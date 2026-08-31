@@ -20,14 +20,15 @@
 #   are tool-name-only. This script does the actual `gh pr <subcmd>` filtering
 #   and exits 0 immediately on unrelated bash calls.
 #
-# * Draft detection is conservative: only a draft flag immediately after
-#   `gh pr create` is exempt. Later flag-like text may be title/body data, so an
-#   ambiguous command stays gated rather than bypassing acknowledgment.
+# * Draft detection is deliberately canonical: `--draft`, `-d`, or an explicit
+#   true value must be the first create argument, with no later draft override.
+#   This avoids mistaking a dash-prefixed value consumed by another flag for an
+#   option, without reimplementing gh's pflag parser.
 #
 # * Two deterministic content checks run before the ack gate — a Conventional-
-#   Commit `--title`, and a `--body` carrying the before/after call graph
-#   (CONTRIBUTING.md #commit--pr-messages). Both only fire when the flag is
-#   actually present and inspectable; neither consumes the ack marker.
+#   Commit `--title`, and an explicit, inspectable PR body carrying the
+#   before/after call graph (CONTRIBUTING.md #commit--pr-messages). A non-draft
+#   create without a body fails closed; neither check consumes the ack marker.
 #
 # * One-shot consumption: the marker file is `rm -f`'d on the allow path so
 #   each successive gh pr command forces a fresh ack, even at the same HEAD.
@@ -54,10 +55,14 @@ protected_body_count=0
 protected_body_commands=()
 protected_body_kinds=()
 protected_body_values=()
+unsafe_content_expansion_count=0
+invalid_create_contract_count=0
+invalid_edit_contract_count=0
+invalid_ready_contract_count=0
+unsafe_authorization_context_count=0
 opaque_protected_count=0
 parsed_simple_count=0
 ambiguous_execution_context=0
-has_redirection_syntax=0
 recursive_scan_depth=0
 literal_assignment_count=0
 literal_assignment_names=()
@@ -83,6 +88,31 @@ record_literal_assignment() {
   literal_assignment_values[$literal_assignment_count]="${assignment_word#*=}"
   literal_assignment_dynamics[$literal_assignment_count]="$assignment_dynamic"
   literal_assignment_count=$((literal_assignment_count + 1))
+}
+
+redirection_skip_index=0
+skip_shell_redirections() { # argv index
+  local word_count="${#shell_words[@]}" scan_word_index="$1" token operator
+  while (( scan_word_index < word_count \
+        && shell_word_redirections[$scan_word_index] )); do
+    ambiguous_execution_context=1
+    token="${shell_words[$scan_word_index]}"
+    operator="$token"
+    if [[ "$operator" =~ ^[0-9]+(.*)$ ]]; then
+      operator="${BASH_REMATCH[1]}"
+    elif [[ "$operator" =~ ^\{[A-Za-z_][A-Za-z0-9_]*\}(.*)$ ]]; then
+      operator="${BASH_REMATCH[1]}"
+    fi
+    scan_word_index=$((scan_word_index + 1))
+    case "$operator" in
+      '<'|'>'|'>>'|'<<'|'<<-'|'<<<'|'<>'|'>|'|'<&'|'>&'|'&>'|'&>>')
+        # The redirection target is a separate shell word, not command argv.
+        (( scan_word_index >= word_count )) \
+          || scan_word_index=$((scan_word_index + 1))
+        ;;
+    esac
+  done
+  redirection_skip_index="$scan_word_index"
 }
 
 # Resolve only an already-literal word or an exact $name/${name} reference to
@@ -147,20 +177,26 @@ resolved_protected_operation() { # argv start index
 
 inspect_simple_command() {
   local word_count="${#shell_words[@]}" command_index=0 index token subcmd executable
+  local subcmd_index=0
   local command_slot draft=0 first_arg="" next_value="" next_quoted=0 next_dynamic=0
+  local next_unquoted_glob=0
+  local create_prefix_valid=1 create_scan_start=0 content_record_end="$word_count"
+  local edit_prefix_valid=1 edit_scan_start=0 edit_content_mode=0
+  local draft_scan_index=0
   local payload="" payload_index=0 payload_dynamic=0 wrapper="" option_flags=""
   local option_index=0 option_char="" option_needs_value=0
   (( word_count > 0 )) || return 0
   parsed_simple_count=$((parsed_simple_count + 1))
 
   # This is deliberately a narrow recognizer, not a Bash interpreter. A single
-  # literal command may use assignment prefixes and command/exec/env. Reserved
-  # control words are scanned far enough to find a protected operation, but the
-  # surrounding execution context is never considered authorizable.
+  # literal command may contain assignment prefixes and command/exec/env. The
+  # prefixes are scanned to find protected operations, but an authorizable PR
+  # command cannot mutate its executable, checkout, host, or repository context.
   while (( command_index < word_count )); do
     if [[ "${shell_words[$command_index]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
       record_literal_assignment "${shell_words[$command_index]}" \
         "${shell_word_dynamics[$command_index]}"
+      unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
       command_index=$((command_index + 1))
       continue
     fi
@@ -241,6 +277,12 @@ inspect_simple_command() {
         recursive_scan_depth=$((recursive_scan_depth + 1))
         scan_command_fragment "$payload"
         recursive_scan_depth=$((recursive_scan_depth - 1))
+        if [[ "$payload" =~ (^|[[:space:]])([^[:space:]]*/)?gh([[:space:]]|$) ]]; then
+          # An alias may define only `gh` or `gh pr` and receive the remaining
+          # protected argv at invocation time, so a partial literal prefix is
+          # already opaque at this static boundary.
+          opaque_protected_count=$((opaque_protected_count + 1))
+        fi
       elif (( shell_word_dynamics[$payload_index] )); then
         opaque_protected_count=$((opaque_protected_count + 1))
       fi
@@ -278,6 +320,7 @@ inspect_simple_command() {
     command_index=$((command_index + 1))
     while (( command_index < word_count )) \
        && [[ "${shell_words[$command_index]}" == -p ]]; do
+      unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
       command_index=$((command_index + 1))
     done
     if (( command_index < word_count )) \
@@ -324,17 +367,25 @@ inspect_simple_command() {
     while (( command_index < word_count )); do
       token="${shell_words[$command_index]}"
       if [[ "$token" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+        unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
         command_index=$((command_index + 1))
         continue
       fi
       case "$token" in
         --) command_index=$((command_index + 1)); break ;;
-        -i|--ignore-environment) command_index=$((command_index + 1)) ;;
+        -i|--ignore-environment)
+          unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+          command_index=$((command_index + 1))
+          ;;
         -u|-C|-P|--unset|--chdir)
           (( command_index + 1 < word_count )) || return 0
+          unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
           command_index=$((command_index + 2))
           ;;
-        --unset=*|--chdir=*) command_index=$((command_index + 1)) ;;
+        --unset=*|--chdir=*)
+          unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+          command_index=$((command_index + 1))
+          ;;
         -S|--split-string|--split-string=*)
           opaque_protected_count=$((opaque_protected_count + 1))
           return 0
@@ -430,66 +481,379 @@ inspect_simple_command() {
   esac
   index=$((command_index + 1))
   while (( index < word_count )); do
+    skip_shell_redirections "$index"
+    index="$redirection_skip_index"
+    (( index < word_count )) || break
     token="${shell_words[$index]}"
     case "$token" in
-      --repo|--hostname|-R) index=$((index + 2)); continue ;;
-      --repo=*|--hostname=*|-R?*) index=$((index + 1)); continue ;;
+      --repo|--hostname|-R)
+        unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        index=$((index + 2))
+        continue
+        ;;
+      --repo=*|--hostname=*|-R?*)
+        unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        index=$((index + 1))
+        continue
+        ;;
       --) index=$((index + 1)); break ;;
       *) break ;;
     esac
   done
   (( index < word_count )) || return 0
-  if (( shell_word_dynamics[$index] )); then
+  if (( shell_word_dynamics[$index] \
+     || shell_word_unquoted_globs[$index] )); then
     opaque_protected_count=$((opaque_protected_count + 1))
     return 0
   fi
-  (( index + 1 < word_count )) || return 0
   [[ "${shell_words[$index]}" == pr ]] || return 0
-  if (( shell_word_dynamics[$((index + 1))] )); then
+  subcmd_index=$((index + 1))
+  while (( subcmd_index < word_count )); do
+    skip_shell_redirections "$subcmd_index"
+    subcmd_index="$redirection_skip_index"
+    (( subcmd_index < word_count )) || break
+    token="${shell_words[$subcmd_index]}"
+    case "$token" in
+      --repo|--hostname|-R)
+        unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        subcmd_index=$((subcmd_index + 2))
+        ;;
+      --repo=*|--hostname=*|-R?*)
+        unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        subcmd_index=$((subcmd_index + 1))
+        ;;
+      *) break ;;
+    esac
+  done
+  (( subcmd_index < word_count )) || return 0
+  if (( shell_word_dynamics[$subcmd_index] \
+     || shell_word_unquoted_globs[$subcmd_index] )); then
     opaque_protected_count=$((opaque_protected_count + 1))
     return 0
   fi
-  subcmd="${shell_words[$((index + 1))]}"
+  subcmd="${shell_words[$subcmd_index]}"
   [[ "$subcmd" == create || "$subcmd" == edit || "$subcmd" == ready ]] \
     || return 0
 
   command_slot="$protected_count"
-  index=$((index + 2))
-  (( index < word_count )) && first_arg="${shell_words[$index]}"
-  if [[ "$subcmd" == create \
-     && ( "$first_arg" == --draft || "$first_arg" == -d ) ]]; then
-    draft=1
-  fi
-  protected_subcmds[$command_slot]="$subcmd"
-  protected_drafts[$command_slot]="$draft"
-  protected_count=$((protected_count + 1))
-  (( draft == 0 )) || return 0
+  index=$((subcmd_index + 1))
 
-  while (( index < word_count )); do
+  # A create is authorizable only through a small argv grammar. The title and
+  # body flags come first, so no earlier value-taking pflag option can consume
+  # them; the tail whitelist excludes every option that can replace, synthesize,
+  # or interactively edit either value after inspection.
+  if [[ "$subcmd" == create ]]; then
+    (( index < word_count )) && first_arg="${shell_words[$index]}"
+    case "$first_arg" in
+      --draft|-d|--draft=true|-d=true) draft=1 ;;
+    esac
+    if (( draft )); then
+      draft_scan_index=$((index + 1))
+      while (( draft_scan_index < word_count )); do
+        token="${shell_words[$draft_scan_index]}"
+        if (( shell_word_dynamics[$draft_scan_index] \
+           || shell_word_unquoted_globs[$draft_scan_index] )); then
+          # Even a quoted expansion is a standalone argv word and can become a
+          # later --draft=false assignment after this pre-execution scan.
+          draft=0
+          break
+        fi
+        case "$token" in
+          --draft|--draft=*|-d|-d=*)
+            # Repeated booleans are order-sensitive in pflag. Conservatively
+            # gate any later draft spelling rather than guessing whether it is
+            # an override or another option's dash-prefixed value.
+            draft=0
+            break
+            ;;
+          -?*)
+            if [[ "$token" != --* && "$token" == *d=* ]]; then
+              # A single-dash cluster can hide an explicit -d assignment
+              # (for example, -fd=false). A value such as -draft and a long
+              # option such as --body or --dry-run cannot.
+              draft=0
+              break
+            fi
+            ;;
+        esac
+        draft_scan_index=$((draft_scan_index + 1))
+      done
+    fi
+    if (( draft )); then
+      protected_subcmds[$command_slot]="$subcmd"
+      protected_drafts[$command_slot]=1
+      protected_count=$((protected_count + 1))
+      return 0
+    fi
+
+    create_scan_start="$index"
+    # Validate only prefix shape here; the shared option loop below records and
+    # checks the values once. Direct long/short forms are deterministic, while
+    # mixed shorthand clusters stay outside the supported boundary.
+    if (( index >= word_count )); then
+      create_prefix_valid=0
+    else
+      token="${shell_words[$index]}"
+      case "$token" in
+        --title|-t)
+          if (( index + 1 >= word_count \
+             || shell_word_unquoted_globs[$((index + 1))] )); then
+            create_prefix_valid=0
+          else
+            index=$((index + 2))
+          fi
+          ;;
+        --title=*|-t=*|-t?*)
+          (( shell_word_unquoted_globs[$index] == 0 )) || create_prefix_valid=0
+          index=$((index + 1))
+          ;;
+        *) create_prefix_valid=0 ;;
+      esac
+    fi
+
+    # Canonical body prefix immediately follows the title. Value safety and body
+    # file binding are handled by the shared recorder and the checks below.
+    if (( create_prefix_valid )); then
+      if (( index >= word_count )); then
+        create_prefix_valid=0
+      else
+        token="${shell_words[$index]}"
+        case "$token" in
+          --body|-b|--body-file|-F)
+            if (( index + 1 >= word_count \
+               || shell_word_unquoted_globs[$((index + 1))] )); then
+              create_prefix_valid=0
+            else
+              index=$((index + 2))
+            fi
+            ;;
+          --body=*|-b=*|-b?*|--body-file=*|-F=*|-F?*)
+            (( shell_word_unquoted_globs[$index] == 0 )) || create_prefix_valid=0
+            index=$((index + 1))
+            ;;
+          *) create_prefix_valid=0 ;;
+        esac
+      fi
+    fi
+    (( create_prefix_valid == 0 )) || content_record_end="$index"
+
+    # Metadata that cannot change title/body or the reviewed diff may follow.
+    # Each value-taking spelling advances past its operand even when that value
+    # starts with '-', matching pflag and preventing a false draft/title/body hit.
+    while (( create_prefix_valid && index < word_count )); do
+      token="${shell_words[$index]}"
+      case "$token" in
+        --assignee|--label|--milestone|--project|--reviewer|-a|-l|-m|-p|-r)
+          if (( index + 1 >= word_count )); then
+            create_prefix_valid=0
+          elif (( shell_word_unquoted_globs[$((index + 1))] )); then
+            create_prefix_valid=0
+          elif (( shell_word_dynamics[$((index + 1))] )) \
+            && { (( shell_word_quotes[$((index + 1))] == 0 \
+                 || shell_word_unquoted_dynamics[$((index + 1))] )) \
+              || [[ ! "${shell_words[$((index + 1))]}" =~ ^\$[A-Za-z_][A-Za-z0-9_]*$ \
+                 && ! "${shell_words[$((index + 1))]}" =~ ^\$\{[A-Za-z_][A-Za-z0-9_]*\}$ ]]; }; then
+            # An unquoted expansion can split into new argv options. Only an
+            # exact quoted variable is provably one metadata operand here.
+            create_prefix_valid=0
+          else
+            index=$((index + 2))
+          fi
+          ;;
+        --assignee=*|--label=*|--milestone=*|--project=*|--reviewer=*|-a?*|-l?*|-m?*|-p?*|-r?*)
+          if (( shell_word_dynamics[$index] \
+             || shell_word_unquoted_globs[$index] )); then
+            # Quote state is word-wide, so a mixed quoted/unquoted attached
+            # expansion cannot be proven single-argv. Use a separated value.
+            create_prefix_valid=0
+          else
+            index=$((index + 1))
+          fi
+          ;;
+        --dry-run|--no-maintainer-edit)
+          index=$((index + 1))
+          ;;
+        *) create_prefix_valid=0 ;;
+      esac
+    done
+    (( create_prefix_valid )) || invalid_create_contract_count=$((invalid_create_contract_count + 1))
+    index="$create_scan_start"
+  elif [[ "$subcmd" == edit ]]; then
+    edit_scan_start="$index"
+
+    # A literal selector may precede edit flags. It is kept for compatibility,
+    # but a dynamic/globbed selector cannot be bound to the inspected command.
+    if (( index < word_count )) && [[ "${shell_words[$index]}" != -* ]]; then
+      if [[ "${shell_words[$index]}" == *://* ]] \
+         || (( shell_word_dynamics[$index] \
+         || shell_word_unquoted_globs[$index] )); then
+        edit_prefix_valid=0
+      fi
+      index=$((index + 1))
+    fi
+    # With no explicit mutation flag gh may open an editor, whose eventual
+    # title/body bytes do not exist yet at this pre-execution boundary.
+    (( index < word_count )) || edit_prefix_valid=0
+
+    # Content-changing edits use the same canonical title/body pair as create.
+    # Recording is bounded to this prefix so later metadata operands cannot be
+    # reinterpreted as decoy content flags by the shared recorder below.
+    if (( edit_prefix_valid && index < word_count )); then
+      token="${shell_words[$index]}"
+      case "$token" in
+        --title|-t)
+          edit_content_mode=1
+          if (( index + 1 >= word_count \
+             || shell_word_unquoted_globs[$((index + 1))] )); then
+            edit_prefix_valid=0
+          else
+            index=$((index + 2))
+          fi
+          ;;
+        --title=*|-t=*|-t?*)
+          edit_content_mode=1
+          (( shell_word_unquoted_globs[$index] == 0 )) || edit_prefix_valid=0
+          index=$((index + 1))
+          ;;
+      esac
+    fi
+
+    if (( edit_prefix_valid && edit_content_mode )); then
+      if (( index >= word_count )); then
+        edit_prefix_valid=0
+      else
+        token="${shell_words[$index]}"
+        case "$token" in
+          --body|-b|--body-file|-F)
+            if (( index + 1 >= word_count \
+               || shell_word_unquoted_globs[$((index + 1))] )); then
+              edit_prefix_valid=0
+            else
+              index=$((index + 2))
+            fi
+            ;;
+          --body=*|-b=*|-b?*|--body-file=*|-F=*|-F?*)
+            (( shell_word_unquoted_globs[$index] == 0 )) || edit_prefix_valid=0
+            index=$((index + 1))
+            ;;
+          *) edit_prefix_valid=0 ;;
+        esac
+      fi
+      (( edit_prefix_valid == 0 )) || content_record_end="$index"
+    elif (( edit_prefix_valid )); then
+      # No canonical title prefix means this must remain metadata-only.
+      content_record_end="$edit_scan_start"
+    fi
+
+    while (( edit_prefix_valid && index < word_count )); do
+      token="${shell_words[$index]}"
+      case "$token" in
+        --add-assignee|--add-label|--add-project|--add-reviewer|--milestone|-m|\
+        --remove-assignee|--remove-label|--remove-project|--remove-reviewer)
+          if (( index + 1 >= word_count \
+             || shell_word_unquoted_globs[$((index + 1))] )); then
+            edit_prefix_valid=0
+          elif (( shell_word_dynamics[$((index + 1))] )) \
+            && { (( shell_word_quotes[$((index + 1))] == 0 \
+                 || shell_word_unquoted_dynamics[$((index + 1))] )) \
+              || [[ ! "${shell_words[$((index + 1))]}" =~ ^\$[A-Za-z_][A-Za-z0-9_]*$ \
+                 && ! "${shell_words[$((index + 1))]}" =~ ^\$\{[A-Za-z_][A-Za-z0-9_]*\}$ ]]; }; then
+            edit_prefix_valid=0
+          else
+            index=$((index + 2))
+          fi
+          ;;
+        --add-assignee=*|--add-label=*|--add-project=*|--add-reviewer=*|\
+        --milestone=*|-m?*|--remove-assignee=*|--remove-label=*|\
+        --remove-project=*|--remove-reviewer=*)
+          if (( shell_word_dynamics[$index] \
+             || shell_word_unquoted_globs[$index] )); then
+            edit_prefix_valid=0
+          else
+            index=$((index + 1))
+          fi
+          ;;
+        --remove-milestone)
+          index=$((index + 1))
+          ;;
+        *) edit_prefix_valid=0 ;;
+      esac
+    done
+    (( edit_prefix_valid )) || invalid_edit_contract_count=$((invalid_edit_contract_count + 1))
+    index="$edit_scan_start"
+  elif [[ "$subcmd" == ready ]]; then
+    # Ready has one literal optional selector and one optional boolean. Persistent
+    # repository flags, extra operands, and expansions can retarget the operation
+    # after the branch/HEAD acknowledgment and therefore stay outside the gate.
+    if (( index < word_count )) && [[ "${shell_words[$index]}" != --undo ]]; then
+      if [[ "${shell_words[$index]}" == -* \
+         || "${shell_words[$index]}" == *://* ]] \
+         || (( shell_word_dynamics[$index] \
+            || shell_word_unquoted_globs[$index] )); then
+        invalid_ready_contract_count=$((invalid_ready_contract_count + 1))
+      fi
+      index=$((index + 1))
+    fi
+    if (( index < word_count )) && [[ "${shell_words[$index]}" == --undo ]] \
+       && (( shell_word_dynamics[$index] == 0 \
+          && shell_word_unquoted_globs[$index] == 0 )); then
+      index=$((index + 1))
+    fi
+    (( index == word_count )) \
+      || invalid_ready_contract_count=$((invalid_ready_contract_count + 1))
+    index=$((subcmd_index + 1))
+  fi
+
+  protected_subcmds[$command_slot]="$subcmd"
+  protected_drafts[$command_slot]=0
+  protected_count=$((protected_count + 1))
+  while (( index < word_count && index < content_record_end )); do
     token="${shell_words[$index]}"
     next_value=""
     next_quoted=0
+    next_dynamic=0
+    next_unquoted_glob=0
     if (( index + 1 < word_count )); then
       next_value="${shell_words[$((index + 1))]}"
       next_quoted="${shell_word_quotes[$((index + 1))]}"
       next_dynamic="${shell_word_dynamics[$((index + 1))]}"
+      next_unquoted_glob="${shell_word_unquoted_globs[$((index + 1))]}"
     fi
     case "$token" in
-      --title)
-        # Preserve the existing inspectable-title contract: quoted long-form
-        # values are deterministic; editor/short/unquoted forms stay with the
-        # human acknowledgment.
-        (( next_quoted == 0 )) \
-          || record_title "$command_slot" "$next_value" "$next_dynamic"
+      --)
+        break
+        ;;
+      --title|-t)
+        # Body rules depend on whether this is a fix, so every argv spelling of
+        # a supplied title must reach the same classifier. Dynamic values are
+        # recorded too and fail closed in the deterministic check below.
+        (( next_unquoted_glob == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
+        record_title "$command_slot" "$next_value" "$next_dynamic"
         index=$((index + 2))
         continue
         ;;
       --title=*)
-        (( ${shell_word_quotes[$index]} == 0 )) \
-          || record_title "$command_slot" "${token#--title=}" \
-            "${shell_word_dynamics[$index]}"
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
+        record_title "$command_slot" "${token#--title=}" \
+          "${shell_word_dynamics[$index]}"
+        ;;
+      -t=*)
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
+        record_title "$command_slot" "${token#-t=}" \
+          "${shell_word_dynamics[$index]}"
+        ;;
+      -t?*)
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
+        record_title "$command_slot" "${token#-t}" \
+          "${shell_word_dynamics[$index]}"
         ;;
       --body-file|-F)
+        (( next_unquoted_glob == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( next_dynamic )); then
           record_body "$command_slot" opaque ""
         else
@@ -499,13 +863,26 @@ inspect_simple_command() {
         continue
         ;;
       --body-file=*)
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( shell_word_dynamics[$index] )); then
           record_body "$command_slot" opaque ""
         else
           record_body "$command_slot" file "${token#--body-file=}"
         fi
         ;;
+      -F=*)
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
+        if (( shell_word_dynamics[$index] )); then
+          record_body "$command_slot" opaque ""
+        else
+          record_body "$command_slot" file "${token#-F=}"
+        fi
+        ;;
       -F?*)
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( shell_word_dynamics[$index] )); then
           record_body "$command_slot" opaque ""
         else
@@ -513,6 +890,8 @@ inspect_simple_command() {
         fi
         ;;
       --body|-b)
+        (( next_unquoted_glob == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( next_quoted && next_dynamic == 0 )); then
           record_body "$command_slot" text "$next_value"
         else
@@ -522,6 +901,8 @@ inspect_simple_command() {
         continue
         ;;
       --body=*)
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( ${shell_word_quotes[$index]} \
            && ${shell_word_dynamics[$index]} == 0 )); then
           record_body "$command_slot" text "${token#--body=}"
@@ -529,7 +910,19 @@ inspect_simple_command() {
           record_body "$command_slot" opaque ""
         fi
         ;;
+      -b=*)
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
+        if (( ${shell_word_quotes[$index]} \
+           && ${shell_word_dynamics[$index]} == 0 )); then
+          record_body "$command_slot" text "${token#-b=}"
+        else
+          record_body "$command_slot" opaque ""
+        fi
+        ;;
       -b?*)
+        (( shell_word_unquoted_globs[$index] == 0 )) \
+          || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( ${shell_word_quotes[$index]} \
            && ${shell_word_dynamics[$index]} == 0 )); then
           record_body "$command_slot" text "${token#-b}"
@@ -554,10 +947,16 @@ finish_shell_word() {
   shell_words[${#shell_words[@]}]="$shell_word"
   shell_word_quotes[${#shell_word_quotes[@]}]="$shell_word_quoted"
   shell_word_dynamics[${#shell_word_dynamics[@]}]="$shell_word_dynamic"
+  shell_word_unquoted_dynamics[${#shell_word_unquoted_dynamics[@]}]="$shell_word_unquoted_dynamic"
+  shell_word_unquoted_globs[${#shell_word_unquoted_globs[@]}]="$shell_word_unquoted_glob"
+  shell_word_redirections[${#shell_word_redirections[@]}]="$shell_word_redirection"
   shell_word=""
   shell_word_started=0
   shell_word_quoted=0
   shell_word_dynamic=0
+  shell_word_unquoted_dynamic=0
+  shell_word_unquoted_glob=0
+  shell_word_redirection=0
   shell_word_escaped=0
   if (( heredoc_expect )); then
     pending_heredoc_delimiter="$completed_word"
@@ -576,12 +975,132 @@ finish_shell_word() {
   fi
 }
 
+# If the direct-command recognizer did not claim this simple command, look for a
+# still-visible protected argv sequence later in it. That sequence may be behind
+# a launcher, leading redirection, or an executable glob. We cannot authorize
+# such source, but we must not let it bypass the gate either. This is deliberately
+# conservative: data that spells three separate command words should be quoted as
+# one value if it is not intended for execution.
+detect_visible_protected_sequence() {
+  local word_count="${#shell_words[@]}" candidate_index=0 noun_index verb_index
+  local executable_index=0 launcher_payload_index=-1
+  local token launcher_basename=""
+  while (( executable_index < word_count )) \
+     && [[ "${shell_words[$executable_index]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
+    executable_index=$((executable_index + 1))
+  done
+  skip_shell_redirections "$executable_index"
+  executable_index="$redirection_skip_index"
+  if (( executable_index < word_count )); then
+    launcher_basename="${shell_words[$executable_index]##*/}"
+  fi
+  case "$launcher_basename" in
+    nohup|sudo|doas|nice|stdbuf|setsid|env|xargs)
+      launcher_payload_index=$((executable_index + 1))
+      ;;
+    timeout)
+      launcher_payload_index=$((executable_index + 2))
+      ;;
+  esac
+  if (( launcher_payload_index >= 0 && launcher_payload_index < word_count )) \
+     && [[ "${shell_words[$launcher_payload_index]}" == -- ]]; then
+    launcher_payload_index=$((launcher_payload_index + 1))
+  fi
+  while (( candidate_index < word_count )); do
+    token="${shell_words[$candidate_index]}"
+    if [[ "${token##*/}" != gh ]]; then
+      if (( candidate_index != executable_index )) \
+         && (( candidate_index != launcher_payload_index )); then
+        candidate_index=$((candidate_index + 1))
+        continue
+      fi
+      if (( shell_word_dynamics[$candidate_index] == 0 \
+         && shell_word_unquoted_globs[$candidate_index] == 0 )); then
+        candidate_index=$((candidate_index + 1))
+        continue
+      fi
+    fi
+
+    # An unquoted executable-position expansion can split into the entire
+    # `gh pr <verb>` prefix, so no later cue is needed to classify it as opaque.
+    if (( shell_word_unquoted_dynamics[$candidate_index] \
+       || shell_word_unquoted_globs[$candidate_index] )); then
+      opaque_protected_count=$((opaque_protected_count + 1))
+      return 0
+    fi
+
+    noun_index=$((candidate_index + 1))
+    while (( noun_index < word_count )); do
+      skip_shell_redirections "$noun_index"
+      noun_index="$redirection_skip_index"
+      (( noun_index < word_count )) || break
+      token="${shell_words[$noun_index]}"
+      case "$token" in
+        --repo|--hostname|-R) noun_index=$((noun_index + 2)); continue ;;
+        --repo=*|--hostname=*|-R?*) noun_index=$((noun_index + 1)); continue ;;
+      esac
+      if (( shell_word_unquoted_dynamics[$noun_index] \
+         || shell_word_unquoted_globs[$noun_index] )); then
+        # One expanding word can provide a global flag, its operand, and `pr`.
+        opaque_protected_count=$((opaque_protected_count + 1))
+        return 0
+      fi
+      if (( shell_word_dynamics[$noun_index] )); then
+        # A quoted expansion remains one argv word, but it may be `pr` or a
+        # global flag. Only classify it when a protected verb remains visible.
+        verb_index=$((noun_index + 1))
+        while (( verb_index < word_count )); do
+          token="${shell_words[$verb_index]}"
+          if [[ "$token" == create || "$token" == edit || "$token" == ready ]] \
+             || (( shell_word_dynamics[$verb_index] \
+                || shell_word_unquoted_globs[$verb_index] )); then
+            opaque_protected_count=$((opaque_protected_count + 1))
+            return 0
+          fi
+          verb_index=$((verb_index + 1))
+        done
+        break
+      fi
+      [[ "$token" == pr ]] || break
+
+      verb_index=$((noun_index + 1))
+      while (( verb_index < word_count )); do
+        skip_shell_redirections "$verb_index"
+        verb_index="$redirection_skip_index"
+        (( verb_index < word_count )) || break
+        token="${shell_words[$verb_index]}"
+        case "$token" in
+          --repo|--hostname|-R) verb_index=$((verb_index + 2)); continue ;;
+          --repo=*|--hostname=*|-R?*) verb_index=$((verb_index + 1)); continue ;;
+        esac
+        if [[ "$token" == create || "$token" == edit || "$token" == ready ]] \
+           || (( shell_word_dynamics[$verb_index] \
+              || shell_word_unquoted_globs[$verb_index] )); then
+          opaque_protected_count=$((opaque_protected_count + 1))
+          return 0
+        fi
+        break
+      done
+      break
+    done
+    candidate_index=$((candidate_index + 1))
+  done
+}
+
 finish_simple_command() {
+  local protected_before="$protected_count" opaque_before="$opaque_protected_count"
   finish_shell_word
   inspect_simple_command
+  if (( protected_count == protected_before \
+     && opaque_protected_count == opaque_before )); then
+    detect_visible_protected_sequence
+  fi
   shell_words=()
   shell_word_quotes=()
   shell_word_dynamics=()
+  shell_word_unquoted_dynamics=()
+  shell_word_unquoted_globs=()
+  shell_word_redirections=()
 }
 
 # `$()` source is executable even when its surrounding word is double quoted.
@@ -628,6 +1147,7 @@ scan_dollar_substitution() {
   sub_source="${command_fragment:$sub_start:$((sub_index - sub_start))}"
   shell_word_started=1
   shell_word_dynamic=1
+  [[ "$scan_quote" == '"' ]] || shell_word_unquoted_dynamic=1
   scan_command_fragment "$sub_source"
   if (( sub_index < scan_length )); then
     scan_index="$sub_index"
@@ -653,6 +1173,7 @@ scan_backtick_substitution() {
   sub_source="${command_fragment:$sub_start:$((sub_index - sub_start))}"
   shell_word_started=1
   shell_word_dynamic=1
+  [[ "$scan_quote" == '"' ]] || shell_word_unquoted_dynamic=1
   scan_command_fragment "$sub_source"
   if (( sub_index < scan_length )); then
     scan_index="$sub_index"
@@ -732,8 +1253,12 @@ skip_pending_heredoc() {
 scan_command_fragment() {
   local command_fragment="$1"
   local -a shell_words=() shell_word_quotes=() shell_word_dynamics=()
+  local -a shell_word_unquoted_dynamics=()
+  local -a shell_word_unquoted_globs=()
+  local -a shell_word_redirections=()
   local shell_word="" shell_word_started=0 shell_word_quoted=0 shell_word_dynamic=0
-  local shell_word_escaped=0
+  local shell_word_escaped=0 shell_word_unquoted_dynamic=0 shell_word_unquoted_glob=0
+  local shell_word_redirection=0
   local scan_index=0 scan_length="${#command_fragment}" scan_quote=""
   local scan_escaped=0 scan_comment=0 scan_char="" scan_next=""
   local pending_heredoc_delimiter="" pending_heredoc_expands=0
@@ -834,8 +1359,10 @@ scan_command_fragment() {
         else
           shell_word+="$scan_char"
           shell_word_started=1
-          [[ "$scan_next" =~ [A-Za-z0-9_\{\*@#\?\$!\-] ]] \
-            && shell_word_dynamic=1
+          if [[ "$scan_next" =~ [A-Za-z0-9_\{\*@#\?\$!\-] ]]; then
+            shell_word_dynamic=1
+            shell_word_unquoted_dynamic=1
+          fi
         fi
         ;;
       "'"|'"') scan_quote="$scan_char"; shell_word_started=1; shell_word_quoted=1 ;;
@@ -848,14 +1375,49 @@ scan_command_fragment() {
         ;;
       ' '|$'\t'|$'\r') finish_shell_word ;;
       $'\n') finish_simple_command; skip_pending_heredoc ;;
-      ';'|'&'|'|'|'('|')'|'{'|'}')
+      ';'|'('|')'|'{'|'}')
         ambiguous_execution_context=1
         finish_simple_command
         ;;
+      '&')
+        if [[ "$scan_next" == '>' \
+           || ( "$shell_word_redirection" == 1 \
+             && ( "$shell_word" == *'>' || "$shell_word" == *'<' ) ) ]]; then
+          shell_word+="$scan_char"
+          shell_word_started=1
+          shell_word_redirection=1
+        else
+          ambiguous_execution_context=1
+          finish_simple_command
+        fi
+        ;;
+      '|')
+        if (( shell_word_redirection )) && [[ "$shell_word" == *'>' ]]; then
+          shell_word+="$scan_char"
+          shell_word_started=1
+        else
+          ambiguous_execution_context=1
+          finish_simple_command
+        fi
+        ;;
       '<'|'>')
-        has_redirection_syntax=1
         shell_word+="$scan_char"
         shell_word_started=1
+        shell_word_redirection=1
+        if [[ "$scan_next" == '(' ]]; then
+          # Process substitution is one shell word even though it contains a
+          # parenthesized command. Reuse the balanced-substitution scanner so
+          # grouping separators inside it cannot split the surrounding argv.
+          ambiguous_execution_context=1
+          shell_word_dynamic=1
+          shell_word_unquoted_dynamic=1
+          scan_dollar_substitution
+        fi
+        ;;
+      '*'|'?'|'[')
+        shell_word+="$scan_char"
+        shell_word_started=1
+        shell_word_unquoted_glob=1
         ;;
       '`') ambiguous_execution_context=1; scan_backtick_substitution ;;
       *) shell_word+="$scan_char"; shell_word_started=1 ;;
@@ -878,10 +1440,15 @@ while (( protected_index < protected_count )); do
   fi
   protected_index=$((protected_index + 1))
 done
-# A draft exemption belongs only to that create segment. If every protected
-# segment is a draft create there is nothing left to acknowledge.
+# A draft exemption belongs only to one direct simple create. Do not fast-exit
+# before execution-shape checks: a compound command or substitution can change
+# the argv after the literal draft prefix was recognized.
 if [[ -z "$subcmd" ]]; then
-  (( opaque_protected_count > 0 )) || exit 0
+  if (( opaque_protected_count == 0 \
+     && ambiguous_execution_context == 0 \
+     && parsed_simple_count == 1 )); then
+    exit 0
+  fi
   subcmd="operation"
 fi
 
@@ -946,12 +1513,52 @@ deny() {
   exit 0
 }
 
+# The acknowledgment binds the current checkout's branch and HEAD. Inline
+# assignments, env mutations, gh target flags, and inherited explicit selectors
+# can make the eventual executable or remote differ from that reviewed state.
+if (( unsafe_authorization_context_count > 0 )) \
+   || [[ -n "${GH_REPO:-}" || -n "${GH_HOST:-}" \
+      || -n "${GIT_DIR:-}" || -n "${GIT_WORK_TREE:-}" ]]; then
+  deny "A protected gh pr command changes or inherits execution/target context that is not bound to the review acknowledgment.
+Run it from the reviewed checkout with no inline environment assignments, env options,
+gh --repo/--hostname flags, or inherited GH_REPO, GH_HOST, GIT_DIR, or GIT_WORK_TREE."
+fi
+
 # An expansion in the executable, `pr`, or protected-subcommand position can
 # change the operation after static inspection. Never spend an acknowledgment
 # on source whose runtime argv cannot be bound to the reviewed operation.
 if (( opaque_protected_count > 0 )); then
   deny "A possible gh pr create/edit/ready operation is built dynamically in an executable position.
 Use literal gh, pr, and subcommand words so the review gate can inspect and bind the exact operation."
+fi
+
+if (( unsafe_content_expansion_count > 0 )); then
+  deny "A PR title or body contains unquoted pathname-expansion syntax.
+Quote the complete value so Bash cannot replace the inspected argv before gh runs."
+fi
+
+# A bounded create grammar is safer than a partial pflag implementation. It
+# binds the exact title/body values before metadata and excludes every flag that
+# can synthesize, prompt for, or override either value after inspection.
+if (( invalid_create_contract_count > 0 )); then
+  deny "A non-draft gh pr create must start with an inspectable title and body.
+Use: gh pr create --title \"type(scope): summary\" --body '<fenced graph>'
+Safe metadata flags may follow that prefix.
+Put --draft, -d, --draft=true, or -d=true first for a draft and do not override it later.
+Mixed short-flag clusters and fill/editor/template/recover/web flows are outside this gate."
+fi
+
+if (( invalid_edit_contract_count > 0 )); then
+  deny "A gh pr edit that changes description content must supply an inspectable title/body pair first.
+Use: gh pr edit [selector] --title \"type(scope): summary\" --body '<fenced graph>'
+Safe metadata-only edits and safe metadata following that pair are supported.
+Base changes, inline environment mutation, dynamic argv splitting, and body files are outside this gate."
+fi
+
+if (( invalid_ready_contract_count > 0 )); then
+  deny "A gh pr ready command has an unbound selector, option, or expansion.
+Use: gh pr ready [literal-selector] [--undo]
+Repository overrides and dynamic argv splitting are outside this branch/HEAD-bound gate."
 fi
 
 # One typed marker is a one-operation capability. A shell tool call containing
@@ -974,23 +1581,30 @@ Run one direct literal gh pr create/edit/ready command per tool call (command,
 exec, or env wrappers are supported). Nothing from this command was authorized."
 fi
 
-# A body-file check is a pre-execution snapshot. Redirection in the same shell
-# command can truncate or replace that path after inspection but before gh reads
-# it, so body-file operations with mutation-capable syntax are not authorizable.
+# Defense in depth for the create prefix above: an interactive editor or
+# repository template is outside this pre-execution boundary. Ready/edit
+# operations may omit a body because they do not create one implicitly.
+if [[ "$subcmd" == create ]] && (( protected_body_count == 0 )); then
+  deny "A non-draft gh pr create must supply an inspectable inline --body.
+The gate cannot verify content produced later by an editor or repository template.
+Prepare the fenced before/after call graph, pass it explicitly, and retry."
+fi
+
+# A body-file read is only a pre-execution snapshot: another process can replace
+# it after validation and before gh opens it. The hook cannot bind those bytes to
+# gh, so inline body text is the only authorizable representation.
 body_index=0
 while (( body_index < protected_body_count )); do
-  if [[ "${protected_body_kinds[$body_index]}" == file ]] \
-     && (( has_redirection_syntax )); then
-    deny "A gh pr body file cannot be authorized from a command containing shell redirection.
-Prepare the file in a separate tool call, then run one direct gh pr command that
-only reads --body-file. Nothing from this command was authorized."
+  if [[ "${protected_body_kinds[$body_index]}" == file ]]; then
+    deny "A gh pr --body-file snapshot cannot be bound to the bytes gh reads later.
+Pass the complete fenced call graph as one literal inline --body value."
   fi
   body_index=$((body_index + 1))
 done
 
-# Deterministic title check: when a quoted --title is given, require a
-# Conventional-Commit subject <=72 chars. (Short `-t` / unquoted forms aren't
-# inspected; body quality / no-narrative is confirmed in the ack below.)
+# Deterministic title check: every supplied literal `--title` / `-t` spelling
+# must be a Conventional-Commit subject <=72 chars. Dynamic values fail closed;
+# body quality / no-narrative is still confirmed in the acknowledgment below.
 protected_fix_flags=()
 protected_index=0
 while (( protected_index < protected_count )); do
@@ -1019,9 +1633,9 @@ done
 # Deterministic body check: a supplied PR body must carry the before/after
 # end-to-end call graph mandated by CONTRIBUTING.md #commit--pr-messages.
 #
-# Only inspected when its command segment actually supplies a body. `gh pr ready` and
-# editor-driven `gh pr create` carry nothing to read, and the editor path opens
-# .github/pull_request_template.md, which already holds the section.
+# Only inspected when its command segment actually supplies a body. `gh pr ready`
+# and body-preserving edits carry nothing to read; non-draft creates were required
+# above to supply an inspectable body.
 body_index=0
 while (( body_index < protected_body_count )); do
   body_command="${protected_body_commands[$body_index]}"
@@ -1030,60 +1644,112 @@ while (( body_index < protected_body_count )); do
   pr_body=""
   pr_title=""
   (( protected_fix_flags[$body_command] == 0 )) || pr_title="fix: inspected"
-  if [[ "$body_kind" == file ]]; then
-    body_snapshot="$(verdict_audit_read_regular_state \
-      "$body_value" 65536 json 2>/dev/null)" || body_snapshot=""
-    [[ "$body_snapshot" == *$'\n'* ]] && pr_body="${body_snapshot#*$'\n'}"
-  elif [[ "$body_kind" == text ]]; then
+  if [[ "$body_kind" == text ]]; then
     pr_body="$body_value"
   fi
 
   # Line-start anchors below: an extracted body begins mid-line, glued to the flag.
   pr_body=$'\n'"$pr_body"
   body_lc="$(tr '[:upper:]' '[:lower:]' <<<"$pr_body")"
+  # The visual contract is deliberately a constrained prefix, not a partial
+  # Markdown parser. With the heading as the first non-blank body line and one
+  # exact column-one text fence immediately after it, no earlier comment, raw
+  # HTML block, outer fence, or indented block can hide or reinterpret the tree.
+  graph_records="$(awk '
+    BEGIN { state = "leading" }
+    function gfm_backtick_closer(line, spaces, position, count, rest) {
+      spaces = 0
+      while (spaces < 4 && substr(line, spaces + 1, 1) == " ") spaces++
+      if (spaces > 3) return 0
+      position = spaces + 1
+      count = 0
+      while (substr(line, position + count, 1) == "`") count++
+      if (count < 3) return 0
+      rest = substr(line, position + count)
+      return rest ~ /^[[:space:]]*$/
+    }
+    { sub(/\r$/, "", $0) }
+    state == "leading" {
+      if ($0 ~ /^[[:space:]]*$/) next
+      if ($0 != "## call graph") {
+        invalid = 1
+        exit
+      }
+      print "@heading"
+      state = "after_heading"
+      next
+    }
+    state == "after_heading" {
+      if ($0 ~ /^[[:space:]]*$/) next
+      if ($0 != "```text") {
+        invalid = 1
+        exit
+      }
+      state = "graph"
+      next
+    }
+    state == "graph" {
+      if ($0 == "```") {
+        print "@closed"
+        state = "after_graph"
+        next
+      }
+      if (gfm_backtick_closer($0)) {
+        invalid = 1
+        exit
+      }
+      if ($0 == "before") {
+        if (before_seen || after_seen) {
+          invalid = 1
+          exit
+        }
+        before_seen = 1
+        print "@before-label"
+        active_graph = 1
+        next
+      }
+      if ($0 == "after") {
+        if (!before_seen || after_seen) {
+          invalid = 1
+          exit
+        }
+        after_seen = 1
+        print "@after-label"
+        active_graph = 2
+        next
+      }
+      if (active_graph == 1) print "@before:" $0
+      if (active_graph == 2) print "@after:" $0
+      next
+    }
+    state == "after_graph" {
+      if (!post_recorded && $0 !~ /^[[:space:]]*$/) {
+        print "@post:" $0
+        post_recorded = 1
+      }
+    }
+    END {
+      if (invalid || state != "after_graph") print "@invalid"
+    }
+  ' <<<"$body_lc")"
   # Herestrings, not pipes: `grep -q` exits on first match and would SIGPIPE the
   # writer, which `set -o pipefail` would then read as a failed check.
-  has_line() { grep -qE "$1" <<<"$body_lc"; }
+  has_graph_record() { grep -qFx "$1" <<<"$graph_records"; }
   missing=""
 
-  has_line '^[[:space:]]*#{2,}[[:space:]]*call[[:space:]]+graph[[:space:]]*$' \
-    || missing+="
-  - a '## Call graph' section"
-  # Shared with the section extractor below, so the header shape can never
-  # drift between "is there a Before label" and "where does Before end".
-  before_re='^[[:space:]]*before([[:space:]]|:|$)'
-  after_re='^[[:space:]]*after([[:space:]]|:|$)'
-  has_line "$before_re" \
+  if has_graph_record '@invalid' || ! has_graph_record '@closed'; then
+    missing+="
+  - the canonical body prefix: first non-blank line '## Call graph', then one closed column-one '\`\`\`text' fence"
+  fi
+  has_graph_record '@before-label' \
     || missing+="
   - a 'Before' graph"
-  has_line "$after_re" \
+  has_graph_record '@after-label' \
     || missing+="
   - an 'After' graph"
-
-  # Lines strictly between a graph's header and whichever comes first: the
-  # other graph's header, or the next markdown heading. Rule order is
-  # load-bearing: reset on a stop, then print, then set on the header — that
-  # sequence is what keeps the header lines themselves out of the section, so a
-  # marker on the `Before` line marks no hop.
-  #
-  # Only the heading stop is fence-aware. Graphs get drawn inside a ``` fence,
-  # where a `## entry` line is drawing rather than structure, and honouring it
-  # stranded every hop that followed. The graph labels are honoured fenced or
-  # not, because CONTRIBUTING.md's own example wraps both labels and all their
-  # hops in a single fence — gating the labels the same way left that example
-  # extracting to nothing and denied for having no hops at all.
-  section() {
-    awk -v start_re="$1" -v stop_re="$2" '
-      /^[[:space:]]*```/                        { fenced = !fenced }
-      $0 ~ stop_re && in_section                { in_section = 0 }
-      !fenced && /^[[:space:]]*##/ && in_section { in_section = 0 }
-      in_section                                { print }
-      $0 ~ start_re                             { in_section = 1 }
-    ' <<<"$body_lc"
-  }
-  before_graph="$(section "$before_re" "$after_re")"
-  after_graph="$(section "$after_re" "$before_re")"
-
+  before_graph="$(sed -n 's/^@before://p' <<<"$graph_records")"
+  after_graph="$(sed -n 's/^@after://p' <<<"$graph_records")"
+  post_graph_line="$(sed -n 's/^@post://p' <<<"$graph_records")"
   # Each graph needs a hop of its own, shaped like the documented
   # `fn_name (Type · path/file.ext:LOC)`. Matching a bare `file.ext:LOC` was
   # too loose — one occurs mid-sentence — so a paragraph mentioning a file in
@@ -1101,9 +1767,7 @@ while (( body_index < protected_body_count )); do
   # human on the typed `reviewed:` ack below.
   #
   # Per graph, not body-wide: a body-wide count lets a prose-only After ride
-  # along on Before's hops, which is not an end-to-end before/after graph. It
-  # is also what an unfilled template cannot fake — its labels are literal
-  # text, but its hop lines are HTML comments.
+  # along on Before's hops, which is not an end-to-end before/after graph.
   hop_re='\(.*[A-Za-z0-9_./-]+\.[A-Za-z]+:[0-9]+.*\)'
   before_hops="$(grep -cE "$hop_re" <<<"$before_graph" || true)"
   after_hops="$(grep -cE "$hop_re" <<<"$after_graph" || true)"
@@ -1112,7 +1776,7 @@ while (( body_index < protected_body_count )); do
   # is printed in full below.
   (( before_hops >= 1 && after_hops >= 1 )) \
     || missing+="
-  - a hop line with a parenthesised 'path/file.ext:LOC' in each graph, shaped as below (found ${before_hops} in Before, ${after_hops} in After)"
+  - a hop line inside a closed 'text' fence with a parenthesised 'path/file.ext:LOC' in each graph (found ${before_hops} in Before, ${after_hops} in After)"
 
   # Bug-fix extras — only decidable when --title was inspectable above.
   if [[ "$pr_title" =~ ^fix(\([^\)]+\))?!?: ]]; then
@@ -1130,21 +1794,25 @@ while (( body_index < protected_body_count )); do
     marked_hop \
       || missing+="
   - fix: PR — '← BUG: <what goes wrong>' on a hop line inside the Before graph"
-    has_line '(fixes|closes|resolves)[[:space:]]+#[0-9]+' \
+    [[ "$post_graph_line" =~ ^fixes[[:space:]]+#[1-9][0-9]*$ ]] \
       || missing+="
-  - fix: PR — an issue link, 'Fixes #<n>'"
+  - fix: PR — 'Fixes #<positive issue number>' as the first non-blank line after the graph fence"
   fi
 
   if [[ -n "$missing" ]]; then
     deny "PR description needs the mandated before/after call graph.
 Missing:${missing}
 
-Required shape; one real changed hop per line:
+Required prefix; make this the first non-blank body content:
+  ## Call graph
+  \`\`\`text
   Before
-    fn_name (Type, path/file.ext:LOC) <- BUG: what fails
+    fn_name (Type · path/file.ext:LOC) <- BUG: what fails
   After
-    fn_name (Type, path/file.ext:LOC) - new behavior
-For fix titles, mark the faulty Before hop and add Fixes #<n>.
+    fn_name (Type · path/file.ext:LOC) - new behavior
+  \`\`\`
+  Fixes #<n>
+For fix titles, mark the faulty Before hop and keep Fixes #<n> immediately after the fence.
 Use real symbols and current line numbers. Rewrite and retry; see CONTRIBUTING.md #commit--pr-messages."
   fi
   body_index=$((body_index + 1))
