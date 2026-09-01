@@ -364,5 +364,46 @@ commit_c restored 2> "$TMP/err"
 check_eq "the restored block commits cleanly" "$?" 0
 
 echo
+echo "## A lifecycle hook's inherited Git environment never reaches the consumer"
+# Git exports GIT_DIR to every hook it runs in a LINKED WORKTREE (checkout, merge,
+# rebase, commit --amend), pointing at .git/worktrees/<name> — and the lifecycle hooks
+# reach this bootstrap through scripts/sync-installation.sh. `git -C <dir>` only
+# changes the working directory; it does not clear that environment. So an unguarded
+# git call in the fetch path operates on the CONSUMER repository instead of the cache:
+# `init` re-initializes the hook's gitdir, and because its basename is not `.git` that
+# writes core.bare=true into the SHARED config, after which every worktree refuses to
+# operate; `remote add`/`fetch`/`checkout` retarget the consumer's own remotes and
+# working tree; and on the warm path `rev-parse HEAD` answers with the consumer's HEAD,
+# which reads as a corrupt cache.
+point_remote "$REMOTE"
+HOOKED="$TMP/hooked"
+HOOKED_WT="$TMP/hooked-wt"
+make_consumer "$HOOKED"
+git -C "$HOOKED" worktree add -q "$HOOKED_WT" -b side
+cp "$REPO_ROOT/templates/install.sh" "$HOOKED_WT/.agent-tooling/install.sh"
+chmod +x "$HOOKED_WT/.agent-tooling/install.sh"
+HOOKED_TIP="$(git -C "$REMOTE" rev-parse HEAD)"
+HOOK_GIT_DIR="$(git -C "$HOOKED_WT" rev-parse --absolute-git-dir)"
+hooked_install() {  # exactly how a linked-worktree hook reaches the bootstrap
+  (cd "$HOOKED_WT" && GIT_DIR="$HOOK_GIT_DIR" AGENT_TOOLING_SYNC_ACTIVE=1 \
+    ./.agent-tooling/install.sh)
+}
+hooked_install > "$TMP/hooked.out" 2> "$TMP/hooked.err"
+check_eq "cold install survives a hook's inherited GIT_DIR" "$?" 0
+check_eq "the shared config keeps its working-tree layout" \
+  "$(git -C "$HOOKED" config --get core.bare)" "false"
+check_eq "the consumer gains no remote from the tooling fetch" \
+  "$(git -C "$HOOKED" remote)" ""
+check_eq "the hook's worktree keeps its own checkout" \
+  "$(git -C "$HOOKED_WT" branch --show-current)" "side"
+check_eq "cold install adopts the tip" \
+  "$(head -n1 "$HOOKED/.git/agent-tooling/current" 2>/dev/null || printf none)" "$HOOKED_TIP"
+hooked_install > "$TMP/hooked-warm.out" 2> "$TMP/hooked-warm.err"
+check_eq "warm-cache install survives a hook's inherited GIT_DIR" "$?" 0
+grep -q 'unexpected HEAD' "$TMP/hooked-warm.err" \
+  && bad "the warm cache is not misread as corrupt (stderr=$(cat "$TMP/hooked-warm.err"))" \
+  || ok "the warm cache is not misread as corrupt"
+
+echo
 printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
 exit $(( fail > 0 ? 1 : 0 ))
