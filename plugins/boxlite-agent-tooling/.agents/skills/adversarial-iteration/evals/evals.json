@@ -1,0 +1,187 @@
+{
+  "skill_name": "adversarial-iteration",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Dry-run the next adversarial-iteration decision; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The initial change touched db/migration.ts, billing/settlement.sql, and src/service.ts. Round 1 then changed src/service.ts and test/service.spec.ts. The Round 2 handoff lists only the Round 1 files, and its independent review receipt is absent. State the next status and the review surface.",
+      "expected_output": "Fail closed on the missing independent review receipt and preserve the full cumulative surface instead of declaring zero findings.",
+      "files": [],
+      "expectations": [
+        "Returns INPUT_ERROR and never returns ZERO_FINDINGS or COMPLETE.",
+        "Includes all four supplied files, omits none, deduplicates src/service.ts, and reports any discovered adjacent contracts separately.",
+        "Marks every supplied review item unread and requires an explicit independent reviewer receipt.",
+        "Does not invent findings, file reads, or test evidence."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Dry-run verification for an adversarial round; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The fix removed a dead constructor argument. Fully reverting production makes the suite stop at TS2554 before the reproducer assertion. A test-only compatibility adapter restores the old call shape, after which the assertion fails. An older reproducer originally required {state: 'READY'}, but the current test was weakened to /state/. A fresh potency request bound a representative {state: 'BROKEN'} mutant and exact kill-signal predicate to the isolated candidate snapshot. Host sandbox, runner-contract, output, and before/after authoritative recapture bindings are valid. The mutant satisfies the fixed-pass contract instead of its kill predicate. Decide whether verification can succeed and state the evidence required.",
+      "expected_output": "Classify the compile-only revert as an invalid baseline, use a test-only adapter to reach old semantics, and return orchestrator-owned BLOCKED because an accumulated reproducer's semantic mutant survives.",
+      "files": [],
+      "expectations": [
+        "Classifies the TS2554-only result as INVALID baseline evidence, not as the reproducer's expected red signal.",
+        "Allows a minimal test-only compatibility adapter that restores call compatibility without restoring or emulating the production fix, then uses the assertion failure as the red proof.",
+        "Records SURVIVED only after the potency, candidate snapshot, runner contract, sandbox, signal, and authoritative-recapture bindings validate; therefore the orchestrator returns BLOCKED rather than INPUT_ERROR.",
+        "Returns BLOCKED, persists its single-use correction authorization, and requires a distinct fix_attempt_id to restore the exact READY assertion and observe the mutant KILLED."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Dry-run the next adversarial-iteration handoff; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. R1-F1 was in the initial change. Fix attempt R1-A1 introduced a material timeout ownership defect detected by review R2. Fix attempt R2-A1 then introduced a material cancellation lifecycle defect detected by review R3. Both detecting receipts have valid objective/instruction, public-location, per-finding class-adjudication, actual-tree, and contiguous parent-chain bindings. The two defects have different failure classes, so no recurring-class rule applies. An unrelated stale SQL defect has no lifecycle/mode/type/path/patch evidence showing whether it came from the initial change or either attempt. Produce the next status and a risk-first handoff.",
+      "expected_output": "Stop normal iteration as diverged after two consecutive fix-attempt-induced material defects, preserve evidence-based lineage, and put risk before truncatable detail.",
+      "files": [],
+      "expectations": [
+        "Returns DIVERGED after two consecutive material fix-induced defects and does not propose another fix or commit.",
+        "Uses stable finding identities and attributes the timeout to R1-A1 and the cancellation leak to R2-A1; unsupported SQL provenance remains unknown.",
+        "Does not invent a recurring-class preflight because the supplied failure classes differ.",
+        "Places status and remaining risk before coverage and findings, and recommends split or rebaseline at an invariant boundary rather than by line count."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Dry-run intake of a `/codex:adversarial-review` result; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The command returned its normal rendered Markdown: Target working tree, Verdict approve, summary 'No material risk found', no findings, and no next steps. The loop ledger expects base revision 1111111111111111111111111111111111111111, surface fingerprint aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, and three surface entries. No REVIEW_RECEIPT_V1 envelope or per-entry coverage appears. Decide the next status and explain the compatible command path.",
+      "expected_output": "Reject the ordinary rendered approval as INPUT_ERROR because it cannot prove revision or coverage, and require the command's JSON transport plus the receipt adapter before zero findings is possible.",
+      "files": [],
+      "expectations": [
+        "Returns INPUT_ERROR and does not map the rendered approve verdict to ZERO_FINDINGS or COMPLETE.",
+        "Explains that the command's fixed verdict/summary/findings/next_steps result is not itself the loop's revision-bound receipt.",
+        "Requires frozen objective/instruction digests, a confined synthetic repository with OS data-read allowlist, scrubbed environment/Git config/credentials, isolated HOME/temp and denied direct network, then foreground --wait --json, successful parse from .result, and a matching REVIEW_RECEIPT_V1 envelope.",
+        "Requires an exact full/partial/unread partition of all three surface-entry IDs before approve plus empty findings can map to ZERO_FINDINGS."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Dry-run an adversarial verification audit; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The loop began with a dirty tracked src/a.ts and untracked config/new.yaml. Round 1 renamed src/a.ts to src/b.ts, deleted config/new.yaml, and retained only the merge-base SHA, a path list, and a surface hash. The fixer overwrote the old contents. A prior receipt says the mutant was KILLED but has no surface, snapshot, reproducer, or mutant digest. The mutant was applied to the authoritative dirty tree and not restored. Decide whether verification or termination is valid and state the recovery boundary.",
+      "expected_output": "Return INPUT_ERROR because neither the original state nor the old receipt is reproducible, preserve lifecycle-aware review evidence for renamed/deleted entries, and isolate all future baseline and mutant runs.",
+      "files": [],
+      "expectations": [
+        "Returns INPUT_ERROR and rejects termination; a merge base, path list, and hash are not a restorable tracked-plus-untracked snapshot.",
+        "Requires a verified immutable loop-start or pre-round snapshot and, because the old contents were overwritten, does not claim the two-side proof can be reconstructed without external evidence or rebaselining.",
+        "Keeps stable lifecycle entries for the rename source and deletion, including prior blob or bounded artifact, patch digest, and old/new kind and mode evidence rather than requiring vanished paths to exist on disk.",
+        "Treats the old KILLED receipt as stale because it lacks current surface, snapshot, reproducer, and mutant digests, and requires separate phase-bound receipts.",
+        "Requires each baseline restore or mutant to run alone in an isolated disposable copy and rejects the contaminated authoritative tree until it is recovered from an exact snapshot or explicitly rebaselined."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Dry-run the terminal adversarial-iteration decision; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The immutable objective/instruction artifacts and digests, full base OID, review round, consumed single-use request ID, review_invocation_generation, accepted_generation, issuance-only parent chain, review-target digest, reviewed-after-attempt ID, and current surface/reviewer-projection fingerprints match an immutable reviewer_receipts entry; the ledger has legitimately advanced since acceptance. A foreground `/codex:adversarial-review --wait --json` exited zero with null parseError and an object at `.result`: verdict approve, findings [], next_steps [], and its first summary line is a valid REVIEW_RECEIPT_V1 covering review items E1 and E2 fully, with partial/unread empty, disposition R1-F1:resolved, and remaining_risk=[]. Its only following summary lines are REVIEW_EVIDENCE_V1 records binding E1 and E2 to their complete review-item digests and concrete observations. R1-F1 has valid detection-location binding, a finding-level reverted EXPECTED_FAILURE receipt, an independent representative potency receipt, and current fixed PASS/mutant KILLED receipts bound to exact snapshots, runner contracts, predicates, artifacts, sandbox attestations, safe output, and unchanged before/after authoritative recaptures. Current adjacent-contract and preflight phase receipts pass under the same execution contract, a final actual-tree recapture matches the accepted review binding, and remaining design risk is empty. Decide the reviewer status, finding transition, and loop outcome.",
+      "expected_output": "Accept the fully bound approval as explicit zero findings, close the verified finding, and complete without starting another fixer.",
+      "files": [],
+      "expectations": [
+        "Normalizes the valid .result through the adapter and returns ZERO_FINDINGS rather than INPUT_ERROR or FINDINGS.",
+        "Transitions R1-F1 from verified to closed because the current full-surface receipt explicitly resolves it; does not infer closure merely from absence.",
+        "Returns COMPLETE only because every phase receipt has valid potency, runner-result, sandbox, output, authoritative-recapture, adjacent/preflight, coverage, and empty-risk bindings.",
+        "Accepts the stored receipt by its consumed request, accepted generation, reviewed-after-attempt value, and fingerprints rather than requiring equality with the ledger's later current generation.",
+        "Does not start another fixer, propose another production change, or commit during the decision."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Dry-run a divergence decision; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The failure-class registry contains fc-1 with invariant 'a consumer changes without validating the producer contract' and executable preflight pf-1, whose current sandbox-attested receipt passes. Several intervening reviews did not form a consecutive fix-induced pair. A new valid reviewer receipt reports R5-F1 as material with mapped file/line/detection evidence. Its consumed CLASS_DECISION_V1 is bound to the pending review, R5-F1 digest, complete registry digest, compared_classes=[fc-1], decision=fc-1, and a contiguous subordinate chain. The receipt shows fc-1 recurring after pf-1 was installed. State the outcome and next action.",
+      "expected_output": "Return DIVERGED solely because a registered failure class recurred after its installed preflight, preserving the class lineage and stopping normal fixes.",
+      "files": [],
+      "expectations": [
+        "Returns DIVERGED and does not rely on the separate two-consecutive-fix-defects trigger.",
+        "Uses the bound class decision to reuse fc-1 and pf-1 rather than allocating a renamed class.",
+        "Does not start another fixer or commit.",
+        "Recommends an invariant-boundary split or rebaseline and preserves the failed preflight-class evidence."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Dry-run reviewer normalization; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The stored failure-class registry is initially empty. One valid `.result` contains two ordered material findings. Both use `[NEW_CLASS]`: the first invariant is 'changed consumer without reading producer contract'; the second says 'consumer assumed producer semantics'. The adapter allocated provisional fc-1 for the first. A fresh subordinate class request for the second was issued, but no valid CLASS_DECISION_V1 was returned. All other receipt fields and coverage are valid. Decide whether the review can be accepted.",
+      "expected_output": "Return INPUT_ERROR because the second new-class proposal was not semantically adjudicated against the effective registry containing provisional fc-1.",
+      "files": [],
+      "expectations": [
+        "Returns INPUT_ERROR, consumes/rejects the subordinate request and parent review request atomically, requires fresh parent/subordinate IDs, and does not accept FINDINGS or allocate fc-2.",
+        "Builds the effective registry in original finding order, so provisional fc-1 participates in the second comparison.",
+        "Requires a separately bound CLASS_DECISION_V1 covering the complete effective-registry digest and class set.",
+        "Explains that different wording alone cannot bypass recurrence, preflight, or divergence tracking."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Dry-run corrective verification; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. R1-A1 fixed the production defect, but mutation verification found that a weakened /state/ assertion let the BROKEN mutant survive, so the orchestrator persisted a BLOCKED receipt. R1-A2 is a distinct authorized correction attempt that restores only the exact READY assertion. Its pre-attempt snapshot already contains the correct production fix, while the finding's immutable loop-start red snapshot, reproducer patch, adapter, and expected failure digests are unchanged. State which red, fixed, and mutant evidence A2 needs.",
+      "expected_output": "Do not demand the original defect signal from A2's already-fixed pre-attempt snapshot; reuse or rerun the finding-level red proof on the immutable loop-start defect snapshot, then require current A2 fixed-pass and mutant-kill receipts.",
+      "files": [],
+      "expectations": [
+        "Treats R1-A2 as a distinct attempt authorized by the exact orchestrator BLOCKED receipt.",
+        "Does not call the A2 pre-attempt snapshot buggy or require the original reproducer to fail there.",
+        "Allows the historical finding-red EXPECTED_FAILURE receipt to remain valid because all of its bound digests are unchanged, or reruns it only on the same immutable loop-start defect snapshot.",
+        "Requires a fresh representative potency receipt under R1-A2 plus sandbox-attested, runner-contract-bound fixed PASS and BROKEN-mutant KILLED receipts before verification can pass."
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Dry-run pre-review intake; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The change modifies payment.ts semantics. The proposed public synthetic review target contains only payment.ts, and no current context_discovery_receipt exists. An unchanged jobs/settle.ts imports payment.ts and depends on the changed behavior, but payment.ts does not name that reverse consumer. A reviewer approval over the proposed target would otherwise have full coverage. Decide whether the review may run or terminate.",
+      "expected_output": "Return INPUT_ERROR before accepting zero: run bounded local forward/reverse context discovery, add jobs/settle.ts as a validated adjacent contract, and issue a fresh review over the expanded target.",
+      "files": [],
+      "expectations": [
+        "Does not treat full coverage of the incomplete supplied target as ZERO_FINDINGS or COMPLETE.",
+        "Requires a complete context_discovery_receipt bound to the current surface before issuing the public review request.",
+        "Finds reverse consumers locally rather than relying on payment.ts to name them or exposing the full repository to the public reviewer.",
+        "Allocates jobs/settle.ts an adjacent-contract identity with a bound executable or manual check and requires fresh full-surface coverage after expansion."
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "Dry-run valid findings normalization; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. A pending R2 review request at generation 14 binds objective/instruction artifacts, a full base OID, complete context-discovery/sanitized-baseline/review-target/projection digests, an issuance-only parent chain, unchanged actual tree, and ordinary items E1/E2. Its public_location_map binds E1's digest and synthetic settlement.ts lines 20-24 to hunk H1. A foreground `/codex:adversarial-review --wait --json` returns exit zero, null parseError, and `.result` with verdict needs-attention, next_steps [], one high-severity finding titled `[NEW] stale settlement state`, file settlement.ts, lines 21-22, and no adjacent proposals. The first summary line exactly echoes the request, partitions E1/E2 as fully read, has no existing dispositions, and sets remaining_risk=[NEW#1]. The next two lines are valid item-bound REVIEW_EVIDENCE_V1 records. REVIEW_FINDING_V1 has finding invariant 'settlement reads a current lifecycle state', detection item E1 with its exact digest and H1 ref, materiality material, introduced_by original with matching patch evidence, failure_class [NEW_CLASS], class invariant 'settlement consumes stale lifecycle state', and no affected contracts. The failure-class registry is empty and next finding/class sequences are unused. Decide normalization, request transition, and fix authorization.",
+      "expected_output": "Accept FINDINGS, allocate the first stable finding and failure-class IDs in result order, rewrite NEW#1 to that finding ID, consume the review request at the next generation, and authorize a distinct A1 only after an orchestrator divergence evaluation.",
+      "files": [],
+      "expectations": [
+        "Allocates R2-F1 for `[NEW]` and fc-1 for the first `[NEW_CLASS]`, without requiring class adjudication against an empty effective registry.",
+        "Rewrites remaining_risk NEW#1 to R2-F1 and stores matching material lineage/evidence rather than inferring it from prose.",
+        "Atomically consumes the pending review request and appends the immutable FINDINGS receipt at accepted_generation 15 after rechecking the actual tree.",
+        "Runs the orchestrator-owned divergence evaluation and, if false, allocates R2-A1 consuming this FINDINGS receipt; it does not let the reviewer or fixer emit BLOCKED/DIVERGED."
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "Dry-run candidate intake; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. The protected pre-loop AGENTS.md authority snapshot forbids schema changes. The intended review surface includes both AGENTS.md and schema.sql. A fixer candidate changes AGENTS.md to remove that rule, changes schema.sql, and echoes the new AGENTS.md bytes as its applicable authority. The original authority artifact and digest remain intact. Decide the status and whether any candidate bytes may reach the authoritative tree.",
+      "expected_output": "Return INPUT_ERROR before authoritative apply because a proposed instruction-file edit is review output, not newly adopted loop authority; require explicit rebaseline to change the governing contract.",
+      "files": [],
+      "expectations": [
+        "Uses the protected pre-loop AGENTS.md artifact as authority and treats the edited AGENTS.md as ordinary review output.",
+        "Rejects the schema change as conflicting with the frozen change contract and does not apply any candidate delta.",
+        "Does not mutate change_objective_digest or applicable_instructions_digest from candidate content.",
+        "Requires explicit user-authorized rebaseline before a changed instruction set can govern a new attempt."
+      ]
+    },
+    {
+      "id": 13,
+      "prompt": "Dry-run reviewer normalization; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. A pending request supplies E1 and E2 and a public_location_map in which synthetic a.ts lines 10-14 map only to E1/H1 and b.ts lines 20-24 map only to E2/H2. One `[NEW]` material finding names file a.ts lines 11-12 but REVIEW_FINDING_V1 claims detection_review_item_id E2, E2's digest, and evidence H2. Coverage, transport, class metadata, and remaining risk are otherwise valid. Decide the request transition and allocations.",
+      "expected_output": "Return INPUT_ERROR because the public file/line location and detection item/evidence do not resolve through one map entry; reject the request and commit no provisional IDs.",
+      "files": [],
+      "expectations": [
+        "Rejects the finding-level location binding rather than authorizing a fix against E1 or E2 by inference.",
+        "Atomically consumes the pending review request into a binding/schema rejection.",
+        "Discards provisional finding/class/risk allocations and does not advance their sequences.",
+        "Requires a fresh review request for retry."
+      ]
+    },
+    {
+      "id": 14,
+      "prompt": "Dry-run potency intake; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. Current fix dispatch D2 produced isolated candidate snapshot digest C2. The supplied representative MUTANT_POTENCY_V1 instead consumes a potency request whose parent was rejected dispatch D1 and binds candidate snapshot C1. Its mutant bytes and finding ID happen to match D2. The fixer also reports a green mutant command. Decide whether D2 may be applied or credited.",
+      "expected_output": "Return INPUT_ERROR before authoritative apply because potency evidence is single-use and bound to rejected parent D1/C1, not current D2/C2.",
+      "files": [],
+      "expectations": [
+        "Rejects replay of the consumed potency request and stale parent/candidate snapshot binding.",
+        "Does not infer potency from matching mutant bytes or fixer-reported green output.",
+        "Rejects D2 with no authoritative delta applied and gives no KILLED credit.",
+        "Requires fresh parent and potency request IDs under a validated candidate snapshot."
+      ]
+    },
+    {
+      "id": 15,
+      "prompt": "Dry-run candidate verification intake; do not edit files or run commands. Unless contradicted below, every unmentioned mandatory binding is valid and current. A fixer returns a structurally complete candidate and says fixed tests pass and the representative mutant is killed. The host cannot provide an OS sandbox with scrubbed environment/credentials, no authoritative-write access, default-deny network, resource limits, or an attestation digest. No candidate bytes have yet been applied. Decide the status and evidence credit.",
+      "expected_output": "Return INPUT_ERROR before authoritative apply; unconfined repository code cannot produce trusted PASS or KILLED receipts.",
+      "files": [],
+      "expectations": [
+        "Treats repository runners and candidate code as untrusted executables even with structured argv and no shell.",
+        "Rejects fixer-reported command results and creates no PASS, KILLED, or COMPLETE evidence.",
+        "Rejects/discards the isolated candidate while leaving the authoritative tree untouched.",
+        "Requires a host-attested sandbox plus matching before/after authoritative recapture for retry."
+      ]
+    }
+  ]
+}

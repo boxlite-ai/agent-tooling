@@ -10,7 +10,7 @@
 - `guidance/workflow.md` is canonical domain-neutral guidance. Explicit sync splices a byte-stable, hash-marked block; gates fail on missing/tampered blocks and warn on stale ones. Keep it within 150 lines.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=a4ec3c44f938-dirty sha256=0fc04f5da52b -->
+<!-- agent-tooling:guidance:begin rev=9f47df3b06f0-dirty sha256=2728d86a743f -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -64,8 +64,8 @@ Every change goes: understand → research → design → implement → test →
 **Test**
 
 - Two-side verification for reproducer tests. When you add a test alongside a fix, demonstrate it in this order, both manually run:
-  1. You must revert **every** production change — every non-test file back to its pre-fix state, only the test remains. Run the test. It must fail, with the failure pointing at the bug — log the observed failure signal (assertion text, hang, panic). **Partial reverts, mental simulation, or "it would obviously fail without the fix" are treated as cheating.** If a full revert is genuinely impractical, stop and surface that — do not paper over it.
-  2. Restore the production change in full. Run the test. It must pass.
+  1. You must revert **every** production change — every non-test file back to its pre-fix state, only the test remains. If that revert changes an API, signature, or schema so the test cannot compile or reach its defect check, keep production fully reverted and add only the smallest temporary test-only compatibility adapter needed to exercise the old contract. A test-only compatibility adapter may adapt setup or invocation only; it must not implement the fix, alter the defect check, or become the failure signal. Run the test. It must reach the defect check and fail for the original bug — log the observed failure signal (assertion text, hang, panic). **Partial reverts, mental simulation, or "it would obviously fail without the fix" are treated as cheating.** If no such adapter can preserve that signal, stop and surface the blocker.
+  2. Remove any temporary compatibility adapter, restore the production change in full, and run the test. It must pass.
      Without a complete step 1 you've only proved your code works, not that the fix was necessary or that this test would have caught the bug. Don't accept "it passes now" as evidence the test guards the right thing.
 - A test is only meaningful when there's something that could go wrong between the data being produced and the assertion being made. If the test builds the value it then asserts on (e.g., formatting a string and then asserting that the same string contains a substring it just put in), the assertion is tautological — nothing crossed a boundary, so nothing is being tested. The data must come from production code under test, not from the test body itself.
 - Add or update tests when behavior changes around branching, parsing, retries, security checks, or boundaries.
