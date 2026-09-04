@@ -797,8 +797,17 @@ resolve_final_message() {
   extract_final_message
   transcript_had_content=false
   [[ -n "$transcript_path" && -s "$transcript_path" ]] && transcript_had_content=true
-  if [[ -z "$FINAL_TEXT" && "$transcript_had_content" == true \
-     && "$AUDIT_TRANSCRIPT_SOURCE_KIND" != failed ]]; then
+  # Two reasons to re-read: no text yet, or a snapshot that came back unusable. The
+  # second is the live-transcript race above — a hollow snapshot reads downstream as
+  # "evidence incomplete" and forces a FAIL dossier the turn never earned, while the
+  # settled file a few hundred milliseconds later extracts cleanly. The old
+  # `!= failed` guard switched this loop off for precisely that case.
+  # A final turn that genuinely exceeds the snapshot budget still ends truncated; it
+  # spends the window first, which is the price of not having to tell the two apart.
+  if [[ "$transcript_had_content" == true ]] \
+     && { [[ -z "$FINAL_TEXT" && "$AUDIT_TRANSCRIPT_SOURCE_KIND" != failed ]] \
+          || [[ "$transcript_snapshot_truncated" == true \
+                && "$AUDIT_TRANSCRIPT_REFRESHABLE" == true ]]; }; then
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       sleep 0.2
       if [[ "$AUDIT_TRANSCRIPT_REFRESHABLE" == true ]]; then
@@ -806,7 +815,7 @@ resolve_final_message() {
           >/dev/null 2>&1 || true
       fi
       extract_final_message
-      [[ -n "$FINAL_TEXT" ]] && break
+      [[ -n "$FINAL_TEXT" && "$transcript_snapshot_truncated" != true ]] && break
     done
   fi
   # Codex permits a null transcript_path and supplies this stable Stop field. Apply it
@@ -1496,6 +1505,27 @@ write_failed_transcript_snapshot() {
   publish_record_for_current_epoch "$payload_transcript_file" "$snapshot_body"
 }
 
+# A failed extraction says nothing about the turn: the usual cause is that the read
+# lost a race with the harness still appending to the transcript, because the
+# extractor requires the source to be byte-identical across its two passes. Publish
+# the hollow snapshot as before, but keep the source armed so resolve_final_message
+# can re-read it — otherwise the one case that most needs a retry is the only one
+# that cannot have one, and the turn dead-ends on evidence that was merely unread.
+fail_transcript_snapshot() {  # source-path
+  write_failed_transcript_snapshot || return 1
+  AUDIT_TRANSCRIPT_SOURCE_KIND="failed"
+  # Only a regular file can settle into a readable transcript. A FIFO, a directory or
+  # a symlink is refused by the extractor for what it IS, and re-reading it would just
+  # spend the retry window before failing exactly as before. Reserved for the built-in
+  # reader: a custom extractor that busted its byte bound or its deadline busts them
+  # again, so its failures stay one-shot.
+  # `-f` alone would follow a symlink to a regular file and arm a source the extractor
+  # rejects on sight (verdict-audit-state.sh refuses any path whose lstat is a link).
+  [[ -f "$1" && ! -L "$1" ]] || return 0
+  AUDIT_TRANSCRIPT_SOURCE_PATH="$1"
+  AUDIT_TRANSCRIPT_REFRESHABLE=true
+}
+
 # A custom extractor is executable configuration, but its output is still untrusted.
 # The shared capture facade keeps both bytes and producer lifetime behind one absolute
 # deadline; a producer cannot close stdout and then strand this hook in a later wait.
@@ -1509,13 +1539,18 @@ prepare_audit_transcript() {
   local source_path="${1:-$transcript_path}" refresh_mode="${2:-initial}"
   local staged extracted snapshot_body raw_snapshot raw_body extracted_snapshot
   local staged_identity="" extracted_identity="" snapshot_state=""
-  transcript_snapshot_truncated=false
   if [[ "$refresh_mode" != refresh ]]; then
+    transcript_snapshot_truncated=false
     PREEXTRACTED_FINAL_TEXT=""
     AUDIT_TRANSCRIPT_SOURCE_PATH=""
     AUDIT_TRANSCRIPT_REFRESHABLE=false
     AUDIT_TRANSCRIPT_SOURCE_KIND="transcript"
   fi
+  # A refresh keeps what it cannot replace. Several exits below return without
+  # publishing a snapshot — the source vanished, or the record could not be
+  # written — and clearing the marker on entry would let one of them retire the
+  # unusable-evidence state that the caller's gate depends on, ending the turn
+  # UNJUDGED. Only a published snapshot may say what the evidence now is.
   if [[ -z "$source_path" || "$source_path" == /dev/null \
      || ( ! -e "$source_path" && ! -L "$source_path" ) ]]; then
     if [[ -n "$last_assistant_message" ]]; then
@@ -1548,6 +1583,7 @@ prepare_audit_transcript() {
         && cleanup_bounded_capture_destination \
             "$staged" "$staged_identity" 2>/dev/null || true
       write_failed_transcript_snapshot || return 1
+      AUDIT_TRANSCRIPT_SOURCE_KIND="failed"
     else
       extracted="${staged}.extracted"
       if capture_bounded_extractor \
@@ -1599,15 +1635,13 @@ prepare_audit_transcript() {
     else
       cleanup_bounded_capture_destination \
         "$staged" "$staged_identity" 2>/dev/null || true
-      write_failed_transcript_snapshot || return 1
-      AUDIT_TRANSCRIPT_SOURCE_KIND="failed"
+      fail_transcript_snapshot "$source_path" || return 1
     fi
   else
     [[ "$staged_identity" =~ ^[0-9]+:[0-9]+$ ]] \
       && cleanup_bounded_capture_destination \
           "$staged" "$staged_identity" 2>/dev/null || true
-    write_failed_transcript_snapshot || return 1
-    AUDIT_TRANSCRIPT_SOURCE_KIND="failed"
+    fail_transcript_snapshot "$source_path" || return 1
   fi
   transcript_path="$payload_transcript_file"
 }

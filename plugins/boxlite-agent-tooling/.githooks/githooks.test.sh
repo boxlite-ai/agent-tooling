@@ -1290,6 +1290,92 @@ check_eq "no hooksPath → PreToolUse still gates"       "$denied" "yes"
 rm -rf "$R"
 
 echo
+echo "## delegated pre-commit names the command the agent actually ran"
+# git hands pre-commit no argv, so the delegated payload is the placeholder
+# `git commit`. The re-audit instruction must still name the real command — the
+# one the PreToolUse layer saw — or the auditor binds sha256("git commit") with no
+# subject and commit-msg rejects even a PASS.
+deny_target_command() {  # deny-json -> target_command named in the Claude route
+  printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecisionReason' \
+    | sed -n 's/^ *prompt=\(".*"\))$/\1/p' | head -1 | jq -r . \
+    | sed -n '/^{"operation_kind"/p' | jq -r '.target_command'
+}
+deny_has_placeholder_note() {  # deny-json -> yes|no
+  printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecisionReason' \
+    | grep -q 'target_command above is the placeholder' && printf 'yes' || printf 'no'
+}
+delegated_gate() {  # repo -> deny json (stdout) for the placeholder payload
+  printf '{"tool_input":{"command":"git commit"}}' \
+    | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" GITHOOK_DELEGATED=1 GITHOOK_KEEP_AUDIT=1 \
+        bash "$1/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null
+}
+pretooluse_gate() {  # repo command -> runs the PreToolUse layer (defers, writes handoff)
+  printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$2" | jq -Rs .)" \
+    | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" bash "$1/.agents/hooks/preflight-commit-push.sh" ) >/dev/null 2>&1
+}
+REAL_CMD="git commit -m 'test(hooks): bind the real command'"
+
+R="$(setup)"; stage_change "$R"
+pretooluse_gate "$R" "$REAL_CMD"
+check_eq "PreToolUse handoff records the commit command" \
+  "$(jq -r '.command' "$R/.agents/state/last-audit-handoff.json")" "$REAL_CMD"
+out="$(delegated_gate "$R")"
+check_eq "delegated deny names the PreToolUse command, not the placeholder" \
+  "$(deny_target_command "$out")" "$REAL_CMD"
+check_eq "delegated deny carries no placeholder note when the command was recovered" \
+  "$(deny_has_placeholder_note "$out")" "no"
+
+# Same tool call, index staged AFTER the handoff (`git add && git commit`): the
+# command is still recoverable — only the dossier is bound to the staged diff.
+printf 'late\n' >> "$R/f"; git -C "$R" add -A
+out="$(delegated_gate "$R")"
+check_eq "command recovered even when staging happened after the handoff" \
+  "$(deny_target_command "$out")" "$REAL_CMD"
+
+# Full chain as a Claude session reaches it: the auditor audits the REAL command,
+# the PreToolUse layer defers again on retry, pre-commit binds through the handoff
+# hash, commit-msg verifies the audited subject and consumes both markers.
+br="$(git -C "$R" branch --show-current)"; hd="$(git -C "$R" rev-parse HEAD)"
+jq -nc --arg b "$br" --arg h "$hd" --arg dh "$(diff_hash_for "$R" commit)" \
+  --arg ch "$(command_hash_for "$REAL_CMD")" \
+  --arg csh "$(subject_hash_for 'test(hooks): bind the real command')" \
+  '{branch:$b, head:$h, command_kind:"commit", diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[]}' \
+  > "$R/.agents/state/last-audit.json"
+pretooluse_gate "$R" "$REAL_CMD"
+check_eq "agent + audit of the real command → commit allowed" \
+  "$(run_commit "$R" agent 'test(hooks): bind the real command')" 0
+[[ -e "$R/.agents/state/last-audit.json" || -e "$R/.agents/state/last-audit-handoff.json" ]] && consumed=no || consumed=yes
+check_eq "real-command audit and handoff consumed" "$consumed" "yes"
+rm -rf "$R"
+
+# Closed over open: a handoff whose text does not hash to command_hash is ignored.
+R="$(setup)"; stage_change "$R"
+pretooluse_gate "$R" "$REAL_CMD"
+jq '.command="git commit -m '"'"'feat: something else'"'"'"' "$R/.agents/state/last-audit-handoff.json" \
+  > "$R/.agents/state/x.json" && mv "$R/.agents/state/x.json" "$R/.agents/state/last-audit-handoff.json"
+out="$(delegated_gate "$R")"
+check_eq "tampered handoff text falls back to the placeholder" \
+  "$(deny_target_command "$out")" "git commit"
+check_eq "placeholder fallback tells the agent to substitute the real command" \
+  "$(deny_has_placeholder_note "$out")" "yes"
+rm -rf "$R"
+
+# No PreToolUse layer at all (AGENT_GATED agents): placeholder plus the note.
+R="$(setup)"; stage_change "$R"
+out="$(delegated_gate "$R")"
+check_eq "no handoff → placeholder with substitution note" \
+  "$(deny_target_command "$out"):$(deny_has_placeholder_note "$out")" "git commit:yes"
+rm -rf "$R"
+
+# The push handoff never carries a command: pre-push rebuilds its own exact one.
+R="$(setup)"
+printf '{"tool_input":{"command":"git push origin HEAD"}}' \
+  | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$R/.agents/hooks/preflight-commit-push.sh" ) >/dev/null 2>&1
+check_eq "push handoff records no command text" \
+  "$(jq -r '.command' "$R/.agents/state/last-audit-handoff.json")" "null"
+rm -rf "$R"
+
+echo
 echo "## transition compat: hooks and trees on either side of the .agents move"
 # Where core.hooksPath is configured absolute rather than the relative value
 # `make setup` sets, ONE installed hook runs for every worktree whatever commit it

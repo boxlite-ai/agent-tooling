@@ -107,6 +107,9 @@ branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
 max_age_seconds=600
 deny_max_bytes=8192
+# The PreToolUse command text recorded in the handoff (see write_command_handoff).
+# Same ceiling as the deny reason that will carry it back to the agent.
+handoff_command_max_bytes=8192
 
 hash_stdin() {
   shasum -a 256 | awk '{print $1}'
@@ -239,7 +242,8 @@ load_handoff_document() {
     handoff_mtime="${snapshot%%$'\n'*}"
     body="${snapshot#*$'\n'}"
   fi
-  handoff_document="$(printf '%s' "$body" | jq -ecs '
+  handoff_document="$(printf '%s' "$body" | jq -ecs \
+    --argjson command_max "$handoff_command_max_bytes" '
     def exact_keys($wanted): (keys | sort) == ($wanted | sort);
     def bounded_line($bytes):
       type == "string" and utf8bytelength <= $bytes
@@ -261,13 +265,16 @@ load_handoff_document() {
         and (.nonce_hash | type == "string" and test("^[0-9a-f]{64}$")));
     if length == 1 and (.[0] | type) == "object"
        and (.[0] | exact_keys(["branch", "head", "command_kind", "diff_hash",
-            "command_hash", "owner", "override", "lifecycle"]))
+            "command_hash", "command", "owner", "override", "lifecycle"]))
        and (.[0].branch | bounded_line(4096))
        and (.[0].head | type == "string"
             and test("^[0-9a-f]{40}([0-9a-f]{24})?$|^\\?$"))
        and (.[0].command_kind == "commit" or .[0].command_kind == "push")
        and (.[0].diff_hash | type == "string" and test("^[0-9a-f]{64}$"))
        and (.[0].command_hash | type == "string" and test("^[0-9a-f]{64}$"))
+       and (.[0].command == null
+            or (.[0].command | type == "string" and utf8bytelength <= $command_max
+                and (explode | all(. != 0))))
        and (.[0].owner | type == "object"
             and exact_keys(["pid", "start_token"])
             and (.pid | type == "number" and . > 0 and floor == .)
@@ -392,18 +399,29 @@ write_command_handoff() {
       --arg epoch "$hook_prompt_epoch" \
       '{session_scope:$scope,prompt_epoch:$epoch}')"
   fi
+  # git hands pre-commit no arguments, so the delegated gate only ever sees the
+  # placeholder `git commit`. Record the command this layer DID see so that gate can
+  # name it in its re-audit instruction (recover_handoff_command). Pushes need no
+  # copy: pre-push rebuilds its exact synthetic command from ref-update stdin.
+  # Oversized text stays null — the deny reason could not carry it back anyway.
+  local command_json='null' command_bytes
+  command_bytes="$(LC_ALL=C printf '%s' "$command" | wc -c | tr -d ' ')"
+  if [[ "$kind" == "commit" ]] && (( command_bytes <= handoff_command_max_bytes )); then
+    command_json="$(printf '%s' "$command" | jq -Rs .)"
+  fi
   jq -nc \
     --arg branch "$branch" \
     --arg head "$head" \
     --arg command_kind "$kind" \
     --arg diff_hash "$diff_hash" \
     --arg command_hash "$command_hash" \
+    --argjson command "$command_json" \
     --argjson owner_pid "$handoff_owner_pid" \
     --arg owner_start_token "$handoff_owner_start_token" \
     --argjson override "$override_json" \
     --argjson lifecycle "$lifecycle_json" \
     '{branch:$branch, head:$head, command_kind:$command_kind, diff_hash:$diff_hash,
-      command_hash:$command_hash,
+      command_hash:$command_hash, command:$command,
       owner:{pid:$owner_pid,start_token:$owner_start_token},
       override:$override, lifecycle:$lifecycle}' \
     | verdict_audit_write_atomic "$handoff_file"
@@ -451,6 +469,32 @@ valid_handoff_command_hash() {
   return 1
 }
 
+# Recover the command the agent actually ran from the PreToolUse handoff. Bound like
+# the hash bridge above — same live owner process, branch, HEAD, kind, age — but NOT
+# to diff_hash: `git add && git commit` in one tool call stages after the handoff was
+# written, and the dossier is bound to the staged diff separately by validate_audit.
+# Text that does not hash to command_hash is a tampered or foreign handoff: ignore it
+# and let the caller fall back to the placeholder (closed over open).
+recover_handoff_command() {
+  local recovered handoff_branch handoff_head handoff_kind handoff_command_hash
+  local now_epoch handoff_age
+  load_handoff_owner || return 1
+  recovered="$(printf '%s' "$handoff_document" \
+    | jq -r 'if (.command | type) == "string" then .command else empty end')"
+  [[ -n "$recovered" ]] || return 1
+  handoff_branch="$(printf '%s' "$handoff_document" | jq -r '.branch')"
+  handoff_head="$(printf '%s' "$handoff_document" | jq -r '.head')"
+  handoff_kind="$(printf '%s' "$handoff_document" | jq -r '.command_kind')"
+  handoff_command_hash="$(printf '%s' "$handoff_document" | jq -r '.command_hash')"
+  now_epoch="$(date +%s)"
+  handoff_age=$(( now_epoch - handoff_mtime ))
+  [[ "$handoff_branch" == "$branch" && "$handoff_head" == "$head" \
+     && "$handoff_kind" == "$kind" ]] || return 1
+  (( handoff_age >= 0 && handoff_age <= max_age_seconds )) || return 1
+  [[ "$(printf '%s' "$recovered" | hash_stdin)" == "$handoff_command_hash" ]] || return 1
+  printf '%s' "$recovered"
+}
+
 # ── Re-audit instruction ─────────────────────────────────────────────────────
 # Sourced HERE rather than at the top of the file so the two early exits above still
 # apply: a missing library must not turn every unrelated Bash call into an error, only
@@ -470,13 +514,32 @@ source "$subagent_lib"
 # One instruction, naming every route. Nothing here inspects the environment to choose
 # between hosts: capability is something the agent knows about itself, while an
 # environment variable can be set by whatever launched the hook.
+#
+# Under the git-level gate `$command` is the placeholder pre-commit synthesized, not
+# what the agent typed. Name the real one from the handoff whenever it can be bound;
+# otherwise say so, because a dossier audited against the placeholder can never bind
+# a subject and commit-msg will reject it.
+audit_target_command="$command"
+target_command_note=""
+if [[ -n "${GITHOOK_DELEGATED:-}" && "$kind" == "commit" ]]; then
+  if recovered_command="$(recover_handoff_command 2>/dev/null)"; then
+    audit_target_command="$recovered_command"
+  else
+    target_command_note="
+
+NOTE: git exposes no arguments to pre-commit and no fresh PreToolUse handoff bound the
+command, so target_command above is the placeholder \`git commit\`. Before spawning,
+replace it with the exact git commit command you are running (with -m/--message or
+-F <file>); an audit of the placeholder cannot bind a subject and commit-msg rejects it."
+  fi
+fi
 task_input_json="$(jq -nc \
   --arg operation_kind "$kind" \
   --arg repo_root "$repo_root" \
   --arg expected_branch "$branch" \
   --arg expected_head "$head" \
   --arg dossier_path "$audit_file" \
-  --arg target_command "$command" \
+  --arg target_command "$audit_target_command" \
   '{operation_kind:$operation_kind, repo_root:$repo_root,
     expected_branch:$expected_branch, expected_head:$expected_head,
     dossier_path:$dossier_path, target_command:$target_command}')"
@@ -494,7 +557,7 @@ invoke_instruction="$(subagent_instruction \
     "task_input_json=${task_input_json}")" \
   --headless "$headless_command")
 
-Retry the same git command after the verdict reports PASS."
+Retry the same git command after the verdict reports PASS.${target_command_note}"
 
 validate_audit() {
   local consume_on_pass="${1:-consume}"
@@ -583,13 +646,17 @@ Retry the push through the git-level pre-push gate so it can produce the exact r
   age=$(( now_epoch - audit_mtime ))
 
   local command_bound=0 handoff_command_hash=""
+  if [[ -n "${GITHOOK_DELEGATED:-}" && "$kind" == "commit" ]]; then
+    # Resolved before deciding so the mismatch report below shows the real bridge
+    # state instead of `none` whenever the direct comparison happened to settle it.
+    handoff_command_hash="$(valid_handoff_command_hash 2>/dev/null || true)"
+  fi
   if [[ "$audit_command_hash" == "$command_hash" ]]; then
     command_bound=1
   elif [[ -n "${GITHOOK_DELEGATED:-}" && "$kind" == "commit" ]]; then
     # Only commits may bridge from the PreToolUse command to git's later hooks:
     # commit-msg verifies the final subject before consuming the audit. Pushes
     # must bind to the detailed pre-push command, including ref-update stdin.
-    handoff_command_hash="$(valid_handoff_command_hash 2>/dev/null || true)"
     if [[ -n "$handoff_command_hash" && "$audit_command_hash" == "$handoff_command_hash" ]]; then
       command_bound=1
     elif [[ "$kind" == "commit" && -n "$audit_commit_subject_hash" ]]; then

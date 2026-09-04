@@ -77,6 +77,10 @@ if [[ "$is_agent" == 1 ]]; then
   # GITHOOK_DELEGATED tells the PreToolUse script this call IS the git-level
   # gate — without it the script's delegation guard would defer right back to
   # us and everything would silently pass.
+  # `git commit` is a placeholder: git gives this hook no argv. The gate recovers
+  # the command the agent actually ran from the PreToolUse handoff when it names
+  # the re-audit target, and binds a PASS through the handoff hash or the audited
+  # subject (checked by commit-msg) rather than through this placeholder.
   if ! out="$(printf '{"tool_input":{"command":"git commit"}}' \
         | GITHOOK_DELEGATED=1 GITHOOK_KEEP_AUDIT=1 bash "$(resolve_gate || echo /nonexistent-gate)" 2>&1)"; then
     printf 'commit-push-auditor delegated preflight failed\n%s\n' "$out" >&2

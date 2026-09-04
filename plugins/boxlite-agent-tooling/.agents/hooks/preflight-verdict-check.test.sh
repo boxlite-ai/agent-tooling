@@ -4096,6 +4096,108 @@ else
   fail=$((fail + 1)); printf '  FAIL  %s (%s)\n' "chat turn → allow via triage in soft AND hard" "$chat_detail"
 fi
 
+# Wait until the gate publishes the hollow snapshot (source_bytes 0), so a test that
+# changes the source afterwards is known to be acting after the first read failed —
+# a fixed sleep can lose that race on a loaded machine and pass vacuously.
+await_hollow_snapshot() {  # repo
+  local repo="$1" snapshot deadline=$(( SECONDS + 20 ))
+  while (( SECONDS < deadline )); do
+    snapshot="$(ls "$repo"/.agents/state/verdict-stop-message.jsonl* 2>/dev/null | head -1)"
+    if [[ -n "$snapshot" && -r "$snapshot" ]] \
+       && [[ "$(jq -r '.source_bytes // empty' "$snapshot" 2>/dev/null)" == 0 ]]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  return 1
+}
+
+echo
+echo "## a transcript unreadable at one moment is re-read, not judged incomplete"
+# The live failure: the gate reads the transcript while the harness is still appending
+# to it, the extractor's two passes disagree on the bytes, and the hollow snapshot it
+# publishes reads downstream as "evidence incomplete" — forcing a FAIL dossier about a
+# turn nobody actually looked at. A regular file the extractor refuses on sight (over
+# the source ceiling) reproduces that moment deterministically, and a helper swaps in
+# the settled transcript inside the retry window.
+R="$(setup)"
+write_transcript "$R" "Nothing here is a verdict; just chatting."
+mv "$R/transcript.jsonl" "$R/settled.jsonl"
+truncate -s 65M "$R/transcript.jsonl"
+( await_hollow_snapshot "$R" && cp "$R/settled.jsonl" "$R/transcript.jsonl" ) &
+swap_pid=$!
+retry_decision="$(decide "$R")"
+wait "$swap_pid" 2>/dev/null || true
+# The observable difference is that the turn never reaches the truncated rung at all.
+# Asserting on the published snapshot cannot tell the two apart: after a
+# truncated-block the gate re-enters itself, and that second pass re-extracts the
+# by-then settled file, so both fixed and unfixed end with a good snapshot.
+retry_log="$(ls "$R"/.agents/state/verdict-decisions.log* 2>/dev/null | head -1)"
+retry_rung="none"
+[[ -n "$retry_log" && -r "$retry_log" ]] \
+  && grep -q 'extract truncated-block' "$retry_log" && retry_rung="extract truncated-block"
+if [[ "$retry_decision" == allow && "$retry_rung" == none ]]; then
+  pass=$((pass + 1))
+  printf '  PASS  a settled re-read keeps the turn off the truncated rung\n'
+else
+  fail=$((fail + 1))
+  printf '  FAIL  a settled re-read keeps the turn off the truncated rung  (decision=%s rung=%s)\n' \
+    "$retry_decision" "$retry_rung"
+fi
+rm -rf "$R"
+
+# The retry must never turn "unreadable" into "unjudged". A refresh that publishes no
+# snapshot — the transcript vanished, or it never settles — has to leave the turn on
+# the same truncated-block path it took before the retry existed.
+check_still_blocks() {  # desc repo
+  local desc="$1" repo="$2" decision log rung
+  decision="$(decide "$repo")"
+  log="$(ls "$repo"/.agents/state/verdict-decisions.log* 2>/dev/null | head -1)"
+  # The truncated-block rung is what must appear; a later dossier rung may follow it
+  # once the audit it triggers comes back.
+  rung="none"
+  [[ -n "$log" && -r "$log" ]] \
+    && grep -q 'extract truncated-block' "$log" && rung="extract truncated-block"
+  if [[ "$decision" == block && "$rung" == "extract truncated-block" ]]; then
+    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
+  else
+    fail=$((fail + 1))
+    printf '  FAIL  %s  (decision=%s rung=%s)\n' "$desc" "$decision" "$rung"
+  fi
+}
+
+R="$(setup)"
+truncate -s 65M "$R/transcript.jsonl"
+( await_hollow_snapshot "$R" && rm -f "$R/transcript.jsonl" ) &
+vanish_pid=$!
+check_still_blocks "a transcript that vanishes mid-retry still blocks as unreadable" "$R"
+wait "$vanish_pid" 2>/dev/null || true
+rm -rf "$R"
+
+R="$(setup)"
+truncate -s 65M "$R/transcript.jsonl"
+check_still_blocks "a transcript that never settles still blocks as unreadable" "$R"
+rm -rf "$R"
+
+# A symlink is refused by the extractor for being a link, whatever it points at, so
+# arming it would spend the whole retry window on a source that can never be read.
+R="$(setup)"
+write_transcript "$R" "Nothing here is a verdict; just chatting."
+mv "$R/transcript.jsonl" "$R/target.jsonl"
+ln -s "$R/target.jsonl" "$R/transcript.jsonl"
+symlink_started="$SECONDS"
+symlink_decision="$(decide "$R")"
+symlink_elapsed=$(( SECONDS - symlink_started ))
+if [[ "$symlink_decision" == block && "$symlink_elapsed" -lt 2 ]]; then
+  pass=$((pass + 1))
+  printf '  PASS  a symlinked transcript fails closed without spending the retry window\n'
+else
+  fail=$((fail + 1))
+  printf '  FAIL  a symlinked transcript fails closed without spending the retry window  (decision=%s elapsed=%ss)\n' \
+    "$symlink_decision" "$symlink_elapsed"
+fi
+rm -rf "$R"
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

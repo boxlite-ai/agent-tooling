@@ -895,6 +895,16 @@ if [[ "$handoff" == "written" ]]; then
 else
   fail=$((fail + 1)); printf '  FAIL  handoff is written when the state dir does not exist yet  (got=%s)\n' "$handoff"
 fi
+# The delegated gate later recovers this text to name the real re-audit target; the
+# schema must accept exactly what this layer writes (command bound to command_hash).
+handoff_command="$(jq -r '.command' "$STATE_REPO/.agents/state/last-audit-handoff.json" 2>/dev/null)"
+handoff_command_hash="$(jq -r '.command_hash' "$STATE_REPO/.agents/state/last-audit-handoff.json" 2>/dev/null)"
+if [[ "$handoff_command" == "git commit -m x" \
+   && "$(printf '%s' "$handoff_command" | shasum -a 256 | awk '{print $1}')" == "$handoff_command_hash" ]]; then
+  pass=$((pass + 1)); printf '  PASS  handoff records the PreToolUse command bound to command_hash\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  handoff records the PreToolUse command bound to command_hash  (got=%s)\n' "$handoff_command"
+fi
 
 # The legacy mirror is a transition convenience, so a legacy location that cannot
 # be written must not fail the gate. mirror_to_legacy returns non-zero on failure
