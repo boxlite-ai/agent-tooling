@@ -71,11 +71,17 @@ for prompt in "ok explain it" "yes because it failed" "stop the server" \
     "$(emit "near-match" "$prompt")" "REPLY SHAPE:"
 done
 
+# Every substantive prompt pays for this block, so the budget is a hard stop rather
+# than a guideline: raising it must be a deliberate edit here, not a side effect of a
+# reworded rule. It went 640 -> 700 for the worked-example rule, which costs 668 and
+# misses the old cap even with the data points unnamed (643). Getting back under means
+# cutting a clause the rule needs — the per-step state requirement (633) or the escape
+# hatch (639) — so the cap moved instead of the rule.
 bytes="$(LC_ALL=C printf '%s' "$first" | wc -c | tr -d ' ')"
-if (( bytes <= 640 )); then
-  ok "reminder stays within 640 bytes ($bytes)"
+if (( bytes <= 700 )); then
+  ok "reminder stays within 700 bytes ($bytes)"
 else
-  bad "reminder stays within 640 bytes ($bytes)"
+  bad "reminder stays within 700 bytes ($bytes)"
 fi
 
 assert_contains "keeps reply-shape marker" "$first" "REPLY SHAPE:"
@@ -88,14 +94,25 @@ assert_contains "prefers renderable visuals when clearer" "$first" \
   "renderable diagram, graph, image, or table over prose when clearer"
 assert_contains "visualizes relationships first" "$first" \
   "Visualize relationships or 3+ entities"
+# The worked example carries the explanation; a reader who cannot follow the abstract
+# rule follows the trace. Assert each half on its own — subject scope, a step-by-step
+# walk, real data points rather than placeholders, the state each step changes, the tie
+# back to the rule — so dropping any one fails loudly instead of degrading into a
+# summary. The data enumeration is spelled out because "concrete example" alone reads
+# as satisfied by a named-but-unvalued one.
 assert_contains "examples apply to any subject" "$first" "Any subject:"
-assert_contains "uses examples for difficult ideas" "$first" \
-  "if abstract, unfamiliar, or unclear"
-assert_contains "requires a brief concrete example" "$first" \
-  "use a brief concrete example"
+assert_contains "an example is the default, not a fallback" "$first" \
+  "whenever possible"
+assert_contains "walks one example step by step" "$first" \
+  "walk one example step by step"
+assert_contains "grounds the walk in real data points" "$first" \
+  "on real data (values, facts, numbers)"
+assert_contains "shows what each step changes" "$first" \
+  "showing what changed at each step"
 assert_contains "connects examples to the general rule" "$first" \
   "tied to the general rule"
-assert_contains "skips unhelpful examples" "$first" "skip it when unhelpful"
+assert_contains "omits an example only when none applies" "$first" \
+  "omit only when none applies"
 assert_not_contains "does not force examples into every explanation" "$first" \
   "Ground every explanation"
 assert_not_contains "does not ban supported render formats" "$first" \
