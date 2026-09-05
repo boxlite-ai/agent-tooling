@@ -79,17 +79,30 @@ done
 # hatch (639) — so the cap moved instead of the rule.
 # A bullet of its own for the answer-first rule lands at 701, so the clause shares the
 # framing bullet (699) instead of moving the cap again.
+# It went 700 -> 720 for comments, which rode out on `exempt code` — a comment ships
+# inside code, so it inherited the exemption and no prose rule reached it. Narrowing
+# that clause (714) is the cheapest of the three fixes and the only one that adds no
+# rule: answer-first, no-recap, and the word cap all bind a comment through the bullet
+# it already sits under. Naming "why, not what" here instead costs 728 folded into the
+# framing bullet and 757 as its own, and both duplicate guidance/workflow.md.
 bytes="$(LC_ALL=C printf '%s' "$first" | wc -c | tr -d ' ')"
-if (( bytes <= 700 )); then
-  ok "reminder stays within 700 bytes ($bytes)"
+if (( bytes <= 720 )); then
+  ok "reminder stays within 720 bytes ($bytes)"
 else
-  bad "reminder stays within 700 bytes ($bytes)"
+  bad "reminder stays within 720 bytes ($bytes)"
 fi
 
 assert_contains "keeps reply-shape marker" "$first" "REPLY SHAPE:"
 assert_contains "keeps prose budget" "$first" "<=80"
+# Comments left through this exemption: `code` covered the block and everything written
+# inside it. Assert the narrowing and the surviving list apart, so restoring the blanket
+# clause fails on its own instead of passing on the leftovers.
 assert_contains "keeps evidence exemptions" "$first" \
-  "code, visuals, tables, paths, uncertainty, risk, failing tests"
+  "visuals, tables, paths, uncertainty, risk, failing tests"
+assert_contains "exempts code but not its comments" "$first" \
+  "exempt code (not comments)"
+assert_not_contains "does not exempt comments along with the code" "$first" \
+  "exempt code, visuals"
 assert_contains "keeps concise-prose rule" "$first" \
   "No preamble, recap, praise, repetition, or closing offer."
 assert_contains "answer leads, in one sentence" "$first" \
