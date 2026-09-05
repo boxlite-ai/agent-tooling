@@ -174,6 +174,7 @@ setup() {
      "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
+     "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" "$d/.agents/lib/"
   cp "$REPO_ROOT/.agents/prompts/"*.md "$d/.agents/prompts/"
   printf 'x\n' > "$d/f"
@@ -186,6 +187,7 @@ setup() {
   cp "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
+     "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" "$plugin/.agents/lib/"
   git -C "$scratch" init -q
   git -C "$scratch" config user.email t@t.test
@@ -1554,6 +1556,247 @@ git -C "$INST" remote remove origin
 
 git -C "$INST" worktree remove --force "$INST-wt"
 rm -rf "$INST"
+
+echo
+echo "## receipt: a single already-audited commit skips the push audit"
+
+# A broken delegated gate is the probe throughout this section: any push that still
+# succeeds proves the auditor was never reached, and any push that fails proves it was.
+receipt_path_for() {  # repo
+  printf '%s/.agents/state/commit-audit-receipt.json' "$1"
+}
+
+receipt_count() {  # repo -> 1 when a receipt is present, else 0
+  [[ -f "$(receipt_path_for "$1")" ]] && echo 1 || echo 0
+}
+
+# Stage, audit, and commit as an agent — the flow that earns a receipt.
+commit_audited() {  # repo [message]
+  local repo="$1" message="${2:-change}"
+  stage_change "$repo"
+  write_audit "$repo" commit
+  run_commit "$repo" agent "$message" >/dev/null
+}
+
+# A fixture whose origin already carries the base commit, so the next commit is the
+# only thing a push would introduce.
+setup_pushed() {  # -> "repo bare"
+  local repo bare branch_ref
+  repo="$(setup)"; bare="$(mktemp -d)"
+  git init -q --bare "$bare"; git -C "$repo" remote add origin "$bare"
+  branch_ref="$(current_branch_ref "$repo")"
+  git -C "$repo" push -q origin "$branch_ref:$branch_ref"
+  printf '%s %s' "$repo" "$bare"
+}
+
+push_agent() {  # repo -> exit code
+  local repo="$1" branch_ref
+  branch_ref="$(current_branch_ref "$repo")"
+  ( cd "$repo" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 BOXLITE_PR_WATCH=0 \
+      git push -q origin "$branch_ref:$branch_ref" >/dev/null 2>"$repo/err.txt" )
+  echo $?
+}
+
+# Fail loudly rather than tamper with nothing: a tamper case that found no receipt
+# would otherwise report PASS for the wrong reason.
+sole_receipt() {  # repo
+  local path; path="$(receipt_path_for "$1")"
+  [[ -f "$path" ]] || { printf 'FATAL: no receipt to tamper with in %s\n' "$1" >&2; exit 1; }
+  printf '%s' "$path"
+}
+
+tamper_receipt() {  # repo jq-filter
+  local receipt; receipt="$(sole_receipt "$1")"
+  jq "$2" "$receipt" > "$receipt.tmp" && mv "$receipt.tmp" "$receipt"
+}
+
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+receipts_after_commit="$(receipt_count "$R")"
+write_broken_preflight "$R" exit
+push_rc="$(push_agent "$R")"
+grep -q 'push audit skipped' "$R/err.txt" && skip_named=yes || skip_named=no
+check_eq "audited single commit → push skips the audit, receipt consumed" \
+  "rc=$push_rc before=$receipts_after_commit skip=$skip_named after=$(receipt_count "$R")" \
+  "rc=0 before=1 skip=yes after=0"
+rm -rf "$R" "$B"
+
+# One-shot: the receipt authorized exactly one push and is gone afterwards.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+push_agent "$R" >/dev/null
+git --git-dir="$B" update-ref -d "$(current_branch_ref "$R")" 2>/dev/null || true
+write_broken_preflight "$R" exit
+check_eq "a second push of the same commit re-audits" "$(push_agent "$R")" "1"
+rm -rf "$R" "$B"
+
+# --no-verify skips pre-commit and commit-msg, so no receipt is ever written.
+read -r R B < <(setup_pushed)
+stage_change "$R"
+( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 \
+    git commit -q --no-verify -m 'feat: unaudited' >/dev/null 2>&1 )
+write_broken_preflight "$R" exit
+check_eq "--no-verify commit → push still audits" \
+  "rc=$(push_agent "$R") receipts=$(receipt_count "$R")" "rc=1 receipts=0"
+rm -rf "$R" "$B"
+
+# Humans are exempt at commit time, so an agent pushing their work must still audit.
+read -r R B < <(setup_pushed)
+stage_change "$R"
+run_commit "$R" human >/dev/null
+write_broken_preflight "$R" exit
+check_eq "human commit + agent push → push still audits" \
+  "rc=$(push_agent "$R") receipts=$(receipt_count "$R")" "rc=1 receipts=0"
+rm -rf "$R" "$B"
+
+# The override path prints OVERRIDDEN BY USER and creates no PASS verdict, so it must
+# leave nothing for a later push to spend.
+read -r R B < <(setup_pushed)
+stage_change "$R"
+activate_override_handoff "$R" session-receipt commit "git commit -m change"
+run_commit "$R" agent >/dev/null
+write_broken_preflight "$R" exit
+check_eq "override commit writes no receipt → push still audits" \
+  "rc=$(push_agent "$R") receipts=$(receipt_count "$R")" "rc=1 receipts=0"
+rm -rf "$R" "$B"
+
+# Two audited commits are two receipts, but the pushed range is not one commit.
+read -r R B < <(setup_pushed)
+commit_audited "$R" 'feat: first'
+commit_audited "$R" 'feat: second'
+write_broken_preflight "$R" exit
+check_eq "two commits in one push → audits" "$(push_agent "$R")" "1"
+rm -rf "$R" "$B"
+
+# --amend records the REPLACED commit as the parent, so no receipt can match.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+git -C "$R" commit -q --amend --no-verify -m 'feat: amended subject'
+write_broken_preflight "$R" exit
+check_eq "amended commit → push audits" "$(push_agent "$R")" "1"
+rm -rf "$R" "$B"
+
+# An expired receipt is not evidence.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+had_receipt="$(receipt_count "$R")"
+tamper_receipt "$R" ".created_at = $(( $(date +%s) - 90000 ))"
+write_broken_preflight "$R" exit
+check_eq "receipt older than its ceiling → push audits" \
+  "had=$had_receipt rc=$(push_agent "$R")" "had=1 rc=1"
+rm -rf "$R" "$B"
+
+# A receipt whose recorded subject no longer matches the commit is not evidence: this
+# is the hole an --amend --no-verify over an unchanged parent and tree would open.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+had_receipt="$(receipt_count "$R")"
+tamper_receipt "$R" '.subject_hash = "0000000000000000000000000000000000000000000000000000000000000000"'
+write_broken_preflight "$R" exit
+check_eq "receipt with a foreign subject hash → push audits" \
+  "had=$had_receipt rc=$(push_agent "$R")" "had=1 rc=1"
+rm -rf "$R" "$B"
+
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+had_receipt="$(receipt_count "$R")"
+printf 'not-json\n' > "$(sole_receipt "$R")"
+write_broken_preflight "$R" exit
+check_eq "malformed receipt → push audits" \
+  "had=$had_receipt rc=$(push_agent "$R")" "had=1 rc=1"
+rm -rf "$R" "$B"
+
+# The slot is fixed, so naming the right commit is the whole check: a receipt left by
+# some other commit must never authorize this one.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+had_receipt="$(receipt_count "$R")"
+tamper_receipt "$R" '.tree = "0000000000000000000000000000000000000000"'
+write_broken_preflight "$R" exit
+check_eq "receipt naming another commit's tree → push audits" \
+  "had=$had_receipt rc=$(push_agent "$R")" "had=1 rc=1"
+rm -rf "$R" "$B"
+
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+had_receipt="$(receipt_count "$R")"
+tamper_receipt "$R" '.parent = "0000000000000000000000000000000000000000"'
+write_broken_preflight "$R" exit
+check_eq "receipt naming another commit's parent → push audits" \
+  "had=$had_receipt rc=$(push_agent "$R")" "had=1 rc=1"
+rm -rf "$R" "$B"
+
+# A new branch qualifies only when its parent is already wholly on the remote.
+read -r R B < <(setup_pushed)
+git -C "$R" checkout -q -b feature-receipt
+commit_audited "$R"
+write_broken_preflight "$R" exit
+( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 BOXLITE_PR_WATCH=0 \
+    git push -q origin HEAD:refs/heads/feature-receipt >/dev/null 2>"$R/err.txt" )
+check_eq "new branch whose parent is on the remote → push skips the audit" "$?" "0"
+rm -rf "$R" "$B"
+
+read -r R B < <(setup_pushed)
+git -C "$R" checkout -q -b feature-unpushed-base
+stage_change "$R"
+( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 \
+    git commit -q --no-verify -m 'feat: unaudited base' >/dev/null 2>&1 )
+commit_audited "$R"
+write_broken_preflight "$R" exit
+( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 BOXLITE_PR_WATCH=0 \
+    git push -q origin HEAD:refs/heads/feature-unpushed-base >/dev/null 2>"$R/err.txt" )
+check_eq "new branch carrying an unpushed parent → push audits" "$?" "1"
+rm -rf "$R" "$B"
+
+# A tag ref is not a branch, even when it points at an audited commit.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+git -C "$R" tag receipt-tag
+write_broken_preflight "$R" exit
+( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 BOXLITE_PR_WATCH=0 \
+    git push -q origin refs/tags/receipt-tag >/dev/null 2>"$R/err.txt" )
+check_eq "tag ref → push audits" "$?" "1"
+rm -rf "$R" "$B"
+
+# Two refs in one push are two ranges; the receipt names only one commit.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+branch_ref="$(current_branch_ref "$R")"
+git -C "$R" branch receipt-second
+write_broken_preflight "$R" exit
+( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 BOXLITE_PR_WATCH=0 \
+    git push -q origin "$branch_ref:$branch_ref" \
+    refs/heads/receipt-second:refs/heads/receipt-second >/dev/null 2>"$R/err.txt" )
+check_eq "two refs in one push → audits" "$?" "1"
+rm -rf "$R" "$B"
+
+# A merge commit's pushed range is not the single diff the commit gate reviewed.
+read -r R B < <(setup_pushed)
+git -C "$R" checkout -q -b receipt-side
+stage_change "$R"
+run_commit "$R" human >/dev/null
+git -C "$R" checkout -q -
+printf 'other\n' > "$R/other"; git -C "$R" add -A
+run_commit "$R" human >/dev/null
+git -C "$R" merge -q --no-ff --no-verify -m 'chore: merge' receipt-side >/dev/null 2>&1
+write_broken_preflight "$R" exit
+check_eq "merge commit → push audits" "$(push_agent "$R")" "1"
+rm -rf "$R" "$B"
+
+# A skipped audit must not skip the installation gate above it.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+installed_pre_push="$(git -C "$R" config --worktree --get core.hooksPath)/pre-push"
+git -C "$R" config --worktree --unset core.hooksPath
+refs_file="$(mktemp)"
+write_ref_updates_file "$R" origin HEAD "$(current_branch_ref "$R")" "$refs_file"
+( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 BOXLITE_PR_WATCH=0 \
+    bash "$installed_pre_push" origin "$B" < "$refs_file" >/dev/null 2>"$R/err.txt" )
+verify_rc=$?
+grep -q 'install.sh' "$R/err.txt" && verify_named=yes || verify_named=no
+check_eq "receipt does not bypass the installation gate" \
+  "rc=$verify_rc named=$verify_named" "rc=1 named=yes"
+rm -f "$refs_file"; rm -rf "$R" "$B"
 
 echo
 echo "RESULT: $pass passed, $fail failed"
