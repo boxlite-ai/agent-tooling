@@ -228,7 +228,7 @@ def filter_manifest(manifest: dict[str, Any], topic: str) -> dict[str, Any]:
     filtered["annotations"] = [
         annotation
         for annotation in manifest.get("annotations", []) or []
-        if _annotation_belongs(annotation, kept_ids, declared_ids)
+        if _annotation_belongs(annotation, kept_ids, declared_ids, topic)
     ]
     return filtered
 
@@ -242,13 +242,18 @@ def _item_ids(manifest: dict[str, Any]) -> set[str]:
     }
 
 
-def _annotation_belongs(annotation: Any, kept_ids: set[str], declared_ids: set[str]) -> bool:
+def _annotation_belongs(
+    annotation: Any, kept_ids: set[str], declared_ids: set[str], topic: str
+) -> bool:
     """Keep this topic's annotations, plus any the manifest cannot account for.
 
     An annotation naming an undeclared target is an error rather than another topic's
     business, so it must reach validate_manifest instead of vanishing in projection.
+    It belongs to the root alone, so one bad target is reported once.
     """
     if not isinstance(annotation, dict) or not isinstance(annotation.get("target"), str):
-        return True
+        return topic == ROOT_TOPIC
     target = annotation["target"].split(":", 1)[-1]
-    return target in kept_ids or target not in declared_ids
+    if target in kept_ids:
+        return True
+    return target not in declared_ids and topic == ROOT_TOPIC

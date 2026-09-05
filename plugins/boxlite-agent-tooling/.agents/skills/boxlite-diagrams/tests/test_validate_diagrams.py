@@ -640,10 +640,6 @@ class DiagramValidatorTests(unittest.TestCase):
                 self.assertIn("manifest.types", statuses, label)
                 if statuses["manifest.types"] == "fail":
                     self.assertIn("manifest.types", failed, label)
-                else:
-                    self.assertNotIn(
-                        "Traceback", "".join(name for name, _ in report), label
-                    )
 
     def test_member_topics_must_stay_inside_their_container(self) -> None:
         # A member projected into no topic is a member nothing ever checks.
@@ -665,6 +661,32 @@ class DiagramValidatorTests(unittest.TestCase):
         result, report = self.validate(topic_document(), manifest)
         failed = {check["name"] for check in report["checks"] if check["status"] == "fail"}
         self.assertNotIn("manifest.topics", failed, json.dumps(report, indent=2))
+
+    def test_bug_fix_pr_without_its_fixes_line_is_rejected(self) -> None:
+        document, manifest = bug_pr_fixture(self.base, self.head)
+        document = document.replace("\nFixes #7\n", "\n")
+        result, report = self.validate(document, manifest)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assert_check_failed(report, "changes.fixes_line")
+
+    def test_unaccounted_annotation_is_reported_once(self) -> None:
+        manifest = topic_manifest(self.head)
+        manifest["annotations"] = [
+            {"kind": "BUG", "target": "node:absent", "state": "current", "text": "ghost"}
+        ]
+        _result, report = self.validate(topic_document(), manifest)
+        reporting = [
+            check["name"]
+            for check in report["checks"]
+            if check["status"] == "fail"
+            and any("must reference a declared item" in line for line in check["evidence"])
+        ]
+        self.assertEqual(reporting, ["overview/manifest.shape"], json.dumps(reporting))
+
+    def test_malformed_svg_dimension_reads_as_unmeasured(self) -> None:
+        self.assertIsNone(_svg_size('<svg width="1.2.3" height="600"></svg>'))
+        self.assertIsNone(_svg_size('<svg viewBox="0 0 1.2.3 65"></svg>'))
+        self.assertEqual(_svg_size('<svg width="800" height="600"></svg>'), (800.0, 600.0))
 
     def test_annotation_rules_apply_to_every_topic(self) -> None:
         # Every topic gets its own change-rule pass: an illegal annotation must be

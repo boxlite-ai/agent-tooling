@@ -11,6 +11,8 @@ from pathlib import Path
 
 from .models import SCOPE_PALETTE, StateBlock, ValidationContext
 
+# Anything float() accepts, so a malformed attribute misses and reads as unmeasured.
+NUMBER = r"[0-9]+(?:\.[0-9]+)?"
 LAPTOP_VIEWPORT = (1600, 900)
 VERSION = "11.16.0"
 UNSAFE_PATTERNS = [
@@ -387,11 +389,13 @@ def _svg_size(svg: str) -> tuple[float, float] | None:
     if root is None:
         return None
     attributes = root.group(0)
-    width = re.search(r'\bwidth="([0-9.]+)(?:px)?"', attributes)
-    height = re.search(r'\bheight="([0-9.]+)(?:px)?"', attributes)
+    width = re.search(rf'\bwidth="({NUMBER})(?:px)?"', attributes)
+    height = re.search(rf'\bheight="({NUMBER})(?:px)?"', attributes)
     if width and height:
         return float(width.group(1)), float(height.group(1))
-    box = re.search(r'\bviewBox="[-0-9.]+\s+[-0-9.]+\s+([0-9.]+)\s+([0-9.]+)"', attributes)
+    box = re.search(
+        rf'\bviewBox="-?{NUMBER}\s+-?{NUMBER}\s+({NUMBER})\s+({NUMBER})"', attributes
+    )
     if box:
         return float(box.group(1)), float(box.group(2))
     return None
