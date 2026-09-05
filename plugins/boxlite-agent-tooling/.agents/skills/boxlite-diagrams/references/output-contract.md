@@ -1,62 +1,71 @@
-# BoxLite diagram output contract
+# Output contract
 
-## Select only the useful views
+`evidence.schema.json` and the validator are the authority; this is the shape they accept.
 
-`evidence.json` may declare a non-empty `views` array in this canonical order:
+## Views
 
-1. `architecture`
-2. `sequence`
-3. `call_graph`
-
-Omitting `views` keeps backward compatibility and selects all three. Every
-node and edge membership must be a subset of the selected views.
-
-Choose views from the user's question:
-
-- deployment, topology, boundary, overview, or rendered picture:
-  `['architecture']` by default;
-- ordering, retries, concurrency, or failure: `['sequence']`;
-- source mechanics or a function path: `['call_graph']`, adding sequence only
-  when time or concurrency matters;
-- before/after change: the smallest view set that makes the change unambiguous.
-
-Three views are useful only when each answers a different question. Repeating
-the same inventory three ways makes the result harder to understand.
+`views`: non-empty subset of `architecture`, `sequence`, `call_graph`, in that order;
+absent selects all three. Every item's `views` ⊆ selected views.
 
 ## Document
 
-`diagram.md` contains exactly the selected level-two sections in canonical
-order. Each section contains exactly one level-three subsection for every state
-listed in `evidence.json`, in the same order. Architecture and sequence state
-sections contain one `mermaid` fence. Call-graph state sections contain one
-`text` fence.
+```text
+## <View>            one H2 per selected view, canonical order
+### <State label>    one H3 per manifest state, manifest order
+<one fence>          mermaid (flowchart|graph …, sequenceDiagram) or text (call graph)
+```
 
-Architecture fences start with `flowchart` or `graph`. Sequence fences start
-with `sequenceDiagram`.
+Bug-fix PR: `Fixes #<n>` on its own line after the last view.
 
-An architecture-only overview is valid:
+## Topics
+
+Declare the tree — `overview` is the root, every other topic names its `parent`, three
+levels maximum:
+
+```json
+"topics": [
+  {"id": "overview", "question": "How public traffic reaches boxes"},
+  {"id": "runner_fleet", "question": "How the fleet executes one box", "parent": "overview"},
+  {"id": "boxlite_core", "question": "How the runtime creates one microVM", "parent": "runner_fleet"}
+]
+```
+
+Declare topics in the order the document nests them - each topic followed by its own
+children, siblings in the order they appear. Every node, edge, boundary, and member then carries
+`"topics": [...]` beside `views`. One ID per element across the whole tree. A member's
+topics sit inside its container's, and every topic a container claims has at least one
+member there — otherwise the element would be projected into a topic nothing checks.
+
+Each topic is a collapsed `<details>` whose `<summary>` is `<code>id</code> — question`.
+A child nests inside its parent; siblings follow manifest order; one fence per
+view × state × topic; no fence outside a block:
 
 ````markdown
-## Architecture
-
-### Current
+<details>
+<summary><code>overview</code> — How public traffic reaches boxes</summary>
 
 ```mermaid
 flowchart TB
-  browser(["Browser"])
-  subgraph private["VPC · private subnets"]
-    api["Api · NestJS<br/>:3000"]
-  end
-  browser browser_api@-->|"/api/*"| api
+…
 ```
+
+<details>
+<summary><code>runner_fleet</code> — How the fleet executes one box</summary>
+
+```mermaid
+…
+```
+
+</details>
+
+</details>
 ````
 
-For bug-fix PRs, put `Fixes #<number>` on a standalone line after the last
-selected view.
+**Blank line after each `<summary>` and before each `</details>`** — GitHub will not
+render the fence otherwise. Checks report as `<topic>/<check>`, artifacts as
+`<view>-<state>-<topic>.{mmd,svg,png}`, and every diagram must fit 1600×900.
 
-## Architecture IDs
-
-Declare nodes with their manifest IDs:
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -65,65 +74,18 @@ flowchart LR
   runtime create_box@-->|"create"| box
 ```
 
-The Mermaid edge ID (`create_box`) is also the manifest edge ID. `<br/>` is the
-only allowed HTML-like tag and is used only for deliberate label wrapping.
+Node ID and edge ID (`create_box`) are the manifest IDs. `<br/>` is the only HTML
+allowed, for deliberate wrapping.
 
-## Architecture boundaries
-
-Give every meaningful subgraph a lowercase snake-case ID and declare it in the
-manifest. Use nested subgraphs for hosting or embedding, and arrows only for
-communication. The BoxLite deployment's execution containment is:
-
-`Runner fleet → EC2 instance × N → Runner daemon → embedded BoxLite runtime → box microVMs`
-
-```mermaid
-flowchart TB
-subgraph runner_fleet["Runner fleet · × N"]
-  subgraph ec2_runner["EC2 instance · representative"]
-    subgraph runner_process["Runner daemon"]
-      runner_api["Runner API · :3003"]
-      subgraph embedded_boxlite["embedded BoxLite runtime"]
-        boxlite_core["BoxLite"]
-        boxes[["box microVMs"]]
-      end
-    end
-  end
-end
-```
-
-Declare each immediate parent-child relationship; do not skip from fleet
-directly to Runner or place BoxLite beside Runner:
+Subgraphs are boundaries: snake-case ID, declared with each immediate member. Nest for
+hosting or embedding, arrows only for communication, never skip an intermediate owner.
+A zone boundary adds `scope` and its palette class:
 
 ```json
-{
-  "id": "runner_process",
-  "label": "Runner daemon",
-  "states": ["current"],
-  "views": ["architecture"],
-  "proposed": false,
-  "members": [
-    {"target": "node:runner_api", "states": ["current"]},
-    {"target": "boundary:embedded_boxlite", "states": ["current"]}
-  ],
-  "evidence": []
-}
-```
-
-In a real manifest, every boundary has revision-aware source or issue evidence,
-just like a node or edge. One target may have only one immediate parent per
-state, and boundary cycles are invalid.
-
-A boundary that acts as a scope zone additionally declares its `scope` —
-`external`, `edge`, `compute`, `execution`, `state`, or `observability` — and
-the Mermaid block assigns the matching palette class:
-
-```json
-{
-  "id": "runner_fleet",
-  "label": "Runner fleet",
-  "scope": "execution",
-  "...": "states, views, proposed, members, evidence as usual"
-}
+{"id": "runner_fleet", "label": "Runner fleet", "scope": "execution",
+ "states": ["current"], "views": ["architecture"], "topics": ["overview"], "proposed": false,
+ "members": [{"target": "boundary:ec2_runner", "states": ["current"], "topics": ["overview"]}],
+ "evidence": ["…"]}
 ```
 
 ```text
@@ -131,15 +93,11 @@ classDef scope_execution fill:#ffedd5,stroke:#ea580c,color:#1f2933
 class runner_fleet scope_execution
 ```
 
-The `classDef` line must match the house palette exactly (the palette table is
-in `architecture-composition.md`), `class` targets must be declared subgraphs,
-and declared scopes must match drawn classes one-to-one per state. Boundaries
-without `scope` are purely physical and stay unstyled.
+`classDef` lines are copied verbatim from the palette in `architecture-composition.md`;
+`class` targets are declared subgraphs; declared scopes equal drawn classes per state.
+One parent per target per state, no cycles. Unscoped boundaries stay unstyled.
 
-## Sequence IDs
-
-Participants use manifest node IDs. Every message is immediately preceded by a
-manifest edge ID comment:
+## Sequence
 
 ```mermaid
 sequenceDiagram
@@ -149,119 +107,55 @@ sequenceDiagram
   runtime->>box: create box<br/>File: src/boxlite/src/runtime/core.rs<br/>Namespace: boxlite::runtime::core<br/>Class: BoxliteRuntime<br/>Function: create<br/>LOC: L291-L300
 ```
 
-Notes and grouping statements may be untracked because they are not edges.
-
-Keep the message's action short, then explicitly label every source field:
-
-`<action><br/>File: <path><br/>Namespace: <full-chain><br/>Class: <owner><br/>Function: <name><br/>LOC: L<start>-L<end>`
-
-- `File` is the repository-relative path.
-- `Namespace` is the complete declared crate, module, or package chain from the
-  outermost scope to the innermost scope. Preserve every nested segment and use
-  the language's native separator. Use `Namespace: —` when none exists.
-- `Class` is the owning class, struct, type, or receiver. Use `Class: —` for a
-  free function so the field remains explicit.
-- `Function` is the unqualified function or method name.
-- `LOC` is the exact inclusive line range.
-
-Do not show only some of these fields. Omit the entire source block only when no
-concrete source symbol exists, such as an external interaction or explicitly
-proposed behavior. Never invent a value to fill the format.
-
-For a source-backed sequence call, the target node's source evidence uses the
-complete language-native symbol chain. The example above therefore uses
-`boxlite::runtime::core::BoxliteRuntime::create`, allowing the validator to
-derive and check `Namespace`, `Class`, and `Function` independently.
+Participants are node IDs; each message follows its `%% edge:<id>` comment; notes and
+groups are untracked. A message is a short action plus every field: `File` repo path ·
+`Namespace` full native chain (`—` if none) · `Class` owner (`—` for a free function) ·
+`Function` bare name · `LOC` inclusive range. All fields or none — none only for external
+or proposed behavior — and never an invented value. The node's evidence `symbol` is the
+full chain (`boxlite::runtime::core::BoxliteRuntime::create`), which is how the validator
+derives the fields.
 
 ## Call graph
-
-Each hop is a single line:
 
 ```text
   create (BoxliteRuntime · src/boxlite/src/runtime/core.rs:291) — public boundary
     └─ create (RuntimeImpl · src/boxlite/src/runtime/rt_impl.rs:385) — persist configuration
 ```
 
-Rules:
+Two-space root, two more spaces per depth, `└─`/`├─` children. The shown line lies in the
+hop's evidence range; indentation is a manifest edge; `← BUG: <why>` only on a faulty
+`Before`/`Current` hop; no invented future hops — annotate the last real boundary.
 
-- two spaces before a root hop;
-- two additional spaces for each depth;
-- a child uses `└─` or `├─` after its indentation;
-- the displayed line must be inside the matching manifest evidence range;
-- indentation creates a caller-to-callee edge that must exist in the manifest;
-- `← BUG: <description>` belongs on a faulty `Before`/`Current` hop, never on a
-  standalone line;
-- future behavior has no invented hop—annotate the last real boundary instead.
-
-## Evidence types
-
-Source evidence:
+## Evidence
 
 ```json
-{
-  "type": "source",
-  "state": "current",
-  "revision": "HEAD",
-  "path": "src/boxlite/src/runtime/core.rs",
-  "line_start": 291,
-  "line_end": 299,
-  "symbol": "boxlite::runtime::core::BoxliteRuntime::create",
-  "tokens": ["pub async fn create", "self.backend.create"]
-}
+{"type": "source", "state": "current", "revision": "HEAD",
+ "path": "src/boxlite/src/runtime/core.rs", "line_start": 291, "line_end": 299,
+ "symbol": "boxlite::runtime::core::BoxliteRuntime::create",
+ "tokens": ["pub async fn create", "self.backend.create"]}
 ```
-
-Issue evidence for behavior that is explicitly proposed:
 
 ```json
-{
-  "type": "issue",
-  "state": "expected",
-  "issue": 1209,
-  "tokens": ["volume creation", "mount"]
-}
+{"type": "issue", "state": "expected", "issue": 1209, "tokens": ["volume creation", "mount"]}
 ```
 
-Tokens are exact, case-sensitive substrings of the cited source range or
-case-insensitive substrings of the issue title/body.
+Tokens are exact case-sensitive substrings of the cited lines, or case-insensitive
+substrings of the issue title/body. Every item has evidence for every state it claims.
 
-## Manifest membership
+## Membership and annotations
 
-Each node, edge, and boundary declares the states and selected views where it
-appears. Shared entities reuse the same canonical ID; view-specific context is
-allowed when it materially improves that view.
-
-Every parsed Mermaid node, Mermaid edge, sequence participant/message, and call
-graph hop/relationship must map to exactly one declared manifest item. When the
-manifest declares `boundaries`, every Mermaid subgraph and every immediate
-node/subgraph parent must match it exactly. Scope classes are checked the same
-way: each boundary `scope` must be drawn as `class <id> scope_<name>` in every
-state where the boundary appears, and no drawn scope class may lack its
-manifest declaration.
-
-## Annotation targets
-
-Annotations target `node:<id>` or `edge:<id>` and include one state:
+Every drawn node, edge, subgraph, participant, message, and hop maps to exactly one
+manifest item, in the states, views, and topics that item declares. Annotations target
+`node:<id>` or `edge:<id>` with one state and a kind from `ISSUE BUG FIX PROPOSED ADDED
+CHANGED REMOVED`; a diff annotation's target must intersect the base/head hunk.
 
 ```json
-{
-  "kind": "BUG",
-  "target": "edge:signal_pid",
-  "state": "before",
-  "text": "a recycled PID can identify another process"
-}
+{"kind": "BUG", "target": "edge:signal_pid", "state": "before", "text": "a recycled PID can identify another process"}
 ```
 
-Use `ISSUE`, `BUG`, `FIX`, `PROPOSED`, `ADDED`, `CHANGED`, or `REMOVED`. For
-diff annotations, the target's evidence must intersect the correct base/head
-diff hunk.
+## Artifacts
 
-## Rendered artifacts
-
-The validator emits `.mmd`, `.svg`, and `.png` artifacts for every Mermaid
-block. The PNG exists for visual inspection. A successful validation report
-proves syntax and traceability, not composition; inspect the PNG before calling
-the result ready. The house scope palette is the only permitted styling: its
-muted fills with explicit dark text are self-contained and stay legible on
-light/dark hosts, and theme directives, `style`, `linkStyle`, and non-palette
-classes remain forbidden. Treat a PNG as a static preview and inspect both
-light and dark renders when the destination's contrast is important.
+`.mmd`, `.svg`, `.png` per block; the SVG is measured against 1600×900. A pass proves
+syntax, fit, and traceability — not composition; inspect the PNG. The palette is the only
+permitted styling and stays legible on light/dark hosts; `style`, `linkStyle`, themes,
+and other `classDef`s are rejected.
