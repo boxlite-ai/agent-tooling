@@ -33,7 +33,7 @@ fi
 cat <<'EOF'
 REPLY SHAPE:
 - <=80 prose words; exempt code, visuals, tables, paths, uncertainty, risk, failing tests.
-- Any subject: whenever possible, use a brief concrete example tied to the general rule; omit one only when no useful example applies.
+- Any subject: whenever possible, walk one example step by step on real data (values, facts, numbers), showing what changed at each step, tied to the general rule; omit only when none applies.
 - Prefer a renderable diagram, graph, image, or table over prose when clearer.
 - No preamble, recap, praise, repetition, or closing offer.
 - Visualize relationships or 3+ entities. Code: `fn (Type, file:LOC) - role`; one Key line.
