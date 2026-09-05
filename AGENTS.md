@@ -6,7 +6,7 @@
 - Consumers float on `tooling.ref`; adopt only validated revisions in `.git/agent-tooling/current`. Only bootstrap/refresh may use the network. A valid lowercase full SHA in `.agent-tooling/hold` freezes adoption; malformed holds fail closed.
 - Validate all three marketplaces and generic/Claude/Codex manifests before release. Copilot has no host-specific manifest and remains untested on a real install.
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
-- Hook manifests are normalized twins: Claude uses `hooks/hooks.json` + `asyncRewake`; Codex/generic use `hooks/codex-hooks.json` + `async`. No other drift.
+- Hook manifests are normalized twins: Claude uses `hooks/hooks.json` + `asyncRewake`; Codex/generic use `hooks/codex-hooks.json` + `async`. The only other permitted drift is an event one host does not have: Codex's hook-event set is closed, and an unknown key there makes it load *no* hooks at all, so such events are declared in `CLAUDE_ONLY_EVENTS` in `host-parity.test.sh`, wired only in `hooks/hooks.json`, and excluded from the twin comparison. Adding an event to both manifests without checking it exists on both hosts is how every Codex gate goes silently off.
 - `guidance/workflow.md` is canonical domain-neutral guidance. Explicit sync splices a byte-stable, hash-marked block; gates fail on missing/tampered blocks and warn on stale ones. Keep it within 150 lines.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 

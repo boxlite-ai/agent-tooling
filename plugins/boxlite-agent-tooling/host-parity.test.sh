@@ -21,6 +21,12 @@
 #     background-delivery primitive: Claude uses asyncRewake so a 30-second escalation
 #     wakes the model, while Codex uses async because its strict schema does not accept
 #     asyncRewake. Unknown keys still make Codex silently load no hooks at all.
+#   - …and except for events Codex has no concept of. Codex's hook-event set is CLOSED,
+#     so a Claude-only event in the Codex twin is not an ignored entry — it is an
+#     unknown key, which costs every Codex gate at once. Those events are declared in
+#     CLAUDE_ONLY_EVENTS, wired only in hooks/hooks.json, and excluded from the twin
+#     comparison. Byte-equal twins were the right invariant while every event existed
+#     on both hosts; the moment one does not, enforcing equality is what breaks Codex.
 #   - Every wired command resolves the plugin root as ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}
 #     — Codex exports the first name, Claude Code the second. A bare single-host
 #     variable expands empty on the other host and the hook runs /nonexistent.
@@ -292,8 +298,47 @@ for pair in "claude:$CLAUDE_HOOKS:asyncRewake" "codex:$CODEX_HOOKS:async"; do
   [ "$nontype" = "0" ] && ok "$label: every hook object is type command" \
                        || bad "$label: every hook object is type command ($nontype are not)"
 done
-claude_normalized="$(jq -Sc '
-  .hooks.SubagentStart[].hooks[] |=
+# Codex's hook-event set is closed (HookEventsToml in the shipped binary). Held here as
+# data so a newly wired event is checked against it without needing a Codex install:
+# getting this wrong does not disable one hook, it disables all of them.
+CODEX_EVENTS='PreToolUse PermissionRequest PostToolUse PreCompact PostCompact
+SessionStart SessionEnd UserPromptSubmit SubagentStart SubagentStop Stop Interrupt'
+# Events Claude Code has and Codex does not. Wired only in hooks/hooks.json.
+CLAUDE_ONLY_EVENTS='StopFailure'
+
+for event in $CLAUDE_ONLY_EVENTS; do
+  case " $(echo $CODEX_EVENTS) " in
+    *" $event "*) bad "claude-only event is genuinely absent from Codex: $event" ;;
+    *)            ok  "claude-only event is genuinely absent from Codex: $event" ;;
+  esac
+done
+for event in $(jq -r '.hooks | keys_unsorted[]' "$CODEX_HOOKS"); do
+  case " $(echo $CODEX_EVENTS) " in
+    *" $event "*) ok  "codex manifest event is in Codex's closed set: $event" ;;
+    *)            bad "codex manifest event is in Codex's closed set: $event" ;;
+  esac
+done
+for event in $(jq -r '.hooks | keys_unsorted[]' "$CLAUDE_HOOKS"); do
+  case " $(echo $CODEX_EVENTS) $(echo $CLAUDE_ONLY_EVENTS) " in
+    *" $event "*) ok  "claude manifest event is known to some host: $event" ;;
+    *)            bad "claude manifest event is known to some host: $event" ;;
+  esac
+done
+
+claude_only_json="$(printf '%s\n' $CLAUDE_ONLY_EVENTS | jq -Rsc 'split("\n") | map(select(length > 0))')"
+leaked="$(jq -r --argjson claude_only "$claude_only_json" \
+  '[.hooks | keys_unsorted[] | select(. as $k | $claude_only | index($k))] | join(",")' "$CODEX_HOOKS")"
+if [ -z "$leaked" ]; then
+  ok "no claude-only event reaches the Codex twin"
+else
+  bad "no claude-only event reaches the Codex twin (found: $leaked)"
+fi
+
+# Twin comparison, with the Claude-only events removed first: everything Codex CAN run
+# must still be byte-identical after async normalization.
+claude_normalized="$(jq -Sc --argjson claude_only "$claude_only_json" '
+  .hooks |= with_entries(select(.key as $k | $claude_only | index($k) | not))
+  | .hooks.SubagentStart[].hooks[] |=
     (if has("asyncRewake") then .async = .asyncRewake | del(.asyncRewake) else . end)
 ' "$CLAUDE_HOOKS")"
 codex_normalized="$(jq -Sc . "$CODEX_HOOKS")"

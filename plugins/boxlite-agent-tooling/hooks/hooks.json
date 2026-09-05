@@ -72,6 +72,17 @@
           }
         ]
       }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/record-api-failure.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
