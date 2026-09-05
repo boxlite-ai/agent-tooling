@@ -77,6 +77,8 @@ done
 # misses the old cap even with the data points unnamed (643). Getting back under means
 # cutting a clause the rule needs — the per-step state requirement (633) or the escape
 # hatch (639) — so the cap moved instead of the rule.
+# A bullet of its own for the answer-first rule lands at 701, so the clause shares the
+# framing bullet (699) instead of moving the cap again.
 bytes="$(LC_ALL=C printf '%s' "$first" | wc -c | tr -d ' ')"
 if (( bytes <= 700 )); then
   ok "reminder stays within 700 bytes ($bytes)"
@@ -90,6 +92,8 @@ assert_contains "keeps evidence exemptions" "$first" \
   "code, visuals, tables, paths, uncertainty, risk, failing tests"
 assert_contains "keeps concise-prose rule" "$first" \
   "No preamble, recap, praise, repetition, or closing offer."
+assert_contains "answer leads, in one sentence" "$first" \
+  "Answer first, in one sentence."
 assert_contains "prefers renderable visuals when clearer" "$first" \
   "renderable diagram, graph, image, or table over prose when clearer"
 assert_contains "visualizes relationships first" "$first" \
