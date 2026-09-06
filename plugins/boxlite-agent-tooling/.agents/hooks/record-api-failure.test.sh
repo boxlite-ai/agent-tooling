@@ -18,8 +18,11 @@ record="$CLAUDE_PROJECT_DIR/.agents/state/last-api-failure.json"
 
 pass=0
 fail=0
+# Increment pass counter and print a PASS line.  # $1 = test name
 ok()  { pass=$(( pass + 1 )); printf '  PASS  %s\n' "$1"; }
+# Increment fail counter and print a FAIL line.  # $1 = test name
 bad() { fail=$(( fail + 1 )); printf '  FAIL  %s\n' "$1"; }
+# Compare expected and actual values, calling ok or bad and printing details on mismatch.  # $1 = name, $2 = expected, $3 = actual
 check() {  # name expected actual
   if [[ "$2" == "$3" ]]; then ok "$1"; else
     bad "$1"; printf '        expected %s\n        actual   %s\n' "$2" "$3"
@@ -28,10 +31,12 @@ check() {  # name expected actual
 
 # stderr is captured, never discarded: swallowing it with 2>&1 is what let a failed
 # /dev/tty redirection go unnoticed. Every case below can therefore assert silence.
+# Feed a payload to the subject hook via stdin, capture exit code and stderr.  # $1 = payload JSON; sets rc, writes stderr to $work/stderr
 feed() {  # payload -> sets rc; leaves the record and captured stderr in place
   printf '%s' "$1" | bash "$subject" >/dev/null 2>"$work/stderr"
   rc=$?
 }
+# Count bytes in the captured stderr file.  # Echoes byte count
 stderr_bytes() { wc -c < "$work/stderr" | tr -d ' '; }
 
 printf 'record-api-failure\n'

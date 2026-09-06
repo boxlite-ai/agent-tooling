@@ -58,14 +58,18 @@ COPILOT_SETTINGS="$REPO_ROOT/.github/copilot/settings.json"
 
 pass=0
 fail=0
+# Increment pass counter and print a PASS line.  # $1 = test name
 ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
+# Increment fail counter and print a FAIL line.  # $1 = test name
 bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
 
 command -v jq >/dev/null 2>&1 || { printf 'jq is required to run these tests\n' >&2; exit 2; }
 
 # Directories resolved through `cd`, not realpath -m: a dangling symlink or a typo'd
 # path must FAIL here, never normalise into a plausible-looking string.
+# Resolve a directory to its canonical path, failing on dangling symlinks or typos.  # $1 = directory path; echoes canonical path or fails
 resolve_dir() { (cd "$1" 2>/dev/null && pwd -P); }
+# Resolve a file to its canonical path, failing if it does not exist.  # $1 = file path; echoes canonical path or fails
 resolve_file() {
   local dir base
   dir="$(dirname "$1")"; base="$(basename "$1")"
@@ -95,6 +99,7 @@ echo
 echo "## Marketplaces advertise the plugin that actually ships"
 # The Codex marketplace pins no version, so only the other two can drift — and both
 # fields have moved in lockstep with the manifests on every release so far.
+# Verify a marketplace file has version and metadata matching the plugin manifest.  # $1 = label (for test output), $2 = marketplace file path; reads VERSION, GENERIC, PLUGIN
 check_versioned_marketplace() {  # <label> <file>
   local label="$1" file="$2" v
   for path in '.metadata.version' '.plugins[0].version'; do

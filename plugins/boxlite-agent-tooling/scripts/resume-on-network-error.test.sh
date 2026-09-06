@@ -51,8 +51,11 @@ failure_record="$CLAUDE_PROJECT_DIR/.agents/state/last-api-failure.json"
 
 pass=0
 fail=0
+# Increment pass counter and print a PASS line.  # $1 = test name
 ok()  { pass=$(( pass + 1 )); printf '  PASS  %s\n' "$1"; }
+# Increment fail counter and print a FAIL line.  # $1 = test name
 bad() { fail=$(( fail + 1 )); printf '  FAIL  %s\n' "$1"; }
+# Compare expected and actual values, calling ok or bad and printing details on mismatch.  # $1 = name, $2 = expected, $3 = actual
 check() {  # name expected actual
   if [[ "$2" == "$3" ]]; then ok "$1"; else
     bad "$1"; printf '        expected %s\n        actual   %s\n' "$2" "$3"
@@ -60,6 +63,7 @@ check() {  # name expected actual
 }
 
 # Write the record the StopFailure hook would have left. Absent kind = no record.
+# Create a fake API failure record or remove it if kind is empty.  # $1 = kind (empty removes it), $2 = session id (default sess-1), $3 = recorded_at (default now); writes to failure_record
 record_failure_kind() {  # $1 = kind (empty removes it), $2 = session id, $3 = recorded_at
   if [[ -z "$1" ]]; then rm -f "$failure_record"; return; fi
   printf '{"error":"%s","error_details":"","session_id":"%s","recorded_at":%s}\n' \
@@ -68,6 +72,7 @@ record_failure_kind() {  # $1 = kind (empty removes it), $2 = session id, $3 = r
 
 # Invocations are counted from the stub's own counter, not by lines in the argv log:
 # a caller-supplied prompt may span lines, so one call can contribute several.
+# Run the subject script with a stubbed plan of outcomes.  # $@ = plan-lines (success, api_error, hook, max_turns, crash); sets rc, calls; writes stdout to $work/stdout, stderr to $work/stderr
 run_subject() {  # plan-lines... ; sets rc, calls, stdout_file
   printf '%s\n' "$@" > "$STUB_PLAN"
   printf 0 > "$STUB_COUNT"; : > "$STUB_ARGV"

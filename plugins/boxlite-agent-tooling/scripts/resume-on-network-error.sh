@@ -57,6 +57,7 @@ kind_is_member() {  # $1 = candidate, $2.. = members
   return 1
 }
 
+# Print usage message to stdout.
 usage() {
   printf 'usage: resume-on-network-error.sh [--max-restarts N] [--max-wait SECONDS]\n'
   printf '                                  [--probe-url URL] [--] <prompt> [claude args...]\n'
@@ -73,6 +74,7 @@ done
 # ── Arguments ────────────────────────────────────────────────────────────────
 # Each value-taking option asserts its value is present before consuming it: a bare
 # `shift 2` on a one-element argv fails without shifting, which spins this loop.
+# Ensure an option has a value argument, exit 2 if not.  # $1 = option name, $2 = remaining argc
 require_value() {  # $1 = option name, $2 = remaining argc
   (( $2 >= 2 )) || {
     printf 'resume-on-network-error: %s requires a value\n' "$1" >&2
@@ -116,6 +118,7 @@ claude_args=("$@")
 project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 api_failure_record="$project_dir/.agents/state/last-api-failure.json"
 
+# Log a timestamped message to stderr.  # $1 = message
 log() {
   printf '%s resume-on-network-error: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >&2
 }
@@ -123,12 +126,14 @@ log() {
 # ── Reachability ─────────────────────────────────────────────────────────────
 # Any HTTP response proves the path is up; 401/404 are as good as 200 here, and no
 # credentials are sent.
+# Probe the API endpoint with a HEAD request, return 0 if reachable.  # Reads probe_url; exit 0 = reachable, 1 = unreachable
 api_is_reachable() {
   curl -sS -o /dev/null -m 5 --head "$probe_url" >/dev/null 2>&1
 }
 
 # Sleep first, then probe: an "overloaded" failure leaves the network perfectly
 # reachable, so probing before waiting would hammer a server already saying stop.
+# Wait for API to become reachable, with exponential backoff up to max_wait_seconds.  # $1 = first delay in seconds; reads max_wait_seconds, probe_url; logs to stderr; exit 0 = reachable, 1 = timeout
 wait_for_api() {  # $1 = first delay in seconds
   local delay="$1" waited=0
   while (( waited < max_wait_seconds )); do
@@ -157,6 +162,7 @@ wait_for_api() {  # $1 = first delay in seconds
 #
 # Failing either gate yields nothing, which routes to the deliberately small unknown
 # budget: guessing briefly beats acting on another run's fault.
+# Read the error kind from the StopFailure hook's record if it matches session and is fresh.  # $1 = session id this run is resuming; reads api_failure_record, api_failure_record_max_age_seconds; echoes kind or empty
 recorded_error_kind() {  # $1 = session id this run is resuming
   local expected_session="$1" recorded_at recorded_session now kind
   [[ -n "$expected_session" ]] || return 0
@@ -175,6 +181,7 @@ recorded_error_kind() {  # $1 = session id this run is resuming
 # Echoes done | retry | fatal for everything the result JSON can decide on its own.
 # `api_error` is deliberately NOT decided here: the kind lives outside this document,
 # so the caller resolves it against the recorded StopFailure kind.
+# Parse result JSON and classify outcome as done, api_error, or fatal.  # $1 = file holding one result JSON object; echoes one of: done, api_error, fatal
 classify_result() {  # $1 = file holding one result JSON object
   jq -r '
     def reason: (.terminal_reason // "" | tostring);
@@ -186,6 +193,7 @@ classify_result() {  # $1 = file holding one result JSON object
 }
 
 # Resolve an api_error into retry or fatal using the kind the StopFailure hook saw.
+# Classify an API error kind as fatal, retry, or retry-unknown.  # $1 = recorded kind (may be empty); reads fatal_kinds, retryable_kinds; echoes one of: fatal, retry, retry-unknown
 classify_api_error() {  # echoes retry|fatal|retry-unknown; $1 = recorded kind, may be empty
   if kind_is_member "$1" "${fatal_kinds[@]}"; then
     printf 'fatal'
