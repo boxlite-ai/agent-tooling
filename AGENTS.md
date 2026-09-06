@@ -10,7 +10,7 @@
 - `guidance/workflow.md` is canonical domain-neutral guidance. Explicit sync splices a byte-stable, hash-marked block; gates fail on missing/tampered blocks and warn on stale ones. Keep it within 150 lines.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=9f47df3b06f0-dirty sha256=2728d86a743f -->
+<!-- agent-tooling:guidance:begin rev=3f8cc03c0492 sha256=2728d86a743f -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 

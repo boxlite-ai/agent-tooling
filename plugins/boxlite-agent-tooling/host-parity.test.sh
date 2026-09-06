@@ -316,6 +316,12 @@ for event in $CLAUDE_ONLY_EVENTS; do
     *" $event "*) bad "claude-only event is genuinely absent from Codex: $event" ;;
     *)            ok  "claude-only event is genuinely absent from Codex: $event" ;;
   esac
+  # An entry left here after its hook was unwired excludes nothing and quietly rots.
+  if jq -e --arg event "$event" '.hooks | has($event)' "$CLAUDE_HOOKS" >/dev/null 2>&1; then
+    ok "claude-only event is wired in the Claude manifest: $event"
+  else
+    bad "claude-only event is wired in the Claude manifest: $event"
+  fi
 done
 for event in $(jq -r '.hooks | keys_unsorted[]' "$CODEX_HOOKS"); do
   case " $(echo $CODEX_EVENTS) " in

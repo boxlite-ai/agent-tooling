@@ -23,8 +23,21 @@
 # retrying a revoked token to the full budget is the burn loop this exists to prevent.
 set -uo pipefail
 
-max_restarts=10
-max_wait_seconds=1800
+# High enough that the wait budget below is what actually ends a waiting run: an
+# overloaded API stays reachable, so each restart costs one sleep and ~20 of them fit
+# inside six hours. A restart cap of 10 would end the run in 1.21h no matter what the
+# wait budget said — this stays a backstop against a fault that fails instantly and
+# forever, not the thing that decides how long an outage is survivable.
+max_restarts=50
+# One budget for the WHOLE run, not per restart: six hours outlasts a usage window that
+# resets on its own schedule, with margin for one that starts partway through. The faults
+# worth waiting out are measured in hours rather than seconds. Intervals grow toward
+# max_backoff_seconds so a long outage costs a handful of probes instead of hundreds —
+# the point of waiting is to be there when the window reopens, not to ask repeatedly
+# while it is shut.
+max_wait_seconds=21600
+max_backoff_seconds=1800
+total_waited=0
 # An unknown kind may be a network blip worth retrying or a permanent fault worth
 # stopping. Bound the guess rather than disabling the feature or spending the budget.
 unknown_kind_max_restarts=2
@@ -61,6 +74,23 @@ kind_is_member() {  # $1 = candidate, $2.. = members
 usage() {
   printf 'usage: resume-on-network-error.sh [--max-restarts N] [--max-wait SECONDS]\n'
   printf '                                  [--probe-url URL] [--] <prompt> [claude args...]\n'
+  printf '\n'
+  printf -- '--max-wait is the total this run may spend waiting, across every restart\n'
+  printf '(default 21600 = 6h, long enough to outlast a usage window). Intervals double\n'
+  printf 'from 5s to a 30m ceiling and keep growing across restarts, so a multi-hour\n'
+  printf 'outage costs a handful of probes rather than hundreds.\n'
+  printf '\n'
+  printf 'Exit: 0 completed · 1 permanent fault · 2 usage · 3 restart budget spent\n'
+  printf '      4 wait budget spent · 5 failure kind never recorded\n'
+  printf '\n'
+  printf 'Exit 4 says the run waited as long as it was allowed, not that the network is\n'
+  printf 'down: a usage window that never reopened inside the budget ends here too.\n'
+  printf '\n'
+  printf 'The failure kind comes from the record .agents/hooks/record-api-failure.sh\n'
+  # shellcheck disable=SC2016 # The reader needs the variable's name, not its value.
+  printf 'writes under $CLAUDE_PROJECT_DIR (default: the current directory). With that\n'
+  printf 'hook unwired, or that variable unset so writer and reader disagree on the\n'
+  printf 'project root, every failure degrades to the small unknown budget and exits 5.\n'
 }
 
 # ── Dependencies, checked at the executable boundary ─────────────────────────
@@ -133,18 +163,30 @@ api_is_reachable() {
 
 # Sleep first, then probe: an "overloaded" failure leaves the network perfectly
 # reachable, so probing before waiting would hammer a server already saying stop.
-# Wait for API to become reachable, with exponential backoff up to max_wait_seconds.  # $1 = first delay in seconds; reads max_wait_seconds, probe_url; logs to stderr; exit 0 = reachable, 1 = timeout
+#
+# `total_waited` is script-level on purpose. A per-call budget would let ten restarts
+# wait ten times over — the deadline has to mean "this run has waited long enough",
+# not "this attempt has". `delay` is likewise carried across restarts by the caller, so
+# intervals keep growing over the whole outage instead of restarting at 5s each time.
+# --max-wait is a deadline, so no single sleep may run past it: the last one is clipped
+# to whatever budget remains. Without that, `--max-wait 1` still sleeps the opening 5s.
 wait_for_api() {  # $1 = first delay in seconds
-  local delay="$1" waited=0
-  while (( waited < max_wait_seconds )); do
-    log "waiting ${delay}s before probing ${probe_url}"
-    sleep "$delay"
-    (( waited += delay ))
+  local delay="$1" sleep_for
+  while (( total_waited < max_wait_seconds )); do
+    sleep_for="$delay"
+    if (( sleep_for > max_wait_seconds - total_waited )); then
+      sleep_for=$(( max_wait_seconds - total_waited ))
+    fi
+    log "waiting ${sleep_for}s before probing ${probe_url}"
+    sleep "$sleep_for"
+    (( total_waited += sleep_for ))
     if api_is_reachable; then
-      log "API reachable after ${waited}s"
+      log "API reachable after ${total_waited}s of total waiting"
       return 0
     fi
-    (( delay = delay < 60 ? delay * 2 : 60 ))
+    # Clamp the DOUBLED value: testing `delay < ceiling` before doubling lets the last
+    # step overshoot (1280 < 1800, so it becomes 2560 — past the advertised ceiling).
+    (( delay = delay * 2 > max_backoff_seconds ? max_backoff_seconds : delay * 2 ))
   done
   return 1
 }
@@ -279,8 +321,8 @@ while :; do
     exit 3
   fi
   if ! wait_for_api "$delay"; then
-    log "API still unreachable after ${max_wait_seconds}s — stopping"
+    log "gave up after ${total_waited}s of waiting (limit ${max_wait_seconds}s) — stopping"
     exit 4
   fi
-  (( delay = delay < 60 ? delay * 2 : 60 ))
+  (( delay = delay * 2 > max_backoff_seconds ? max_backoff_seconds : delay * 2 ))
 done

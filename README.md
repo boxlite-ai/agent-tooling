@@ -349,6 +349,36 @@ After installation, configure repository Git hooks explicitly:
 plugins/boxlite-agent-tooling/scripts/setup.sh /path/to/consumer
 ```
 
+## Unattended runs
+
+A turn that dies on an API error ends the run: the host fires `StopFailure` instead of
+`Stop`, and that event is fire-and-forget, so nothing in the session can resume it. For
+runs nobody is watching, wrap them:
+
+```sh
+plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh "<task prompt>"
+```
+
+It restarts only what another attempt could fix. The failure kind is not in the result
+JSON — `terminal_reason` reports a bare `api_error` — so the wrapper reads it from the
+record `.agents/hooks/record-api-failure.sh` publishes under `.agents/state/`. Without
+that hook wired, or with `CLAUDE_PROJECT_DIR` unset so writer and reader disagree on the
+project root, every failure degrades to the two-restart unknown budget and exits 5.
+
+`--max-wait` is one budget for the whole run rather than per restart — six hours by
+default, long enough to outlast a usage window that resets on its own schedule. Waits
+double from 5s to a 30-minute ceiling and keep growing across restarts, so a multi-hour
+outage costs a handful of probes instead of hundreds of rejected calls.
+
+Exit codes a CI wrapper branches on: `0` the run completed · `1` a permanent fault
+(auth, billing, invalid request) · `2` usage · `3` restart budget spent · `4` wait
+budget spent · `5` the failure kind was never recorded. Needs `curl` in addition to
+`claude` and `jq`.
+
+Exit 4 says the run waited as long as it was allowed, not that the network is down — a
+usage window that never reopened inside the budget ends there too, with the endpoint
+reachable throughout.
+
 ## Floating updates
 
 Consumers copy `templates/install.sh` to `.agent-tooling/install.sh` and declare the
