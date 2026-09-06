@@ -21,6 +21,12 @@
 #     background-delivery primitive: Claude uses asyncRewake so a 30-second escalation
 #     wakes the model, while Codex uses async because its strict schema does not accept
 #     asyncRewake. Unknown keys still make Codex silently load no hooks at all.
+#   - …and except for events Codex has no concept of. Codex's hook-event set is CLOSED,
+#     so a Claude-only event in the Codex twin is not an ignored entry — it is an
+#     unknown key, which costs every Codex gate at once. Those events are declared in
+#     CLAUDE_ONLY_EVENTS, wired only in hooks/hooks.json, and excluded from the twin
+#     comparison. Byte-equal twins were the right invariant while every event existed
+#     on both hosts; the moment one does not, enforcing equality is what breaks Codex.
 #   - Every wired command resolves the plugin root as ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}
 #     — Codex exports the first name, Claude Code the second. A bare single-host
 #     variable expands empty on the other host and the hook runs /nonexistent.
@@ -52,14 +58,18 @@ COPILOT_SETTINGS="$REPO_ROOT/.github/copilot/settings.json"
 
 pass=0
 fail=0
+# Increment pass counter and print a PASS line.  # $1 = test name
 ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
+# Increment fail counter and print a FAIL line.  # $1 = test name
 bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
 
 command -v jq >/dev/null 2>&1 || { printf 'jq is required to run these tests\n' >&2; exit 2; }
 
 # Directories resolved through `cd`, not realpath -m: a dangling symlink or a typo'd
 # path must FAIL here, never normalise into a plausible-looking string.
+# Resolve a directory to its canonical path, failing on dangling symlinks or typos.  # $1 = directory path; echoes canonical path or fails
 resolve_dir() { (cd "$1" 2>/dev/null && pwd -P); }
+# Resolve a file to its canonical path, failing if it does not exist.  # $1 = file path; echoes canonical path or fails
 resolve_file() {
   local dir base
   dir="$(dirname "$1")"; base="$(basename "$1")"
@@ -89,6 +99,7 @@ echo
 echo "## Marketplaces advertise the plugin that actually ships"
 # The Codex marketplace pins no version, so only the other two can drift — and both
 # fields have moved in lockstep with the manifests on every release so far.
+# Verify a marketplace file has version and metadata matching the plugin manifest.  # $1 = label (for test output), $2 = marketplace file path; reads VERSION, GENERIC, PLUGIN
 check_versioned_marketplace() {  # <label> <file>
   local label="$1" file="$2" v
   for path in '.metadata.version' '.plugins[0].version'; do
@@ -292,8 +303,53 @@ for pair in "claude:$CLAUDE_HOOKS:asyncRewake" "codex:$CODEX_HOOKS:async"; do
   [ "$nontype" = "0" ] && ok "$label: every hook object is type command" \
                        || bad "$label: every hook object is type command ($nontype are not)"
 done
-claude_normalized="$(jq -Sc '
-  .hooks.SubagentStart[].hooks[] |=
+# Codex's hook-event set is closed (HookEventsToml in the shipped binary). Held here as
+# data so a newly wired event is checked against it without needing a Codex install:
+# getting this wrong does not disable one hook, it disables all of them.
+CODEX_EVENTS='PreToolUse PermissionRequest PostToolUse PreCompact PostCompact
+SessionStart SessionEnd UserPromptSubmit SubagentStart SubagentStop Stop Interrupt'
+# Events Claude Code has and Codex does not. Wired only in hooks/hooks.json.
+CLAUDE_ONLY_EVENTS='StopFailure'
+
+for event in $CLAUDE_ONLY_EVENTS; do
+  case " $(echo $CODEX_EVENTS) " in
+    *" $event "*) bad "claude-only event is genuinely absent from Codex: $event" ;;
+    *)            ok  "claude-only event is genuinely absent from Codex: $event" ;;
+  esac
+  # An entry left here after its hook was unwired excludes nothing and quietly rots.
+  if jq -e --arg event "$event" '.hooks | has($event)' "$CLAUDE_HOOKS" >/dev/null 2>&1; then
+    ok "claude-only event is wired in the Claude manifest: $event"
+  else
+    bad "claude-only event is wired in the Claude manifest: $event"
+  fi
+done
+for event in $(jq -r '.hooks | keys_unsorted[]' "$CODEX_HOOKS"); do
+  case " $(echo $CODEX_EVENTS) " in
+    *" $event "*) ok  "codex manifest event is in Codex's closed set: $event" ;;
+    *)            bad "codex manifest event is in Codex's closed set: $event" ;;
+  esac
+done
+for event in $(jq -r '.hooks | keys_unsorted[]' "$CLAUDE_HOOKS"); do
+  case " $(echo $CODEX_EVENTS) $(echo $CLAUDE_ONLY_EVENTS) " in
+    *" $event "*) ok  "claude manifest event is known to some host: $event" ;;
+    *)            bad "claude manifest event is known to some host: $event" ;;
+  esac
+done
+
+claude_only_json="$(printf '%s\n' $CLAUDE_ONLY_EVENTS | jq -Rsc 'split("\n") | map(select(length > 0))')"
+leaked="$(jq -r --argjson claude_only "$claude_only_json" \
+  '[.hooks | keys_unsorted[] | select(. as $k | $claude_only | index($k))] | join(",")' "$CODEX_HOOKS")"
+if [ -z "$leaked" ]; then
+  ok "no claude-only event reaches the Codex twin"
+else
+  bad "no claude-only event reaches the Codex twin (found: $leaked)"
+fi
+
+# Twin comparison, with the Claude-only events removed first: everything Codex CAN run
+# must still be byte-identical after async normalization.
+claude_normalized="$(jq -Sc --argjson claude_only "$claude_only_json" '
+  .hooks |= with_entries(select(.key as $k | $claude_only | index($k) | not))
+  | .hooks.SubagentStart[].hooks[] |=
     (if has("asyncRewake") then .async = .asyncRewake | del(.asyncRewake) else . end)
 ' "$CLAUDE_HOOKS")"
 codex_normalized="$(jq -Sc . "$CODEX_HOOKS")"
