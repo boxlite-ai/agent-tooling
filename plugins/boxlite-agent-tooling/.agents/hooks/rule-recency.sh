@@ -32,7 +32,7 @@ fi
 
 cat <<'EOF'
 REPLY SHAPE:
-- <=80 prose words; exempt code, visuals, tables, paths, uncertainty, risk, failing tests.
+- <=80 prose words; exempt code (not comments), visuals, tables, paths, uncertainty, risk, failing tests.
 - Any subject: whenever possible, walk one example step by step on real data (values, facts, numbers), showing what changed at each step, tied to the general rule; omit only when none applies.
 - Prefer a renderable diagram, graph, image, or table over prose when clearer.
 - Answer first, in one sentence. No preamble, recap, praise, repetition, or closing offer.

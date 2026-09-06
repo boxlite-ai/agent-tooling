@@ -14,6 +14,7 @@ is_agent=0
 repo_root="$(git rev-parse --show-toplevel)"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 verdict_state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
+receipt_state_lib="$tooling_root/.agents/lib/commit-audit-receipt.sh"
 watch_binding_command_hash=""
 watch_binding_session_scope=""
 watch_binding_prompt_epoch=""
@@ -130,6 +131,12 @@ if [[ "$is_agent" == 1 ]]; then
   }
   # shellcheck source=../.agents/lib/verdict-audit-state.sh
   source "$verdict_state_lib" || exit 1
+  # Optional by design: without it no push can claim a receipt, which is exactly the
+  # pre-receipt behavior of auditing every push. Never a reason to reject one.
+  if [[ -r "$receipt_state_lib" ]]; then
+    # shellcheck source=../.agents/lib/commit-audit-receipt.sh
+    source "$receipt_state_lib" || true
+  fi
 fi
 
 hash_file() {
@@ -311,6 +318,58 @@ cleanup_push_audit_context() {
   push_context_diff_identity=""
 }
 
+# A push that introduces exactly one commit the commit gate already audited needs no
+# second audit of the same content: .githooks/commit-msg published a receipt naming
+# that commit's parent, tree, and subject. Print the qualifying commit and return 0
+# only once that receipt is claimed; EVERY other shape returns non-zero and falls
+# through to the auditor unchanged, because only this shape makes the pushed range
+# and the audited commit the same thing.
+push_is_single_audited_commit() {  # remote-name
+  local remote_name="$1"
+  local ref_updates local_ref local_sha remote_ref remote_sha
+  local commit_facts parents parent tree="" subject="" subject_hash
+
+  declare -F commit_audit_receipt_claim >/dev/null 2>&1 || return 1
+
+  ref_updates="$(grep '[^[:space:]]' "$stdin_file")" || return 1
+  [[ "$ref_updates" != *$'\n'* ]] || return 1        # more than one ref update
+  read -r local_ref local_sha remote_ref remote_sha _ <<<"$ref_updates" || return 1
+  [[ -n "${local_ref:-}" ]] || return 1
+  [[ "$remote_ref" == refs/heads/* ]] || return 1    # a branch, not a tag or note
+  is_zero_sha "$local_sha" && return 1               # branch deletion
+
+  # One git call for every fact this needs: parents, tree, subject.
+  commit_facts="$(GIT_NO_REPLACE_OBJECTS=1 git -C "$repo_root" \
+    log -1 --format='%P%n%T%n%s' "$local_sha" 2>/dev/null)" || return 1
+  { IFS= read -r parents; IFS= read -r tree; IFS= read -r subject; } <<<"$commit_facts"
+  # A lone parent carries no separator. A merge (two) and a root commit (none) both
+  # fail here, and neither one's pushed range is the diff the commit gate reviewed.
+  [[ "$parents" =~ ^[0-9a-f]+$ ]] || return 1
+  parent="$parents"
+
+  if is_zero_sha "$remote_sha"; then
+    # New branch. Qualify only when the parent is already wholly on this remote, so
+    # the push still introduces exactly the one audited commit and nothing beneath
+    # it. A bare-URL push has no remote-tracking refs to prove that against.
+    git -C "$repo_root" config --get "remote.${remote_name}.url" >/dev/null 2>&1 \
+      || return 1
+    [[ "$(GIT_NO_REPLACE_OBJECTS=1 git -C "$repo_root" rev-list --count \
+      "$parent" --not --remotes="$remote_name" 2>/dev/null)" == 0 ]] || return 1
+  else
+    # Existing branch: the advertised tip must BE the parent, which settles
+    # fast-forward and "exactly one commit in range" in one comparison.
+    [[ "$remote_sha" == "$parent" ]] || return 1
+  fi
+
+  # commit-msg hashes the bare subject with no trailing newline; %s is read the same
+  # way here. A subject differing only through git's message cleanup fails the claim
+  # and costs a re-audit — the safe direction.
+  subject_hash="$(printf '%s' "$subject" | hash_stdin)"
+
+  commit_audit_receipt_claim "$repo_root" "$parent" "$tree" "$subject_hash" || return 1
+  printf '%s' "$local_sha"
+}
+
 # Capture the original PreToolUse command binding before the delegated gate
 # consumes its handoff. This is best-effort state for the informational watcher;
 # audit behavior and push exit status never depend on it.
@@ -350,9 +409,18 @@ capture_pr_watch_binding() {
 
 capture_pr_watch_binding || true
 
-if [[ "$is_agent" == 1 ]]; then
-  remote_name="${1:-?}"
-  remote_url="${2:-}"
+# The audited-push stage. Humans leave at the guard; a push carrying a receipt for
+# its single new commit leaves right after claiming it, because that claim IS the
+# authorization and nothing below would re-derive it. Everything else audits.
+run_push_audit() {  # remote-name remote-url
+  [[ "$is_agent" == 1 ]] || return 0
+  local remote_name="$1" remote_url="$2" audited_commit
+  audited_commit="$(push_is_single_audited_commit "$remote_name" || true)"
+  if [[ -n "$audited_commit" ]]; then
+    printf 'agent-tooling: push audit skipped; commit %s already passed its own audit\n' \
+      "$audited_commit" >&2
+    return 0
+  fi
   remote_url_hash="$(printf '%s' "$remote_url" | shasum -a 256 | awk '{print $1}')"
   ref_updates_hash="$(hash_file "$stdin_file")"
   write_pushed_diff | capture_bounded_stream \
@@ -400,7 +468,8 @@ if [[ "$is_agent" == 1 ]]; then
     printf '%s\n' "$advisory" >&2
   fi
   cleanup_push_audit_context
-fi
+}
+run_push_audit "${1:-?}" "${2:-}"
 
 # Arm the CI + PR-comment watcher for every branch in this push.
 #

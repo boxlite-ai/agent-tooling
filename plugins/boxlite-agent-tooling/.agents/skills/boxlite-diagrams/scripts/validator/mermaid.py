@@ -11,6 +11,9 @@ from pathlib import Path
 
 from .models import SCOPE_PALETTE, StateBlock, ValidationContext
 
+# Anything float() accepts, so a malformed attribute misses and reads as unmeasured.
+NUMBER = r"[0-9]+(?:\.[0-9]+)?"
+LAPTOP_VIEWPORT = (1600, 900)
 VERSION = "11.16.0"
 UNSAFE_PATTERNS = [
     (re.compile(r"%%\{"), "initialization directives"),
@@ -280,10 +283,14 @@ def _render_all(ctx: ValidationContext) -> None:
     errors: list[str] = []
     tool_errors: list[str] = []
     rendered: list[str] = []
+    oversized: list[str] = []
+    measured: list[str] = []
+    unmeasured: list[str] = []
     for (view, state), block in blocks:
-        input_path = artifacts_dir / f"{view}-{state}.mmd"
-        output_path = artifacts_dir / f"{view}-{state}.svg"
-        preview_path = artifacts_dir / f"{view}-{state}.png"
+        stem = f"{view}-{state}-{block.topic}" if ctx.nested else f"{view}-{state}"
+        input_path = artifacts_dir / f"{stem}.mmd"
+        output_path = artifacts_dir / f"{stem}.svg"
+        preview_path = artifacts_dir / f"{stem}.png"
         input_path.write_text(block.content, encoding="utf-8")
         try:
             result = _run_mmdc(input_path, output_path, artifacts_dir)
@@ -332,15 +339,66 @@ def _render_all(ctx: ValidationContext) -> None:
         if not preview_path.is_file() or preview_path.stat().st_size == 0:
             errors.append(f"{view}/{state}: rendered PNG preview is empty")
             continue
+        size = _svg_size(svg)
+        if size is None:
+            unmeasured.append(
+                f"{view}/{state}/{block.topic}" if ctx.nested else f"{view}/{state}"
+            )
+        else:
+            width, height = size
+            where = f"{view}/{state}/{block.topic}" if ctx.nested else f"{view}/{state}"
+            if width > LAPTOP_VIEWPORT[0] or height > LAPTOP_VIEWPORT[1]:
+                oversized.append(
+                    f"{where}: renders {width:.0f}x{height:.0f}, "
+                    f"larger than a {LAPTOP_VIEWPORT[0]}x{LAPTOP_VIEWPORT[1]} laptop viewport"
+                )
+            else:
+                measured.append(f"{where}: {width:.0f}x{height:.0f}")
         ctx.parsed.rendered_svgs[(view, state)] = output_path
         ctx.artifacts.extend([input_path, output_path, preview_path])
         rendered.extend([str(output_path), str(preview_path)])
     if tool_errors:
         ctx.add("tool.mermaid_cli", "error", "pinned Mermaid CLI is unavailable", tool_errors)
-    elif errors:
+        return
+    if errors:
         ctx.add("mermaid.render", "fail", "one or more Mermaid diagrams did not render correctly", errors)
+        return
+    ctx.add("mermaid.render", "pass", f"rendered with @mermaid-js/mermaid-cli@{VERSION}", rendered)
+    if oversized:
+        ctx.add(
+            "mermaid.viewport",
+            "fail",
+            "a diagram must fit a laptop screen without zooming; raise its altitude or split the topic",
+            oversized,
+        )
+    elif unmeasured:
+        # Never silently skip the fit contract: an unreadable size is unproven fit.
+        ctx.add(
+            "mermaid.viewport",
+            "fail",
+            "a rendered diagram carried no width/height or viewBox, so its fit could not be measured",
+            unmeasured,
+        )
     else:
-        ctx.add("mermaid.render", "pass", f"rendered with @mermaid-js/mermaid-cli@{VERSION}", rendered)
+        ctx.add("mermaid.viewport", "pass", "every diagram fits a laptop viewport", measured)
+
+
+def _svg_size(svg: str) -> tuple[float, float] | None:
+    """Intrinsic size of a rendered diagram, or None when it cannot be measured."""
+    root = re.search(r"<svg\b[^>]*>", svg)
+    if root is None:
+        return None
+    attributes = root.group(0)
+    width = re.search(rf'\bwidth="({NUMBER})(?:px)?"', attributes)
+    height = re.search(rf'\bheight="({NUMBER})(?:px)?"', attributes)
+    if width and height:
+        return float(width.group(1)), float(height.group(1))
+    box = re.search(
+        rf'\bviewBox="-?{NUMBER}\s+-?{NUMBER}\s+({NUMBER})\s+({NUMBER})"', attributes
+    )
+    if box:
+        return float(box.group(1)), float(box.group(2))
+    return None
 
 
 def _run_mmdc(input_path: Path, output_path: Path, artifacts_dir: Path) -> subprocess.CompletedProcess[str] | None:

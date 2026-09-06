@@ -38,9 +38,33 @@ if [[ "$is_agent" == 1 ]]; then
   source "$verdict_state_lib"
   # shellcheck source=../.agents/lib/auditor-override-state.sh
   source "$override_state_lib"
+  # A receipt only saves a later push a duplicate audit, so its library is optional
+  # where the other two are mandatory: a checkout without it writes no receipts and
+  # its pushes audit exactly as they did before receipts existed.
+  receipt_state_lib="$tooling_root/.agents/lib/commit-audit-receipt.sh"
+  if [[ -r "$receipt_state_lib" ]]; then
+    # shellcheck source=../.agents/lib/commit-audit-receipt.sh
+    source "$receipt_state_lib"
+  fi
   # Assigned by auditor_override_load_valid_grant; initialize the sourced public output
   # explicitly so `set -u` and static analysis share the same boundary contract.
   auditor_override_nonce_hash=""
+
+  # Publish proof that this exact commit passed its own audit, so .githooks/pre-push
+  # can skip re-auditing identical content.
+  #
+  # HEAD is the parent the commit is about to get and the index is the tree it is
+  # about to get; git has not minted the commit object yet, so identity is recorded
+  # from the two halves that are already known. `git commit --amend` therefore
+  # records the REPLACED commit as the parent, no receipt can ever match the amended
+  # commit, and pushing it audits — deliberate, because the amended content is not
+  # what the audit reviewed.
+  publish_commit_audit_receipt() {  # subject-hash
+    local parent tree
+    parent="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null)" || return 0
+    tree="$(git -C "$repo_root" write-tree 2>/dev/null)" || return 0
+    commit_audit_receipt_write "$repo_root" "$parent" "$tree" "$1" 2>/dev/null || true
+  }
 
   validate_override_handoff() {
     local handoff_branch handoff_head handoff_kind expected_diff_hash scope epoch nonce
@@ -108,6 +132,14 @@ if [[ "$is_agent" == 1 ]]; then
   elif [[ "$audit_kind" == "commit" ]]; then
     printf 'Commit audit did not bind a commit subject.\n' >&2
     exit 1
+  fi
+
+  # Only a validated commit dossier earns a receipt. The override path above returned
+  # before reaching here precisely because no PASS verdict was ever created, and a
+  # human commit never enters this block at all.
+  if [[ "$audit_kind" == "commit" ]] \
+     && declare -F commit_audit_receipt_write >/dev/null 2>&1; then
+    publish_commit_audit_receipt "$actual_subject_hash"
   fi
 
   rm -f "$audit_file" "$handoff_file"

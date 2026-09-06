@@ -51,13 +51,6 @@ def validate_changes(ctx: ValidationContext) -> None:
         if annotation_kind in DIFF_KINDS and kind not in CHANGE_CONTEXTS:
             errors.append(f"{annotation_kind} requires a PR, commit, branch, or working-tree change context")
 
-    if context["change_kind"] == "bug" and kind == "pr":
-        issue_number = context["sources"].get("issue")
-        if not isinstance(issue_number, int):
-            errors.append("bug-fix PR requires context.sources.issue")
-        elif ctx.parsed and not re.search(rf"(?im)^Fixes\s+#{issue_number}\s*$", ctx.parsed.text):
-            errors.append(f"bug-fix PR document requires a standalone 'Fixes #{issue_number}' line")
-
     diff_annotations = [annotation for annotation in annotations if annotation["kind"] in DIFF_KINDS]
     if diff_annotations:
         diff = _load_diff(ctx, errors)
@@ -69,6 +62,33 @@ def validate_changes(ctx: ValidationContext) -> None:
         ctx.add("changes.alignment", "fail", "state or diff annotations are invalid", errors)
     else:
         ctx.add("changes.alignment", "pass", "state labels and change annotations align with their evidence")
+
+
+def validate_fixes_line(ctx: ValidationContext, text: str) -> None:
+    """Check the bug-fix issue link once for the whole document.
+
+    Every other rule here is about one item and so belongs to a topic, but this line
+    is a property of the document; running it per topic would repeat one failure under
+    every topic prefix.
+    """
+    manifest = ctx.manifest
+    context = manifest.get("context") if isinstance(manifest, dict) else None
+    if not isinstance(context, dict):
+        return
+    if context.get("change_kind") != "bug" or context.get("kind") != "pr":
+        return
+    sources = context.get("sources")
+    issue_number = sources.get("issue") if isinstance(sources, dict) else None
+    if not isinstance(issue_number, int):
+        ctx.add("changes.fixes_line", "fail", "bug-fix PR requires context.sources.issue")
+    elif not re.search(rf"(?im)^Fixes\s+#{issue_number}\s*$", text):
+        ctx.add(
+            "changes.fixes_line",
+            "fail",
+            f"bug-fix PR document requires a standalone 'Fixes #{issue_number}' line",
+        )
+    else:
+        ctx.add("changes.fixes_line", "pass", f"document links the fixed issue #{issue_number}")
 
 
 def _load_diff(ctx: ValidationContext, errors: list[str]) -> dict[str, dict[str, list[tuple[int, int]]]] | None:

@@ -41,6 +41,7 @@ class StateBlock:
     language: str
     content: str
     start_line: int
+    topic: str = "overview"
 
 
 @dataclass
@@ -68,6 +69,7 @@ class ValidationContext:
     evidence_path: Path
     report_path: Path
     manifest: Any
+    nested: bool = False
     checks: list[Check] = field(default_factory=list)
     parsed: ParsedDocument | None = None
     source_windows: dict[tuple[str, str, int, int], str] = field(default_factory=dict)

@@ -12,7 +12,8 @@
         "The architecture covers user and SDK entry points, external dependencies, public ingress, private compute and box execution, state, observability, and the main request/control/data/image routes at one deployment altitude.",
         "The Runner fleet surrounds a representative EC2 instance × N; EC2 surrounds the Runner daemon; Runner surrounds the embedded BoxLite runtime; BoxLite surrounds box microVMs. These immediate memberships are declared in evidence.json boundaries and validated against Mermaid nesting.",
         "Related components form contiguous scope zones ordered along the main path; each zone subgraph carries its exact house palette class (classDef scope_* plus class assignment) with the matching scope declared in evidence.json boundaries, while physical boundaries and nodes stay unstyled and no style, linkStyle, theme, or non-palette classDef appears, keeping the diagram legible on light/dark hosts with the PNG used only as a static preview.",
-        "validation.json reports valid=true and emits both SVG and PNG artifacts; the agent opens the PNG and checks readability, truthful containment, disjoint boundaries, routing, and label clipping before presenting it."
+        "validation.json reports valid=true and emits both SVG and PNG artifacts; the agent opens the PNG and checks readability, truthful containment, disjoint boundaries, routing, and label clipping before presenting it.",
+        "The canonical deployment fits one laptop-sized diagram, so the agent does not declare topics; validation.json reports mermaid.viewport as a pass with the measured size rather than splitting an already-readable picture."
       ]
     },
     {
@@ -37,6 +38,33 @@
         "← BUG: appears only on the faulty Before call-graph hop when a call graph is selected, FIX appears on the corrected After behavior, and diagram.md contains Fixes #1155.",
         "Every displayed relationship has concrete revision-aware source evidence and canonical IDs agree across the selected views.",
         "Every Mermaid view renders to SVG and PNG and is visually inspected before presentation."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Explain the entire BoxLite hosted control plane end to end — ingress, the API and proxy services, the runner fleet, durable state, and telemetry — for an engineer who has never seen the system. Produce diagram.md, evidence.json, and validation.json in the requested output directory. Do not change production source.",
+      "expected_output": "A validated topic tree: one overview index of the whole control plane plus a detailed diagram per sub-topic, every diagram inside a collapsed <details> block and every diagram fitting a laptop screen.",
+      "files": [],
+      "expectations": [
+        "The agent splits only because one honest diagram at this altitude would not fit a 1600x900 viewport, and says so; it does not split a subject that already fits.",
+        "evidence.json declares topics with overview as the root and each sub-topic naming its parent, and every node, edge, boundary, and boundary member declares its topics alongside its views.",
+        "The overview stays at or below roughly 12 nodes and is honest at its own altitude — an index of real evidence-backed systems, not a shrunken detail diagram.",
+        "Each sub-topic reuses the ID of the overview element it expands as its own root and descends exactly one altitude; no sub-topic re-explains a sibling's nodes.",
+        "diagram.md wraps every diagram, overview included, in a <details> block whose <summary> carries the topic id and its one-sentence question, with a blank line after each <summary> and before each </details> so GitHub renders the fenced Mermaid.",
+        "validation.json reports valid=true, every topic reports under its own prefixed check names, mermaid.viewport passes for every diagram, and each topic renders its own SVG and PNG artifacts."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Explain how a box actually gets created in the hosted deployment, starting from the whole cloud architecture and drilling all the way down to the BoxLite runtime call path. Produce diagram.md, evidence.json, and validation.json in the requested output directory. Do not change production source.",
+      "expected_output": "A validated three-level topic tree: cloud overview, then the runner fleet, then the embedded BoxLite runtime's creation mechanics, each level one altitude below the last and none exceeding three levels.",
+      "files": [],
+      "expectations": [
+        "The topic tree is exactly three levels deep because each level's own diagram would otherwise not fit, and the agent does not add a fourth level; the validator rejects one if attempted.",
+        "Level one names deployed systems and boundaries, level two expands one system into its components, and level three shows that component's source mechanics — no level mixes altitudes.",
+        "Each child's <details> block nests inside its parent's block, matching the declared parent in evidence.json; siblings appear in manifest order.",
+        "The deepest topic may select the call_graph view where source mechanics answer the question better than another architecture inventory.",
+        "validation.json reports valid=true with manifest.topics confirming a rooted tree 3 levels deep, and every diagram passes mermaid.viewport."
       ]
     }
   ]
