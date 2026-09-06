@@ -131,10 +131,14 @@ fi
 
 echo
 echo "## PR resolution"
+# Both plugin roots are cleared so the default is genuinely the unknown host. Running
+# the suite from inside a hook would otherwise leave a real root exported, and every
+# case built on this would quietly exercise that host's route instead.
 ctx() {
   jq -nc --arg c "$1" --arg r "$2" \
      '{tool_input:{command:$c}, tool_response:{stdout:$r, stderr:""}}' \
-   | "$HOOK" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // ""'
+   | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT "$HOOK" 2>/dev/null \
+   | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
 
 ctx_at() { # repo, command, response
@@ -2236,13 +2240,46 @@ else
   fail=$((fail + 1)); printf '  FAIL  context tells consumers how to handle conflicts\n'
 fi
 
-# One attach route per capability, self-selected — the subagent.sh doctrine.
-# Guards the Codex-consumer regression: a context that names only Monitor()
-# reads as Claude-only wiring the moment another host registers this hook.
-if [[ "$got" == *"Monitor({"* && "$got" == *"Codex"* && "$got" == *"WHICHEVER"* ]]; then
+# An unknown host still gets every attach route. Guards the Codex-consumer
+# regression: a context that names only Monitor() reads as Claude-only wiring the
+# moment another host registers this hook, and a runtime this hook has not been
+# taught about must degrade to the menu rather than to a guess.
+if [[ "$got" == *"Monitor({"* && "$got" == *"Codex"* ]]; then
   pass=$((pass + 1)); printf '  PASS  context names an attach route for every host\n'
 else
   fail=$((fail + 1)); printf '  FAIL  context names an attach route for every host\n'
+fi
+
+# ...and a KNOWN host is named its own route and no other. An agent that cannot run
+# Monitor should not be reading about it, and the narrower text also buys headroom
+# against the 1400-byte ceiling this hook enforces.
+# Invokes the hook directly rather than through ctx(), which strips both roots to pin
+# its own unknown-host default — routing this through it would erase the very host
+# being set up here.
+ctx_as_host() {  # host, command, response
+  local host="$1" cmd="$2" response="$3" payload
+  payload="$(jq -nc --arg c "$cmd" --arg r "$response" \
+    '{tool_input:{command:$c}, tool_response:{stdout:$r, stderr:""}}')"
+  case "$host" in
+    claude)
+      printf '%s' "$payload" | env -u PLUGIN_ROOT CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+        "$HOOK" 2>/dev/null ;;
+    codex)
+      printf '%s' "$payload" | env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$REPO_ROOT" \
+        "$HOOK" 2>/dev/null ;;
+  esac | jq -r '.hookSpecificOutput.additionalContext // ""'
+}
+claude_ctx="$(ctx_as_host claude "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
+if [[ "$claude_ctx" == *"Monitor({"* && "$claude_ctx" != *"Codex"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  a Claude host is named only the Monitor route\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  a Claude host is named only the Monitor route (got: %.160s)\n' "$claude_ctx"
+fi
+codex_ctx="$(ctx_as_host codex "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
+if [[ "$codex_ctx" == *"background shell"* && "$codex_ctx" != *"Monitor({"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  a Codex host is named only the background-shell route\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  a Codex host is named only the background-shell route (got: %.160s)\n' "$codex_ctx"
 fi
 
 # The stream script must be addressed in the TOOLING tree (the hook's own

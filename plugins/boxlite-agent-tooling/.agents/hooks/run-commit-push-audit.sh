@@ -23,10 +23,28 @@ audit_file="$project_dir/.agents/state/last-audit.json"
 audit_tmp_dir=""
 evidence_max_bytes=262144
 agent_output_max_bytes=65536
-# The model result and stderr are actively stopped at 64 KiB. This process-wide
-# synchronous backstop is wider because the read-only CLI may copy the separately
-# bounded 256 KiB evidence file while servicing a tool read.
-agent_process_file_max_kib=256
+# The auditor's RESULT and the auditor's STDERR are bounded separately because they
+# scale with different things. The result is one dossier against a fixed schema, so
+# 64 KiB is already generous. Stderr is the CLI's working transcript — every command
+# it runs and reads while auditing — so it grows with the size of the change under
+# review, and holding it to the result's bound killed real audits of ordinary commits
+# just as they were about to answer. It is a diagnostic stream this runner discards;
+# it needs a runaway bound, not a tight one.
+agent_stderr_max_bytes=4194304
+# Guards runaway DISK USE, and nothing finer. It is not the output bound: the result
+# is stopped at agent_output_max_bytes and stderr at agent_stderr_max_bytes by the
+# monitors, and the reader refuses an oversized result again before parsing it.
+#
+# `ulimit -f` is process-wide, so this also covers every file the CLI writes for its
+# own reasons — model caches, session state — which are far larger than anything this
+# runner produces and are none of its business. Sizing it around our evidence file
+# instead strangled those writes, and the CLI then exited 0 having written no result
+# AND no stderr, which reached validation as "malformed JSON" and named nothing that
+# would locate the cause. Measured against codex-cli 0.150.0: 128 MiB still produced
+# an empty result, 1 GiB ran clean. Keep the headroom generous — the number exists to
+# stop an unbounded writer, and a CLI that needs more than this is not the failure it
+# is here to catch.
+agent_process_file_max_kib=2097152
 raw_source_max_bytes=16777216
 commit_subject_read_max_bytes=1025
 audit_timeout_seconds="${COMMIT_PUSH_AUDITOR_TIMEOUT:-900}"
@@ -778,6 +796,14 @@ normalize_agentic_output() {
     "$raw_file" "$agent_output_max_bytes" json 2>/dev/null)" || raw_snapshot=""
   raw_json=""
   [[ "$raw_snapshot" == *$'\n'* ]] && raw_json="${raw_snapshot#*$'\n'}"
+  # Nothing at all is a different failure from something unparseable, and only this
+  # branch can tell them apart — downstream they are both an empty normalization.
+  # An auditor that wrote no result is one that never got to answer: it died, its
+  # writes were refused, or it was denied a resource. Saying "malformed JSON" there
+  # describes a dossier that was never written and sends the reader to the model.
+  if [[ -z "${raw_json//[[:space:]]/}" ]]; then
+    write_fail "Internal: Codex audit produced no output at all; the auditor exited without writing a result, so check its process limits and CLI availability rather than its answer"
+  fi
   normalized_output="$(printf '%s' "$raw_json" | jq -ecs '
     def exact_keys($wanted): (keys | sort) == ($wanted | sort);
     def bounded_line($bytes):
@@ -922,14 +948,22 @@ start_codex_monitors() {  # status reason raw-output stderr-log
   finish_audit_group_launch
 
   audit_group_launch_in_progress=1
+  # Each watched path carries its own ceiling: the pairs arrive as max,path,max,path
+  # so the result and the stderr transcript are never judged against one number.
   perl -MFcntl=:DEFAULT -e '
-    my ($max, $parent, $status_path, $reason_path, @paths) = @ARGV;
+    my ($parent, $status_path, $reason_path, @pairs) = @ARGV;
     $SIG{TERM} = sub { exit 0 };
-    exit 125 unless $max =~ /\A[1-9][0-9]*\z/
-      && $parent =~ /\A[1-9][0-9]*\z/ && @paths == 2;
+    exit 125 unless $parent =~ /\A[1-9][0-9]*\z/ && @pairs == 4;
+    my @watch;
+    while (@pairs) {
+      my ($max, $path) = splice(@pairs, 0, 2);
+      exit 125 unless $max =~ /\A[1-9][0-9]*\z/;
+      push @watch, [$max, $path];
+    }
     while (getppid() == $parent && !-e $status_path && !-e $reason_path) {
       my $reason_text = "";
-      for my $path (@paths) {
+      for my $entry (@watch) {
+        my ($max, $path) = @$entry;
         my @state = lstat($path);
         if (!@state || -l _ || !-f _) {
           $reason_text = "output-state";
@@ -949,8 +983,9 @@ start_codex_monitors() {  # status reason raw-output stderr-log
       }
       select(undef, undef, undef, 0.01);
     }
-  ' "$agent_output_max_bytes" "$runner_pid" "$status_file" "$reason_file" \
-    "$raw_file" "$log_file" >/dev/null 2>&1 &
+  ' "$runner_pid" "$status_file" "$reason_file" \
+    "$agent_output_max_bytes" "$raw_file" \
+    "$agent_stderr_max_bytes" "$log_file" >/dev/null 2>&1 &
   active_audit_limit_pid=$!
   finish_audit_group_launch
 }
@@ -1009,7 +1044,12 @@ run_codex_group() {  # codex-bin prompt raw-output stderr-log
         --output-last-message "$raw_file" \
         -
     ) >/dev/null 2> "$log_file"
-    command_status="${PIPESTATUS[1]}"
+    # A monitor that trips kills this group mid-pipeline, and PIPESTATUS is then unset
+    # rather than zero — under `set -u` reading it aborted the subshell before it could
+    # record any status, so the runner saw a missing status file and blamed the process
+    # instead of the limit that actually fired. 125 keeps the "no usable status" shape
+    # the caller already handles.
+    command_status="${PIPESTATUS[1]:-125}"
     printf '%s\n' "$command_status" > "$status_file"
     # Keep this PID as the runner-owned PGID identity until parent teardown.
     exec perl -e '
@@ -1033,6 +1073,18 @@ run_codex_group() {  # codex-bin prompt raw-output stderr-log
   reason_record="$(verdict_audit_read_single_record "$reason_file" 2>/dev/null || true)"
   status_record="$(verdict_audit_read_single_record "$status_file" 2>/dev/null || true)"
   quiesce_codex_group
+
+  # Measured once the group is reaped, because the live monitor stops the moment a
+  # status record exists and so never sees an auditor that crosses a ceiling and exits
+  # inside one poll interval. The reader independently refuses an oversized RESULT;
+  # stderr has no such second line of defence, which is the half this closes. The
+  # decision itself lives in the state library, where it can be tested against a FIFO
+  # without a poller racing to answer first.
+  if [[ -z "$reason_record" ]]; then
+    reason_record="$(verdict_audit_output_reason \
+      "$raw_file" "$agent_output_max_bytes" \
+      "$log_file" "$agent_stderr_max_bytes")"
+  fi
 
   case "$reason_record" in
     timeout|output-limit|output-state) codex_group_reason="$reason_record" ;;
@@ -1132,7 +1184,7 @@ run_agentic_audit() {
       write_fail "Internal: Codex audit timed out after ${audit_timeout_seconds} seconds"
       ;;
     output-limit)
-      write_fail "Internal: Codex audit output crossed the ${agent_output_max_bytes}-byte active limit; the ${agent_process_file_max_kib}-KiB synchronous file ceiling stopped further growth"
+      write_fail "Internal: Codex audit output crossed its active limit (result ${agent_output_max_bytes} bytes, stderr ${agent_stderr_max_bytes} bytes); the monitor terminated the auditor's process group"
       ;;
     output-state)
       write_fail "Internal: Codex audit output paths stopped being regular files"

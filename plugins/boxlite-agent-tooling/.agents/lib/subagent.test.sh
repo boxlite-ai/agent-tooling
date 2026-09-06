@@ -5,14 +5,22 @@
 # built-in — only name it. So the tests are mostly about what the emitted block does
 # and does not say:
 #
-#   1. Both hosts are always offered. The moment one route can go missing, the gate is
-#      back to deciding which host it is on, which is the bug this replaced.
-#   2. NOTHING in here reads the environment to choose. A grep guards that directly,
-#      because the regression would be silent — a host-sniffing branch still emits a
-#      perfectly plausible-looking instruction, just the wrong one.
+#   1. The route printed matches the host, and an unknown host still gets every route.
+#      Narrowing is the point, but a host this library has not been taught about must
+#      degrade to the menu rather than to a guess — a wrong single route is worse than
+#      a menu. The Codex-only shape gets its own check because dropping the Claude
+#      block also drops the text its message used to point at.
+#   2. The choice comes ONLY from hook_host_kind. A grep guards that directly, because
+#      the regression would be silent — a branch on CLAUDECODE or CODEX_SANDBOX still
+#      emits a perfectly plausible-looking instruction, just the wrong one, and those
+#      markers are exported to every child so a nested agent inherits them.
 #   3. Every agent name the gates reference resolves to a real spec file. The Codex
 #      route cites that path for the subagent to read, so a rename upstream turns into
 #      an instruction pointing at nothing, and only a test can see it from here.
+#
+# This file uses PLUGIN_ROOT as an ordinary local (below), which is exactly the
+# collision hook_host_kind's exported-only rule exists to survive. Leaving it is
+# deliberate: it keeps a real instance of that hazard in the suite.
 #
 # Run with:  bash .agents/lib/subagent.test.sh
 # Exits non-zero on any failure.
@@ -34,8 +42,23 @@ has() { case "$2" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
 check()    { has "$2" "$3" && ok "$1" || bad "$1 (missing: $2)"; }
 check_no() { has "$2" "$3" && bad "$1 (present: $2)" || ok "$1"; }
 
-echo "## Both hosts are always offered"
-out="$(subagent_instruction --agent verdict-auditor --root "$PLUGIN_ROOT" --task 'audit my turn')"
+# Every case below that does not name a host runs with neither root exported, so it
+# renders the unknown-host menu — the shape the whole suite was written against.
+as_host() {  # claude | codex | unknown, then the subagent_instruction arguments
+  local host="$1"; shift
+  (
+    unset PLUGIN_ROOT CLAUDE_PLUGIN_ROOT
+    case "$host" in
+      claude) export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT_FIXTURE" ;;
+      codex)  export PLUGIN_ROOT="$PLUGIN_ROOT_FIXTURE" ;;
+    esac
+    subagent_instruction "$@"
+  )
+}
+PLUGIN_ROOT_FIXTURE="$PLUGIN_ROOT"
+
+echo "## An unknown host is still offered every route"
+out="$(as_host unknown --agent verdict-auditor --root "$PLUGIN_ROOT" --task 'audit my turn')"
 check    "names the Claude Code route"  "Claude Code"                 "$out"
 check    "names the Codex route"        "Codex"                       "$out"
 check    "uses the plugin-scoped Task() agent for Claude" \
@@ -86,6 +109,111 @@ check "retry forbids a concurrent sibling writer" \
   "Do not create a sibling task name" "$scoped"
 check_no "generic cold-agent routes do not implicitly reuse context" \
   "collaboration.followup_task(" "$out"
+
+echo
+echo "## A known host is offered its own route and no other"
+claude_out="$(as_host claude --agent verdict-auditor --root "$PLUGIN_ROOT" \
+  --task 'audit my turn' --headless 'bash run-verdict-audit.sh')"
+check    "Claude Code keeps its own route" \
+  'Task(subagent_type="boxlite-agent-tooling:verdict-auditor"' "$claude_out"
+check_no "Claude Code is not shown the Codex route" \
+  "collaboration.spawn_agent(" "$claude_out"
+# The headless producer is a route of last resort. An agent holding a native built-in
+# must not be told to shell out to a second CLI with its own auth and sandbox.
+check_no "Claude Code is not shown the headless producer" \
+  "No agent runtime" "$claude_out"
+check_no "a single route drops the menu wording" \
+  "WHICHEVER route" "$claude_out"
+
+codex_out="$(as_host codex --agent verdict-auditor --root "$PLUGIN_ROOT" \
+  --task 'audit my turn' --headless 'bash run-verdict-audit.sh')"
+check    "Codex keeps its own route"  "collaboration.spawn_agent(" "$codex_out"
+check_no "Codex is not shown the Claude route" \
+  'Task(subagent_type=' "$codex_out"
+check_no "Codex is not shown the headless producer" \
+  "No agent runtime" "$codex_out"
+# Dropping the Claude block also drops the prompt its message used to point at, so the
+# task has to travel with the Codex route or the reference dangles.
+check    "Codex still carries the task text" "audit my turn" "$codex_out"
+codex_task_occurrences="$(printf '%s' "$codex_out" | grep -oF 'audit my turn' | wc -l | tr -d ' ')"
+[[ "$codex_task_occurrences" == 1 ]] \
+  && ok "Codex renders the task exactly once" \
+  || bad "Codex renders the task exactly once (count=$codex_task_occurrences)"
+check_no "no dangling reference to a Claude prompt that was not printed" \
+  "Claude prompt" "$codex_out"
+
+echo
+echo "## A missing host accessor fails closed"
+# `source` on an absent file only warns, and every caller runs under `set -uo pipefail`
+# rather than `-e`. Without an explicit check the library would carry on with no
+# accessor, take the unknown-host branch, and print the whole menu — a packaging bug
+# delivered as a plausible instruction. Staged without hook-host.sh beside it, which is
+# exactly what a fixture that forgets to copy the file produces.
+missing_host_dir="$TMP/no-host-lib"
+mkdir -p "$missing_host_dir"
+cp "$LIB_DIR/subagent.sh" "$missing_host_dir/"
+missing_host_err="$TMP/no-host-lib.err"
+# Loading must stay inert even when the accessor is absent — a library that aborts its
+# own source takes that decision away from callers that load several. The refusal
+# belongs at the call, where it can be reported.
+( source "$missing_host_dir/subagent.sh" ) 2>"$missing_host_err"
+missing_host_load_rc=$?
+[[ "$missing_host_load_rc" == 0 ]] \
+  && ok "sourcing without hook-host.sh stays inert" \
+  || bad "sourcing without hook-host.sh stays inert (rc=$missing_host_load_rc)"
+
+missing_host_out="$(
+  unset -f hook_host_kind
+  # shellcheck source=/dev/null
+  source "$missing_host_dir/subagent.sh" 2>/dev/null
+  subagent_instruction --agent verdict-auditor --root "$PLUGIN_ROOT_FIXTURE" \
+    --task 'audit my turn' 2>"$missing_host_err"
+)"
+missing_host_rc=$?
+[[ "$missing_host_rc" == 2 && -z "$missing_host_out" ]] \
+  && ok "routing without hook-host.sh refuses instead of printing the menu" \
+  || bad "routing without hook-host.sh refuses instead of printing the menu (rc=$missing_host_rc out=${missing_host_out:0:40})"
+check "the refusal names the accessor it could not load" \
+  "host accessor is unavailable" "$(cat "$missing_host_err")"
+check_no "the refusal never falls back to the unknown-host menu" \
+  "collaboration.spawn_agent(" "$missing_host_out"
+
+# ...and a failed load must not leave an INHERITED accessor standing. Bash carries
+# exported functions in the environment, so the guard would otherwise accept whatever
+# an ancestor process defined and route on it — the missing file turned into silent
+# trust of untrusted state, which is worse than the packaging bug it was meant to catch.
+hijacked_missing_out="$(
+  hook_host_kind() { printf 'codex'; }
+  export -f hook_host_kind
+  # shellcheck source=/dev/null
+  source "$missing_host_dir/subagent.sh" 2>/dev/null
+  subagent_instruction --agent verdict-auditor --root "$PLUGIN_ROOT_FIXTURE" \
+    --task 'audit my turn' 2>/dev/null
+)"
+hijacked_missing_rc=$?
+[[ "$hijacked_missing_rc" == 2 && -z "$hijacked_missing_out" ]] \
+  && ok "an inherited accessor cannot survive a failed load" \
+  || bad "an inherited accessor cannot survive a failed load (rc=$hijacked_missing_rc out=${hijacked_missing_out:0:40})"
+
+echo
+echo "## An inherited hook_host_kind cannot choose the route"
+# Bash carries exported functions in the environment, so this name can arrive already
+# defined from any ancestor process. Honoring such a definition would route on
+# inherited state — the exact thing the accessor exists to refuse — so the library
+# must load the trusted implementation over it rather than skip the load.
+hijack_out="$(
+  hook_host_kind() { printf 'codex'; }
+  # shellcheck source=/dev/null
+  source "$LIB_DIR/subagent.sh"
+  unset PLUGIN_ROOT
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT_FIXTURE"
+  subagent_instruction --agent verdict-auditor --root "$PLUGIN_ROOT_FIXTURE" \
+    --task 'audit my turn'
+)"
+check    "the trusted accessor overrides an inherited definition" \
+  'Task(subagent_type="boxlite-agent-tooling:verdict-auditor"' "$hijack_out"
+check_no "an inherited definition cannot force the Codex route" \
+  "collaboration.spawn_agent(" "$hijack_out"
 
 echo
 echo "## The Codex route points the subagent at the real spec"
@@ -202,16 +330,31 @@ check "passes a frontmatter-less spec through" "JUST A BODY" "$plain"
 check "keeps its later lines too"              "second line" "$plain"
 
 echo
-echo "## No host detection anywhere in the library"
-# The regression this guards is silent: a host-sniffing branch still emits a plausible
-# instruction, just the wrong one on one of the two hosts.
+echo "## The host is named by hook_host_kind and nothing else"
+# The regression this guards is silent: a branch on one of these markers still emits a
+# plausible instruction, just the wrong one. Every name below is session-scoped and
+# exported to every child, so it reports what launched the process tree rather than who
+# is calling this hook — run-commit-push-audit.sh spawns the Codex CLI from inside a
+# hook, and that process inherits CLAUDECODE and AI_AGENT. Probing for a vendor binary
+# on PATH is the same mistake: both CLIs can be installed at once.
+ambient='CODEX_SANDBOX|CLAUDECODE|AI_AGENT|CODEX_COMPANION|command -v (claude|codex)'
 code_only="$(sed 's/#.*//' "$LIB_DIR/subagent.sh")"
-if printf '%s' "$code_only" | grep -qE 'CODEX_SANDBOX|CLAUDECODE|CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT=|command -v (claude|codex)'; then
-  bad "library never sniffs the host"
-  printf '%s' "$code_only" | grep -nE 'CODEX_SANDBOX|CLAUDECODE|CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT=|command -v (claude|codex)' | sed 's/^/        offending: /'
+if printf '%s' "$code_only" | grep -qE "$ambient"; then
+  bad "library never routes on an ambient session marker"
+  printf '%s' "$code_only" | grep -nE "$ambient" | sed 's/^/        offending: /'
 else
-  ok "library never sniffs the host"
+  ok "library never routes on an ambient session marker"
 fi
+# The plugin roots are legitimate, but only hook_host_kind may read them: it is the one
+# place that requires them to be EXPORTED, which is what separates a host's injection
+# from a caller's same-named local.
+if printf '%s' "$code_only" | grep -qE '(CLAUDE_)?PLUGIN_ROOT'; then
+  bad "library reads the plugin roots only through hook_host_kind"
+  printf '%s' "$code_only" | grep -nE '(CLAUDE_)?PLUGIN_ROOT' | sed 's/^/        offending: /'
+else
+  ok "library reads the plugin roots only through hook_host_kind"
+fi
+check "library routes through the shared accessor" "hook_host_kind" "$code_only"
 
 echo
 echo "## Every referenced spec exists on disk"
@@ -239,7 +382,6 @@ for budget in \
   '.agents/prompts/commit-push-runner.md:280:1900' \
   '.agents/prompts/commit-push-task.md:140:1100' \
   '.agents/prompts/verdict-runner.md:110:850' \
-  '.agents/prompts/verdict-task.md:130:1000' \
   '.claude/agents/commit-push-auditor.md:560:4200' \
   '.claude/agents/verdict-auditor.md:850:6500'; do
   relative="${budget%%:*}"
@@ -247,6 +389,13 @@ for budget in \
   max_words="${limits%%:*}"
   max_bytes="${limits#*:}"
   document="$PLUGIN_ROOT/$relative"
+  # A missing document must FAIL here. `wc` on one prints nothing, the counts read as
+  # zero, and a budget check answers "within budget" about a file that does not exist
+  # — so a deleted prompt would be reported as the tightest one in the suite.
+  if [[ ! -r "$document" ]]; then
+    bad "$relative stays within its model-context budget (document is missing)"
+    continue
+  fi
   words="$(wc -w < "$document" | tr -d ' ')"
   bytes="$(wc -c < "$document" | tr -d ' ')"
   if (( words <= max_words && bytes <= max_bytes )); then
@@ -280,19 +429,14 @@ commit_task_rendered="$(subagent_prompt commit-push-task "$PLUGIN_ROOT" \
   'task_input_json={"marker":"DYNAMIC_COMMIT_TASK"}')"
 static_precedes_dynamic "commit task keeps reusable policy before run data" \
   "$commit_task_rendered" 'parent history is intentionally unavailable' DYNAMIC_COMMIT_TASK
-for verdict_prompt in verdict-runner verdict-task; do
-  verdict_rendered="$(subagent_prompt "$verdict_prompt" "$PLUGIN_ROOT" \
-    'task_input_json={"marker":"DYNAMIC_VERDICT_TASK"}')"
-  static_precedes_dynamic "$verdict_prompt keeps reusable policy before run data" \
-    "$verdict_rendered" 'bind `generation` exactly' DYNAMIC_VERDICT_TASK
-done
-if cmp -s \
-  <(subagent_strip_frontmatter "$PLUGIN_ROOT/.agents/prompts/verdict-runner.md") \
-  <(subagent_strip_frontmatter "$PLUGIN_ROOT/.agents/prompts/verdict-task.md"); then
-  ok "native and headless verdict prompts share one byte-identical policy body"
-else
-  bad "native and headless verdict prompts share one byte-identical policy body"
-fi
+# verdict-runner is the only verdict prompt. The Stop gate runs its auditor
+# synchronously rather than emitting a spawn instruction, so the task-prompt twin it
+# used to pair with is gone; the byte-identical-body check that compared the two went
+# with it. run-verdict-audit.sh:909 is the single remaining consumer.
+verdict_rendered="$(subagent_prompt verdict-runner "$PLUGIN_ROOT" \
+  'task_input_json={"marker":"DYNAMIC_VERDICT_TASK"}')"
+static_precedes_dynamic "verdict-runner keeps reusable policy before run data" \
+  "$verdict_rendered" 'bind `generation` exactly' DYNAMIC_VERDICT_TASK
 
 model_documents="$(cat \
   "$PLUGIN_ROOT"/.agents/prompts/*.md \

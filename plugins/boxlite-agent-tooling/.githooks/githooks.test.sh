@@ -175,7 +175,8 @@ setup() {
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
      "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
-     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" "$d/.agents/lib/"
+     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
+     "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
   cp "$REPO_ROOT/.agents/prompts/"*.md "$d/.agents/prompts/"
   printf 'x\n' > "$d/f"
 
@@ -188,7 +189,8 @@ setup() {
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
      "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
-     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" "$plugin/.agents/lib/"
+     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
+     "$REPO_ROOT/.agents/lib/hook-host.sh" "$plugin/.agents/lib/"
   git -C "$scratch" init -q
   git -C "$scratch" config user.email t@t.test
   git -C "$scratch" config user.name tester
