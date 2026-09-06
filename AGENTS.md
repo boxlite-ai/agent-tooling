@@ -10,7 +10,7 @@
 - `guidance/workflow.md` is canonical domain-neutral guidance. Explicit sync splices a byte-stable, hash-marked block; gates fail on missing/tampered blocks and warn on stale ones. Keep it within 150 lines.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=3f8cc03c0492 sha256=2728d86a743f -->
+<!-- agent-tooling:guidance:begin rev=98a8bf1600f7 sha256=657194b24244 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -86,6 +86,7 @@ Every change goes: understand → research → design → implement → test →
 - An auditor still running after 30 seconds opens one interactive choice on hosts that support asynchronous re-wake: Keep waiting, or Force pass because the auditor is taking too long. No response leaves the auditor running. The host cannot dismiss an outstanding question when PASS/FAIL arrives, so a stale card may remain; its generation-bound selection is rejected after terminal completion or replacement. Other hosts publish a non-blocking typed status instead. The first non-empty line `force-pass-auditors: <required reason>` remains the headless/accessibility fallback. An override is recorded as `OVERRIDDEN BY USER`, never PASS, expires within one hour, and is revoked by the next real prompt. It bypasses only `commit-push-auditor` and `verdict-auditor`; installation/guidance checks, PR-review acknowledgement, chained hooks, push ref binding/watchers, permissions, and remote protections still run.
 - Honor scope reduction: "drop X" means drop X. Don't bundle adjacent improvements unprompted.
 - Treat every failure as a class, not an instance: when one surfaces, find and fix every sibling of the same shape in the same pass — grounded in what's actually there, not speculation. A single-site fix to a systemic bug isn't done.
+- Supersede completely: when behavior changes, delete every artifact describing the old way in the same change — code, comments, prose, tests asserting the old contract, and cross-references that now point at nothing. Grep for what you replaced, not just the file you edited. Prose that contradicts the code is worse than none, because it is read as current.
 
 **Communication**
 
