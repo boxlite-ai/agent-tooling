@@ -82,6 +82,57 @@ verdict_audit_read_json_snapshot() {  # dossier-path
   verdict_audit_read_regular_state "$1" 1048576 json
 }
 
+# Size of a path that must still be the plain file the caller created. Ordinary `<`
+# redirection cannot be used for this: a path swapped for a FIFO parks the open forever
+# and hangs the caller instead of failing it. Same guards as
+# verdict_audit_read_regular_state — O_NONBLOCK, O_NOFOLLOW, an lstat before and an
+# fstat identity match after, and a one-second alarm — but it reports the size rather
+# than the body, so a multi-megabyte file can be measured without being read.
+verdict_audit_regular_file_bytes() {  # path -> byte count; non-zero when unsafe
+  command -v perl >/dev/null 2>&1 || return 1
+  perl -MFcntl=:DEFAULT -e '
+    my ($path) = @ARGV;
+    $SIG{ALRM} = sub { exit 1 };
+    alarm 1;
+    exit 1 if lstat($path) && -l _;
+    my $flags = O_RDONLY | O_NONBLOCK;
+    $flags |= Fcntl::O_NOFOLLOW() if defined &Fcntl::O_NOFOLLOW;
+    sysopen(my $fh, $path, $flags) or exit 1;
+    my @opened = stat($fh);
+    my @named = lstat($path);
+    exit 1 unless @opened && @named && -f $fh
+      && $opened[0] == $named[0] && $opened[1] == $named[1];
+    alarm 0;
+    print $opened[7];
+  ' "$1"
+}
+
+# Why a completed agent's two output files are unusable, or empty when both are fine:
+# `output-state` when either stopped being the plain file the caller created,
+# `output-limit` when either reached its ceiling.
+#
+# A live poller cannot answer this on its own. Its loop ends the moment a status record
+# exists, so an agent that crosses a ceiling and exits inside one poll interval is
+# never measured, and the ceiling would hold only for writers slow enough to be caught.
+# This runs once the process is reaped, when both files are final.
+#
+# Split out of the caller rather than inlined so it can be tested against a FIFO
+# directly. Reached through the caller it is racy to exercise — a poller watching the
+# same paths may report first — and that race is a property of the poller, not of this
+# decision, which has none.
+verdict_audit_output_reason() {  # result-path result-max stderr-path stderr-max
+  local result_path="$1" result_max="$2" stderr_path="$3" stderr_max="$4"
+  local result_bytes stderr_bytes
+  if ! result_bytes="$(verdict_audit_regular_file_bytes "$result_path")" \
+     || ! stderr_bytes="$(verdict_audit_regular_file_bytes "$stderr_path")"; then
+    printf 'output-state'
+    return 0
+  fi
+  if (( result_bytes >= result_max || stderr_bytes >= stderr_max )); then
+    printf 'output-limit'
+  fi
+}
+
 # Copy one exact regular source inode into a new private regular file. This is the
 # binary-safe companion to verdict_audit_read_regular_state: large diffs stay out of
 # shell variables, FIFOs/symlinks fail without blocking, and a source changed in place

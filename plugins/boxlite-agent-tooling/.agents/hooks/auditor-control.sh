@@ -8,6 +8,7 @@ verdict_state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
 override_state_lib="$tooling_root/.agents/lib/auditor-override-state.sh"
 control_state_lib="$tooling_root/.agents/lib/auditor-control-state.sh"
 interactive_prompt_lib="$tooling_root/.agents/lib/hook-interactive-prompt.sh"
+host_lib="$tooling_root/.agents/lib/hook-host.sh"
 for required in jq perl git shasum; do
   command -v "$required" >/dev/null 2>&1 || {
     printf 'auditor-control.sh: required dependency not found: %s\n' "$required" >&2
@@ -15,7 +16,8 @@ for required in jq perl git shasum; do
   }
 done
 [[ -r "$verdict_state_lib" && -r "$override_state_lib" \
-   && -r "$control_state_lib" && -r "$interactive_prompt_lib" ]] || {
+   && -r "$control_state_lib" && -r "$interactive_prompt_lib" \
+   && -r "$host_lib" ]] || {
   printf 'auditor-control.sh: shared state libraries are unavailable.\n' >&2
   exit 2
 }
@@ -27,6 +29,8 @@ source "$override_state_lib"
 source "$control_state_lib"
 # shellcheck source=../lib/hook-interactive-prompt.sh
 source "$interactive_prompt_lib"
+# shellcheck source=../lib/hook-host.sh
+source "$host_lib"
 
 # Module context is populated once repository identity has been validated below.
 auditor_control_state_dir=
@@ -828,7 +832,7 @@ case "$event" in
         "$scope" "$auditor" "$generation" "$epoch")"; then
       wake_nonce="$(printf '%s' "$escalation_result" | jq -er \
         '.wake_nonce | select(type == "string" and test("^[0-9a-f]{64}$"))')" || exit 2
-      if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -z "${PLUGIN_ROOT:-}" ]]; then
+      if [[ "$(hook_host_kind)" == claude ]]; then
         control_script="$tooling_root/.agents/hooks/auditor-control.sh"
         keep_payload="$(jq -nc --arg session "$session_id" --arg auditor "$auditor" \
           --arg generation "$generation" \

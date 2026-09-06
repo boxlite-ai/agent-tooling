@@ -45,7 +45,8 @@ stage_lib() {  # $1 = fake repo root
      "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
-     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" "$1/.agents/lib/"
+     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
+     "$REPO_ROOT/.agents/lib/hook-host.sh" "$1/.agents/lib/"
   # The prompts travel with the library: they are the text it loads, and the hook
   # treats a missing prompt document as an error rather than improvising one.
   cp "$REPO_ROOT/.agents/prompts/"*.md "$1/.agents/prompts/"
@@ -1082,14 +1083,18 @@ fi
 rm -f "$handoff_path" "$TMP/replacement-handoff.json" "$TMP/.agents/state/last-audit.json"
 
 echo
-echo "## The deny reason offers BOTH hosts, whatever the environment says"
+echo "## The deny reason names the caller's host, and every route when it is unknown"
 # The regression this pins: the dispatch used to pick ONE host's instruction by
 # testing CODEX_SANDBOX, and hooks.json launches this hook with
 # `CODEX_SANDBOX=${CODEX_SANDBOX:-seatbelt}` — never empty — so Claude Code users were
 # always sent to the Codex producer and the Claude branch was dead in production.
 # Both branches passed their unit tests, because the tests call the script directly
-# and never through the wiring. Asserting on BOTH routes under BOTH environments is
-# what that pair of tests could not do.
+# and never through the wiring, which is why these go through the public hook boundary.
+#
+# CODEX_SANDBOX must still change nothing: it names a sandbox, not an agent. What does
+# decide is the plugin root the host injects, so the cases below drive this boundary as
+# each host and assert the routes that must be ABSENT as well as the one present — a
+# reason carrying the wrong host's route still reads as a perfectly good instruction.
 BOTH_REPO="$(mktemp -d)"
 git -C "$BOTH_REPO" init -q
 git -C "$BOTH_REPO" config user.email t@t.test
@@ -1103,10 +1108,14 @@ git -C "$BOTH_REPO" commit -qm base
 printf 'change\n' >> "$BOTH_REPO/f"
 git -C "$BOTH_REPO" add -A
 
+# Both plugin roots are cleared so this is genuinely the unknown host. Running the suite
+# from inside a hook would otherwise leave a real root exported, and the menu assertions
+# below would quietly exercise that host's single route instead.
 reason_for_repo() {  # repo, command, optional CODEX_SANDBOX value
   local repo="$1" target_command="$2" env_desc="${3:-}"
   printf '%s' "$target_command" | jq -Rs '{tool_input:{command:.}}' \
-    | ( cd "$repo" && CLAUDE_PROJECT_DIR="$repo" \
+    | ( cd "$repo" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT \
+        CLAUDE_PROJECT_DIR="$repo" \
         ${env_desc:+CODEX_SANDBOX="$env_desc"} \
         bash "$repo/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null \
     | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null
@@ -1140,10 +1149,52 @@ case "$reason" in
   *"collaboration.spawn_agent("*) ok_codex=1 ;; *) ok_codex=0 ;;
 esac
 if [[ "$ok_claude" == 1 && "$bare_claude" == 0 && "$ok_codex" == 1 ]]; then
-  pass=$((pass + 1)); printf '  PASS  the deny reason names both Task() and spawn_agent()\n'
+  pass=$((pass + 1)); printf '  PASS  an unknown host is offered both Task() and spawn_agent()\n'
 else
-  fail=$((fail + 1)); printf '  FAIL  the deny reason names both Task() and spawn_agent()  (claude=%s bare=%s codex=%s)\n' \
+  fail=$((fail + 1)); printf '  FAIL  an unknown host is offered both Task() and spawn_agent()  (claude=%s bare=%s codex=%s)\n' \
     "$ok_claude" "$bare_claude" "$ok_codex"
+fi
+
+# Same hook, same command, driven as each known host.
+reason_as_host() {  # claude | codex
+  local host="$1" payload
+  payload="$(printf '%s' "git commit -m 'test: x'" | jq -Rs '{tool_input:{command:.}}')"
+  case "$host" in
+    claude)
+      printf '%s' "$payload" | ( cd "$BOTH_REPO" && env -u PLUGIN_ROOT \
+        CLAUDE_PROJECT_DIR="$BOTH_REPO" CLAUDE_PLUGIN_ROOT="$BOTH_REPO" \
+        CODEX_SANDBOX=seatbelt \
+        bash "$BOTH_REPO/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null ;;
+    codex)
+      printf '%s' "$payload" | ( cd "$BOTH_REPO" && env -u CLAUDE_PLUGIN_ROOT \
+        CLAUDE_PROJECT_DIR="$BOTH_REPO" PLUGIN_ROOT="$BOTH_REPO" \
+        bash "$BOTH_REPO/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null ;;
+  esac | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null
+}
+
+claude_reason="$(reason_as_host claude)"
+claude_has_task=0; claude_has_codex=0; claude_has_headless=0
+case "$claude_reason" in *'Task(subagent_type="boxlite-agent-tooling:commit-push-auditor"'*) claude_has_task=1 ;; esac
+case "$claude_reason" in *"collaboration.spawn_agent("*) claude_has_codex=1 ;; esac
+case "$claude_reason" in *"No agent runtime"*) claude_has_headless=1 ;; esac
+# CODEX_SANDBOX is set here on purpose: the variable that used to decide must not.
+if [[ "$claude_has_task" == 1 && "$claude_has_codex" == 0 && "$claude_has_headless" == 0 ]]; then
+  pass=$((pass + 1)); printf '  PASS  a Claude host is offered Task() alone, with CODEX_SANDBOX set\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  a Claude host is offered Task() alone, with CODEX_SANDBOX set  (task=%s codex=%s headless=%s)\n' \
+    "$claude_has_task" "$claude_has_codex" "$claude_has_headless"
+fi
+
+codex_reason="$(reason_as_host codex)"
+codex_has_task=0; codex_has_codex=0; codex_has_headless=0
+case "$codex_reason" in *'Task(subagent_type='*) codex_has_task=1 ;; esac
+case "$codex_reason" in *"collaboration.spawn_agent("*) codex_has_codex=1 ;; esac
+case "$codex_reason" in *"No agent runtime"*) codex_has_headless=1 ;; esac
+if [[ "$codex_has_codex" == 1 && "$codex_has_task" == 0 && "$codex_has_headless" == 0 ]]; then
+  pass=$((pass + 1)); printf '  PASS  a Codex host is offered spawn_agent() alone\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  a Codex host is offered spawn_agent() alone  (task=%s codex=%s headless=%s)\n' \
+    "$codex_has_task" "$codex_has_codex" "$codex_has_headless"
 fi
 
 # Codex runs with fork_turns:none, so the task crossing this public boundary must not

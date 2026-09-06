@@ -7,7 +7,8 @@
 #
 # Flow on a denied attempt:
 #   1. Hook denies the git tool call.
-#   2. Reason text names every route to an auditor; the agent takes the one it has.
+#   2. Reason text names the calling host's route to an auditor, or every route when
+#      that host cannot be identified.
 #   3. That auditor writes .agents/state/last-audit.json.
 #   4. Parent retries -> hook reads the artifact and allows on PASS.
 #
@@ -511,9 +512,11 @@ fi
 # shellcheck source=../lib/subagent.sh
 source "$subagent_lib"
 
-# One instruction, naming every route. Nothing here inspects the environment to choose
-# between hosts: capability is something the agent knows about itself, while an
-# environment variable can be set by whatever launched the hook.
+# One instruction, naming the calling host's route — or every route when that host
+# cannot be named. The choice comes from the plugin root the host injects into this
+# hook's own environment, never from a marker the session exports to every child: the
+# latter reports what launched the process tree rather than who is calling here.
+# .agents/lib/hook-host.sh carries which signals qualify and which only look like it.
 #
 # Under the git-level gate `$command` is the placeholder pre-commit synthesized, not
 # what the agent typed. Name the real one from the handoff whenever it can be bound;
@@ -756,10 +759,12 @@ ${advisories}"
 
 }
 
-# This gate never produces the audit itself. It denies, names every way to spawn an
-# auditor, and the agent uses whichever its runtime provides — Task() under Claude
-# Code, collaboration.spawn_agent under Codex, the headless producer when neither
-# exists. One path for every host, and no environment sniffing to get it wrong.
+# This gate never produces the audit itself. It denies and names the way to spawn an
+# auditor on the host that is calling — Task() under Claude Code,
+# collaboration.spawn_agent under Codex — falling back to every route, headless
+# producer included, when the host is unknown. Reached through the git-level gate
+# below, no plugin root is injected and that fallback is what prints, which is
+# correct: a git hook genuinely cannot tell which agent ran the command.
 
 # Delegate to the git-level gate when installed: with core.hooksPath pointing at
 # .githooks, the same contract is enforced by .githooks/pre-commit|pre-push for

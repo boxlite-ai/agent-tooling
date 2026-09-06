@@ -54,6 +54,18 @@ claude_hook() {
   )
 }
 
+# Codex exports the other plugin-root name. It has no AskUserQuestion, so it has to
+# land on the same non-blocking status a runtime with neither name gets: handing it the
+# interactive card would be an instruction it cannot carry out. Only the Claude branch
+# may take that path, and this is the case that pins the difference.
+codex_hook() {
+  local repo="$1" payload="$2"
+  printf '%s' "$payload" | (
+    cd "$repo" && env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$REPO_ROOT" \
+      CLAUDE_PROJECT_DIR="$repo" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
+  )
+}
+
 handle_prompt() {  # repo, payload, old epoch, new epoch
   printf '%s' "$2" | (
     cd "$1" && CLAUDE_PROJECT_DIR="$1" bash "$CONTROL" handle-prompt "$3" "$4"
@@ -156,6 +168,20 @@ check_eq "portable hosts receive the same instruction as JSON without an unknown
 check_eq "doing nothing leaves the auditor active" \
   "policy=$(jq -r '.no_response' "$portable_escalation") active=$([[ -e "$R/.agents/state/auditor-control/active.$scope.verdict-auditor.json" ]] && echo yes || echo no)" \
   "policy=keep-running active=yes"
+
+# Same escalation, a host that exports the OTHER root: it must take the portable branch,
+# not Claude's. Asserting the absence of the card matters as much as the presence of the
+# status — routing that sent Codex an AskUserQuestion payload would still look plausible.
+codex_route_start="$(jq -nc --arg s "$session" --arg id codex-route \
+  '{hook_event_name:"SubagentStart",session_id:$s,agent_id:$id,agent_type:"verdict-auditor"}')"
+codex_route_out="$(codex_hook "$R" "$codex_route_start" 2>"$R/codex-route.err")"; codex_route_rc=$?
+codex_route_escalation="$R/.agents/state/auditor-control/escalation.$scope.verdict-auditor.codex-route.json"
+check_eq "Codex receives the portable status, never the Claude interactive card" \
+  "rc=$codex_route_rc state=$(jq -r '.state' "$codex_route_escalation" 2>/dev/null) note=$(printf '%s' "$codex_route_out" | jq -r '.systemMessage | contains("non-blocking assistant status")') card=$(grep -c 'Invoke AskUserQuestion' "$R/codex-route.err" || true)" \
+  "rc=0 state=open note=true card=0"
+codex_route_stop="$(jq -nc --arg s "$session" --arg id codex-route \
+  '{hook_event_name:"SubagentStop",session_id:$s,agent_id:$id,agent_type:"verdict-auditor",last_assistant_message:"PASS"}')"
+codex_hook "$R" "$codex_route_stop" >/dev/null 2>&1
 
 portable_hook "$R" "$portable_start" >/dev/null
 escalation_count="$(jq -r 'select(.event == "escalated" and .generation == "portable-audit") | .generation' "$event_file" | wc -l | tr -d ' ')"

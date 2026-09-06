@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PostToolUse hook: after a successful remote write, tell WHICHEVER agent is
-# running to attach a consumer to the pr-watch event stream.
+# PostToolUse hook: after a successful remote write, tell the agent that is running
+# to attach a consumer to the pr-watch event stream.
 #
 # This is the in-session *consumer* of the watch. The producer is universal —
 # .githooks/pre-push starts .agents/watch/pr-watch.sh for every agent and every
@@ -11,12 +11,10 @@
 # resolves it through the generic plugin.json, Codex through
 # .codex-plugin/plugin.json: the vendor manifests register, .agents/ implements.
 #
-# The context names one attach route PER capability — Monitor for Claude Code, a
-# background shell for Codex, a plain drain for anything else — and the agent
-# self-selects. It deliberately does NOT sniff the host to emit only "its" route:
-# the one gate that did (CODEX_SANDBOX) picked wrong on every host, because env
-# vars report sandbox state, not which agent is running. See the post-mortem in
-# .agents/lib/subagent.sh.
+# The context names the attach route this host has — Monitor for Claude Code, a
+# background shell for Codex — and names all of them when hook_host_kind answers
+# `unknown`. That accessor is the only sanctioned way to ask; .agents/lib/hook-host.sh
+# carries which signals are trustworthy and which look right but are not.
 #
 # Design notes
 # ------------
@@ -100,6 +98,13 @@ if [[ ! -r "$safe_state_helpers" ]]; then
 fi
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$safe_state_helpers"
+host_helpers="$tooling_root/.agents/lib/hook-host.sh"
+if [[ ! -r "$host_helpers" ]]; then
+  printf 'post-remote-write-watch: host helper not found: %s\n' "$host_helpers" >&2
+  exit 1
+fi
+# shellcheck source=../lib/hook-host.sh
+source "$host_helpers"
 command -v shasum >/dev/null 2>&1 || {
   printf 'post-remote-write-watch: shasum not found\n' >&2
   exit 127
@@ -927,14 +932,30 @@ if (( branch_count > 1 || omitted_ref_count > 0 )); then
   pushed_ref_count=$((branch_count + omitted_ref_count))
   branch_line="Remote write succeeded for ${pushed_ref_count} pushed branches; ${branch_count} exact watcher generations attached, ${omitted_ref_count} omitted."
 fi
+# Name the attach route this host actually has; fall back to all of them when the
+# host is unknown (a runtime this hook has not been taught about). Narrowing also
+# buys headroom against the 1400-byte ceiling enforced below.
+case "$(hook_host_kind)" in
+  claude)
+    attach_line="Claude: Monitor({command: <stream command>, persistent: true})."
+    compact_attach_line="Claude: use Monitor with this command." ;;
+  codex)
+    attach_line="Codex: run it in a background shell and read at natural pauses."
+    compact_attach_line="Codex: run it in a background shell." ;;
+  *)
+    attach_line="Claude: Monitor({command: <stream command>, persistent: true}). Codex: run it in a
+background shell and read at natural pauses. Without background support, cat its
+log before each turn ends."
+    compact_attach_line="Claude: use Monitor with this command. Codex: run it in a background shell. Without
+background support, drain it before turns end." ;;
+esac
+
 context="${branch_line} ${pr_line}
-Attach exactly ONE consumer using WHICHEVER route exists; do not attach twice or
+Attach exactly ONE consumer using the route below; do not attach twice or
 poll gh pr checks. Stream command:
   ${stream_command}
 
-Claude: Monitor({command: <stream command>, persistent: true}). Codex: run it in a
-background shell and read at natural pauses. Without background support, cat its
-log before each turn ends. Replay is bounded and generation-scoped; it exits at watch_end.
+${attach_line} Replay is bounded and generation-scoped; it exits at watch_end.
 
 fail/cancel: run gh run view <run-id> --log-failed. kind 'conflict': alert the
 human to the confirmed conflict (confirmed merge conflict) and inspect both
@@ -954,8 +975,7 @@ if (( context_bytes > context_max_bytes )); then
 Attach exactly ONE consumer.
 Stream command:
   ${stream_command}
-Claude: use Monitor with this command. Codex: run it in a background shell. Without
-background support, drain it before turns end. Read the escalation policy at JSON path
+${compact_attach_line} Read the escalation policy at JSON path
 ${policy_path_json} before editing. Notify the human for fail/cancel, confirmed
 conflict, and every new comment/review/thread including bots; routine passing checks
 stay silent."

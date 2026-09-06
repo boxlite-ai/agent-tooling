@@ -70,7 +70,8 @@ setup() {  # [object format] -> repo path
     "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
     "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
     "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
-    "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" "$d/.agents/lib/"
+    "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
+    "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
   cp "$REPO_ROOT/.agents/prompts/"*.md "$d/.agents/prompts/"
   printf 'base\n' > "$d/f"
   git -C "$d" add -A
@@ -143,7 +144,32 @@ fi
   printf 'approval=%s\n' "$approval"
   printf 'schema=%s\n' "$([[ -r "$schema" ]] && echo readable || echo MISSING)"
 } > "$FAKE_DIR/flags.txt"
+if [[ -n "${CODEX_FAKE_STDERR_KIB:-}" ]]; then
+  # The CLI narrates its work on stderr, so this stream grows with the size of the
+  # change being audited, not with the size of the answer. Written in one burst and
+  # followed immediately by a normal exit, which is the shape the live poller cannot
+  # catch: the status record lands before its next tick.
+  perl -e 'print STDERR "s" x 1024 for 1 .. $ARGV[0]' "$CODEX_FAKE_STDERR_KIB"
+fi
+if [[ -n "${CODEX_FAKE_SCRATCH_KIB:-}" ]]; then
+  # The real CLI writes its own stores (model cache, session state) while running.
+  # `ulimit -f` is process-wide, so a ceiling sized for our evidence file strangles
+  # those too — and the CLI then exits 0 having written NOTHING, output and stderr
+  # alike. Reproduce that exact shape rather than a visible error.
+  if ! dd if=/dev/zero of="$FAKE_DIR/cli-scratch.bin" bs=1024 \
+       count="$CODEX_FAKE_SCRATCH_KIB" >/dev/null 2>&1; then
+    exit 0
+  fi
+  rm -f "$FAKE_DIR/cli-scratch.bin"
+fi
 printf '%s' "${CODEX_FAKE_OUTPUT:-}" > "$out"
+if [[ -n "${CODEX_FAKE_FIFO_SWAP:-}" ]]; then
+  # Swap the result for a FIFO on the way out. Timing this against the live monitor is
+  # deliberately not attempted: the case built on it asserts only that the gate reports
+  # rather than stalls, and either layer satisfies that. The red-side proof lives in
+  # verdict_audit_output_reason, where no monitor exists to race.
+  rm -f "$out" && mkfifo "$out"
+fi
 if [[ -n "${CODEX_FAKE_MUTATE_FILE:-}" ]]; then
   printf '%s\n' "${CODEX_FAKE_MUTATE_CONTENT:-test(hooks): changed during audit}" \
     > "$CODEX_FAKE_MUTATE_FILE"
@@ -192,9 +218,16 @@ perl -MIO::Handle -e '
   };
   $SIG{INT} = "IGNORE";
   STDERR->autoflush(1);
-  my $bytes = $mode eq "cap" ? 2048 : 128;
-  my $delay = $mode eq "cap" ? 0.01 : 0.10;
+  # A cap case must actually REACH the ceiling it names inside the case window, and
+  # only that one: at a few KiB per tick it reached neither and stopped on the
+  # deadline instead, so the assertion held on a bound it could not have crossed.
+  # Rates are chosen to cross in well under a second while keeping the overshoot to
+  # roughly one poll interval, so the case stays fast and does not churn the disk.
+  my $bytes = $mode eq "timeout" ? 128 : 32768;
+  my $delay = $mode eq "timeout" ? 0.10 : 0.005;
   my $chunk = "d" x $bytes;
+  # `capresult` holds stderr still so the RESULT ceiling is the only one reachable.
+  exit 0 if $mode eq "capresult";
   while (1) { print STDERR $chunk; select(undef, undef, undef, $delay); }
 ' "$FAKE_DIR/resource-descendant.pid" "$FAKE_DIR/resource-term.log" "$mode" &
 exec perl -MIO::Handle -e '
@@ -206,11 +239,17 @@ exec perl -MIO::Handle -e '
     print {$term_file} "parent\n"; close($term_file);
   };
   $SIG{INT} = "IGNORE";
-  my $bytes = $mode eq "cap" ? 2048 : 128;
-  my $delay = $mode eq "cap" ? 0.01 : 0.10;
+  my $bytes = $mode eq "timeout" ? 128 : 32768;
+  my $delay = $mode eq "timeout" ? 0.10 : 0.005;
   my $chunk = "p" x $bytes;
+  # `capstderr` leaves the result untouched so only the stderr ceiling can be the one
+  # that fires. Growing both would let the result cap — 64 times tighter — trip first
+  # every time, which is how a single case ended up proving neither.
+  my $grow_result = $mode ne "capstderr";
+  my $grow_stderr = $mode ne "capresult";
   while (1) {
-    print {$out_file} $chunk; print STDERR $chunk;
+    print {$out_file} $chunk if $grow_result;
+    print STDERR $chunk if $grow_stderr;
     select(undef, undef, undef, $delay);
   }
 ' "$out" "$FAKE_DIR/resource-term.log" "$mode"
@@ -301,6 +340,9 @@ audit() {  # $1 = repo, $2 = fake auditor output, [$3 = mode], [$4 = command]
       AUDIT_TEST_SWAP_DIFF_ON_CALL="${AUDIT_TEST_SWAP_DIFF_ON_CALL:-}" \
       AUDIT_TEST_SWAP_DIFF_FILE="${AUDIT_TEST_SWAP_DIFF_FILE:-}" \
       CODEX_BIN="$repo/bin/codex" CODEX_FAKE_OUTPUT="$out" \
+      CODEX_FAKE_SCRATCH_KIB="${CODEX_FAKE_SCRATCH_KIB:-}" \
+      CODEX_FAKE_STDERR_KIB="${CODEX_FAKE_STDERR_KIB:-}" \
+      CODEX_FAKE_FIFO_SWAP="${CODEX_FAKE_FIFO_SWAP:-}" \
       CODEX_FAKE_MUTATE_FILE="${CODEX_FAKE_MUTATE_FILE:-}" \
       CODEX_FAKE_MUTATE_CONTENT="${CODEX_FAKE_MUTATE_CONTENT:-}" \
       CODEX_COMMIT_PUSH_AUDIT_MODE="$mode" \
@@ -394,16 +436,25 @@ else
 fi
 rm -rf "$R_RESOURCE_TIMEOUT"
 
+# The monitors are what bound a hostile auditor's two streams; the process-wide file
+# ceiling is a runaway-disk guard three orders of magnitude above them, so it is no
+# longer the first thing to bite. The byte bound below is therefore not the assertion
+# that matters — the STOP REASON is. A case that merely stayed under a ceiling it was
+# too slow to reach would pass while proving nothing, so the finding must name the
+# active limit rather than the deadline.
 R_RESOURCE_CAP="$(setup)"; install_resource_stub "$R_RESOURCE_CAP"
-run_resource_case "$R_RESOURCE_CAP" cap 4 7
+run_resource_case "$R_RESOURCE_CAP" cap 30 40
+cap_finding_lower="$(printf '%s' "$resource_case_finding" | tr '[:upper:]' '[:lower:]')"
 cap_resource_state="rc=$resource_case_rc elapsed=$resource_case_elapsed verdict=$resource_case_verdict"
 cap_resource_state="$cap_resource_state output=$resource_case_output_bytes stderr=$resource_case_stderr_bytes"
 cap_resource_state="$cap_resource_state gone=$resource_case_processes_gone term=$resource_case_term"
 if [[ "$resource_case_rc" != 0 && "$resource_case_rc" != 124 ]] \
-   && (( resource_case_elapsed < 7 )) \
+   && (( resource_case_elapsed < 30 )) \
    && [[ "$resource_case_verdict" == FAIL ]] \
-   && (( resource_case_output_bytes >= 0 && resource_case_output_bytes <= 262144 )) \
-   && (( resource_case_stderr_bytes >= 0 && resource_case_stderr_bytes <= 262144 )) \
+   && [[ "$cap_finding_lower" == *"active limit"* ]] \
+   && [[ "$cap_finding_lower" != *timeout* && "$cap_finding_lower" != *timed\ out* ]] \
+   && (( resource_case_output_bytes >= 0 && resource_case_output_bytes <= 33554432 )) \
+   && (( resource_case_stderr_bytes >= 0 && resource_case_stderr_bytes <= 33554432 )) \
    && [[ "$resource_case_processes_gone" == yes ]] \
    && [[ "$resource_case_term" == *parent* && "$resource_case_term" == *descendant* ]]; then
   ok "live result and stderr ceilings terminate and reap the hostile auditor ($cap_resource_state)"
@@ -411,6 +462,54 @@ else
   bad "live result and stderr ceilings terminate and reap the hostile auditor ($cap_resource_state finding=$resource_case_finding)"
 fi
 rm -rf "$R_RESOURCE_CAP"
+
+# The case above grows BOTH streams, so it cannot name which ceiling stopped the
+# writer: with a wide byte bound it still passes when only the stderr monitor works.
+# This one holds stderr still, leaving the result ceiling as the only limit reachable,
+# and bounds the result tightly enough that reaching it is the only way to pass.
+R_RESOURCE_RESULT="$(setup)"; install_resource_stub "$R_RESOURCE_RESULT"
+run_resource_case "$R_RESOURCE_RESULT" capresult 30 40
+result_cap_state="rc=$resource_case_rc elapsed=$resource_case_elapsed verdict=$resource_case_verdict"
+result_cap_state="$result_cap_state output=$resource_case_output_bytes stderr=$resource_case_stderr_bytes"
+result_cap_state="$result_cap_state gone=$resource_case_processes_gone term=$resource_case_term"
+result_finding_lower="$(printf '%s' "$resource_case_finding" | tr '[:upper:]' '[:lower:]')"
+if [[ "$resource_case_rc" != 0 && "$resource_case_rc" != 124 ]] \
+   && (( resource_case_elapsed < 30 )) \
+   && [[ "$resource_case_verdict" == FAIL ]] \
+   && [[ "$result_finding_lower" == *"active limit"* ]] \
+   && [[ "$result_finding_lower" != *timeout* && "$result_finding_lower" != *timed\ out* ]] \
+   && (( resource_case_output_bytes >= 65536 )) \
+   && (( resource_case_stderr_bytes < 4194304 )) \
+   && [[ "$resource_case_processes_gone" == yes ]] \
+   && [[ "$resource_case_term" == *parent* ]]; then
+  ok "the result ceiling alone stops an auditor whose stderr stays quiet ($result_cap_state)"
+else
+  bad "the result ceiling alone stops an auditor whose stderr stays quiet ($result_cap_state finding=$resource_case_finding)"
+fi
+rm -rf "$R_RESOURCE_RESULT"
+
+# ...and the mirror: the result held still, leaving the stderr ceiling as the only
+# limit that can stop the auditor.
+R_RESOURCE_STDERR="$(setup)"; install_resource_stub "$R_RESOURCE_STDERR"
+run_resource_case "$R_RESOURCE_STDERR" capstderr 30 40
+stderr_cap_state="rc=$resource_case_rc elapsed=$resource_case_elapsed verdict=$resource_case_verdict"
+stderr_cap_state="$stderr_cap_state output=$resource_case_output_bytes stderr=$resource_case_stderr_bytes"
+stderr_cap_state="$stderr_cap_state gone=$resource_case_processes_gone term=$resource_case_term"
+stderr_finding_lower="$(printf '%s' "$resource_case_finding" | tr '[:upper:]' '[:lower:]')"
+if [[ "$resource_case_rc" != 0 && "$resource_case_rc" != 124 ]] \
+   && (( resource_case_elapsed < 30 )) \
+   && [[ "$resource_case_verdict" == FAIL ]] \
+   && [[ "$stderr_finding_lower" == *"active limit"* ]] \
+   && [[ "$stderr_finding_lower" != *timeout* && "$stderr_finding_lower" != *timed\ out* ]] \
+   && (( resource_case_output_bytes == 0 )) \
+   && (( resource_case_stderr_bytes >= 4194304 )) \
+   && [[ "$resource_case_processes_gone" == yes ]] \
+   && [[ "$resource_case_term" == *parent* && "$resource_case_term" == *descendant* ]]; then
+  ok "the stderr ceiling alone stops an auditor whose result stays small ($stderr_cap_state)"
+else
+  bad "the stderr ceiling alone stops an auditor whose result stays small ($stderr_cap_state finding=$resource_case_finding)"
+fi
+rm -rf "$R_RESOURCE_STDERR"
 
 # Deliver TERM from Bash's DEBUG hook after the model process group is forked
 # but before the `$!` assignment publishes its PGID. The hostile stub keeps the
@@ -552,6 +651,200 @@ echo "## A correct dossier is accepted"
 good="$(audit "$R" "$(bound_output "$R" PASS '[]')")"
 [[ "$(verdict_of "$good")" == "PASS" ]] && ok "well-formed, bound, PASS → written as PASS" \
                                         || bad "well-formed, bound, PASS → written as PASS (verdict=$(verdict_of "$good"))"
+
+echo
+echo "## The process-wide file ceiling does not strangle the CLI itself"
+# `ulimit -f` bounds EVERY file the auditor process writes, not just the two this
+# runner caps. A ceiling sized for the evidence file also blocks the CLI's own
+# stores, and the CLI then exits 0 having written no output and no stderr — which
+# reaches validation as "malformed JSON" and names nothing that would locate it.
+# 1 MiB of scratch stands in for those stores: comfortably past a 256 KiB ceiling,
+# far under one that leaves the CLI room to run.
+scratch_out="$(CODEX_FAKE_SCRATCH_KIB=1024 audit "$R" "$(bound_output "$R" PASS '[]')")"
+[[ "$(verdict_of "$scratch_out")" == "PASS" ]] \
+  && ok "an auditor writing its own 1 MiB store still returns a verdict" \
+  || bad "an auditor writing its own 1 MiB store still returns a verdict (verdict=$(verdict_of "$scratch_out") findings=$(printf '%s' "$scratch_out" | jq -c '.findings' 2>/dev/null))"
+
+# The result and the transcript are bounded separately. 256 KiB of stderr is four
+# times the result ceiling and would have killed this audit while it was still
+# working; a real audit of an ordinary commit narrates well past 64 KiB.
+verbose_out="$(CODEX_FAKE_STDERR_KIB=256 audit "$R" "$(bound_output "$R" PASS '[]')")"
+[[ "$(verdict_of "$verbose_out")" == "PASS" ]] \
+  && ok "a verbose auditor transcript does not cap the audit" \
+  || bad "a verbose auditor transcript does not cap the audit (verdict=$(verdict_of "$verbose_out") findings=$(printf '%s' "$verbose_out" | jq -c '.findings' 2>/dev/null))"
+
+# A burst past the ceiling followed by a clean exit is the case the live poller cannot
+# see: the status record exists before its next tick, so its loop ends without ever
+# measuring the file. Only the check taken after the group is reaped catches this, and
+# stderr has no second line of defence downstream the way the result does.
+burst_out="$(CODEX_FAKE_STDERR_KIB=5120 audit "$R" "$(bound_output "$R" PASS '[]')")"
+if printf '%s' "$burst_out" | jq -e '.verdict == "FAIL"' >/dev/null 2>&1 \
+   && printf '%s' "$burst_out" | jq -e '.findings[0] | test("active limit")' >/dev/null 2>&1; then
+  ok "a fast auditor that bursts past the stderr ceiling is still caught"
+else
+  bad "a fast auditor that bursts past the stderr ceiling is still caught (verdict=$(verdict_of "$burst_out") findings=$(printf '%s' "$burst_out" | jq -c '.findings' 2>/dev/null))"
+fi
+
+# Four cases cover the post-exit measurement, and only ONE of them is the red-side
+# proof. Which one matters, because three of them look sufficient and are not:
+#
+#   * verdict_audit_output_reason, below — the reproducer, demonstrated under a FULL
+#     revert of production to 29d39e5 rather than an internals swap. That revert leaves
+#     no post-exit measurement at all, so the case reaches its defect check through the
+#     smallest test-only adapter that supplies the old contract: both paths measured
+#     with plain `<` redirection, implementing none of the fix. Observed there:
+#
+#       PASS  two healthy output files give no reason to stop
+#       FAIL  a result that became a FIFO is reported, not waited on
+#             (blocked until the deadline)
+#       PASS  an oversized result is reported as a limit, not a state failure
+#
+#     Its two neighbours passing is what shows the adapter is faithful rather than
+#     itself the failure signal. Nothing polls these paths, so no second layer can
+#     answer first — unlike the end-to-end case, which is why that one claims less.
+#   * verdict_audit_regular_file_bytes, below — the input contract underneath it
+#     (regular, FIFO, symlink, directory, missing). Deterministic, but a contract test:
+#     deleting the helper fails these on the missing symbol rather than on the defect.
+#   * the burst case above — reaches the post-exit branch through the real runner;
+#     removing that branch turns it from FAIL into a clean PASS.
+#   * the end-to-end FIFO case at the end — integration only. It proves the gate
+#     REPORTS rather than stalls, and deliberately claims nothing more: its FIFO
+#     appears while the live monitor may still be polling, and that monitor emits the
+#     same failure, so on any given run either layer may be the one that caught it.
+# shellcheck source=../lib/verdict-audit-state.sh
+source "$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
+probe_dir="$(mktemp -d)"
+printf 'hello' > "$probe_dir/regular"
+mkfifo "$probe_dir/fifo"
+ln -s "$probe_dir/regular" "$probe_dir/link"
+probe_bytes="$(verdict_audit_regular_file_bytes "$probe_dir/regular" 2>/dev/null || printf 'refused')"
+[[ "$probe_bytes" == 5 ]] \
+  && ok "the post-exit measurement sizes a regular file" \
+  || bad "the post-exit measurement sizes a regular file (got=$probe_bytes)"
+# A FIFO must be REFUSED, not read: an ordinary open on one never returns.
+probe_started="$SECONDS"
+if verdict_audit_regular_file_bytes "$probe_dir/fifo" >/dev/null 2>&1; then
+  bad "the post-exit measurement refuses a FIFO"
+elif (( SECONDS - probe_started < 5 )); then
+  ok "the post-exit measurement refuses a FIFO without blocking"
+else
+  bad "the post-exit measurement refuses a FIFO without blocking ($(( SECONDS - probe_started ))s)"
+fi
+if verdict_audit_regular_file_bytes "$probe_dir/link" >/dev/null 2>&1; then
+  bad "the post-exit measurement refuses a symlink"
+else
+  ok "the post-exit measurement refuses a symlink"
+fi
+if verdict_audit_regular_file_bytes "$probe_dir/missing" >/dev/null 2>&1; then
+  bad "the post-exit measurement refuses a missing path"
+else
+  ok "the post-exit measurement refuses a missing path"
+fi
+# A directory is the non-regular input that does NOT block: opening one can succeed,
+# so only the `-f` check on the opened descriptor rejects it, and it would otherwise
+# report a size that means nothing.
+mkdir -p "$probe_dir/subdir"
+if verdict_audit_regular_file_bytes "$probe_dir/subdir" >/dev/null 2>&1; then
+  bad "the post-exit measurement refuses a directory"
+else
+  ok "the post-exit measurement refuses a directory"
+fi
+
+# The post-exit DECISION, called the way the runner calls it. This is the deterministic
+# pre-fix reproducer the end-to-end case cannot be: no poller exists here to answer
+# first, so the FIFO can only be seen by the code under test. Under a blocking read the
+# call never returns, so it runs behind a deadline — rc=124 is the pre-fix hang, and it
+# survives that change because the symbol stays put while its internals move.
+printf 'small' > "$probe_dir/ok-result"
+printf 'small' > "$probe_dir/ok-stderr"
+reason_ok="$(with_deadline 10 bash -c '
+  source "$1"; verdict_audit_output_reason "$2" 65536 "$3" 4194304' \
+  x "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
+  "$probe_dir/ok-result" "$probe_dir/ok-stderr" 2>/dev/null)"
+reason_ok_rc=$?
+[[ "$reason_ok_rc" != 124 && -z "$reason_ok" ]] \
+  && ok "two healthy output files give no reason to stop" \
+  || bad "two healthy output files give no reason to stop (rc=$reason_ok_rc reason=$reason_ok)"
+
+reason_fifo="$(with_deadline 10 bash -c '
+  source "$1"; verdict_audit_output_reason "$2" 65536 "$3" 4194304' \
+  x "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
+  "$probe_dir/fifo" "$probe_dir/ok-stderr" 2>/dev/null)"
+reason_fifo_rc=$?
+if (( reason_fifo_rc == 124 )); then
+  bad "a result that became a FIFO is reported, not waited on (blocked until the deadline)"
+elif [[ "$reason_fifo" == "output-state" ]]; then
+  ok "a result that became a FIFO is reported, not waited on"
+else
+  bad "a result that became a FIFO is reported, not waited on (rc=$reason_fifo_rc reason=$reason_fifo)"
+fi
+
+# ...and the same call still reports an oversized stream rather than an unsafe one.
+head -c 70000 /dev/zero > "$probe_dir/big-result"
+reason_big="$(with_deadline 10 bash -c '
+  source "$1"; verdict_audit_output_reason "$2" 65536 "$3" 4194304' \
+  x "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
+  "$probe_dir/big-result" "$probe_dir/ok-stderr" 2>/dev/null)"
+[[ "$reason_big" == "output-limit" ]] \
+  && ok "an oversized result is reported as a limit, not a state failure" \
+  || bad "an oversized result is reported as a limit, not a state failure (reason=$reason_big)"
+
+rm -rf "$probe_dir"
+
+# End to end: a result that stops being a regular file must make the gate REPORT, not
+# stall. That is the whole claim — either the live monitor or the post-exit measurement
+# may be what noticed, and this case cannot tell them apart, so it is not the red-side
+# proof for either (verdict_audit_output_reason above is). The deadline still sits
+# outside the call because a blocking read never returns, and an assertion inside a
+# hung call is never reached.
+fifo_repo="$(setup)"; install_stub "$fifo_repo"
+fifo_dossier="$fifo_repo/.agents/state/last-audit.json"
+rm -f "$fifo_dossier"
+fifo_started="$SECONDS"
+# Run INSIDE the fixture. The producer resolves its repo from the working directory, so
+# without this it audits whatever repository the suite itself is running in — passing or
+# failing on that tree's staged changes rather than on anything this case set up.
+( cd "$fifo_repo" && with_deadline 60 env PATH="$fifo_repo/bin:$PATH" \
+    CLAUDE_PROJECT_DIR="$fifo_repo" FAKE_DIR="$fifo_repo" \
+    AUDIT_TEST_REAL_GIT="$SYSTEM_GIT" \
+    CODEX_BIN="$fifo_repo/bin/codex" \
+    CODEX_FAKE_OUTPUT="$(bound_output "$fifo_repo" PASS '[]')" \
+    CODEX_FAKE_FIFO_SWAP=1 CODEX_COMMIT_PUSH_AUDIT_MODE=agentic \
+    bash "$fifo_repo/.agents/hooks/run-commit-push-audit.sh" commit "$CMD" \
+  >/dev/null 2>&1 )
+fifo_rc=$?
+fifo_elapsed=$(( SECONDS - fifo_started ))
+fifo_out="$(cat "$fifo_dossier" 2>/dev/null || true)"
+# 124 is the deadline's own kill: reaching it means the audit hung, which is the bug.
+# The finding must also name THIS failure — any quick FAIL would otherwise satisfy a
+# regression that is specifically about unsafe output paths.
+if (( fifo_rc != 124 )) && (( fifo_elapsed < 60 )) \
+   && printf '%s' "$fifo_out" | jq -e '.verdict == "FAIL"' >/dev/null 2>&1 \
+   && printf '%s' "$fifo_out" | jq -e '.findings[0] | test("stopped being regular files")' >/dev/null 2>&1; then
+  ok "a result swapped for a FIFO fails as an unsafe output path, without hanging (${fifo_elapsed}s)"
+else
+  bad "a result swapped for a FIFO fails as an unsafe output path, without hanging (rc=$fifo_rc ${fifo_elapsed}s verdict=$(verdict_of "$fifo_out") findings=$(printf '%s' "$fifo_out" | jq -c '.findings' 2>/dev/null))"
+fi
+rm -rf "$fifo_repo"
+
+# ...but the RESULT keeps its tight ceiling: that one is a dossier against a fixed
+# schema, and an oversized one is a runaway, not a busy auditor.
+oversized_result="$(audit "$R" "$(printf 'x%.0s' $(seq 1 70000))")"
+if printf '%s' "$oversized_result" | jq -e '.verdict == "FAIL"' >/dev/null 2>&1; then
+  ok "an oversized auditor result is still refused"
+else
+  bad "an oversized auditor result is still refused (verdict=$(verdict_of "$oversized_result"))"
+fi
+
+# An auditor that produced nothing at all must say so. Reaching the generic
+# malformed-JSON finding for an empty file is what made the ceiling bug expensive to
+# locate: the message describes the symptom and never the cause.
+empty_out="$(audit "$R" '')"
+if printf '%s' "$empty_out" | jq -e '.findings[0] | test("no output")' >/dev/null 2>&1; then
+  ok "an empty auditor result is reported as no output, not malformed JSON"
+else
+  bad "an empty auditor result is reported as no output, not malformed JSON (findings=$(printf '%s' "$empty_out" | jq -c '.findings' 2>/dev/null))"
+fi
 
 echo
 echo "## The auditor is invoked inside a sandbox it cannot escape"

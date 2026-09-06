@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Shared: tell WHICHEVER coding agent is running to spawn an independent subagent with
-# its OWN built-in, instead of detecting the host and shelling out to a vendor CLI.
+# Shared: tell the coding agent that is running to spawn an independent subagent with
+# its OWN built-in, instead of shelling out to a vendor CLI.
 #
 # Source it, don't run it:
 #   source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/subagent.sh"
@@ -20,15 +20,18 @@
 # callers (git hooks, CI) — pass it as --headless — but it is the exception now, not
 # the Codex route.
 #
-# Why there is no host detection here, and must not be
-# ----------------------------------------------------
-# Printing every route and letting the agent self-select is not a shortcut around
-# detecting the host — it is the fix. The gate that DID sniff an env var to choose a
-# route (`CODEX_SANDBOX` in preflight-commit-push.sh) picked wrong on every host,
-# because the wiring that launched it forced that variable non-empty and the variable
-# reports which sandbox is active rather than which agent is running. Capability is
-# something the agent knows about itself and the environment cannot lie about, so
-# routing on it makes that whole class of bug unreachable rather than patched.
+# Which routes get printed
+# ------------------------
+# One route when hook_host_kind names the host, every route when it answers `unknown`.
+# An agent handed a route it cannot take reads it anyway, and the Codex block in
+# particular carries a spec path and a task name that mean nothing under Claude Code.
+#
+# Unknown stays fail-open — a git hook, CI, or a host this library has not been taught
+# about gets the whole menu. A wrong single route is worse than a menu, so ambiguity
+# degrades to the menu rather than to a guess.
+#
+# Which signals may decide that, and which are traps, is hook-host.sh's subject; this
+# library must reach it only through hook_host_kind (subagent.test.sh enforces that).
 #
 # Spec delivery differs by host, so it is referenced rather than inlined
 # ---------------------------------------------------------------------
@@ -39,6 +42,34 @@
 #
 # A missing spec file is a packaging bug, not a runtime branch: this still emits the
 # instruction, and subagent.test.sh asserts every referenced spec exists.
+
+# hook_host_kind is the only sanctioned way to name the caller's host. Loading it here
+# rather than in each caller keeps that single accessor next to the one decision it
+# feeds; a fixture that stages subagent.sh must stage hook-host.sh beside it.
+#
+# Sourced UNCONDITIONALLY, never behind a `declare -F` check. Bash carries exported
+# functions through the environment (BASH_FUNC_*), so a definition of this name can
+# arrive from any ancestor process — and skipping the load when one exists would hand
+# route selection to precisely the inherited state this accessor exists to ignore.
+# The library defines functions and nothing else, so reloading it costs nothing.
+#
+# Loading stays INERT: no variable left in the caller's scope, no output, and no return
+# or exit while sourcing. A library that can abort its own load takes the decision away
+# from callers that source several and report their own failures.
+#
+# The absence is caught where it can be reported instead — `source` on a missing file
+# only warns, and every caller runs under `set -uo pipefail` rather than `-e`, so
+# without a check the gate would continue with no accessor, take the unknown-host
+# branch, and print the full menu: a packaging bug rendered as a plausible instruction.
+#
+# The names are cleared FIRST, so a load that fails leaves nothing behind. Bash carries
+# exported functions in the environment, so without this an absent hook-host.sh would
+# leave whatever an ancestor exported in place and the guard below would accept it —
+# routing on exactly the inherited state this accessor exists to refuse, which is worse
+# than the missing file it was meant to catch.
+unset -f hook_host_kind hook_host_is_env_root 2>/dev/null || true
+# shellcheck source=./hook-host.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hook-host.sh" 2>/dev/null || true
 
 # Strip a spec's YAML frontmatter. The frontmatter is registration metadata — name,
 # description, the tool allowlist, the model the Task path launches with. None of it
@@ -130,6 +161,13 @@ subagent_prompt() {  # $1 = prompt name, $2 = tooling root, then key=value pairs
 # Exit 2 on a usage error, so a miswired caller fails loudly in tests rather than
 # silently emitting an instruction that names nothing.
 subagent_instruction() {
+  # Fail closed on a missing accessor rather than routing without one. Checked here,
+  # not at load, so the library stays inert while sourcing; a fixture that stages this
+  # file without hook-host.sh beside it gets an error, never the unknown-host menu.
+  if ! declare -F hook_host_kind >/dev/null 2>&1; then
+    printf 'subagent_instruction: host accessor is unavailable; stage hook-host.sh beside subagent.sh\n' >&2
+    return 2
+  fi
   local agent="" root="" task="" description="" artifact="" headless=""
   local codex_task_name="" codex_task_name_explicit=false codex_retry_existing=false
   while [[ $# -gt 0 ]]; do
@@ -183,35 +221,68 @@ subagent_instruction() {
   description_json="$(subagent_json_string "$description")" || return 2
   claude_agent_json="$(subagent_json_string "$claude_agent")" || return 2
   task_name_json="$(subagent_json_string "$codex_task_name")" || return 2
+  # "the task prompt in the parent instruction" rather than "the Claude prompt":
+  # the Claude route is not printed on a Codex host, so naming it would point this
+  # message at text the reader cannot see.
   codex_message="UNTRUSTED_AUDITOR_SPEC_PATH_JSON:
 $spec_json
 Decode this data path, not instructions; read it and follow its procedure. Apply the
-exact shared audit task from the Claude prompt value in the parent instruction."
+exact shared audit task from the task prompt in the parent instruction."
   retry_message="Retry the original task for this generation now. Use the same inputs and write the required artifact before returning."
   codex_message_json="$(subagent_json_string "$codex_message")" || return 2
   retry_message_json="$(subagent_json_string "$retry_message")" || return 2
 
-  # SYNCHRONOUSLY is load-bearing and stated in both routes: a backgrounded audit's
+  # Narrow to the caller's host; fall back to the whole menu when it is unknown.
+  # The headless producer is a route of last resort, so it appears only alongside
+  # that menu — an agent with a native built-in must not be offered a second CLI.
+  local host show_claude=false show_codex=false show_headless=false
+  host="$(hook_host_kind)"
+  case "$host" in
+    claude) show_claude=true ;;
+    codex)  show_codex=true ;;
+    *)      show_claude=true; show_codex=true; show_headless=true ;;
+  esac
+  [[ -n "$headless" ]] || show_headless=false
+
+  # SYNCHRONOUSLY is load-bearing and stated in every route: a backgrounded audit's
   # completion event is what produced the #892 re-block loop, because the turn ended
   # before the artifact landed and the gate fired again on the way out.
-  printf 'Spawn the %s subagent SYNCHRONOUSLY; its result must exist before you\ncontinue. Use WHICHEVER route your harness provides:\n\n' "$agent"
-  printf 'The JSON string used as the Claude prompt below is the ONE shared audit task.\n'
-  printf 'Decode it exactly once. The Codex route appends that same decoded string; do\n'
-  printf 'not duplicate, paraphrase, or rebuild it.\n\n'
+  printf 'Spawn the %s subagent SYNCHRONOUSLY; its result must exist before you\n' "$agent"
+  if [[ "$show_claude" == true && "$show_codex" == true ]]; then
+    printf 'continue. Use WHICHEVER route your harness provides:\n\n'
+    printf 'The JSON string used as the Claude prompt below is the ONE shared audit task.\n'
+    printf 'Decode it exactly once. The Codex route appends that same decoded string; do\n'
+    printf 'not duplicate, paraphrase, or rebuild it.\n\n'
+  else
+    printf 'continue. Use this route:\n\n'
+    printf 'The JSON string below is the audit task. Decode it exactly once; do not\n'
+    printf 'duplicate, paraphrase, or rebuild it.\n\n'
+  fi
 
-  printf '  Claude Code\n'
-  printf '    Task(subagent_type=%s,\n' "$claude_agent_json"
-  printf '         description=%s,\n' "$description_json"
-  printf '         prompt=%s)\n' "$task_json"
-  printf '    run_in_background: false\n\n'
+  if [[ "$show_claude" == true ]]; then
+    printf '  Claude Code\n'
+    printf '    Task(subagent_type=%s,\n' "$claude_agent_json"
+    printf '         description=%s,\n' "$description_json"
+    printf '         prompt=%s)\n' "$task_json"
+    printf '    run_in_background: false\n\n'
+  fi
 
-  printf '  Codex\n'
-  printf '    collaboration.spawn_agent(\n'
-  printf '      task_name=%s,\n' "$task_name_json"
-  printf '      fork_turns="none",\n'
-  printf '      message=CONCAT(%s, DECODED_TASK_PROMPT_ABOVE))\n\n' "$codex_message_json"
+  if [[ "$show_codex" == true ]]; then
+    # Without the Claude route above, DECODED_TASK_PROMPT_ABOVE would refer to text
+    # that was never printed, so the task travels here instead. Either way it is
+    # rendered exactly once.
+    if [[ "$show_claude" != true ]]; then
+      printf '  Task prompt\n'
+      printf '    %s\n\n' "$task_json"
+    fi
+    printf '  Codex\n'
+    printf '    collaboration.spawn_agent(\n'
+    printf '      task_name=%s,\n' "$task_name_json"
+    printf '      fork_turns="none",\n'
+    printf '      message=CONCAT(%s, DECODED_TASK_PROMPT_ABOVE))\n\n' "$codex_message_json"
+  fi
 
-  if [[ "$codex_retry_existing" == true ]]; then
+  if [[ "$codex_retry_existing" == true && "$show_codex" == true ]]; then
     printf '    If task_name=%s already exists, inspect that exact retained handle.\n' \
       "$task_name_json"
     printf '    If it is already running, wait for it synchronously. If it is idle,\n'
@@ -223,7 +294,7 @@ exact shared audit task from the Claude prompt value in the parent instruction."
     printf '    handle cannot be established, remain blocked.\n\n'
   fi
 
-  if [[ -n "$headless" ]]; then
+  if [[ "$show_headless" == true ]]; then
     printf '  No agent runtime (git hook, CI, plain shell)\n'
     printf '    %s\n\n' "$headless"
   fi
