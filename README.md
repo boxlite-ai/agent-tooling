@@ -16,6 +16,8 @@ profile manifest; the adopted revision is recorded locally in
 .claude-plugin/marketplace.json         Claude-compatible marketplace
 .github/plugin/marketplace.json         Copilot marketplace
 plugins/boxlite-agent-tooling/          Shared multi-host plugin
+plugins/boxlite-agent-tooling/ARCHITECTURE.md  Entry points, invariants, Stop-gate decisions, glossary
+plugins/boxlite-agent-tooling/CONTRIBUTING.md  Commit and pull request message contract
 plugins/boxlite-agent-tooling/guidance/ Canonical engineering-workflow guidance
 templates/install.sh                    Thin consumer bootstrap
 templates/codex-plugin-bootstrap.json   Full-plugin Codex SessionStart wiring
@@ -332,6 +334,7 @@ hooks schema, every declared path, and every wired command instead.
 
 ```sh
 bash plugins/boxlite-agent-tooling/host-parity.test.sh
+bash plugins/boxlite-agent-tooling/architecture.test.sh
 claude plugin validate plugins/boxlite-agent-tooling
 bash templates/codex-plugin-bootstrap.test.sh
 bash templates/claude-plugin-bootstrap.test.sh

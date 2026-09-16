@@ -77,6 +77,7 @@ Every change goes: understand → research → design → implement → test →
 **Communication**
 
 - Words: as concise and simple as possible, unless explicitly asked otherwise.
+- Form follows content, in docs, code comments, commit/PR text, and replies: numbered list for a sequence; bullets for 2 to 7 parallel items; description list for name plus description; table when items carry 3 or more attributes or several conditions decide an outcome; prose, message first, for reasoning and trade-offs. Never a list of one, a one-column table, or a paragraph in a cell.
 - A simple call graph (func name, class name, file name, LOC, short annotation) is the first choice when explaining code.
 - Commit/PR text: describe the change, not the process that produced it. Conventional-Commit subject ≤72; no process/AI narrative, pasted logs, or secrets. Local rules and examples live in the repository's CONTRIBUTING.
 - Every PR description carries a before/after end-to-end call graph — same shape as the graph above. Bug fixes mark the faulty hop `← BUG: …` in _Before_ and link the issue (`Fixes #<n>`). Enforced by the pinned agent-tooling preflight hook; rule and example in the repository's CONTRIBUTING.
