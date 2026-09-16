@@ -43,7 +43,16 @@ SOURCES="$(find "$PLUGIN/.agents/hooks" "$PLUGIN/.agents/lib" "$PLUGIN/.agents/w
 section() { awk -v h="## $1" '$0 == h {on = 1; next} /^## / {on = 0} on' "$DOC"; }
 
 # Case-insensitive fixed-string or regex search over every source file.  # $1 = -F|-E, $2 = needle
-in_sources() { printf '%s\n' "$SOURCES" | xargs grep -qi "$1" -- "$2" 2>/dev/null; }
+# One path per line, read whole: xargs or an unquoted expansion would split a checkout
+# path that contains a space.
+in_sources() {
+  local mode="$1" needle="$2" file
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    grep -qi "$mode" -- "$needle" "$file" 2>/dev/null && return 0
+  done <<<"$SOURCES"
+  return 1
+}
 
 echo "== every path the map names exists =="
 # shellcheck disable=SC2016 # the backticks are literal: they delimit code spans in the map
@@ -86,18 +95,15 @@ for name in $(section 'State files' | grep -oE '^- `[^`]+`' | tr -d '`' | sed 's
 done
 
 echo "== every glossary term is used by a source =="
-section 'Glossary' | grep -oE '^- \*\*[^*]+\*\*' | sed -E 's/^- \*\*//; s/\*\*$//' | while IFS= read -r term; do
+# A here-string keeps the loop in this shell, so the counters update; a pipe into
+# `while read` would run it in a subshell and lose them.
+glossary_terms="$(section 'Glossary' | grep -oE '^- \*\*[^*]+\*\*' | sed -E 's/^- \*\*//; s/\*\*$//')"
+while IFS= read -r term; do
+  [[ -n "$term" ]] || continue
   # "session scope" may be spelled session_scope or session-scope in code.
   pattern="$(printf '%s' "$term" | sed 's/[.]/\\./g; s/ /[ _-]/g')"
-  if in_sources -E "$pattern"; then printf 'PASS %s\n' "$term"; else printf 'FAIL %s\n' "$term"; fi
-done > "${TMPDIR:-/tmp}/architecture-glossary.$$"
-while IFS= read -r line; do
-  case "$line" in
-    PASS\ *) ok "glossary term in source: ${line#PASS }" ;;
-    FAIL\ *) bad "glossary term not used by any source: ${line#FAIL }" ;;
-  esac
-done < "${TMPDIR:-/tmp}/architecture-glossary.$$"
-rm -f "${TMPDIR:-/tmp}/architecture-glossary.$$"
+  if in_sources -E "$pattern"; then ok "glossary term in source: $term"; else bad "glossary term not used by any source: $term"; fi
+done <<<"$glossary_terms"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

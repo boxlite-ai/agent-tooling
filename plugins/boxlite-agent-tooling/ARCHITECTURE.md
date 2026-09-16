@@ -2,8 +2,8 @@
 
 - One plugin, three hosts: Claude Code, Codex, Copilot.
 - Fail-closed gates around the moments a coding agent acts on a repository: the end of a turn, a commit, a push, a pull request.
-- A gate never produces the verdict it checks. An independent auditor writes a dossier under `.agents/state/`, bound to branch, HEAD, working-tree hash and audit generation; the gate reads it back.
-- A binding that no longer matches is discarded, never blocked on.
+- A gate never produces the verdict it checks. An independent auditor writes a dossier under `.agents/state/`, bound to what it judged, and the gate reads it back.
+- A turn dossier whose binding no longer matches is discarded, never blocked on; a commit or push dossier that no longer matches denies until a fresh audit.
 - Humans are not gated: the Git gates bind only when a harness variable such as `CLAUDECODE` is in the environment.
 - This file is a map, not an atlas: entry points, boundaries, invariants, vocabulary. How a script works is in its own header comment.
 - `architecture.test.sh` fails when the map names a script, state file, decision or term the code no longer has.
@@ -66,7 +66,7 @@ than one session can share a checkout.
 - Host to hook: the host injects its own plugin-root name, `PLUGIN_ROOT` on Codex and `CLAUDE_PLUGIN_ROOT` on Claude Code, and every wired command resolves `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `.agents/lib/hook-host.sh` answers which host is calling from that name alone. Session variables such as `CLAUDECODE` name whatever launched the process tree and are never used for routing.
 - Hook to agent: a hook is a bash process and cannot spawn a subagent. It emits text naming the route the calling host has, and the agent takes it. `.agents/lib/subagent.sh:8`
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
-- Gate to state: every artifact is bound to branch, HEAD, tree hash, generation, session scope and prompt epoch. A mismatch is discarded and the gate falls through to fresh detection. `.agents/hooks/preflight-verdict-check.sh:28`
+- Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject; a mismatch denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:672`). Receipt: parent, tree, subject.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`
 
 ## Invariants
@@ -75,7 +75,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 
 - A gate never produces the verdict it checks. `.agents/hooks/preflight-commit-push.sh:6`
 - PASS is silent: a consumed PASS dossier emits nothing. `.agents/hooks/preflight-verdict-check.sh:17`
-- A stale or mismatched dossier is discarded, never blocked on. `.agents/hooks/preflight-verdict-check.sh:28`
+- A stale or mismatched turn dossier is discarded, never blocked on. `.agents/hooks/preflight-verdict-check.sh:28`
 - A turn the gate cannot read ends unjudged under `blind-allow`, never blocked. `.agents/hooks/preflight-verdict-check.sh:52`
 - A message is never judged twice. `.agents/hooks/preflight-verdict-check.sh:61`
 - A parked FAIL serves only the next audit of the same round. `.agents/hooks/preflight-verdict-check.sh:210`
@@ -126,7 +126,7 @@ commit and push dossier in `.claude/agents/commit-push-auditor.md` carries `PASS
 
 ## Glossary
 
-- **dossier**: the JSON verdict an auditor writes, bound to branch, HEAD, tree hash, generation and session scope.
+- **dossier**: the JSON verdict an auditor writes, bound to what it judged; the bindings per kind are under Boundaries.
 - **generation**: the id of one audit request. A revised turn gets a new generation and a new audit; a dossier from another generation is discarded.
 - **session scope**: the per-session suffix that keeps one session's state files apart from another's in the same checkout.
 - **prompt epoch**: a counter advanced by each real user prompt. Grants, cancellations and dossiers bind to it, so a new prompt revokes what the old one authorised.
@@ -137,7 +137,7 @@ commit and push dossier in `.claude/agents/commit-push-auditor.md` carries `PASS
 - **override**: a prompt-scoped grant that bypasses both auditor gates, recorded as `OVERRIDDEN BY USER`.
 - **revoke**: what a newer prompt does to an audit or override the previous prompt owned.
 - **parked**: a FAIL dossier kept after the tree moves so the next audit re-checks its findings.
-- **stale**: a dossier or receipt whose binding no longer matches; discarded, never blocked on.
+- **stale**: a binding that no longer matches. A stale turn dossier is discarded; a stale commit or push dossier denies until a fresh audit.
 - **blind-allow**: the rung under which a turn ends unjudged because the gate could not read its text.
 - **hold**: `.agent-tooling/hold`, one full lowercase SHA that freezes adoption; a malformed hold fails closed.
 - **tooling.ref**: the branch or tag consumers float on; the validated revision they run is recorded in `.git/agent-tooling/current`.

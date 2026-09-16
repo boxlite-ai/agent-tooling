@@ -85,12 +85,14 @@ done
 # rule: answer-first, no-recap, and the word cap all bind a comment through the bullet
 # it already sits under. Naming "why, not what" here instead costs 728 folded into the
 # framing bullet and 757 as its own, and both duplicate guidance/workflow.md.
-# It went 720 -> 800 for the form-follows-content rule (796): items as bullets, 3+
+# It went 720 -> 800 for the form-follows-content rule (800): 2-7 items as bullets, 3+
 # attributes or conditions as a table, reasoning as sentences. The clause shares the
 # prose-budget bullet because it says what the non-prose remainder looks like and
 # where prose stays required. A blanket "narrative as bullets or a table" (747) was
 # tried first and dropped: the style guides and the comprehension evidence send
 # reasoning back to full sentences, so the shorter rule was wrong, not just shorter.
+# The 2-7 bound (796 without it) is kept because "items as bullets" alone permits a
+# list of one, which the canonical rule forbids.
 # The existing "table over prose when clearer" line stays a preference for visuals.
 bytes="$(LC_ALL=C printf '%s' "$first" | wc -c | tr -d ' ')"
 if (( bytes <= 800 )); then
@@ -101,7 +103,7 @@ fi
 
 assert_contains "keeps reply-shape marker" "$first" "REPLY SHAPE:"
 assert_contains "keeps prose budget" "$first" "<=80"
-assert_contains "items go as bullets" "$first" "items as bullets"
+assert_contains "2 to 7 items go as bullets" "$first" "2-7 items as bullets"
 assert_contains "attributes and conditions go as a table" "$first" \
   "3+ attributes or conditions as a table"
 assert_contains "reasoning stays in sentences" "$first" "reasoning as sentences"
