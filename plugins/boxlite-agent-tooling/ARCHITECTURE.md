@@ -63,11 +63,11 @@ than one session can share a checkout.
 
 ## Boundaries
 
-- Host to hook: the host injects its own plugin-root name, `PLUGIN_ROOT` on Codex and `CLAUDE_PLUGIN_ROOT` on Claude Code, and every wired command resolves `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `.agents/lib/hook-host.sh` answers which host is calling from that name alone. Session markers such as `CLAUDECODE` name whatever launched the process tree and are never used for routing.
+- Host to hook: the host injects its own plugin-root name, `PLUGIN_ROOT` on Codex and `CLAUDE_PLUGIN_ROOT` on Claude Code, and every wired command resolves `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `.agents/lib/hook-host.sh` answers which host is calling from that name alone. Session variables such as `CLAUDECODE` name whatever launched the process tree and are never used for routing.
 - Hook to agent: a hook is a bash process and cannot spawn a subagent. It emits text naming the route the calling host has, and the agent takes it. `.agents/lib/subagent.sh:8`
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: every artifact is bound to branch, HEAD, tree hash, generation, session scope and prompt epoch. A mismatch is discarded and the gate falls through to fresh detection. `.agents/hooks/preflight-verdict-check.sh:28`
-- Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:15`
+- Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`
 
 ## Invariants
 
@@ -93,7 +93,8 @@ Often stated as an absence. Each names the line that states or enforces it.
 ## Stop gate decisions
 
 Every decision is logged as a rung and an outcome, in this evaluation order. Line
-numbers are in `.agents/hooks/preflight-verdict-check.sh`.
+numbers are in `.agents/hooks/preflight-verdict-check.sh`; a pair logged at more than
+one line cites the first.
 
 | Rung | Outcome | When | Line |
 | --- | --- | --- | --- |

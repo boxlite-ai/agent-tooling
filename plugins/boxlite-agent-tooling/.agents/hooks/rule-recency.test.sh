@@ -85,15 +85,26 @@ done
 # rule: answer-first, no-recap, and the word cap all bind a comment through the bullet
 # it already sits under. Naming "why, not what" here instead costs 728 folded into the
 # framing bullet and 757 as its own, and both duplicate guidance/workflow.md.
+# It went 720 -> 800 for the form-follows-content rule (796): items as bullets, 3+
+# attributes or conditions as a table, reasoning as sentences. The clause shares the
+# prose-budget bullet because it says what the non-prose remainder looks like and
+# where prose stays required. A blanket "narrative as bullets or a table" (747) was
+# tried first and dropped: the style guides and the comprehension evidence send
+# reasoning back to full sentences, so the shorter rule was wrong, not just shorter.
+# The existing "table over prose when clearer" line stays a preference for visuals.
 bytes="$(LC_ALL=C printf '%s' "$first" | wc -c | tr -d ' ')"
-if (( bytes <= 720 )); then
-  ok "reminder stays within 720 bytes ($bytes)"
+if (( bytes <= 800 )); then
+  ok "reminder stays within 800 bytes ($bytes)"
 else
-  bad "reminder stays within 720 bytes ($bytes)"
+  bad "reminder stays within 800 bytes ($bytes)"
 fi
 
 assert_contains "keeps reply-shape marker" "$first" "REPLY SHAPE:"
 assert_contains "keeps prose budget" "$first" "<=80"
+assert_contains "items go as bullets" "$first" "items as bullets"
+assert_contains "attributes and conditions go as a table" "$first" \
+  "3+ attributes or conditions as a table"
+assert_contains "reasoning stays in sentences" "$first" "reasoning as sentences"
 # Comments left through this exemption: `code` covered the block and everything written
 # inside it. Assert the narrowing and the surviving list apart, so restoring the blanket
 # clause fails on its own instead of passing on the leftovers.
