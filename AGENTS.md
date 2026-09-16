@@ -2,6 +2,7 @@
 
 - Keep reusable implementation in `plugins/boxlite-agent-tooling/`.
 - For non-trivial Bash hooks, gates, or libraries, load the plugin's `.agents/skills/shell-engineering/SKILL.md` and preserve stdin/stdout/stderr/exit behavior.
+- Keep `plugins/boxlite-agent-tooling/ARCHITECTURE.md` in step with the code; `architecture.test.sh` fails on drift.
 - Keep consumer manifests declarative and secret-free; invalid profiles or missing dependencies fail closed with a clear stderr error.
 - Consumers float on `tooling.ref`; adopt only validated revisions in `.git/agent-tooling/current`. Only bootstrap/refresh may use the network. A valid lowercase full SHA in `.agent-tooling/hold` freezes adoption; malformed holds fail closed.
 - Validate all three marketplaces and generic/Claude/Codex manifests before release. Copilot has no host-specific manifest and remains untested on a real install.
