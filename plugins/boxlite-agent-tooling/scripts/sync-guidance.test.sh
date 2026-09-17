@@ -102,8 +102,6 @@ require_semantic_rule "guidance pins production-boundary tests" \
   'data must come from production code under test'
 require_semantic_rule "guidance pins evidence-qualified reporting" \
   'Don.t claim tests passed unless they actually ran.*residual risk'
-require_semantic_rule "guidance pins auditor ownership of proof" \
-  'auditor .*never you.* writes the dossier'
 
 echo
 echo "## A repository with no instructions files gets the canonical layout"

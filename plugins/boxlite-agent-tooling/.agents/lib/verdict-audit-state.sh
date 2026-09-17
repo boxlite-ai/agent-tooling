@@ -792,6 +792,7 @@ verdict_audit_normalize_turn_snapshot() {  # max-allowed-bytes; snapshot JSON on
 
 # Normalize exactly one verdict dossier only when it matches the published wire contract.
 # Legacy/manual dossiers may omit `generation`; a present generation is always a string.
+# `advisories` is optional on every verdict: non-blocking notes that never decide one.
 # Keeping this policy in one function prevents the runner and Stop gate from drifting on
 # which JSON has authority.
 verdict_audit_normalize_dossier() {  # JSON on stdin
@@ -819,8 +820,8 @@ verdict_audit_normalize_dossier() {  # JSON on stdin
            end);
     if length == 1
        and (.[0] | type) == "object"
-       and ((.[0] | exact_keys(["branch", "head", "tree_hash", "verdict", "proof", "findings"]))
-            or (.[0] | exact_keys(["branch", "head", "tree_hash", "generation", "verdict", "proof", "findings"])))
+       and (.[0] | del(.generation, .advisories)
+            | exact_keys(["branch", "head", "tree_hash", "verdict", "proof", "findings"]))
        and (.[0].branch | type) == "string"
        and (.[0].head | type) == "string"
        and (.[0].tree_hash | type) == "string"
@@ -831,6 +832,9 @@ verdict_audit_normalize_dossier() {  # JSON on stdin
        and all(.[0].proof[]; valid_proof)
        and (.[0].findings | type) == "array"
        and all(.[0].findings[]; nonempty_line)
+       and ((.[0] | has("advisories") | not)
+            or ((.[0].advisories | type) == "array"
+                and all(.[0].advisories[]; nonempty_line)))
        and (if .[0].verdict == "PASS"
             then (.[0].findings | length) == 0
             else (.[0].findings | length) > 0
