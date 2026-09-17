@@ -14,7 +14,7 @@
 #
 # Flow:
 #   1. Dossier present, binding fresh + matching:
-#        PASS         -> allow silently (consumed)
+#        PASS         -> allow (consumed); advisories, if any, reach only the human
 #        IN_PROGRESS  -> allow with note (consumed)
 #        FAIL         -> block with the findings — THE one legitimate loop: it
 #                        persists until the findings are addressed and a re-audit
@@ -42,7 +42,7 @@
 #           fast model (haiku) answers YES/NO; when no model is reachable the static
 #           pattern list below decides (deterministic fallback, e.g. sessions without
 #           a model CLI). YES -> run the independent audit inside this Stop invocation;
-#           PASS emits nothing, FAIL blocks with concise findings. NO -> allow
+#           PASS never reaches the model, FAIL blocks with concise findings. NO -> allow
 #           (announced to the human via systemMessage, invisible to the model).
 #           Turns over 12 KB skip this duplicate model input and block for the
 #           file-backed auditor instead.
@@ -635,11 +635,11 @@ allow()           { exit 0; }                                              # let
 # HUMAN in the terminal only — the model never sees it (documented hook contract).
 # Announcing triage results this way keeps the agent's context clean and the gate
 # loop-inert while the human still sees every decision live.
-allow_with_note() {
+allow_with_note() {  # note [replacement when the note exceeds the output limit]
   local note="$1" note_bytes
   note_bytes="$(LC_ALL=C printf '%s' "$note" | wc -c | tr -d ' ')"
   if (( note_bytes > verdict_output_max_bytes )); then
-    note="Verdict: IN_PROGRESS — details omitted because the rendered note exceeded the 8192-byte safety limit. Proof remains deferred; inspect the session-scoped last-verdict dossier locally."
+    note="${2:-Verdict: IN_PROGRESS — details omitted because the rendered note exceeded the 8192-byte safety limit. Proof remains deferred; inspect the session-scoped last-verdict dossier locally.}"
   fi
   jq -nc --arg m "$note" '{continue:true, systemMessage:$m}'
   exit 0
@@ -1910,11 +1910,17 @@ if [[ "$request_is_current" == true && -n "$dossier_observed_identity" ]] \
     else
       case "$v_verdict" in
         PASS)
+          pass_advisories="$(printf '%s' "$verdict_json" \
+            | jq -r '.advisories[]? | "  ~ " + .' 2>/dev/null || echo '')"
           if consume_current_verdict_request; then
             log_decision dossier PASS-allow
             retire_selected_dossier || true
             discard_path_for_current_epoch "$prev_verdict_file" >/dev/null 2>&1 || true
             discard_path_for_current_epoch "$payload_transcript_file" >/dev/null 2>&1 || true
+            # Advisories never block, and the model never sees them: a note it could read
+            # would invite a revision the verdict did not ask for.
+            [[ -z "$pass_advisories" ]] || allow_with_note "Verdict: PASS, with non-blocking advisories:
+${pass_advisories}" "Verdict: PASS. Its non-blocking advisories exceeded the 8192-byte safety limit and were omitted."
             allow
           fi
           log_decision dossier discard-revoked

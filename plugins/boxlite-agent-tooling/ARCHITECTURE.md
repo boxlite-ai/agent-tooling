@@ -74,7 +74,7 @@ than one session can share a checkout.
 Often stated as an absence. Each names the line that states or enforces it.
 
 - A gate never produces the verdict it checks. `.agents/hooks/preflight-commit-push.sh:6`
-- PASS is silent: a consumed PASS dossier emits nothing. `.agents/hooks/preflight-verdict-check.sh:17`
+- A PASS never reaches the model: a consumed PASS emits nothing the model sees, and any advisories go to the human only. `.agents/hooks/preflight-verdict-check.sh:17`
 - A stale or mismatched turn dossier is discarded, never blocked on. `.agents/hooks/preflight-verdict-check.sh:28`
 - A turn the gate cannot read ends unjudged under `blind-allow`, never blocked. `.agents/hooks/preflight-verdict-check.sh:52`
 - A message is never judged twice. `.agents/hooks/preflight-verdict-check.sh:61`
@@ -105,24 +105,25 @@ one line cites the first.
 | cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1799 |
 | dossier | discard-generation | The dossier's generation is not the requested one. | 1877 |
 | dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1883 |
-| dossier | PASS-allow | A fresh, matching PASS; consumed silently. | 1914 |
-| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1920 |
-| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 1928 |
-| dossier | FAIL-block | Findings block the turn; unchanged text reuses this FAIL instead of re-running the model. | 1941 |
-| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2068 |
-| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2081 |
-| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2113 |
-| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2122 |
-| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2129 |
-| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2138 |
-| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2142 |
-| regex | none-allow | No model reachable and no fallback pattern matched. | 2150 |
-| regex | match-block | No model reachable and a fallback pattern matched. | 2154 |
+| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 1916 |
+| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1926 |
+| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 1934 |
+| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 1947 |
+| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2074 |
+| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2087 |
+| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2119 |
+| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2128 |
+| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2135 |
+| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2144 |
+| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2148 |
+| regex | none-allow | No model reachable and no fallback pattern matched. | 2156 |
+| regex | match-block | No model reachable and a fallback pattern matched. | 2160 |
 
 Dossier shape, from `.claude/agents/verdict-auditor.md`: `branch`, `head`, `tree_hash`,
 `generation`, a `verdict` of `PASS`, `FAIL` or `IN_PROGRESS`, and `findings`. The
 commit and push dossier in `.claude/agents/commit-push-auditor.md` carries `PASS` or
-`FAIL` and is `FAIL` exactly when `findings` is non-empty.
+`FAIL` and is `FAIL` exactly when `findings` is non-empty. Both kinds may carry
+non-blocking `advisories`, which never decide the verdict.
 
 ## Glossary
 

@@ -4,7 +4,8 @@
 # The hook is DETECTION-TRIGGERED, with finding-driven loops only:
 #   - no dossier + the turn asserts a verdict ("root cause is X",
 #     "tests pass", "prod looks healthy", "done")      -> audit synchronously;
-#                                                         PASS is silent, FAIL blocks
+#                                                         PASS never reaches the model,
+#                                                         FAIL blocks
 #   - no dossier + chat / question / no transcript     -> allow
 #   - present PASS/IN_PROGRESS, fresh + matching       -> allow (consumed)
 #   - present FAIL, fresh + matching                   -> block with findings
@@ -215,8 +216,11 @@ jq -nc \
   --arg generation "$VERDICT_AUDITOR_GENERATION" \
   --arg verdict "$verdict" \
   --argjson findings "$findings" \
+  --arg advisories "${TEST_AUDIT_ADVISORIES:-}" \
   '\''{branch:$branch,head:$head,tree_hash:$tree,generation:$generation,
-     verdict:$verdict,proof:[],findings:$findings}'\'' > "$VERDICT_AUDITOR_OUTPUT_FILE"'
+     verdict:$verdict,proof:[],findings:$findings}
+   + (if $advisories == "" then {} else {advisories:($advisories | fromjson)} end)'\'' \
+  > "$VERDICT_AUDITOR_OUTPUT_FILE"'
 export VERDICT_AUDITOR_CMD="$AUDITOR_STUB"
 export TEST_AUDIT_VERDICT=FAIL
 
@@ -512,6 +516,64 @@ else
   fail=$((fail+1)); printf '  FAIL  %s  (out=%s ran=%s)\n' \
     "successful audit still exposes Stop feedback" "${silent_pass_out:-EMPTY}" \
     "$([[ -e "$R/.agents/state/SYNC_AUDIT_RAN" ]] && echo yes || echo no)"
+fi
+rm -rf "$R"
+
+# Advisories are the auditor's non-blocking channel. A PASS that carries them still ends
+# the turn and is consumed; the human sees them in a model-invisible systemMessage, and
+# nothing asks the agent to revise.
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+advisory_pass_out="$(export TEST_AUDIT_VERDICT=PASS \
+  TEST_AUDIT_ADVISORIES='["socket.rs:59 is cited; the call is on :60"]'
+  run_payload_hook "$R" "$payload")"
+advisory_pass_note="$(printf '%s' "$advisory_pass_out" | jq -r '.systemMessage // ""' 2>/dev/null)"
+advisory_pass_keys="$(printf '%s' "$advisory_pass_out" | jq -c 'keys' 2>/dev/null)"
+if [[ "$advisory_pass_keys" == '["continue","systemMessage"]' \
+   && "$advisory_pass_note" == *"socket.rs:59 is cited; the call is on :60"* \
+   && ! -e "$(session_state_path "$R" last-verdict.json session-a)" \
+   && ! -e "$(session_state_path "$R" verdict-request session-a)" ]]; then
+  pass=$((pass+1)); printf '  PASS  %s\n' "PASS advisories end the turn and reach only the human"
+else
+  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' \
+    "PASS advisories did not end the turn as a human-only note" "${advisory_pass_out:-EMPTY}"
+fi
+rm -rf "$R"
+
+# A FAIL blocks on its findings alone. Its advisories stay out of the model-facing reason,
+# so the revision addresses what blocked and nothing else.
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+advisory_fail_out="$(export TEST_AUDIT_VERDICT=FAIL \
+  TEST_AUDIT_ADVISORIES='["wording could be tighter"]'
+  run_payload_hook "$R" "$payload")"
+advisory_fail_reason="$(printf '%s' "$advisory_fail_out" | jq -r '.reason // ""' 2>/dev/null)"
+if [[ "$(decision_from_output "$advisory_fail_out")" == block \
+   && "$advisory_fail_reason" == *"independent audit finding"* \
+   && "$advisory_fail_reason" != *"wording could be tighter"* ]]; then
+  pass=$((pass+1)); printf '  PASS  %s\n' "FAIL blocks on findings and keeps advisories out of the reason"
+else
+  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' \
+    "FAIL with advisories did not block on findings alone" "${advisory_fail_out:-EMPTY}"
+fi
+rm -rf "$R"
+
+# Advisories are validated like findings: a PASS whose advisories are not a list of lines
+# is not a dossier, so the audit fails closed rather than passing.
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+malformed_advisory_out="$(export TEST_AUDIT_VERDICT=PASS TEST_AUDIT_ADVISORIES='"not a list"'
+  run_payload_hook "$R" "$payload")"
+malformed_advisory_reason="$(printf '%s' "$malformed_advisory_out" | jq -r '.reason // ""' 2>/dev/null)"
+if [[ "$(decision_from_output "$malformed_advisory_out")" == block \
+   && "$malformed_advisory_reason" == *"did not produce a valid dossier"* ]]; then
+  pass=$((pass+1)); printf '  PASS  %s\n' "malformed advisories fail the audit closed"
+else
+  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' \
+    "malformed advisories were accepted" "${malformed_advisory_out:-EMPTY}"
 fi
 rm -rf "$R"
 
@@ -1101,6 +1163,27 @@ if [[ "$(decision_from_output "$oversized_progress_out")" == allow ]] \
   pass=$((pass+1)); printf '  PASS  %s\n' "oversized IN_PROGRESS note stays bounded ($oversized_progress_bytes bytes)"
 else
   fail=$((fail+1)); printf '  FAIL  %s\n' "oversized IN_PROGRESS note escaped the final-output bound ($oversized_progress_bytes bytes)"
+fi; rm -rf "$R"
+
+# PASS advisories are auditor-controlled strings too: the human-only note stays bounded
+# and still says the turn passed.
+R="$(setup)"; write_transcript "$R" "The fix works."
+write_verdict "$R" "PASS" '[]'
+jq -c --argjson a "$oversized_findings" '. + {advisories:$a}' \
+  "$R/.agents/state/last-verdict.json" > "$R/oversized-advisories.json" \
+  && mv "$R/oversized-advisories.json" "$R/.agents/state/last-verdict.json"
+oversized_pass_out="$(run_payload_hook "$R" \
+  "$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p,hook_event_name:"Stop"}')")"
+oversized_pass_note="$(printf '%s' "$oversized_pass_out" | jq -r '.systemMessage // ""')"
+oversized_pass_bytes="$(LC_ALL=C printf '%s' "$oversized_pass_note" | wc -c | tr -d ' ')"
+if [[ "$(decision_from_output "$oversized_pass_out")" == allow ]] \
+   && (( oversized_pass_bytes <= 8192 )) \
+   && [[ "$oversized_pass_note" != *"END_UNBOUNDED_VERDICT_FINDING"* ]] \
+   && [[ "$oversized_pass_note" == *"Verdict: PASS"* ]] \
+   && [[ "$oversized_pass_note" == *"omitted"* ]]; then
+  pass=$((pass+1)); printf '  PASS  %s\n' "oversized PASS advisories note stays bounded ($oversized_pass_bytes bytes)"
+else
+  fail=$((fail+1)); printf '  FAIL  %s\n' "oversized PASS advisories note escaped the final-output bound ($oversized_pass_bytes bytes)"
 fi; rm -rf "$R"
 
 # A carried legacy FAIL is handled before message extraction and blocks once with only
