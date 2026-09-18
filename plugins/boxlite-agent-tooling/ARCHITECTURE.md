@@ -45,19 +45,21 @@ An agent with a built-in spawns the auditor itself, `Task` on Claude Code and
 `collaboration.spawn_agent` on Codex, from the specs in `.claude/agents/`.
 
 GitHub events, in a repository whose `.github/workflows/unreviewed-pr.yml` runs
-`scripts/pr-unreviewed-file.sh`. Independent of every hook above.
+`scripts/pr-unreviewed-file.sh` from a trusted base-branch checkout (`pull_request_target`).
+Independent of every hook above.
 
 | On `opened`, `reopened`, `synchronize` or `ready_for_review` | The step does |
 | --- | --- |
 | The branch tip carries `UNREVIEWED.md` | Reports `Author reviewed the PR` as failing. |
-| The tip lacks it and the pull request carries the marking commit | Passes: the file was added and then deleted. |
+| The tip lacks it and the pull request carries a valid marking commit | Passes: the file was added and then deleted. |
 | The tip lacks it and the pull request lacks that commit | Commits the file, then reports the gate as failing on that commit, since a commit made with the workflow's own token starts no run. |
 | The head branch lives in a fork | Reports unreviewed: that token cannot write a fork's branch. |
 
 Both reads are of current state, never the event's own sha, so a queued run cannot pass a
-tip that still carries the file. A pull request merged unreviewed carries the file onto the
-default branch. The workflow names this repository's script path, so a consumer copies the
-script with it.
+tip that still carries the file. A valid marking commit uses the marker subject, carries the
+canonical marker content, and has this workflow's failing gate status on that same commit. A
+pull request merged unreviewed carries the file onto the default branch. The workflow names
+this repository's script path, so a consumer copies the script with it.
 
 ## State files
 

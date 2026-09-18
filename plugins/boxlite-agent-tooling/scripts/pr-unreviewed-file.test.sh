@@ -20,22 +20,59 @@ rc=""
 err=""
 HEAD_SHA="0123456789abcdef0123456789abcdef01234567"
 MARKED_SHA="89abcdef89abcdef89abcdef89abcdef89abcdef"
+SPOOF_SHA="fedcba9876543210fedcba9876543210fedcba98"
+MARKER_B64="$(printf '%s\n' \
+  '# Unreviewed' \
+  '' \
+  'Nobody has reviewed this pull request yet. After reading the diff, delete this file in a commit.' \
+  '' \
+  'If this file is on the default branch, the pull request that added it was merged without review.' \
+  | base64 | tr -d '\n')"
 
 cat > "$TMP/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_DIR/gh-calls"
 case "$*" in
+  "api -X GET "*"/status")
+    case "${STUB_MARK_STATUS:-no}" in
+      yes)
+        printf '{"statuses":[{"context":"Author reviewed the PR","state":"failure","description":"UNREVIEWED.md is in this pull request"}]}\n'
+        exit 0
+        ;;
+      no) printf '{"statuses":[]}\n'; exit 0 ;;
+      *) printf 'gh: Server Error (HTTP 500)\n' >&2; exit 1 ;;
+    esac
+    ;;
   "api -X GET "*)
-    case "${STUB_GET:-absent}" in
-      present) printf '{"name":"UNREVIEWED.md"}\n'; exit 0 ;;
+    ref=""
+    if [[ "$*" =~ -f\ ref=([^[:space:]]+) ]]; then
+      ref="${BASH_REMATCH[1]}"
+    fi
+    case "$ref" in
+      feat/thing) mode="${STUB_GET_HEAD:-absent}" ;;
+      "${STUB_MARK_SHA:-89abcdef89abcdef89abcdef89abcdef89abcdef}") mode="${STUB_GET_MARK:-absent}" ;;
+      *) mode="${STUB_GET_OTHER:-absent}" ;;
+    esac
+    case "$mode" in
+      present)
+        if [[ "$*" == *"--jq .content"* ]]; then
+          printf '%s\n' "${STUB_MARKER_B64}"
+        else
+          printf '{"name":"UNREVIEWED.md"}\n'
+        fi
+        exit 0
+        ;;
       absent) printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1 ;;
       *) printf 'gh: Server Error (HTTP 500)\n' >&2; exit 1 ;;
     esac
     ;;
   "api --paginate "*commits*)
     case "${STUB_MARKED:-no}" in
-      yes) printf 'feat: the change\nchore: mark pull request unreviewed\n'; exit 0 ;;
-      no) printf 'feat: the change\n'; exit 0 ;;
+      yes) printf '%s\t%s\n%s\t%s\n' "${STUB_MARK_SHA:-89abcdef89abcdef89abcdef89abcdef89abcdef}" \
+        'chore: mark pull request unreviewed' "$HEAD_SHA" 'feat: the change'; exit 0 ;;
+      no) printf '%s\t%s\n' "$HEAD_SHA" 'feat: the change'; exit 0 ;;
+      spoof) printf '%s\t%s\n%s\t%s\n' "${STUB_SPOOF_SHA:-fedcba9876543210fedcba9876543210fedcba98}" 'chore: mark pull request unreviewed' \
+        "$HEAD_SHA" 'feat: the change'; exit 0 ;;
       *) printf 'gh: Server Error (HTTP 500)\n' >&2; exit 1 ;;
     esac
     ;;
@@ -61,11 +98,17 @@ event() {  # file, action, head repo, head sha
                     head: {sha: $sha, ref: "feat/thing", repo: {full_name: $head_repo}}}}' > "$1"
 }
 
-run_script() {  # event file, lookup (present|absent|error), marked (yes|no|error),
+run_script() {  # event file, tip lookup (present|absent|error), marked (yes|no|spoof|error),
                 # creation exit code, status exit code, commit the creation returns
   rm -f "$TMP/gh-calls" "$TMP/put-body" "$TMP/status-body"
-  err="$(STUB_DIR="$TMP" STUB_GET="$2" STUB_MARKED="$3" STUB_PUT_EXIT="${4:-0}" \
-    STUB_STATUS_EXIT="${5:-0}" STUB_NEW_SHA="${6-$MARKED_SHA}" GH_BIN="$TMP/gh" \
+  local mark_get=absent mark_status=no
+  case "$3" in
+    yes) mark_get=present; mark_status=yes ;;
+  esac
+  err="$(STUB_DIR="$TMP" STUB_GET_HEAD="$2" STUB_GET_MARK="$mark_get" STUB_MARKED="$3" \
+    STUB_MARK_STATUS="$mark_status" STUB_MARK_SHA="${6-$MARKED_SHA}" STUB_SPOOF_SHA="$SPOOF_SHA" \
+    STUB_MARKER_B64="$MARKER_B64" \
+    STUB_PUT_EXIT="${4:-0}" STUB_STATUS_EXIT="${5:-0}" STUB_NEW_SHA="${6-$MARKED_SHA}" GH_BIN="$TMP/gh" \
     bash "$SCRIPT" "$1" 2>&1 >/dev/null)"
   rc=$?
 }
@@ -113,6 +156,9 @@ reported_gate_on_marking_commit; report "the marking commit gets the failing gat
 event "$TMP/sync.json" synchronize boxlite-ai/agent-tooling "$HEAD_SHA"
 run_script "$TMP/sync.json" absent no
 marked_unreviewed; report "a later event marks a PR that was never marked" $? "rc=$rc err=$err"
+run_script "$TMP/sync.json" absent spoof
+marked_unreviewed; report "a spoofed subject without a marker commit is ignored and re-marked" $? \
+  "rc=$rc err=$err calls=$(cat "$TMP/gh-calls")"
 
 echo "## Deleting the file passes only after it was added"
 run_script "$TMP/sync.json" absent yes

@@ -9,8 +9,8 @@
 # A missing file means "reviewed" only when the pull request carries the commit that added
 # it. Every event the workflow listens for marks a pull request that does not, so a first
 # run that failed, or a pull request older than this workflow, cannot pass unmarked. The
-# marking commit is proof of ceremony, not of reading: an empty commit with that subject
-# satisfies it.
+# marking commit is proof of ceremony, not of reading: it must carry this file's canonical
+# content and the gate status posted by this workflow.
 #
 # Both reads are live — the branch tip and the pull request's current commits — because a
 # queued run holding an older event sha would otherwise pass a tip that still has the file.
@@ -28,12 +28,12 @@
 set -uo pipefail
 
 marker_path="UNREVIEWED.md"
-# The subject of the commit that adds the file, and the proof that the pull request was
-# marked at all: a head without the file counts as reviewed only when this commit is in it.
+# The subject of the commit that adds the file.
 marker_commit_subject="chore: mark pull request unreviewed"
 # The job name in .github/workflows/unreviewed-pr.yml: branch protection matches a status
 # to a check run by this one name, so the marking commit reports under the same gate.
 status_context="Author reviewed the PR"
+status_description="$marker_path is in this pull request"
 
 marker_content() {
   printf '%s\n' \
@@ -60,10 +60,46 @@ marker_state() {  # repo, ref
 
 # Report whether the pull request carries the marking commit: 0 yes, 1 no, 2 cannot tell.
 marker_commit_state() {  # repo, pull request number
-  local subjects
-  subjects="$(gh_cli api --paginate "repos/$1/pulls/$2/commits" \
-    --jq '.[].commit.message | split("\n")[0]')" || return 2
-  grep -qxF "$marker_commit_subject" <<<"$subjects"
+  local commits sha subject marker
+  commits="$(gh_cli api --paginate "repos/$1/pulls/$2/commits" \
+    --jq '.[] | [.sha, (.commit.message | split("\n")[0])] | @tsv')" || return 2
+  while IFS=$'\t' read -r sha subject; do
+    [[ "$subject" == "$marker_commit_subject" ]] || continue
+    marker="$(marker_state "$1" "$sha")" || return 2
+    [[ "$marker" == present ]] || continue
+    marker_content_matches "$1" "$sha" || {
+      [[ "$?" == 1 ]] && continue
+      return 2
+    }
+    marker_statused_unreviewed "$1" "$sha" || {
+      [[ "$?" == 1 ]] && continue
+      return 2
+    }
+    return 0
+  done <<<"$commits"
+  return 1
+}
+
+# Return 0 when the file at ref carries this script's canonical marker body.
+marker_content_matches() {  # repo, ref
+  local encoded content expected
+  encoded="$(gh_cli api -X GET "repos/$1/contents/$marker_path" -f ref="$2" --jq '.content' 2>/dev/null)" \
+    || return 2
+  content="$(printf '%s' "$encoded" | tr -d '\n' | base64 --decode 2>/dev/null)" || return 2
+  expected="$(marker_content)"
+  [[ "$content" == "$expected" ]]
+}
+
+# Return 0 when commit sha has this workflow's unreviewed status on it.
+marker_statused_unreviewed() {  # repo, commit sha
+  if gh_cli api -X GET "repos/$1/commits/$2/status" 2>/dev/null \
+    | jq -er --arg context "$status_context" --arg description "$status_description" '
+        .statuses[]? | select(.context == $context and .state == "failure" and .description == $description)
+      ' >/dev/null; then
+    return 0
+  fi
+  [[ "$?" == 1 ]] && return 1
+  return 2
 }
 
 # Add the file and print the commit it created.
@@ -75,7 +111,7 @@ add_marker() {  # repo, branch
 
 # That commit runs no workflow, so report the gate on it here or nothing ever will.
 mark_commit_unreviewed() {  # repo, commit sha
-  jq -n --arg context "$status_context" --arg description "$marker_path is in this pull request" \
+  jq -n --arg context "$status_context" --arg description "$status_description" \
     '{state: "failure", context: $context, description: $description}' \
     | gh_cli api -X POST "repos/$1/statuses/$2" --input - >/dev/null
 }
