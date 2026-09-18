@@ -98,6 +98,16 @@ event() {  # file, action, head repo, head sha
                     head: {sha: $sha, ref: "feat/thing", repo: {full_name: $head_repo}}}}' > "$1"
 }
 
+event_pull_request_target() {  # file, action, head repo, head sha
+  jq -n --arg action "$2" --arg head_repo "$3" --arg sha "$4" '
+    {action: $action,
+     repository: {full_name: "boxlite-ai/agent-tooling"},
+     pull_request: {number: 7,
+                    head: {sha: $sha, ref: "feat/thing", repo: {full_name: $head_repo}},
+                    base: {repo: {full_name: "boxlite-ai/agent-tooling"}}},
+     sender: {login: "octocat"}}' > "$1"
+}
+
 run_script() {  # event file, tip lookup (present|absent|error), marked (yes|no|spoof|error),
                 # creation exit code, status exit code, commit the creation returns
   rm -f "$TMP/gh-calls" "$TMP/put-body" "$TMP/status-body"
@@ -150,6 +160,11 @@ looked_up_branch_tip; report "the lookup reads the branch tip, not the event sha
   "calls=$(cat "$TMP/gh-calls")"
 reported_gate_on_marking_commit; report "the marking commit gets the failing gate itself" $? \
   "calls=$(cat "$TMP/gh-calls") status=$(cat "$TMP/status-body" 2>/dev/null)"
+
+event_pull_request_target "$TMP/target-opened.json" opened boxlite-ai/agent-tooling "$HEAD_SHA"
+run_script "$TMP/target-opened.json" absent no
+marked_unreviewed; report "a pull_request_target payload marks an unreviewed PR the same way" $? \
+  "rc=$rc err=$err calls=$(cat "$TMP/gh-calls")"
 
 # The hole this closes: a first run that failed, or a PR older than the workflow, has no
 # marking commit. Reading the missing file as "reviewed" would pass it green forever.
