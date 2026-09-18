@@ -4,6 +4,10 @@ name: Unreviewed PR
 # fails until a person deletes the file after reading the diff. A PR merged without that
 # brings the file onto the default branch. Make the "Author reviewed the PR" check required
 # to block the merge. A consumer copying this file copies the script it names.
+#
+# pull_request_target, and a checkout of the base commit alone: this job holds write scopes,
+# so it must never run a pull request's own copy of the workflow or the script. Checking out
+# the head, or switching back to pull_request, hands those scopes to the pull request.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]

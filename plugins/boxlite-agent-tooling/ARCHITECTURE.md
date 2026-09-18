@@ -50,16 +50,20 @@ Independent of every hook above.
 
 | On `opened`, `reopened`, `synchronize` or `ready_for_review` | The step does |
 | --- | --- |
-| The branch tip carries `UNREVIEWED.md` | Reports `Author reviewed the PR` as failing. |
-| The tip lacks it and the pull request carries a valid marking commit | Passes: the file was added and then deleted. |
-| The tip lacks it and the pull request lacks that commit | Commits the file, then reports the gate as failing on that commit, since a commit made with the workflow's own token starts no run. |
-| The head branch lives in a fork | Reports unreviewed: that token cannot write a fork's branch. |
+| The head carries `UNREVIEWED.md` | Reports `Author reviewed the PR` as failing on the head. |
+| The head lacks it and the pull request carries a valid marking commit | Reports the gate as passing on the head: the file was added and then deleted. |
+| The head lacks it and the pull request lacks that commit | Commits the file, then reports the gate as failing on that commit, since a commit made with the workflow's own token starts no run. |
+| No such commit among the 250 GitHub lists, the most it returns | Fails closed: one past that end would be invisible, and marking again would loop. |
+| The head branch lives in a fork | Reports the gate as failing on the fork's head, which the base repository holds as `refs/pull/<number>/head`; that token cannot write a fork's branch, so there is nothing to mark. |
 
-Both reads are of current state, never the event's own sha, so a queued run cannot pass a
-tip that still carries the file. A valid marking commit uses the marker subject, carries the
-canonical marker content, and has this workflow's failing gate status on that same commit. A
-pull request merged unreviewed carries the file onto the default branch. The workflow names
-this repository's script path, so a consumer copies the script with it.
+Every read is of current state, the pull request's head sha and its commits, never the
+event's own sha, so a queued run cannot pass a head that still carries the file. A valid
+marking commit carries the marker subject, is authored by `github-actions[bot]`, is signed
+by GitHub, and its own diff added the file: a subject, a file body and a commit status are
+all things a pull request author can write. The gate is a status on the head because
+`pull_request_target` associates this job's own check run with the base sha, which no merge
+looks at. A pull request merged unreviewed carries the file onto the default branch. The
+workflow names this repository's script path, so a consumer copies the script with it.
 
 ## State files
 
