@@ -1,0 +1,28 @@
+name: Unreviewed PR
+
+# Commits UNREVIEWED.md to a pull request that does not already carry that commit, and
+# fails until a person deletes the file after reading the diff. A PR merged without that
+# brings the file onto the default branch. Make the "Author reviewed the PR" check required
+# to block the merge. A consumer copying this file copies the script it names.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  statuses: write
+
+concurrency:
+  group: unreviewed-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  unreviewed-file:
+    name: Author reviewed the PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add or check UNREVIEWED.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash plugins/boxlite-agent-tooling/scripts/pr-unreviewed-file.sh "$GITHUB_EVENT_PATH"

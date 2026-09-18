@@ -44,6 +44,21 @@ Producers for callers with no agent runtime.
 An agent with a built-in spawns the auditor itself, `Task` on Claude Code and
 `collaboration.spawn_agent` on Codex, from the specs in `.claude/agents/`.
 
+GitHub events, in a repository whose `.github/workflows/unreviewed-pr.yml` runs
+`scripts/pr-unreviewed-file.sh`. Independent of every hook above.
+
+| On `opened`, `reopened`, `synchronize` or `ready_for_review` | The step does |
+| --- | --- |
+| The branch tip carries `UNREVIEWED.md` | Reports `Author reviewed the PR` as failing. |
+| The tip lacks it and the pull request carries the marking commit | Passes: the file was added and then deleted. |
+| The tip lacks it and the pull request lacks that commit | Commits the file, then reports the gate as failing on that commit, since a commit made with the workflow's own token starts no run. |
+| The head branch lives in a fork | Reports unreviewed: that token cannot write a fork's branch. |
+
+Both reads are of current state, never the event's own sha, so a queued run cannot pass a
+tip that still carries the file. A pull request merged unreviewed carries the file onto the
+default branch. The workflow names this repository's script path, so a consumer copies the
+script with it.
+
 ## State files
 
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
@@ -145,6 +160,7 @@ non-blocking `advisories`, which never decide the verdict.
 - **guidance block**: the hash-marked splice of `guidance/workflow.md` into a consumer's `AGENTS.md`; missing or edited fails the gates, behind only warns.
 - **twins**: `hooks/hooks.json` and `hooks/codex-hooks.json`, behaviourally identical except `asyncRewake` against `async` and the events only one host has.
 - **watch**: one run of `.agents/watch/pr-watch.sh` after a push, streaming CI and PR events as JSON lines under one watch id.
+- **unreviewed file**: `UNREVIEWED.md`, committed by CI to a new pull request; a person deletes it after reading the diff, and a PR merged without that brings it onto the default branch.
 
 ## Code map
 
@@ -156,7 +172,7 @@ hooks/                  the twin host hook manifests
 .agents/skills/         shell-engineering, boxlite-diagrams, adversarial-iteration
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
-scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor
+scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, unreviewed-PR file
 guidance/workflow.md    the canonical guidance spliced into consumers
 host-parity.test.sh     what keeps the three hosts loading the same assets
 architecture.test.sh    what keeps this map honest
