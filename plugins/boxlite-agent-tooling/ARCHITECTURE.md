@@ -54,14 +54,19 @@ Independent of every hook above.
 | The head lacks it and the pull request carries a valid marking commit | Passes: the file was added and then deleted. |
 | The head lacks it and the pull request lacks that commit | Commits the file, reports `Author reviewed the PR` as failing on that commit, converts to a draft and fails. |
 | No such commit among the 250 GitHub lists, the most it returns | Fails closed: one past that end would be invisible, and marking again would loop. |
-| The head branch lives in a fork | Converts to a draft and fails; that token cannot write a fork's branch, so there is nothing to mark. |
+| The head branch lives in a fork, opened by an owner, member or collaborator | Converts to a draft and fails: that token cannot mark a fork, and opening from one would otherwise be the way around this gate. |
+| The head branch lives in a fork, opened by anyone else | Passes, unmarked and undrafted: they cannot merge it either, so whoever merges it is reading it. |
 
 The verdict reaches the pull request as this job's own check run, which GitHub attaches to
 the head under `pull_request_target` as under `pull_request`. The marking commit is the one
 thing that never gets a run, because a commit made with the workflow's token starts none, so
 the step posts a status on it under the job name; one required check covers both. Draft is
-the enforcement that needs no branch protection and the only one that reaches a fork. The
-step only ever converts to draft: a person marks the pull request ready.
+the enforcement that needs no branch protection. The step only ever converts to draft: a
+person marks the pull request ready. A fork is the one head this token cannot mark at all,
+so the gate reads who opened it: refusing every fork would close the contribution route of
+any repository that asks people to fork, and passing every fork would let anyone with push
+access walk around the gate by opening from one. Require approvals on the base branch to
+hold the side this cannot.
 
 A valid marking commit names this pull request in its subject, is authored by
 `github-actions[bot]`, is committed by `web-flow`, verifies, and its own diff added the
