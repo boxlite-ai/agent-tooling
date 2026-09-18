@@ -92,10 +92,11 @@ marker_content_matches() {  # repo, ref
 
 # Return 0 when commit sha has this workflow's unreviewed status on it.
 marker_statused_unreviewed() {  # repo, commit sha
-  if gh_cli api -X GET "repos/$1/commits/$2/status" 2>/dev/null \
-    | jq -er --arg context "$status_context" --arg description "$status_description" '
+  local response
+  response="$(gh_cli api -X GET "repos/$1/commits/$2/status" 2>/dev/null)" || return 2
+  if jq -er --arg context "$status_context" --arg description "$status_description" '
         .statuses[]? | select(.context == $context and .state == "failure" and .description == $description)
-      ' >/dev/null; then
+      ' >/dev/null <<<"$response"; then
     return 0
   fi
   [[ "$?" == 1 ]] && return 1
