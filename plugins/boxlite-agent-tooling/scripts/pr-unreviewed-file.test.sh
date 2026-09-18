@@ -31,10 +31,10 @@ cat > "$TMP/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_DIR/gh-calls"
 case "$*" in
-  *"--jq (.head.sha // \"\"), (.node_id // \"\"), (.draft | tostring)"*)  # the pull request
+  *"--jq (.head.sha // \"\"), (.node_id // \"\"), (.draft | tostring), (.author_association // \"\")"*)
     [[ "${STUB_PR_EXIT:-0}" == 0 ]] || { printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1; }
-    printf '%s\n%s\n%s\n' "${STUB_HEAD-0123456789abcdef0123456789abcdef01234567}" \
-      "${STUB_NODE_ID-PR_kwDOAbCdEf}" "${STUB_DRAFT:-false}"
+    printf '%s\n%s\n%s\n%s\n' "${STUB_HEAD-0123456789abcdef0123456789abcdef01234567}" \
+      "${STUB_NODE_ID-PR_kwDOAbCdEf}" "${STUB_DRAFT:-false}" "${STUB_ASSOCIATION-COLLABORATOR}"
     ;;
   "api -X GET "*contents*)
     case "${STUB_GET:-absent}" in
@@ -191,12 +191,31 @@ present_fails() { [[ "$rc" == 1 ]] && never_created && drafted; }
 present_fails; report "a head that still carries the file fails and is drafted, even after a marking commit" $? \
   "rc=$rc calls=$(cat "$TMP/gh-calls")"
 
-echo "## A fork is drafted and reported, never marked or passed"
+echo "## A fork cannot be marked, so who opened it decides"
+# Nobody can mark a fork's branch from here. Refusing every fork would kill the documented
+# contribution route of any repository that asks people to fork; passing every fork would
+# hand anyone with push access a way around the gate by opening from one.
 event "$TMP/fork.json" opened someone/agent-tooling
-run_script "$TMP/fork.json" STUB_GET=absent STUB_MARKED=no
-fork_reported() { [[ "$rc" == 1 && "$err" == *someone/agent-tooling* ]] && never_created && drafted; }
-fork_reported; report "a fork PR is drafted and reported unreviewed, never marked" $? \
+run_script "$TMP/fork.json" STUB_GET=absent STUB_MARKED=no STUB_ASSOCIATION=COLLABORATOR
+fork_from_insider_refused() {
+  # And it must not also tell them to delete a file the token never put in their fork:
+  # that instruction belongs to a marked branch and contradicts the remedy above it.
+  [[ "$rc" == 1 && "$err" == *someone/agent-tooling* && "$err" == *"Open it from a branch in"* \
+     && "$err" != *"delete UNREVIEWED.md"* ]] \
+    && never_created && drafted
+}
+fork_from_insider_refused; report "a fork from someone who can push here is refused and drafted" $? \
   "rc=$rc err=$err calls=$(cat "$TMP/gh-calls")"
+run_script "$TMP/fork.json" STUB_GET=absent STUB_MARKED=no STUB_ASSOCIATION=CONTRIBUTOR
+fork_from_outsider_passes() { [[ "$rc" == 0 ]] && never_created && never_drafted; }
+fork_from_outsider_passes; report "a fork from anyone else passes, unmarked and undrafted" $? \
+  "rc=$rc err=$err calls=$(cat "$TMP/gh-calls")"
+run_script "$TMP/fork.json" STUB_GET=absent STUB_MARKED=no STUB_ASSOCIATION=FIRST_TIME_CONTRIBUTOR
+fork_from_outsider_passes; report "and so does a first-time contributor" $? "rc=$rc err=$err"
+run_script "$TMP/fork.json" STUB_GET=absent STUB_MARKED=no STUB_ASSOCIATION=MEMBER
+fork_from_insider_refused; report "an organisation member is refused as well" $? "rc=$rc err=$err"
+run_script "$TMP/fork.json" STUB_GET=absent STUB_MARKED=no STUB_ASSOCIATION=OWNER
+fork_from_insider_refused; report "the owner opening from a fork is refused too" $? "rc=$rc err=$err"
 
 echo "## Failures fail closed"
 run_script "$TMP/sync.json" STUB_PR_EXIT=1
@@ -222,6 +241,10 @@ jq -n '{action: "opened", repository: {full_name: "boxlite-ai/agent-tooling"},
   > "$TMP/bad-identity.json"
 run_script "$TMP/bad-identity.json"
 failed_before_github; report "an unusable number or branch fails closed before calling GitHub" $? "rc=$rc"
+# Whether a fork is refused or waved through turns on this field, so an absent one decides
+# nothing: without it the fork branch would silently take the passing arm.
+run_script "$TMP/fork.json" STUB_ASSOCIATION=
+exited 2; report "a pull request with no author association fails closed" $? "rc=$rc err=$err"
 printf '{not json' > "$TMP/malformed.json"
 run_script "$TMP/malformed.json"
 exited 2; report "a malformed event fails closed" $? "rc=$rc"

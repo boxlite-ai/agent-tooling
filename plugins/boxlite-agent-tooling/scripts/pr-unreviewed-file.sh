@@ -25,19 +25,24 @@
 #
 # Every read is of current state — the head sha of the pull request and its commits —
 # because a queued run holding an older event sha would otherwise pass a head that still has
-# the file. Exit 0 when the file was added and then deleted, 1 otherwise, 2 when the event
-# cannot be read or GitHub cannot be queried or updated: CI must not pass an unknown state.
+# the file. Exit 0 when the file was added and then deleted, and for the fork this gate
+# leaves to whoever merges it; 1 otherwise; 2 when the event cannot be read or GitHub cannot
+# be queried or updated, because CI must not pass an unknown state.
 # GH_BIN overrides the gh executable (tests). Needs jq and an authenticated gh.
 #
-# Three properties of GitHub shape this:
+# Four properties of GitHub shape this:
 #   - The verdict reaches the pull request as this job's own check run, which GitHub
 #     attaches to the head of the pull request under pull_request_target as under
 #     pull_request. A commit made with this token starts no run at all, so the marking
 #     commit gets an explicit status instead, under the job name so that one required check
 #     covers both.
-#   - Draft is the only block that needs no branch protection, and it is the only one that
-#     reaches a fork, whose branch this token cannot write. The step converts to draft and
-#     never back: a person marks the pull request ready themselves.
+#   - Draft is the only block that needs no branch protection. The step converts to draft
+#     and never back: a person marks the pull request ready themselves.
+#   - A fork's branch cannot be written by this token, so the ceremony cannot run there.
+#     A fork opened by someone who can push here is refused, since opening from a fork
+#     would otherwise be the way around this gate. One opened by anyone else passes: they
+#     cannot merge it either, so whoever merges it is reading it, and a check that could
+#     never go green would only stop them contributing.
 #   - A pull request lists at most 250 commits. Past that end a marking commit is invisible
 #     and its absence proves nothing, so the step says so rather than marking forever.
 #
@@ -76,12 +81,15 @@ marker_content() {
 
 gh_cli() { "${GH_BIN:-gh}" "$@"; }
 
-# Print the current head sha, node id and draft state of the pull request, one per line so
-# that a missing value stays an empty field instead of shifting the next one into its place.
-# The head sha of a fork pull request is one of the fork's commits.
+# Print the current head sha, node id, draft state and author association of the pull
+# request, one per line so that a missing value stays an empty field instead of shifting the
+# next one into its place. The head sha of a fork pull request is one of the fork's commits.
+# The association comes from here rather than from the event because the event carries what
+# was true when it fired: an author who has gained push access since would otherwise be
+# judged on the old answer, and the stale answer is the one that lets a fork through.
 pr_state() {  # base repo, pull request number
   gh_cli api "repos/$1/pulls/$2" \
-    --jq '(.head.sha // ""), (.node_id // ""), (.draft | tostring)'
+    --jq '(.head.sha // ""), (.node_id // ""), (.draft | tostring), (.author_association // "")'
 }
 
 # Print present or absent for the file at a ref; return 1 when GitHub cannot say.
@@ -143,8 +151,9 @@ mark_commit_unreviewed() {  # base repo, commit sha
     | gh_cli api -X POST "repos/$1/statuses/$2" --input - >/dev/null
 }
 
-# Take the merge button away. Draft is the only block that needs no branch protection and
-# the only one that reaches a fork. Never the reverse: a person marks it ready.
+# Take the merge button away. Draft is the only block that needs no branch protection.
+# Never the reverse: a person marks it ready. A fork opened from outside is left undrafted,
+# since nothing there can ever clear a draft this sets.
 draft_pull_request() {  # node id
   # shellcheck disable=SC2016  # $id is a GraphQL variable, bound by -f id below
   gh_cli api graphql -f query='
@@ -170,8 +179,9 @@ if ! identity="$(jq -er '
   fail_closed "$event_file is not a readable pull request event"
 fi
 IFS=$'\t' read -r base_repo number head_repo head_ref <<<"$identity"
-# The head repository, not the base: a fork's branch name can match a base branch. The
-# event's own sha is deliberately unused; every read below is of the current state.
+# The head repository, not the base: a fork's branch name can match a base branch. Identity
+# is all the event is read for; the sha it carries, and who it says opened the pull request,
+# are deliberately unused, because every value the verdict turns on is read live below.
 [[ "$base_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ \
    && "$head_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ \
    && "$number" =~ ^[1-9][0-9]*$ && -n "$head_ref" ]] \
@@ -179,30 +189,54 @@ IFS=$'\t' read -r base_repo number head_repo head_ref <<<"$identity"
 
 state="$(pr_state "$base_repo" "$number")" \
   || fail_closed "could not read $base_repo#$number"
-{ IFS= read -r head_sha; IFS= read -r node_id; IFS= read -r is_draft; } <<<"$state"
-[[ "$head_sha" =~ ^[0-9a-f]{40}$ && -n "$node_id" ]] \
-  || fail_closed "unexpected head or id for $base_repo#$number"
+{ IFS= read -r head_sha; IFS= read -r node_id; IFS= read -r is_draft
+  IFS= read -r author_association; } <<<"$state"
+[[ "$head_sha" =~ ^[0-9a-f]{40}$ && -n "$node_id" \
+   && "$author_association" =~ ^[A-Z_]+$ ]] \
+  || fail_closed "unexpected head, id or author association for $base_repo#$number"
 
 # Exit 1 after taking the merge button away. The failing verdict itself is this job's own
-# check run, which GitHub puts on the head of the pull request.
-report_unreviewed() {  # closing line
+# check run, which GitHub puts on the head of the pull request. The remedy travels with the
+# reason rather than being appended to every refusal: what to do about a marker sitting in
+# the tree and what to do about a fork nobody can mark are different instructions, and the
+# wrong one names a file the reader does not have.
+report_unreviewed() {  # reason, what to do about it
   if [[ "$is_draft" != true ]] && ! draft_pull_request "$node_id"; then
     printf 'pr-unreviewed-file: could not convert %s#%s to a draft; the failing gate is the only block left\n' \
       "$base_repo" "$number" >&2
   fi
   printf 'Unreviewed: %s\n' "$1" >&2
-  printf 'Read the diff, delete %s in a commit, then mark this pull request ready.\n' "$marker_path" >&2
+  printf '%s\n' "$2" >&2
   exit 1
 }
 
-# Nothing to mark on a fork's branch, which this token cannot write. Draft still applies.
+# What an author does about a marker that is in their own branch.
+delete_the_marker="Read the diff, delete $marker_path in a commit, then mark this pull request ready."
+
+# A fork's branch is one this token cannot write, so the ceremony cannot run there at all.
+# Who opened it decides what that silence should mean. Someone who can push here has a
+# branch in this repository available and is exactly who the gate is for, so a fork from
+# them is refused rather than waved through: that is the way around it otherwise. Someone
+# who cannot push here also cannot merge their own pull request, so whoever merges it is
+# reading it by definition, and a gate that could never go green would only stop them
+# contributing. Require approvals on the base branch to hold that side.
 if [[ "$head_repo" != "$base_repo" ]]; then
-  report_unreviewed "this pull request comes from $head_repo, where this workflow's token cannot commit $marker_path."
+  case "$author_association" in
+    OWNER | MEMBER | COLLABORATOR)
+      report_unreviewed "this pull request comes from $head_repo, which this workflow's token cannot mark." \
+        "Open it from a branch in $base_repo, where the gate can mark it; if you cannot push there, a maintainer can."
+      ;;
+    *)
+      printf '%s#%s comes from %s, which this workflow cannot mark; whoever merges it is its reviewer.\n' \
+        "$base_repo" "$number" "$head_repo"
+      exit 0
+      ;;
+  esac
 fi
 
 marker="$(marker_state "$head_repo" "$head_sha")" \
   || fail_closed "could not look up $marker_path at $head_repo@$head_sha"
-[[ "$marker" == present ]] && report_unreviewed "$marker_path is still in this pull request."
+[[ "$marker" == present ]] && report_unreviewed "$marker_path is still in this pull request." "$delete_the_marker"
 
 # Absent is only reviewed when this pull request was marked and the mark was deleted.
 marker_commit_state "$base_repo" "$number"
@@ -218,4 +252,4 @@ marked_sha="$(add_marker "$head_repo" "$head_ref" "$number")" \
   || fail_closed "adding $marker_path returned no commit for $head_repo:$head_ref"
 mark_commit_unreviewed "$base_repo" "$marked_sha" \
   || fail_closed "could not report $status_context on $base_repo@$marked_sha"
-report_unreviewed "$marker_path was just added to this pull request."
+report_unreviewed "$marker_path was just added to this pull request." "$delete_the_marker"
