@@ -1,9 +1,15 @@
 name: Unreviewed PR
 
-# Commits UNREVIEWED.md to a pull request that does not already carry that commit, and
-# fails until a person deletes the file after reading the diff. A PR merged without that
-# brings the file onto the default branch. Make the "Author reviewed the PR" check required
-# to block the merge. A consumer copying this file copies the script it names.
+# Commits UNREVIEWED.md to a pull request that does not already carry that commit, converts
+# the pull request to a draft, and fails until a person deletes the file after reading the
+# diff and marks it ready. Draft blocks the merge on its own; making "Author reviewed the
+# PR" a required check blocks it again for anyone who undrafts without reviewing. A PR
+# merged without that brings the file onto the default branch. A consumer copying this file
+# copies the script it names.
+#
+# pull_request_target, and a checkout of the base commit alone: this job holds write scopes,
+# so it must never run a pull request's own copy of the workflow or the script. Checking out
+# the head, or switching back to pull_request, hands those scopes to the pull request.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -11,6 +17,7 @@ on:
 permissions:
   contents: write
   statuses: write
+  pull-requests: write
 
 concurrency:
   group: unreviewed-pr-${{ github.event.pull_request.number }}
