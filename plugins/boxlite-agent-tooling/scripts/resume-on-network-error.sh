@@ -6,11 +6,11 @@
 #
 # Why this is a wrapper and not a hook
 # ------------------------------------
-# A turn that dies on an API error IS observable in-session — the host fires
-# StopFailure instead of Stop, carrying the error kind. But that event is documented
-# and implemented as fire-and-forget ("hook output and exit codes are ignored", and
-# the dispatcher discards the result), so no hook can resume the turn. Restarting the
-# run is only possible from outside the process, which is what this script does.
+# In an interactive session, .agents/hooks/resume-after-api-failure.sh resumes the turn
+# in place: wired to StopFailure with asyncRewake, it wakes the model by exiting 2. A
+# plain `claude -p` run has no such path. The host runs asyncRewake hooks synchronously
+# there and ignores StopFailure's exit code, so the run can only be restarted from
+# outside the process, which is what this script does.
 #
 # How it knows WHICH failure it is
 # --------------------------------

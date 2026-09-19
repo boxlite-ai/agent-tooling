@@ -29,8 +29,7 @@ check() {  # name expected actual
   fi
 }
 
-# stderr is captured, never discarded: swallowing it with 2>&1 is what let a failed
-# /dev/tty redirection go unnoticed. Every case below can therefore assert silence.
+# stderr is captured, never discarded, so every case below can assert silence.
 # Feed a payload to the subject hook via stdin, capture exit code and stderr.  # $1 = payload JSON; sets rc, writes stderr to $work/stderr
 feed() {  # payload -> sets rc; leaves the record and captured stderr in place
   printf '%s' "$1" | bash "$subject" >/dev/null 2>"$work/stderr"
@@ -45,12 +44,8 @@ printf 'record-api-failure\n'
 rm -f "$record"
 feed '{"hook_event_name":"StopFailure","error":"overloaded","error_details":"529","session_id":"s1"}'
 check "recognised kind exits 0" "0" "$rc"
-# This suite runs with no controlling terminal, so the notification path's open of
-# /dev/tty fails here. A `[[ -w /dev/tty ]]` guard does not prevent that (the node is
-# world-writable) and a command-level 2>/dev/null does not silence it (the shell
-# reports a failed redirection on its own stderr). A hook reporting someone else's
-# failure must never emit one of its own.
-check "no controlling terminal produces no stderr" "0" "$(stderr_bytes)"
+# A hook reporting someone else's failure must never emit one of its own.
+check "a recorded failure produces no stderr" "0" "$(stderr_bytes)"
 check "recognised kind is recorded" "overloaded" \
   "$(jq -r '.error' "$record" 2>/dev/null || echo MISSING)"
 check "error_details is carried" "529" \
