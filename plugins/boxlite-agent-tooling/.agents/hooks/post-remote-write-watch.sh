@@ -923,8 +923,10 @@ fi
 policy_path_json="$(jq -Rn --arg path "$policy_path" '$path')"
 
 pr_line="No open PR for '${branch}' yet; the watcher polls until one appears."
+compact_pr_line="No open PR may exist yet; the watcher polls."
 if [[ "$pr_number" =~ ^[0-9]+$ ]]; then
   pr_line="PR #${pr_number}: https://github.com/${slug}/pull/${pr_number}"
+  compact_pr_line="PR #${pr_number}."
 fi
 
 branch_line="Remote write succeeded on '${branch}'."
@@ -970,8 +972,9 @@ context_bytes="$(LC_ALL=C printf '%s' "$context" | wc -c | tr -d ' ')"
 if (( context_bytes > context_max_bytes )); then
   # Paths are caller-controlled and can be unusually long. Keep the hook bounded
   # rather than letting repeated path prose turn one advisory event into a large
-  # prompt. The one exact command is retained; it is the authoritative locator.
-  context="${branch_line} No open PR may exist yet; the watcher polls.
+  # prompt. The one exact command is retained; it is the authoritative locator, and a
+  # PR number already read is kept, since it is digits and cannot grow with the paths.
+  context="${branch_line} ${compact_pr_line}
 Attach exactly ONE consumer.
 Stream command:
   ${stream_command}
