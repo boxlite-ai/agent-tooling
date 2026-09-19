@@ -4281,6 +4281,37 @@ else
 fi
 rm -rf "$R"
 
+# stop-gate.sh asks for a small closing reply only after a judged allow, and learns
+# which rung decided from VERDICT_DECISION_OUT. The file sits outside the repo: a line
+# appended inside it would move the tree hash a dossier is bound to.
+printf '\n## The deciding rung reaches a caller that asks for it\n'
+decided_rung() {  # repo classifier-answer -> last line the gate reported
+  local decisions; decisions="$(mktemp)"
+  jq -nc --arg p "$1/transcript.jsonl" \
+    '{transcript_path:$p, hook_event_name:"Stop", session_id:"decision-out"}' \
+    | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" VERDICT_GATE_HARD_BLOCK=1 \
+        VERDICT_DECISION_OUT="$decisions" \
+        VERDICT_CLASSIFIER_CMD="$(cls_stub "$1" "$2")" bash "$HOOK" ) >/dev/null 2>&1
+  tail -n 1 "$decisions"
+  rm -f "$decisions"
+}
+R="$(setup)"; write_transcript "$R" "Nothing here is a verdict; just chatting."
+rung="$(decided_rung "$R" NO)"
+if [[ "$rung" == "triage NO-allow" ]]; then
+  pass=$((pass + 1)); printf '  PASS  a triage allow reports its rung\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  a triage allow reports its rung  (got: %s)\n' "$rung"
+fi
+rm -rf "$R"
+R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
+rung="$(decided_rung "$R" YES)"
+if [[ "$rung" == "dossier FAIL-block" ]]; then
+  pass=$((pass + 1)); printf '  PASS  the re-entered audit child reports the rung that decided\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  the re-entered audit child reports the rung that decided  (got: %s)\n' "$rung"
+fi
+rm -rf "$R"
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

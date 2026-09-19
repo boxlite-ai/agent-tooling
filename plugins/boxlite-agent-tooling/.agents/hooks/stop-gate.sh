@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# Stop hook: the end-of-turn gate. It runs two checks in order from one hook, so they
+# never race the way two parallel Stop hooks would:
+#   1. A small reply answering the previous Stop's ask ends the turn when no tool ran
+#      since the ask: it restates a turn the verdict check already judged.
+#   2. preflight-verdict-check.sh judges the turn. Its block, error or allow is the
+#      answer, except that
+#   3. an allow that followed a judgment, on a last reply over 60 words, continues the
+#      turn once to ask for a closing reply that shows the result in few words:
+#      drawings of any kind, as many as it takes, or at most 3 bullet points where a
+#      drawing cannot express it.
+# The reply-summary rule and its record live in .agents/lib/reply-summary.sh. Both
+# decisions here join the verdict check's per-session decision log.
+#
+# stdin is the host's Stop payload, handed unchanged to the verdict check. stdout,
+# stderr and the exit status are the verdict check's, except that step 1 ends silently
+# and step 3 replaces an allow with the ask. When a library or command this needs is
+# missing, only the verdict check runs, so its own failure handling stays in charge.
+#
+# Tests: bash .agents/hooks/stop-gate.test.sh
+set -uo pipefail
+
+hooks_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+tooling_root="$(cd "$hooks_dir/../.." && pwd)"
+verdict_check="$hooks_dir/preflight-verdict-check.sh"
+raw_payload="$(cat)"
+
+run_verdict_check_alone() {
+  printf '%s' "$raw_payload" | bash "$verdict_check"
+  exit $?
+}
+
+for required_command in jq perl git; do
+  command -v "$required_command" >/dev/null 2>&1 || run_verdict_check_alone
+done
+for library in verdict-audit-state.sh reply-summary.sh hook-host.sh; do
+  [[ -r "$tooling_root/.agents/lib/$library" ]] || run_verdict_check_alone
+done
+# shellcheck source=../lib/verdict-audit-state.sh
+source "$tooling_root/.agents/lib/verdict-audit-state.sh"
+# shellcheck source=../lib/reply-summary.sh
+source "$tooling_root/.agents/lib/reply-summary.sh"
+# shellcheck source=../lib/hook-host.sh
+source "$tooling_root/.agents/lib/hook-host.sh"
+
+# ── Input: the payload fields this gate reads; anything malformed is the verdict
+#    check's to report ─────────────────────────────────────────────────────────
+payload="$(printf '%s' "$raw_payload" | jq -ecs '
+  if length == 1 and (.[0] | type) == "object" then .[0] else empty end
+' 2>/dev/null)" || run_verdict_check_alone
+payload_string() { printf '%s' "$payload" | jq -r "if (.$1 | type) == \"string\" then .$1 else \"\" end"; }
+session_id="$(payload_string session_id)"
+transcript_path="$(payload_string transcript_path)"
+last_assistant_message="$(payload_string last_assistant_message)"
+stop_hook_active="$(printf '%s' "$payload" | jq -r 'if .stop_hook_active == true then "true" else "false" end')"
+
+project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+if ! repo_root="$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null)" \
+   || ! repo_root="$(cd "$repo_root" && pwd -P)"; then
+  run_verdict_check_alone
+fi
+session_scope="-"
+if [[ -n "$session_id" ]]; then
+  session_scope="$(verdict_audit_scope_from_hook_payload "$payload" "$repo_root" 2>/dev/null)" \
+    || session_scope="-"
+fi
+# Without a session there is nowhere to remember an ask, so the verdict check decides.
+[[ "$session_scope" != "-" ]] || run_verdict_check_alone
+
+state_dir="$repo_root/.agents/state"
+ask_file="$(verdict_audit_state_path "$state_dir/reply-summary-ask" "$session_scope")"
+prompt_epoch_file="$(verdict_audit_state_path "$state_dir/verdict-prompt-epoch" "$session_scope")"
+decision_log="$(verdict_audit_state_path "$state_dir/verdict-decisions.log" "$session_scope")"
+message_id="cksum-$(printf '%s' "$last_assistant_message" | cksum | tr ' \t' '--')"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/stop-gate.XXXXXX")" || run_verdict_check_alone
+trap 'rm -f "$scratch/payload" "$scratch/verdict-output" "$scratch/decisions" "$scratch/final-turn.json"; rmdir "$scratch" 2>/dev/null' EXIT
+
+# The prompt epoch is an opaque token that UserPromptSubmit advances; a missing marker
+# is the initial epoch. An ask binds to it, so a new prompt retires the ask.
+read_prompt_epoch() {
+  if [[ ! -e "$prompt_epoch_file" && ! -L "$prompt_epoch_file" ]]; then
+    printf -
+    return 0
+  fi
+  verdict_audit_read_single_record "$prompt_epoch_file" 2>/dev/null
+}
+entry_prompt_epoch="$(read_prompt_epoch)" || entry_prompt_epoch=""
+prompt_epoch_is_current() {
+  local current
+  current="$(read_prompt_epoch)" || return 1
+  [[ -n "$entry_prompt_epoch" && "$current" == "$entry_prompt_epoch" ]]
+}
+
+log_decision() {  # rung outcome
+  mkdir -p "$(dirname "$decision_log")" 2>/dev/null || return 0
+  verdict_audit_append_log_line "$decision_log" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ) $message_id $1 $2" 2>/dev/null || true
+}
+
+# A custom extractor means a transcript format the shared reader cannot parse.
+final_turn_tool_count() {
+  [[ -z "${VERDICT_EXTRACTOR_CMD:-}" ]] || return 1
+  reply_summary_tool_count "$transcript_path" "$scratch"
+}
+
+# ── 1. The small reply the previous Stop asked for ───────────────────────────
+# A block started a new transcript turn at the request, so that turn must hold no tool
+# call at all; a context continuation still holds the judged turn, so its count must
+# not have grown. Anything else is new work for the verdict check, never asked twice.
+asked=false
+asked_mode=""
+asked_tools=""
+if ask="$(reply_summary_take_ask "$ask_file")"; then
+  read -r ask_epoch asked_mode asked_tools <<<"$ask"
+  [[ "$ask_epoch" == "$entry_prompt_epoch" ]] && asked=true
+fi
+is_restatement() {
+  local tools
+  [[ "$asked" == true && "$stop_hook_active" == true ]] || return 1
+  [[ -n "$last_assistant_message" ]] || return 1
+  reply_summary_fits_restatement "$last_assistant_message" || return 1
+  tools="$(final_turn_tool_count)" || return 1
+  case "$asked_mode" in
+    block)   [[ "$tools" == 0 ]] ;;
+    context) [[ "$asked_tools" =~ ^[0-9]+$ && "$tools" == "$asked_tools" ]] ;;
+    *)       return 1 ;;
+  esac
+}
+if is_restatement; then
+  log_decision summary restatement-allow
+  exit 0
+fi
+
+# ── 2. The verdict check ─────────────────────────────────────────────────────
+# A signal can reach this gate two ways, and the check must see both, as it did when it
+# was the hook itself:
+#   - to the whole process group: the check, its audit runner and the model under it
+#     each get it and stop through their own traps. A background child of a shell
+#     without job control would ignore SIGINT and SIGQUIT for good, so the check
+#     starts with both restored.
+#   - to this gate alone: this gate waits in the background-job `wait`, where its traps
+#     run at once, and passes the signal on to the check.
+# The traps are set before the check starts, so no signal lands in between.
+verdict_pid=""
+# shellcheck disable=SC2329 # invoked from the TERM and INT traps below
+forward_signal() {  # signal exit-status
+  if [[ -n "$verdict_pid" ]]; then
+    kill "-$1" "$verdict_pid" 2>/dev/null
+    wait "$verdict_pid" 2>/dev/null
+  fi
+  exit "$2"
+}
+trap 'forward_signal TERM 143' TERM
+trap 'forward_signal INT 130' INT
+printf '%s' "$raw_payload" > "$scratch/payload"
+: > "$scratch/decisions"
+VERDICT_DECISION_OUT="$scratch/decisions" \
+  perl -e '$SIG{INT} = $SIG{QUIT} = "DEFAULT"; exec @ARGV; exit 127' \
+  bash "$verdict_check" < "$scratch/payload" > "$scratch/verdict-output" &
+verdict_pid=$!
+wait "$verdict_pid"
+verdict_status=$?
+verdict_output="$(cat "$scratch/verdict-output")"
+if (( verdict_status != 0 )); then
+  printf '%s' "$verdict_output"
+  exit "$verdict_status"
+fi
+
+# ── 3. Ask once for a small closing reply ────────────────────────────────────
+# Only the allows that follow a judgment, or a user's override, ask; an unjudged or
+# superseded allow, an audit still running, and every block pass through. Soft mode
+# means the gate never continues a turn, so it asks for nothing either.
+# Claude Code takes the request as additionalContext, which continues the turn without
+# a hook-error notice (code.claude.com/docs/en/hooks, "Stop decision control"). Its
+# transcript records it as an attachment, not a user message, and the next Stop carries
+# stop_hook_active=true: observed on Claude Code 2.1.278. Any other caller gets
+# decision:block, which every host honors and records as a user message.
+ask_is_due() {
+  local length_status=0
+  [[ "$asked" != true && "${VERDICT_GATE_HARD_BLOCK:-1}" != "0" ]] || return 1
+  case "$(tail -n 1 "$scratch/decisions" 2>/dev/null)" in
+    "override overridden-allow"|"dossier PASS-allow"|"dossier IN_PROGRESS-allow") ;;
+    "triage NO-allow"|"regex none-allow") ;;
+    *) return 1 ;;
+  esac
+  [[ -z "$verdict_output" ]] \
+    || printf '%s' "$verdict_output" | jq -e '(.decision // "") != "block"' >/dev/null 2>&1 \
+    || return 1
+  reply_summary_is_long "$last_assistant_message" || length_status=$?
+  (( length_status == 0 ))
+}
+ask_for_reply_summary() {
+  local mode=block tools note
+  [[ "$(hook_host_kind)" == claude ]] && mode=context
+  tools="$(final_turn_tool_count)" || tools="-"
+  reply_summary_record_ask "$ask_file" "$entry_prompt_epoch" "$mode" "$tools" \
+    2>/dev/null || return 1
+  # Checked after the record is written, so a prompt that arrived at any point before
+  # now supersedes this Stop and takes the ask back with it.
+  if ! prompt_epoch_is_current; then
+    reply_summary_retract_ask "$ask_file" "$entry_prompt_epoch" "$mode" "$tools" || true
+    return 1
+  fi
+  log_decision summary ask-continue
+  note="$(printf '%s' "$verdict_output" | jq -r '.systemMessage // empty' 2>/dev/null)"
+  if [[ "$mode" == context ]]; then
+    jq -nc --arg c "$(reply_summary_request)" --arg m "$note" \
+      '{hookSpecificOutput:{hookEventName:"Stop", additionalContext:$c}}
+       + (if $m == "" then {} else {systemMessage:$m} end)'
+  else
+    jq -nc --arg r "$(reply_summary_request)" --arg m "$note" \
+      '{decision:"block", reason:$r}
+       + (if $m == "" then {} else {systemMessage:$m} end)'
+  fi
+}
+if ask_is_due && ask_for_reply_summary; then
+  exit 0
+fi
+printf '%s' "$verdict_output"
+exit 0
