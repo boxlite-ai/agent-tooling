@@ -62,6 +62,14 @@ if [[ ! -r "$audit_state_lib" ]]; then
 fi
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$audit_state_lib"
+wake_lib="$tooling_root/.agents/lib/hook-wake.sh"
+if [[ ! -r "$wake_lib" ]]; then
+  printf 'cancel-verdict-audit.sh: missing %s — cannot recognise internal wakes.\n' \
+    "$wake_lib" >&2
+  exit 1
+fi
+# shellcheck source=../lib/hook-wake.sh
+source "$wake_lib"
 # Never transport the session string through command substitution: it strips trailing
 # newlines. The shared helper streams the raw JSON value directly into git hash-object.
 if ! session_scope="$(verdict_audit_scope_from_hook_payload \
@@ -70,11 +78,15 @@ if ! session_scope="$(verdict_audit_scope_from_hook_payload \
   exit 1
 fi
 
-# Claude dispatches the asyncRewake UserPromptSubmit hook before appending its host
-# notification to the transcript. Authenticate this one internal wake from the payload
-# itself: the escalation stores only a hash, and the control facade consumes it under
-# the session mutex. A valid queued wake remains internal after terminal or prompt state
-# moves on; a missing, forged, reused, or expired marker falls through as a real prompt.
+# Claude dispatches UserPromptSubmit for its own task notifications before appending them
+# to the transcript, so an internal turn is authenticated from the payload itself, and
+# anything not authenticated falls through as a real prompt. A background audit's
+# completion arrives as a bare envelope naming its generation, which the control facade
+# credits a bounded number of times. The auditor's 30-second escalation is an asyncRewake
+# wake whose marker rides in the reminder after the envelope (.agents/lib/hook-wake.sh):
+# the escalation stores only the nonce's hash and spends it once, so a missing, forged,
+# reused, or expired marker is a real prompt. A valid queued wake remains internal after
+# terminal or prompt state moves on.
 prompt_text="$(printf '%s' "$payload" | jq -r '
   if (.prompt | type) == "string" then .prompt else "" end
 ')"
@@ -89,16 +101,13 @@ if [[ "$prompt_text" == '<task-notification>'$'\n'*$'\n</task-notification>' ]];
        >/dev/null 2>&1; then
     exit 0
   fi
-  wake_nonce="$(printf '%s' "$prompt_text" | jq -Rer '
-    capture("\\[auditor-wake:(?<nonce>[0-9a-f]{64})\\]").nonce
-  ' 2>/dev/null || true)"
-  if [[ "$wake_nonce" =~ ^[0-9a-f]{64}$ ]]; then
-    wake_nonce_hash="$(printf '%s' "$wake_nonce" | shasum -a 256 | awk '{print $1}')"
-    if CLAUDE_PROJECT_DIR="$project_dir" bash \
-      "$tooling_root/.agents/hooks/auditor-control.sh" \
-      consume-wake "$session_scope" "$wake_nonce_hash" >/dev/null 2>&1; then
-      exit 0
-    fi
+fi
+if wake_nonce="$(hook_wake_marker "$prompt_text" auditor-wake)"; then
+  wake_nonce_hash="$(printf '%s' "$wake_nonce" | shasum -a 256 | awk '{print $1}')"
+  if CLAUDE_PROJECT_DIR="$project_dir" bash \
+    "$tooling_root/.agents/hooks/auditor-control.sh" \
+    consume-wake "$session_scope" "$wake_nonce_hash" >/dev/null 2>&1; then
+    exit 0
   fi
 fi
 
