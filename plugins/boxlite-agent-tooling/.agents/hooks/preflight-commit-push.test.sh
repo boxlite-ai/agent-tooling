@@ -190,6 +190,19 @@ write_audit "PASS" "[]" "commit"
 run "PASS verdict matches → allow"      "$GC -m foo"                  "passthrough"
 run "verdict consumed on allow"         "$GC -m foo"                  "deny"
 
+# A report stays valid for 5 hours after it is written, then expires.
+age_audit() {  # seconds-old
+  perl -e 'my $t = time - $ARGV[0]; utime($t, $t, $ARGV[1]) or exit 1' \
+    "$1" "$TMP/.agents/state/last-audit.json"
+}
+write_audit "PASS" "[]" "commit"
+age_audit $(( 5 * 3600 - 60 ))
+run "PASS written just under 5 hours ago → allow" "$GC -m foo"       "passthrough"
+write_audit "PASS" "[]" "commit"
+age_audit $(( 5 * 3600 + 60 ))
+run "PASS written just over 5 hours ago → deny"   "$GC -m foo"       "deny"
+rm -f "$TMP/.agents/state/last-audit.json"
+
 # Force two gate processes past stable selection before either consumes the
 # canonical dossier. Only the winner of that atomic consume may authorize Git.
 write_audit "PASS" "[]" "commit"

@@ -5,8 +5,8 @@
 #   - every script, manifest and spec the map names exists on disk;
 #   - every hook script the manifests wire, and every non-test script in
 #     .agents/hooks/, is on the map;
-#   - the Stop-gate decision table and the gate's logged rung/outcome pairs are the
-#     same set, in both directions;
+#   - the Stop-gate decision table and the rung/outcome pairs its two scripts log are
+#     the same set, in both directions;
 #   - every state file the map lists is named by some non-test source;
 #   - every glossary term is used by some non-test source.
 #
@@ -19,7 +19,8 @@ set -uo pipefail
 PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$PLUGIN/../.." && pwd)"
 DOC="$PLUGIN/ARCHITECTURE.md"
-STOP_GATE="$PLUGIN/.agents/hooks/preflight-verdict-check.sh"
+# stop-gate.sh logs the summary rungs around the verdict check it runs.
+STOP_GATE_SCRIPTS=("$PLUGIN/.agents/hooks/stop-gate.sh" "$PLUGIN/.agents/hooks/preflight-verdict-check.sh")
 CLAUDE_HOOKS="$PLUGIN/hooks/hooks.json"
 CODEX_HOOKS="$PLUGIN/hooks/codex-hooks.json"
 
@@ -76,7 +77,7 @@ echo "== the decision table and the gate log the same rung/outcome pairs =="
 table_pairs="$(section 'Stop gate decisions' \
   | awk -F'|' 'NF >= 4 { r = $2; o = $3; gsub(/[` ]/, "", r); gsub(/[` ]/, "", o);
                 if (r != "" && r != "Rung" && r !~ /^-+$/) print r " " o }' | sort -u)"
-gate_pairs="$(grep -oE 'log_decision [a-z]+ [A-Za-z_-]+' "$STOP_GATE" | sed 's/^log_decision //' | sort -u)"
+gate_pairs="$(grep -ohE 'log_decision [a-z]+ [A-Za-z_-]+' "${STOP_GATE_SCRIPTS[@]}" | sed 's/^log_decision //' | sort -u)"
 if [[ -z "$table_pairs" ]]; then bad "decision table has no rows"; fi
 for pair in $(comm -23 <(printf '%s\n' "$table_pairs") <(printf '%s\n' "$gate_pairs") | tr ' ' '/'); do
   bad "table row the gate never logs: ${pair}"

@@ -106,7 +106,12 @@ mirror_to_legacy() {
 }
 branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
-max_age_seconds=600
+# An audit report, and the handoff it answers, stays valid for 5 hours after it is
+# written. The branch, HEAD, diff, command and subject bindings already reject a report
+# that no longer describes what is being committed or pushed, so the age only retires
+# reports from long-finished work. 10 minutes expired reports that took 25 minutes to
+# produce before anyone could read their findings.
+max_age_seconds=18000
 deny_max_bytes=8192
 # The PreToolUse command text recorded in the handoff (see write_command_handoff).
 # Same ceiling as the deny reason that will carry it back to the agent.

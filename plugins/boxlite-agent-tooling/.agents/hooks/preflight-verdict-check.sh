@@ -64,7 +64,9 @@
 #      waits briefly for the fresh message and, failing that, allows — a message is
 #      never judged twice.
 #
-# Wired in .claude/settings.json under hooks.Stop (no matcher — fires every turn end).
+# Run by stop-gate.sh, the Stop hook both manifests wire, at every turn end except one
+# that answers the gate's request for the result; stop-gate.sh reads the deciding rung
+# from VERDICT_DECISION_OUT when it sets that path.
 #
 # Design notes
 # ------------
@@ -263,9 +265,14 @@ prompt_epoch_is_current() {
 # One line per Stop decision (gitignored): timestamp, message identity, deciding
 # rung, outcome — so "why did/didn't the gate fire?" is answerable with tail
 # instead of fixture reconstruction. Best-effort: logging must never fail the
-# hook. Rotated in place to stay bounded.
+# hook. Rotated in place to stay bounded. A caller that sets VERDICT_DECISION_OUT
+# also receives each bare "rung outcome" line there; an exit that logs nothing, such
+# as a superseded Stop, leaves the previous line last.
 log_decision() {  # rung outcome
   local line
+  if [[ -n "${VERDICT_DECISION_OUT:-}" ]]; then
+    verdict_audit_append_log_line "$VERDICT_DECISION_OUT" "$1 $2" 2>/dev/null || true
+  fi
   mkdir -p "$(dirname "$decision_log")" 2>/dev/null || return 0
   line="$(date -u +%Y-%m-%dT%H:%M:%SZ) ${FINAL_ID:--} $1 $2"
   verdict_audit_append_log_line "$decision_log" "$line" 2>/dev/null || true
