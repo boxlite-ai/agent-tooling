@@ -131,15 +131,24 @@ fi
 
 echo
 echo "## PR resolution"
+# The full context names the tooling root twice, so the path of the checkout running
+# this suite decides whether it fits the hook's 1400-byte limit; from a Claude Code
+# worktree it did not, and the hook sent its fallback instead. These cases run the
+# hook through a short link to this checkout, so they judge the full context wherever
+# the suite runs. The fallback has its own cases, reached through a long link.
+SHORT_ROOT="$TMP/t"
+ln -s "$REPO_ROOT" "$SHORT_ROOT"
 # Both plugin roots are cleared so the default is genuinely the unknown host. Running
 # the suite from inside a hook would otherwise leave a real root exported, and every
 # case built on this would quietly exercise that host's route instead.
-ctx() {
-  jq -nc --arg c "$1" --arg r "$2" \
+ctx_via() {  # tooling-root, command, response
+  jq -nc --arg c "$2" --arg r "$3" \
      '{tool_input:{command:$c}, tool_response:{stdout:$r, stderr:""}}' \
-   | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT "$HOOK" 2>/dev/null \
+   | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT \
+       "$1/.agents/hooks/post-remote-write-watch.sh" 2>/dev/null \
    | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
+ctx() { ctx_via "$SHORT_ROOT" "$@"; }
 
 ctx_at() { # repo, command, response
   local repo="$1" cmd="$2" response="$3"
@@ -2258,15 +2267,16 @@ fi
 # being set up here.
 ctx_as_host() {  # host, command, response
   local host="$1" cmd="$2" response="$3" payload
+  local hook="$SHORT_ROOT/.agents/hooks/post-remote-write-watch.sh"
   payload="$(jq -nc --arg c "$cmd" --arg r "$response" \
     '{tool_input:{command:$c}, tool_response:{stdout:$r, stderr:""}}')"
   case "$host" in
     claude)
       printf '%s' "$payload" | env -u PLUGIN_ROOT CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
-        "$HOOK" 2>/dev/null ;;
+        "$hook" 2>/dev/null ;;
     codex)
       printf '%s' "$payload" | env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$REPO_ROOT" \
-        "$HOOK" 2>/dev/null ;;
+        "$hook" 2>/dev/null ;;
   esac | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
 claude_ctx="$(ctx_as_host claude "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
@@ -2284,9 +2294,9 @@ fi
 
 # The stream script must be addressed in the TOOLING tree (the hook's own
 # plugin), not at the consumer repo root: an installed consumer has no .agents/
-# checkout, and this suite's scratch repo root is not $REPO_ROOT. Asserting the
-# full path is what the bare-filename checks above cannot do.
-if [[ "$got" == *"bash $REPO_ROOT/.agents/watch/pr-watch-stream.sh"* ]]; then
+# checkout, and this suite's scratch repo root is not the tooling root. Asserting
+# the full path is what the bare-filename checks above cannot do.
+if [[ "$got" == *"bash $SHORT_ROOT/.agents/watch/pr-watch-stream.sh"* ]]; then
   pass=$((pass + 1)); printf '  PASS  stream script addressed at the tooling root\n'
 else
   fail=$((fail + 1)); printf '  FAIL  stream script addressed at the tooling root (got: %.120s)\n' "$got"
@@ -2305,6 +2315,31 @@ if [[ "$got" == *"exactly ONE"* && "$got" == *"fail/cancel"* \
   pass=$((pass + 1)); printf '  PASS  compact context preserves attach and alert contracts\n'
 else
   fail=$((fail + 1)); printf '  FAIL  compact context preserves attach and alert contracts\n'
+fi
+
+echo
+echo "## The long-path fallback keeps the PR it resolved"
+# A tooling root this long pushes the full context past 1400 bytes while the fallback
+# still fits, so the hook sends the fallback. That text must still name a PR the hook
+# has read, not tell the agent that none may exist.
+LONG_LINK_PARENT="$TMP/$(printf '%0150d' 0 | tr 0 f)"
+mkdir -p "$LONG_LINK_PARENT"
+ln -s "$REPO_ROOT" "$LONG_LINK_PARENT/t"
+is_fallback_context() {  # context
+  [[ "$1" == *"Stream command:"* && "$1" != *"using the route below"* ]] \
+    && (( $(LC_ALL=C printf '%s' "$1" | wc -c) <= 1400 ))
+}
+got="$(ctx_via "$LONG_LINK_PARENT/t" "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
+if is_fallback_context "$got" && [[ "$got" == *"PR #1234"* && "$got" != *"No open PR"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  the fallback names the PR read from the create URL\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  the fallback names the PR read from the create URL (got: %.120s)\n' "$got"
+fi
+got="$(STUB_PR_NUMBER="" ctx_via "$LONG_LINK_PARENT/t" "git push" "")"
+if is_fallback_context "$got" && [[ "$got" == *"No open PR may exist yet"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  the fallback without a PR says none may exist yet\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  the fallback without a PR says none may exist yet (got: %.120s)\n' "$got"
 fi
 
 echo
