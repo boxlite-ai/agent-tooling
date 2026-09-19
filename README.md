@@ -352,11 +352,33 @@ After installation, configure repository Git hooks explicitly:
 plugins/boxlite-agent-tooling/scripts/setup.sh /path/to/consumer
 ```
 
+## Turns cut off by an API error
+
+In an interactive Claude Code session, a turn that an API error cuts off resumes by
+itself. `.agents/hooks/resume-after-api-failure.sh` answers `StopFailure` through
+`asyncRewake`, which lets a hook that exits 2 start the next turn:
+
+- It resumes on `server_error` (a dropped or stalled stream, a mid-stream 5xx) and on
+  `overloaded`. A rate limit, or an auth, billing or request error, still ends the turn.
+- It resumes at most three times per session in any ten minutes, and records each
+  resume before announcing it, so an outage cannot loop.
+- The model is told to resume where its reply stopped, and that any tool call it was
+  still writing was discarded.
+- `.agents/hooks/cancel-verdict-audit.sh` recognises the resumed turn by a one-time
+  nonce, so the resume does not revoke the audit of the prompt it continues.
+
+Codex needs no hook for this. It retries a dropped stream itself, continuing from
+session history, up to `stream_max_retries` times (5 by default), and no Codex hook
+fires on a failed turn: `Stop` runs only after a successful one. A higher retry count
+needs a provider entry of your own in `~/.codex/config.toml`, because the built-in
+providers cannot be overridden. A failed `codex exec` run restarts with
+`codex exec resume <thread_id> "Continue."`, the id coming from its first `--json` line.
+
 ## Unattended runs
 
-A turn that dies on an API error ends the run: the host fires `StopFailure` instead of
-`Stop`, and that event is fire-and-forget, so nothing in the session can resume it. For
-runs nobody is watching, wrap them:
+A plain `claude -p` run has no in-session resume: the host runs `asyncRewake` hooks
+synchronously there and ignores `StopFailure`'s exit code, so a turn that dies on an API
+error ends the run. For runs nobody is watching, wrap them:
 
 ```sh
 plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh "<task prompt>"
