@@ -71,6 +71,14 @@ session_state_path() {  # repo basename session
   printf '%s/.agents/state/%s.%s' "$1" "$2" "$(session_scope_of "$1" "$3")"
 }
 
+# The prompt Claude Code submits when an asyncRewake hook exits 2, captured from a live
+# 2.1.278 session: the envelope carries only the host's own summary, and the hook's stderr
+# follows it inside a system-reminder, so that is where a hook's marker lands.
+rewake_prompt() {  # hook-name hook-stderr
+  printf '<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "%s": %s\n\n</system-reminder>' \
+    "$1" "$2"
+}
+
 process_state() {
   local pid="$1" state
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || { printf 'invalid'; return; }
@@ -107,7 +115,7 @@ wake_marker="$(sed -n 's/.*\(\[auditor-wake:[0-9a-f][0-9a-f]*\]\).*/\1/p' "$R/wa
 wake_request="$(session_state_path "$R" verdict-request session-a)"
 printf 'keep\n' > "$wake_request"
 wake_epoch_before="$(cat "$fresh_epoch")"
-wake_prompt="$(printf '<task-notification>\n<summary>%s</summary>\n</task-notification>' "$wake_marker")"
+wake_prompt="$(rewake_prompt SubagentStart:verdict-auditor "$(cat "$R/wake.err")")"
 wake_payload="$(jq -nc --arg s session-a --arg p "$wake_prompt" \
   '{hook_event_name:"UserPromptSubmit",session_id:$s,prompt:$p}')"
 wake_out="$(printf '%s' "$wake_payload" \
@@ -166,8 +174,7 @@ printf '%s' "$late_wake_stop" \
 prompt_hook "$R" session-a intervening-human-prompt >/dev/null
 late_wake_epoch_before="$(cat "$fresh_epoch")"
 printf 'new-audit\n' > "$wake_request"
-late_wake_prompt="$(printf '<task-notification>\n<summary>%s</summary>\n</task-notification>' \
-  "$late_wake_marker")"
+late_wake_prompt="$(rewake_prompt SubagentStart:verdict-auditor "$(cat "$R/late-wake.err")")"
 late_wake_payload="$(jq -nc --arg s session-a --arg p "$late_wake_prompt" \
   '{hook_event_name:"UserPromptSubmit",session_id:$s,prompt:$p}')"
 late_wake_out="$(printf '%s' "$late_wake_payload" \
@@ -825,6 +832,57 @@ duplicate_state="$duplicate_state a_ran=$([[ -e "$R/duplicate-a-ran" ]] && echo 
 duplicate_state="$duplicate_state b_ran=$([[ -e "$R/duplicate-b-ran" ]] && echo yes || echo no)"
 check_eq "a duplicate runner cannot displace the session's cancellable owner" \
   "$duplicate_state" "a_rc=130 b_rc=2 a_ran=yes b_ran=no"
+rm -rf "$R"
+
+echo
+echo "## Only the wake itself is internal; text riding along makes a real prompt"
+R="$(setup)"
+prompt_hook "$R" session-a turn-a >/dev/null 2>&1
+outcome_request="$(session_state_path "$R" verdict-request session-a)"
+outcome_epoch="$(session_state_path "$R" verdict-prompt-epoch session-a)"
+# Submit one prompt over a live audit request; report what it left of the request and epoch.
+submit_outcome() {  # repo prompt label
+  local repo="$1" prompt="$2" label="$3" epoch_before out rc
+  printf 'keep\n' > "$outcome_request"
+  epoch_before="$(cat "$outcome_epoch")"
+  out="$(jq -nc --arg s session-a --arg p "$prompt" \
+      '{hook_event_name:"UserPromptSubmit",session_id:$s,prompt:$p}' \
+    | (cd "$repo" && CLAUDE_PROJECT_DIR="$repo" bash "$HOOK") 2>"$repo/$label.err")"
+  rc=$?
+  printf 'rc=%s request=%s epoch=%s stdout=%s stderr=%s' "$rc" \
+    "$([[ -e "$outcome_request" ]] && echo present || echo gone)" \
+    "$([[ "$(cat "$outcome_epoch")" == "$epoch_before" ]] && echo same || echo changed)" \
+    "$out" "$(cat "$repo/$label.err")"
+}
+# Escalate a fresh auditor and return the prompt the host would submit for its wake.
+mint_wake() {  # repo agent-id
+  jq -nc --arg id "$2" \
+      '{hook_event_name:"SubagentStart",session_id:"session-a",agent_id:$id,agent_type:"verdict-auditor"}' \
+    | (cd "$1" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$1" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+        AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL") >/dev/null 2>"$1/$2.err"
+  rewake_prompt SubagentStart:verdict-auditor "$(cat "$1/$2.err")"
+}
+# Each refusal is followed by the same wake alone, which must still be internal: the
+# nonce was valid and unspent, so the text riding along is what made the prompt real.
+tail_wake="$(mint_wake "$R" ride-tail)"
+check_eq "text after a valid wake is a new prompt" \
+  "$(submit_outcome "$R" "$tail_wake"$'\nand also rename the module' ride-tail)" \
+  "rc=0 request=gone epoch=changed stdout= stderr="
+check_eq "the wake refused for trailing text still holds an unspent nonce" \
+  "$(submit_outcome "$R" "$tail_wake" ride-tail-alone)" \
+  "rc=0 request=present epoch=same stdout= stderr="
+second_wake="$(mint_wake "$R" ride-second)"
+check_eq "a second reminder after a valid wake is a new prompt" \
+  "$(submit_outcome "$R" "$second_wake"$'\n<system-reminder>\nand also rename the module\n</system-reminder>' ride-second)" \
+  "rc=0 request=gone epoch=changed stdout= stderr="
+check_eq "the wake refused for a second reminder still holds an unspent nonce" \
+  "$(submit_outcome "$R" "$second_wake" ride-second-alone)" \
+  "rc=0 request=present epoch=same stdout= stderr="
+reworded_wake="$(mint_wake "$R" ride-reworded \
+  | sed 's/Stop hook blocking error from command/Async hook woke the model from command/')"
+check_eq "a wake stays internal when the host rewords its reminder" \
+  "$(submit_outcome "$R" "$reworded_wake" ride-reworded)" \
+  "rc=0 request=present epoch=same stdout= stderr="
 rm -rf "$R"
 
 echo

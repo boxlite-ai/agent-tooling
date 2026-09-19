@@ -129,6 +129,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A receipt names a commit by parent and tree, never by a diff hash. `.agents/lib/commit-audit-receipt.sh:10`
 - An override is recorded as `OVERRIDDEN BY USER`, never PASS, and expires within an hour. `.agents/hooks/auditor-control.sh:686`, `.agents/lib/auditor-override-state.sh:55`
 - The StopFailure hook cannot block or resume; it records and notifies. `.agents/hooks/record-api-failure.sh:7`
+- An `asyncRewake` wake is internal only while its one-time nonce is unspent; a typed copy of one, or text riding after it, is a real prompt. `.agents/lib/hook-wake.sh:18`
 - Codex's hook-event set is closed; an unknown key loads no hooks at all. `host-parity.test.sh:24`
 - Every wired command resolves the plugin root as `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `host-parity.test.sh:30`
 - A malformed hold fails closed. `templates/install.sh:15`
@@ -194,6 +195,7 @@ non-blocking `advisories`, which never decide the verdict.
 - **guidance block**: the hash-marked splice of `guidance/workflow.md` into a consumer's `AGENTS.md`; missing or edited fails the gates, behind only warns.
 - **twins**: `hooks/hooks.json` and `hooks/codex-hooks.json`, behaviourally identical except `asyncRewake` against `async` and the events only one host has.
 - **watch**: one run of `.agents/watch/pr-watch.sh` after a push, streaming CI and PR events as JSON lines under one watch id.
+- **wake**: the turn Claude Code starts when an `asyncRewake` hook exits 2; its prompt carries the hook's stderr in a reminder after the host's envelope, and it is internal only while its one-time nonce is unspent.
 - **unreviewed file**: `UNREVIEWED.md`, committed by CI to a new pull request, which it also drafts; a person deletes the file after reading the diff and marks the pull request ready, and a PR merged without that brings the file onto the default branch.
 
 ## Code map
@@ -201,7 +203,7 @@ non-blocking `advisories`, which never decide the verdict.
 ```text
 hooks/                  the twin host hook manifests
 .agents/hooks/          one script per gate or producer, listed above
-.agents/lib/            shared state, receipt, host and rendering libraries; sourced, never run
+.agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/watch/          the pr-watch producer and its stream and attach consumers
 .agents/skills/         shell-engineering, boxlite-diagrams, adversarial-iteration
 .claude/agents/         the two auditor specs
