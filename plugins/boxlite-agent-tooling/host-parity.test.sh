@@ -378,6 +378,13 @@ jq -e '.hooks.SubagentStart[].hooks[] | .async == true and has("asyncRewake") ==
   "$CODEX_HOOKS" >/dev/null 2>&1 \
   && ok "codex SubagentStart stays inside its async schema" \
   || bad "codex SubagentStart stays inside its async schema"
+# The API-failure resume exists only as a background wake: wired synchronously, the host
+# ignores its exit 2 and the turn never resumes, while every other test stays green.
+jq -e '[.hooks.StopFailure[].hooks[] | select(.command | contains("resume-after-api-failure.sh"))]
+       | length == 1 and all(.[]; .asyncRewake == true)' \
+  "$CLAUDE_HOOKS" >/dev/null 2>&1 \
+  && ok "claude StopFailure resume hook uses asyncRewake" \
+  || bad "claude StopFailure resume hook uses asyncRewake"
 
 # Full plugin prompts stay silent: cancellation is required, while prose recency is
 # available only through the explicit standalone template.

@@ -22,7 +22,8 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | A denial naming the required description shape, then a request for the human's typed `reviewed:` acknowledgment. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
 | Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | Nothing on PASS, unless the last reply runs over 60 words of prose: then one request to show the result in few words, drawn where a drawing can express it. The findings on FAIL. See the decision table below. |
-| Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | A terminal notice. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
+| Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
+| Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
 
 Git gates. They run for any process and bind only when `CLAUDECODE`, `CODEX_SANDBOX`
 or `AGENT_GATED=1` is in the environment.
@@ -101,6 +102,7 @@ than one session can share a checkout.
 - `pr-reviewed.json`: the typed PR-review acknowledgment, bound to branch and HEAD.
 - `auditor-control`: a directory of escalation, completion, grant and event records for running auditors and overrides.
 - `last-api-failure.json`: the kind of API error that ended a turn.
+- `api-resume`: the recent resumes and the unspent wake hashes of the API-failure resume.
 
 ## Boundaries
 
@@ -128,8 +130,8 @@ Often stated as an absence. Each names the line that states or enforces it.
 - Humans are not gated; named harness variables gate, never prefix wildcards. `.githooks/pre-commit:9`
 - A receipt names a commit by parent and tree, never by a diff hash. `.agents/lib/commit-audit-receipt.sh:10`
 - An override is recorded as `OVERRIDDEN BY USER`, never PASS, and expires within an hour. `.agents/hooks/auditor-control.sh:686`, `.agents/lib/auditor-override-state.sh:55`
-- The StopFailure hook cannot block or resume; it records and notifies. `.agents/hooks/record-api-failure.sh:7`
-- An `asyncRewake` wake is internal only while its one-time nonce is unspent; a typed copy of one, or text riding after it, is a real prompt. `.agents/lib/hook-wake.sh:18`
+- A StopFailure hook's result is ignored. A turn resumes only through an `asyncRewake` exit 2, at most three times per session in ten minutes, each resume recorded before it is announced. `.agents/hooks/resume-after-api-failure.sh:125`
+- An `asyncRewake` wake is internal only while its one-time nonce is unspent, and its owner spends it on first acceptance; a copy of a spent wake, or text riding after one, is a real prompt. `.agents/lib/hook-wake.sh:19`
 - Codex's hook-event set is closed; an unknown key loads no hooks at all. `host-parity.test.sh:24`
 - Every wired command resolves the plugin root as `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `host-parity.test.sh:30`
 - A malformed hold fails closed. `templates/install.sh:15`

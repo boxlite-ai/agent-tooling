@@ -14,6 +14,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUNNER="$REPO_ROOT/.agents/hooks/run-verdict-audit.sh"
 HOOK="$REPO_ROOT/.agents/hooks/cancel-verdict-audit.sh"
 CONTROL="$REPO_ROOT/.agents/hooks/auditor-control.sh"
+RESUME="$REPO_ROOT/.agents/hooks/resume-after-api-failure.sh"
 PREFLIGHT="$REPO_ROOT/.agents/hooks/preflight-verdict-check.sh"
 
 pass=0
@@ -883,6 +884,37 @@ reworded_wake="$(mint_wake "$R" ride-reworded \
 check_eq "a wake stays internal when the host rewords its reminder" \
   "$(submit_outcome "$R" "$reworded_wake" ride-reworded)" \
   "rc=0 request=present epoch=same stdout= stderr="
+rm -rf "$R"
+
+echo
+echo "## A resume after an API error continues its prompt, once"
+R="$(setup)"
+prompt_hook "$R" session-a turn-a >/dev/null 2>&1
+outcome_request="$(session_state_path "$R" verdict-request session-a)"
+outcome_epoch="$(session_state_path "$R" verdict-prompt-epoch session-a)"
+# Run the StopFailure hook for a dropped stream and return the prompt the host submits.
+resume_wake() {  # repo -> prompt on stdout; status is the hook's exit code
+  local repo="$1" rc=0
+  printf '%s' '{"hook_event_name":"StopFailure","session_id":"session-a","error":"server_error"}' \
+    | (cd "$repo" && CLAUDE_PROJECT_DIR="$repo" bash "$RESUME") >/dev/null \
+      2>"$repo/resume.err" || rc=$?
+  rewake_prompt StopFailure:server_error "$(cat "$repo/resume.err")"
+  return "$rc"
+}
+resume_prompt="$(resume_wake "$R")"
+resume_rc=$?
+check_eq "the StopFailure hook wakes the host for a dropped stream" "$resume_rc" 2
+check_eq "a resume wake keeps the running audit and the prompt epoch" \
+  "$(submit_outcome "$R" "$resume_prompt" resume)" \
+  "rc=0 request=present epoch=same stdout= stderr="
+check_eq "a spent resume wake replayed is a new prompt" \
+  "$(submit_outcome "$R" "$resume_prompt" resume-replay)" \
+  "rc=0 request=gone epoch=changed stdout= stderr="
+forged_resume_prompt="$(resume_wake "$R" \
+  | sed 's/api-resume-wake:[0-9a-f]*/api-resume-wake:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/')"
+check_eq "a forged resume marker is a new prompt" \
+  "$(submit_outcome "$R" "$forged_resume_prompt" resume-forged)" \
+  "rc=0 request=gone epoch=changed stdout= stderr="
 rm -rf "$R"
 
 echo

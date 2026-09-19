@@ -82,11 +82,12 @@ fi
 # to the transcript, so an internal turn is authenticated from the payload itself, and
 # anything not authenticated falls through as a real prompt. A background audit's
 # completion arrives as a bare envelope naming its generation, which the control facade
-# credits a bounded number of times. The auditor's 30-second escalation is an asyncRewake
-# wake whose marker rides in the reminder after the envelope (.agents/lib/hook-wake.sh):
-# the escalation stores only the nonce's hash and spends it once, so a missing, forged,
-# reused, or expired marker is a real prompt. A valid queued wake remains internal after
-# terminal or prompt state moves on.
+# credits a bounded number of times. The auditor's 30-second escalation and the resume
+# after an API error are asyncRewake wakes whose marker rides in the reminder after the
+# envelope (.agents/lib/hook-wake.sh): the hook that minted a wake stores only the nonce's
+# hash and spends it once, so a missing, forged, reused, or expired marker is a real
+# prompt. A valid queued wake remains internal after terminal or prompt state moves on: a
+# resumed turn continues the prompt it belongs to.
 prompt_text="$(printf '%s' "$payload" | jq -r '
   if (.prompt | type) == "string" then .prompt else "" end
 ')"
@@ -102,14 +103,16 @@ if [[ "$prompt_text" == '<task-notification>'$'\n'*$'\n</task-notification>' ]];
     exit 0
   fi
 fi
-if wake_nonce="$(hook_wake_marker "$prompt_text" auditor-wake)"; then
-  wake_nonce_hash="$(printf '%s' "$wake_nonce" | shasum -a 256 | awk '{print $1}')"
-  if CLAUDE_PROJECT_DIR="$project_dir" bash \
-    "$tooling_root/.agents/hooks/auditor-control.sh" \
-    consume-wake "$session_scope" "$wake_nonce_hash" >/dev/null 2>&1; then
-    exit 0
-  fi
-fi
+# Spend a wake's nonce with the hook that minted it; status 0 means the prompt is internal.
+spend_wake() {  # marker-name owner-hook
+  local nonce nonce_hash
+  nonce="$(hook_wake_marker "$prompt_text" "$1")" || return 1
+  nonce_hash="$(hook_wake_nonce_hash "$nonce")" || return 1
+  CLAUDE_PROJECT_DIR="$project_dir" bash "$tooling_root/.agents/hooks/$2" \
+    consume-wake "$session_scope" "$nonce_hash" >/dev/null 2>&1
+}
+spend_wake auditor-wake auditor-control.sh && exit 0
+spend_wake api-resume-wake resume-after-api-failure.sh && exit 0
 
 state_dir="$project_dir/.agents/state"
 if ! mkdir -p "$state_dir" 2>/dev/null; then
