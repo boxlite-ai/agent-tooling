@@ -6,7 +6,7 @@ on:
 
 # Copied from author-review.yml for the real-token regression experiment.
 permissions:
-  contents: read
+  contents: write
   statuses: write
   pull-requests: write
 
