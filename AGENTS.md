@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=5bcae0cf70e1-dirty sha256=880fb3083027 -->
+<!-- agent-tooling:guidance:begin rev=af7481f363b2-dirty sha256=958e059bf437 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -38,7 +38,7 @@ Every change goes: understand → research → design → implement → test →
 - DRY when it's the same rule, policy, or transformation. Tolerate small local duplication when an abstraction would hide important local behavior.
 - Validation at the boundary — untrusted inputs get checked where they enter; trust internal code.
 - Composition over inheritance / framework magic.
-- Only what's used — no future-proofing; delete dead code immediately.
+- Only what's used (Occam's razor) — design the simplest API that meets current requirements; no future-proofing. Delete dead code immediately.
 - No premature optimization — measure first.
 
 **Implement**
