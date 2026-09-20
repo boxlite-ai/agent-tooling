@@ -26,7 +26,7 @@ Every change goes: understand → research → design → implement → test →
 - DRY when it's the same rule, policy, or transformation. Tolerate small local duplication when an abstraction would hide important local behavior.
 - Validation at the boundary — untrusted inputs get checked where they enter; trust internal code.
 - Composition over inheritance / framework magic.
-- Only what's used — no future-proofing; delete dead code immediately.
+- Only what's used (Occam's razor) — design the simplest API that meets current requirements; no future-proofing. Delete dead code immediately.
 - No premature optimization — measure first.
 
 **Implement**
