@@ -41,7 +41,7 @@ fail=0
 
 run() {
   local desc="$1" cmd="$2" expect="$3" out decision
-  out=$(printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | "$HOOK")
+  out=$(jq -nc --arg command "$cmd" '{tool_input:{command:$command}}' | "$HOOK")
   if [[ -z "$out" ]]; then
     decision="passthrough"
   else
@@ -53,6 +53,7 @@ run() {
   else
     fail=$((fail + 1))
     printf '  FAIL  %s  (got=%s expected=%s)\n' "$desc" "$decision" "$expect"
+    printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' >&2
   fi
 }
 
@@ -64,13 +65,13 @@ write_marker() {
 }
 
 reason_for() {
-  printf '%s' "$1" | jq -Rs '{tool_input:{command:.}}' | "$HOOK" \
+  jq -nc --arg command "$1" '{tool_input:{command:$command}}' | "$HOOK" \
     | jq -r '.hookSpecificOutput.permissionDecisionReason // ""'
 }
 
 reason_for_repo() { # repo, project state root, command
   local repo="$1" state_root="$2" cmd="$3"
-  printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' \
+  jq -nc --arg command "$cmd" '{tool_input:{command:$command}}' \
     | (cd "$repo" && CLAUDE_PROJECT_DIR="$state_root" "$HOOK") \
     | jq -r '.hookSpecificOutput.permissionDecisionReason // ""'
 }
@@ -568,12 +569,12 @@ run_title() {
 }
 run_title "bad --title (no type prefix) → deny"  "gh pr create --title \"add a cool thing\" --body '$TITLE_GRAPH'"  "deny"
 run_title "over-72 --title → deny"               "gh pr create --title \"feat(api): this title is far too long and clearly exceeds the seventy-two character ceiling\" --body '$TITLE_GRAPH'"  "deny"
-run_title "short fix title cannot bypass fix body rules" \
-  "gh pr create -t \"fix(api): repair graph\" --body '$TITLE_GRAPH'" "deny"
-run_title "attached short fix title cannot bypass fix body rules" \
-  "gh pr create -t\"fix(api): repair graph\" --body '$TITLE_GRAPH'" "deny"
-run_title "escaped unquoted fix title cannot bypass fix body rules" \
-  "gh pr create --title fix:\\ graph --body '$TITLE_GRAPH'" "deny"
+run_title "short fix title accepts a concise description" \
+  "gh pr create -t \"fix(api): repair graph\" --body '$TITLE_GRAPH'" "passthrough"
+run_title "attached short fix title accepts a concise description" \
+  "gh pr create -t\"fix(api): repair graph\" --body '$TITLE_GRAPH'" "passthrough"
+run_title "escaped unquoted fix title accepts a concise description" \
+  "gh pr create --title fix:\\ graph --body '$TITLE_GRAPH'" "passthrough"
 run_title "unquoted title glob cannot replace the inspected title" \
   "gh pr create --title 'feat: '* --body '$TITLE_GRAPH'" "deny"
 run_title "dynamic short title fails closed" \
@@ -611,130 +612,75 @@ run "earlier protected flags cannot validate a later malformed create" \
   "deny"
 
 echo
-echo "## Body check: a supplied --body must start with one fenced before/after call graph"
+echo "## Body check: concise descriptions may use any explanatory form"
 
-UNFENCED_GRAPH=$'## Call graph\n\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)'
-GRAPH=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n```'
+GRAPH=$'```text\npush PR -> select matrix -> run tests\n```'
 GRAPH_CRLF="${GRAPH//$'\n'/$'\r\n'}"
-FIX_GRAPH=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)  ← BUG: returns before the socket binds\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n```\n\nFixes #1042'
-GRAPH_WITH_TRAILING_SECTION="$GRAPH"$'\n\n## Summary\n\nAdds a thing.'
-FIX_BODY_ONLY="${FIX_GRAPH%$'\n\nFixes #1042'}"
-FIX_LINK_LATE="$FIX_BODY_ONLY"$'\n\n## Notes\n\nFixes #1042'
-FIX_CLOSES_ISSUE="$FIX_BODY_ONLY"$'\n\nCloses #1042'
-FIX_ZERO_ISSUE="${FIX_GRAPH/Fixes #1042/Fixes #0}"
-# The arrow glyph is not part of the contract — ASCII `<-`, or none at all, reads
-# the same. What is enforced is the marker's position: on a hop line, in Before.
-FIX_ASCII="${FIX_GRAPH/← BUG:/<- BUG:}"
-FIX_BARE="${FIX_GRAPH/← BUG:/BUG:}"
-FIX_MARK_IN_AFTER=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)  ← BUG: returns before the socket binds\n```\n\nFixes #1042'
-FIX_MARK_OFF_HOP=$'## Call graph\n\n```text\nBefore\n  ← BUG: open_console returns too early\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n```\n\nFixes #1042'
-FIX_DEBUG_ONLY=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)  debug: enabled\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n```\n\nFixes #1042'
-# Each graph needs a hop of its own — one section cannot borrow the other's.
-AFTER_PROSE=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n\nAfter\n  the same hops, but the socket is awaited first\n```'
-BEFORE_PROSE=$'## Call graph\n\n```text\nBefore\n  exec_box calls open_console, which returns early\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n```'
-# Free-form prose that happens to name a file and line. A bare `file.ext:NN`
-# occurs mid-sentence all the time; only the parenthesised hop shape counts.
-PROSE_WITH_LOC=$'## Call graph\n\n```text\nBefore\nThis refactor touches exec_box.rs:88 and improves things...\n\nAfter\nThis refactor touches open_console.rs:41 and improves things...\n```'
-# A Type half carrying its own parens is ordinary Rust, not a malformed hop.
-PARENS_IN_TYPE=$'## Call graph\n\n```text\nBefore\n  on_ready (fn(u32) -> u32 · src/portal/exec.rs:88)\n\nAfter\n  on_ready (fn(u32) -> Result<u32> · src/portal/exec.rs:91)\n```'
-# Hops sit past the graphs, in a later section — neither graph gets credit.
-HOPS_OUTSIDE=$'## Call graph\n\n```text\nBefore\n  exec_box calls open_console\n\nAfter\n  exec_box awaits open_console\n```\n\n## Changes\n\n```text\n- exec_box (BoxHandle · src/portal/exec.rs:88)\n- open_console (Jailer · src/jailer/console.rs:41)\n```'
-MISSING_AFTER=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-NO_LOC_GRAPH=$'## Call graph\n\n```text\nBefore\n  exec_box calls open_console\n\nAfter\n  exec_box awaits open_console\n```'
-WRONG_LANGUAGE_GRAPH=$'## Call graph\n\n```bash\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-UNTYPED_FENCE_GRAPH=$'## Call graph\n\n```\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-PARTLY_FENCED_GRAPH=$'## Call graph\n\nBefore\n\n```text\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)'
-UNTERMINATED_FENCE_GRAPH=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)'
-COMMENTED_GRAPH=$'<!--\n## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```\n-->'
-MULTI_COMMENT_GRAPH=$'<!-- closed --> <!-- hide graph\n## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```\n-->'
-INDENTED_OPEN_FENCE_GRAPH=$'## Call graph\n\n    ```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-INDENTED_CLOSE_FENCE_GRAPH=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    ```'
-LONG_CLOSE_DECOY_GRAPH=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n````\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-SPACED_CLOSE_DECOY_GRAPH=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```   \nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-INDENTED_CLOSE_DECOY_GRAPH=$'## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n ```\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-REVERSED_LABELS_GRAPH=$'## Call graph\n\n```text\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-HEADING_IN_TEXT_FENCE=$'```text\n## Call graph\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-INDENTED_HEADING_GRAPH=$'    ## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-INLINE_CODE_COMMENT_GRAPH=$'Literal `<!--` syntax.\n\n## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-CPLUS_EXAMPLE_THEN_GRAPH=$'```c++\n// The literal token <!-- belongs to this example.\n```\n\n## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```'
-FOUR_BACKTICK_HIDDEN_GRAPH=$'## Call graph\n\n````markdown\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```\n````'
-TILDE_HIDDEN_GRAPH=$'## Call graph\n\n~~~markdown\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```\n~~~'
-RAW_HTML_HIDDEN_GRAPH=$'<script>\n## Call graph\n\n```text\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n```\n</script>'
-# The former separate-fence form is visually renderable, but it expands the
-# accepted grammar without adding information. The canonical prefix deliberately
-# keeps both labels and both graphs in one completed text fence.
-FENCED=$'## Call graph\n\nBefore\n\n```text\n## entry\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n```\n\nAfter\n\n```text\n## entry\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n    open_console (Jailer · src/jailer/console.rs:41)\n```'
-# The repo's own worked example must clear the gate it documents — including
-# its shape, which wraps both labels AND their hops in one fence. Lifted from
-# CONTRIBUTING.md at run time so the doc and the hook cannot drift apart.
-CONTRIB_FENCE="$(awk '/^```text$/ {i=1; print; next} i && /^```$/ {print; exit} i {print}' "$REPO_ROOT/CONTRIBUTING.md")"
-CONTRIB_ISSUE="$(awk '/^Fixes #[0-9]+$/ {print; exit}' "$REPO_ROOT/CONTRIBUTING.md")"
-CONTRIB_BODY="## Call graph"$'\n\n'"$CONTRIB_FENCE"$'\n\n'"$CONTRIB_ISSUE"
+FIX_GRAPH=$'Await the console bind before attaching.\n\nFixes #1042'
+GRAPH_WITH_TRAILING_SECTION="$GRAPH"$'\n\nChecks: workflow suite passed.'
+BULLET_BODY=$'- Routine SDK CI: 21 jobs -> 11.\n- Full compatibility matrix still runs weekly.\n- Workflow tests passed.'
+EXAMPLE_BODY=$'Example: change only the Python image -> build Python, skip Node.\nVerified with the image-selection test.'
+SEQUENCE_BODY=$'```mermaid\nsequenceDiagram\n  Contributor->>CI: Push SDK change\n  CI->>Runner: Run focused matrix\n```'
+TABLE_BODY=$'| Trigger | Matrix |\n| --- | --- |\n| PR | Focused |\n| Weekly | Full |'
+# Include a formerly valid graph so the old gate reaches the oversized body,
+# rather than denying for the unrelated lack of a graph.
+LEGACY_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
+LONG_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
+LONG_UNSPACED_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
+LIMIT_WORDS_BODY="$(awk 'BEGIN {for (i=1; i<=200; i++) printf "%sx", (i == 1 ? "" : " ")}')"
+LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<2000; i++) printf "字"}')"
+OVER_WORDS_BODY="$LIMIT_WORDS_BODY x"
+OVER_CHARS_BODY="${LIMIT_CHARS_BODY}字"
+EMOJI_BODY="$(awk 'BEGIN {for (i=0; i<2000; i++) printf "😀"}')"
+HUGE_BODY="$(awk 'BEGIN {for (i=0; i<8001; i++) printf "x"}')"
+# Read the example rather than duplicating its text in the test.
+CONTRIB_BODY="$(awk '/^````markdown$/ {inside=1; next} inside && /^````$/ {exit} inside {print}' "$REPO_ROOT/CONTRIBUTING.md")"
 FEAT='--title "feat(api): add a cool thing"'
 FIX='--title "fix(portal): await console bind"'
 DOUBLE_QUOTE_BACKSLASH_TITLE='feat(api): \q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q\q'
-DOUBLE_QUOTE_BACKSLASH_BODY=$'## Call Gr\\aph\n\nBefore\n  exec_box (BoxHandle · src/portal/exec.rs:88)\n\nAfter\n  exec_box (BoxHandle · src/portal/exec.rs:91)'
-
 printf '%s' "$GRAPH" > "$TMP/body.md"
 printf 'Adds a thing. Tested locally.\n' > "$TMP/prose.md"
 
-# A fresh marker before EVERY case: the allow path consumes it, so without one
-# a later case would deny for want of an ack and look like a body-check pass.
+# A fresh marker for every case ensures content checks, not stale review state,
+# decide whether the body is accepted.
 run_body() {
   write_marker "reviewed: body cases"
   run "$@"
 }
 
-run_body "prose body, no graph → deny"        "gh pr create $FEAT --body \"Adds a thing. Tested locally.\"" "deny"
-run_body "create without explicit body → deny" "gh pr create $FEAT"                                      "deny"
-run_body "create without explicit title → deny" "gh pr create --body '$GRAPH'"                            "deny"
+run_body "short prose without a graph → allow" "gh pr create $FEAT --body 'Reduce duplicate CI jobs. Workflow tests passed.'" "passthrough"
+run_body "bullets without a graph → allow" "gh pr create $FEAT --body '$BULLET_BODY'" "passthrough"
+run_body "real example without a graph → allow" "gh pr create $FEAT --body '$EXAMPLE_BODY'" "passthrough"
+run_body "sequence diagram without a call graph → allow" "gh pr create $FEAT --body '$SEQUENCE_BODY'" "passthrough"
+run_body "comparison table without a graph → allow" "gh pr create $FEAT --body '$TABLE_BODY'" "passthrough"
+run_body "fix description needs no graph or BUG marker → allow" "gh pr create $FIX --body '$FIX_GRAPH'" "passthrough"
+run_body "fix without an associated issue → allow" "gh pr create $FIX --body 'Wait for console setup before attaching.'" "passthrough"
+run_body "empty body → deny" "gh pr create $FEAT --body ''" "deny"
+WHITESPACE_BODY=$' \n\t'
+run_body "whitespace body → deny" "gh pr create $FEAT --body '$WHITESPACE_BODY'" "deny"
+run_body "oversized description with valid legacy graph → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"
+run_body "unspaced text cannot evade the size limit → deny" "gh pr create $FEAT --body '$LONG_UNSPACED_BODY'" "deny"
+run_body "200 words at the boundary → allow" "gh pr create $FEAT --body '$LIMIT_WORDS_BODY'" "passthrough"
+run_body "201 words → deny" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "deny"
+run_body "2000 Unicode characters at the boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
+run_body "2001 Unicode characters → deny" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "deny"
+run_body "2000 four-byte characters → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
+run_body "oversized argument → deny" "gh pr create $FEAT --body '$HUGE_BODY'" "deny"
+run_body "long body edit → deny" "gh pr edit 42 $FEAT --body '$LONG_BODY'" "deny"
+write_marker "reviewed: shorten description"
+run "size rejection → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"
+run "size rejection preserves acknowledgment for corrected body" "gh pr create $FEAT --body '$BULLET_BODY'" "passthrough"
+run "corrected body consumes acknowledgment" "gh pr create $FEAT --body '$BULLET_BODY'" "deny"
+run_body "create without explicit body → deny" "gh pr create $FEAT" "deny"
+run_body "create without explicit title → deny" "gh pr create --body '$GRAPH'" "deny"
 run_body "double-quote backslashes count in the runtime title" \
-  "gh pr create --title \"$DOUBLE_QUOTE_BACKSLASH_TITLE\" --body '$TITLE_GRAPH'"        "deny"
-run_body "double-quote backslashes cannot repair an invalid runtime body" \
-  "gh pr create $FEAT --body \"$DOUBLE_QUOTE_BACKSLASH_BODY\""                         "deny"
-# Shell source can contain a valid-looking graph that a command substitution
-# suppresses at runtime. The hook must not validate the source spelling as the
-# body GitHub would receive.
+  "gh pr create --title \"$DOUBLE_QUOTE_BACKSLASH_TITLE\" --body '$TITLE_GRAPH'" "deny"
 DYNAMIC_BODY_COMMAND="gh pr create $FEAT --body \"\$(printf prose"$'\n'": '"$'\n'"$GRAPH"$'\n'"')\""
-run_body "dynamic body cannot borrow a graph from non-output substitution source" \
-  "$DYNAMIC_BODY_COMMAND"                                                                    "deny"
-run_body "unfenced graph → deny"              "gh pr create $FEAT --body '$UNFENCED_GRAPH'"                  "deny"
-run_body "graph missing After → deny"         "gh pr create $FEAT --body '$MISSING_AFTER'"                   "deny"
-run_body "labels but no file:LOC → deny"      "gh pr create $FEAT --body '$NO_LOC_GRAPH'"                    "deny"
-run_body "wrong-language fence → deny"        "gh pr create $FEAT --body '$WRONG_LANGUAGE_GRAPH'"            "deny"
-run_body "untyped fence → deny"               "gh pr create $FEAT --body '$UNTYPED_FENCE_GRAPH'"             "deny"
-run_body "only Before fenced → deny"          "gh pr create $FEAT --body '$PARTLY_FENCED_GRAPH'"             "deny"
-run_body "unterminated text fence → deny"     "gh pr create $FEAT --body '$UNTERMINATED_FENCE_GRAPH'"        "deny"
-run_body "HTML-commented graph → deny"        "gh pr create $FEAT --body '$COMMENTED_GRAPH'"                 "deny"
-run_body "second HTML comment hides graph → deny" "gh pr create $FEAT --body '$MULTI_COMMENT_GRAPH'"          "deny"
-run_body "four-space fence opener → deny"     "gh pr create $FEAT --body '$INDENTED_OPEN_FENCE_GRAPH'"       "deny"
-run_body "four-space fence closer → deny"     "gh pr create $FEAT --body '$INDENTED_CLOSE_FENCE_GRAPH'"      "deny"
-run_body "long closer cannot be a decoy → deny" "gh pr create $FEAT --body '$LONG_CLOSE_DECOY_GRAPH'"        "deny"
-run_body "spaced closer cannot be a decoy → deny" "gh pr create $FEAT --body '$SPACED_CLOSE_DECOY_GRAPH'"    "deny"
-run_body "indented closer cannot be a decoy → deny" "gh pr create $FEAT --body '$INDENTED_CLOSE_DECOY_GRAPH'" "deny"
-run_body "After before Before → deny"         "gh pr create $FEAT --body '$REVERSED_LABELS_GRAPH'"           "deny"
-run_body "Call graph heading inside fence → deny" "gh pr create $FEAT --body '$HEADING_IN_TEXT_FENCE'"        "deny"
-run_body "four-space Call graph heading → deny" "gh pr create $FEAT --body '$INDENTED_HEADING_GRAPH'"        "deny"
-run_body "graph hidden in four-backtick fence → deny" "gh pr create $FEAT --body '$FOUR_BACKTICK_HIDDEN_GRAPH'" "deny"
-run_body "graph hidden in tilde fence → deny" "gh pr create $FEAT --body '$TILDE_HIDDEN_GRAPH'"              "deny"
-run_body "graph hidden in raw HTML block → deny" "gh pr create $FEAT --body '$RAW_HTML_HIDDEN_GRAPH'"         "deny"
-run_body "prose-only After → deny"            "gh pr create $FEAT --body '$AFTER_PROSE'"                     "deny"
-run_body "prose-only Before → deny"           "gh pr create $FEAT --body '$BEFORE_PROSE'"                    "deny"
-run_body "hops outside both graphs → deny"    "gh pr create $FEAT --body '$HOPS_OUTSIDE'"                    "deny"
-run_body "prose w/ incidental file:LOC → deny" "gh pr create $FEAT --body '$PROSE_WITH_LOC'"                 "deny"
-run_body "unfilled template → deny"           "gh pr create $FEAT --body-file $REPO_ROOT/.github/pull_request_template.md" "deny"
-run_body "--fill (no body of its own) → deny" "gh pr create $FEAT --fill"                                   "deny"
-run_body "fix: graph w/o BUG marker → deny"   "gh pr create $FIX --body '$GRAPH'"                            "deny"
-run_body "fix: BUG but no issue link → deny"  "gh pr create $FIX --body '$FIX_BODY_ONLY'"                   "deny"
-run_body "fix: issue link must follow graph → deny" "gh pr create $FIX --body '$FIX_LINK_LATE'"              "deny"
-run_body "fix: issue line must say Fixes → deny" "gh pr create $FIX --body '$FIX_CLOSES_ISSUE'"             "deny"
-run_body "fix: issue number must be positive → deny" "gh pr create $FIX --body '$FIX_ZERO_ISSUE'"             "deny"
-run_body "fix: BUG marked in After → deny"    "gh pr create $FIX --body '$FIX_MARK_IN_AFTER'"                "deny"
-run_body "fix: BUG off any hop line → deny"   "gh pr create $FIX --body '$FIX_MARK_OFF_HOP'"                 "deny"
-run_body "fix: 'debug:' is not a marker → deny" "gh pr create $FIX --body '$FIX_DEBUG_ONLY'"                 "deny"
-run_body "--body-file prose → deny"           "gh pr create $FEAT --body-file $TMP/prose.md"                "deny"
-run_body "--body-file=prose → deny"           "gh pr create $FEAT --body-file=$TMP/prose.md"                "deny"
-run_body "-Fprose → deny"                     "gh pr create $FEAT -F$TMP/prose.md"                          "deny"
+run_body "dynamic body cannot borrow inspected source text" "$DYNAMIC_BODY_COMMAND" "deny"
+run_body "--fill is not an explicit body" "gh pr create $FEAT --fill" "deny"
+run_body "--body-file prose → deny" "gh pr create $FEAT --body-file $TMP/prose.md" "deny"
+run_body "--body-file=prose → deny" "gh pr create $FEAT --body-file=$TMP/prose.md" "deny"
+run_body "-Fprose → deny" "gh pr create $FEAT -F$TMP/prose.md" "deny"
 
 mv "$TMP/body.md" "$TMP/outside-body.md"
 ln -s "$TMP/outside-body.md" "$TMP/body.md"
@@ -778,9 +724,9 @@ run_body "dynamic ready tail cannot inject a repository override" \
   'gh pr ready 42 $READY_ARGS'                                                                              "deny"
 run_body "ready URL selector cannot change repository" \
   "gh pr ready https://github.com/other/repo/pull/7"                                                       "deny"
-run_body "body-only edit cannot escape title-dependent rules" \
+run_body "body-only edit still requires the paired title" \
   "gh pr edit 42 --body '$GRAPH'"                                                                          "deny"
-run_body "title-only edit cannot reclassify an unchecked body" \
+run_body "title-only edit still requires the paired body" \
   "gh pr edit 42 --title \"fix(api): reclassify description\""                                            "deny"
 run_body "edit title and body are validated together" \
   "gh pr edit 42 --title \"fix(api): repair description\" --body '$FIX_GRAPH'"                            "passthrough"
@@ -855,18 +801,12 @@ run "dash-prefixed metadata value still consumes the marker" \
   "gh pr create $FEAT --body '$GRAPH' --label --draft"                                                     "deny"
 run_body "CRLF graph body → allow"            "gh pr create $FEAT --body '$GRAPH_CRLF'"                    "passthrough"
 run_body "trailing sections after graph → allow" "gh pr create $FEAT --body '$GRAPH_WITH_TRAILING_SECTION'" "passthrough"
-run_body "content before Call graph → deny"   "gh pr create $FEAT --body '$INLINE_CODE_COMMENT_GRAPH'" "deny"
-run_body "code example before Call graph → deny" "gh pr create $FEAT --body '$CPLUS_EXAMPLE_THEN_GRAPH'" "deny"
-run_body "separate text fences → deny"        "gh pr create $FEAT --body '$FENCED'"                     "deny"
 run_body "CONTRIBUTING.md's own example → allow" "gh pr create $FIX --body '$CONTRIB_BODY'"                "passthrough"
-run_body "parens inside the Type half → allow" "gh pr create $FEAT --body '$PARENS_IN_TYPE'"               "passthrough"
 run_body "--body-file snapshot is not runtime-bound → deny" \
   "gh pr create $FEAT --body-file $TMP/body.md"                                                             "deny"
 run_body "edit --body-file snapshot is not runtime-bound → deny" \
   "gh pr edit 42 --body-file $TMP/body.md"                                                                  "deny"
-run_body "fix: graph + BUG + issue → allow"   "gh pr create $FIX --body '$FIX_GRAPH'"                      "passthrough"
-run_body "fix: ASCII '<- BUG:' → allow"       "gh pr create $FIX --body '$FIX_ASCII'"                      "passthrough"
-run_body "fix: bare 'BUG:' (no arrow) → allow" "gh pr create $FIX --body '$FIX_BARE'"                       "passthrough"
+run_body "fix: concise description + issue → allow"   "gh pr create $FIX --body '$FIX_GRAPH'"                      "passthrough"
 
 echo
 echo "## Denial reasons are compact but preserve the typed-ack contract"
@@ -930,13 +870,12 @@ assert_reason_contains "malformed-marker keeps typed format" "$malformed_reason"
 assert_reason_budget "title denial stays bounded" \
   "$(reason_for "gh pr create --title \"add a cool thing\" --body '$TITLE_GRAPH'")"
 
-write_marker "reviewed: graph body"
-graph_reason="$(reason_for 'gh pr create --title "feat(api): add thing" --body "prose"')"
-assert_reason_budget "graph denial stays bounded" "$graph_reason"
-assert_reason_contains "graph denial shows the required text fence" \
-  "$graph_reason" '```text'
-assert_reason_contains "graph denial teaches the canonical hop separator" \
-  "$graph_reason" 'Type · path/file.ext:LOC'
+write_marker "reviewed: concise body"
+body_reason="$(reason_for "gh pr create $FEAT --body '$LONG_BODY'")"
+assert_reason_budget "size denial stays bounded" "$body_reason"
+assert_reason_contains "size denial gives the word limit" "$body_reason" '200 words'
+assert_reason_contains "size denial gives the character limit" "$body_reason" '2000 characters'
+assert_reason_contains "size denial preserves freedom of form" "$body_reason" 'No diagram is required'
 
 echo
 echo "RESULT: $pass passed, $fail failed"

@@ -1,7 +1,7 @@
 # Contributing
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) first: entry points, invariants, the Stop gate's decision table, and the vocabulary used below.
-- Form follows content: numbered list for a sequence; bullets for 2 to 7 parallel items; description list for name plus description; table when items carry 3 or more attributes or several conditions decide an outcome; prose, message first, for reasoning and trade-offs.
+- Choose the form that makes the point easiest to understand: a diagram, real example, bullets, table, or short prose. No form is mandatory; walls of text are forbidden.
 
 ## Commit & PR messages
 
@@ -15,63 +15,46 @@ The preflight hook's denials point here as `CONTRIBUTING.md #commit--pr-messages
 
 ### Pull request descriptions
 
-| Order | Section | Content | Checked by |
-| --- | --- | --- | --- |
-| 1 | `## Call graph` | first non-blank content; one column-one `text` fence with the changed end-to-end Before/After graph | preflight hook |
-| 2 | `Fixes #<n>` | bug fixes only; first non-blank line after the fence; the faulty Before hop carries `← BUG:` | preflight hook |
-| 3 | `## Why` | the problem, why this change solves it, the alternatives rejected | reviewer |
-| 4 | `## User-facing change` | one line: what the agent or human now sees differently, or `NONE` | reviewer |
-| 5 | `## Verification` | commands run and what they showed; for a fix, the test failing on the reverted change and passing on the restored one | reviewer |
+Help a human understand the change quickly. Use a call graph, sequence diagram,
+real example, bullets, table, or short prose—whichever makes the point clearest.
+No diagram, Before/After layout, source annotation, or section order is mandatory.
 
-Graph rules:
+- Lead with the problem and resulting behavior. Explain each fact once.
+- Keep the entire description within **200 words and 2000 characters**, including
+  diagrams and Markdown. Walls of text are forbidden; splitting one into many
+  bullets or hiding it in a collapsed section does not make it concise.
+- Keep material trade-offs, risks, and untested behavior visible. Link detailed
+  evidence instead of pasting logs, file inventories, or exhaustive test counts.
+- Include decisive verification as `command → observed result`. For a fix, briefly
+  report the failure with all production changes reverted and the pass with the
+  complete fix restored. Do not present old results as newly verified.
+- Link the relevant issue when one exists, using `Fixes #<n>` when the PR closes it.
+  No issue or inline bug marker is required just to satisfy a format.
 
-- Root: the command or host event a person triggers (`git commit`, `gh pr create`, the Stop event).
-- Leaves: what they observe (a denial message, a dossier path, a question card). After leaves may name the test that guards each changed hop.
-- Every hop carries `(Type · path:LOC)`; every changed hop carries a plain-word annotation.
-- Only the hops that change; elide the rest.
+The preflight hook checks explicit nonempty bodies against the size limits for
+non-draft creates and description edits. It does not judge the explanatory form.
+Draft creates, body-preserving operations, web/API edits, and later bot additions
+are outside this content check; the writing rules still apply.
 
-Extra views, only when the graph cannot carry the feature:
+`.github/PULL_REQUEST_TEMPLATE.md` is a starting point, not a required structure.
+Use safe shell quoting for inline bodies: Markdown backticks inside double quotes
+can execute as command substitutions.
 
-| Feature is about | Add |
-| --- | --- |
-| ordering, retries, cancellation, a re-wake | a `sequence` fence after the graph |
-| a decision or transition in ARCHITECTURE.md | the changed table row |
-| a message or format | one real command and its output |
+CI posts an author-review prompt and converts unacknowledged PRs to draft. After
+reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a new,
+unedited comment. Once `Author reviewed the PR` passes, the author can click
+**Ready for review**. A new push or editing/deleting the only acknowledgment
+returns the PR to draft and requires a fresh comment. Forks use the same flow.
+Maintainer approval remains separate.
 
-- `.github/PULL_REQUEST_TEMPLATE.md` carries this shape for PRs opened in the web UI, which the hook never sees.
-- Paste bodies into `gh pr create --body '…'` single-quoted: the fence's backticks are command substitution inside double quotes, and the hook denies the command.
-- CI posts an author-review prompt and converts unacknowledged PRs to draft. After reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a new, unedited comment. Once `Author reviewed the PR` passes, the author can click **Ready for review**. A new push or editing/deleting the only acknowledgment returns the PR to draft and requires a fresh comment. Forks use the same flow. Maintainer approval remains separate.
+Illustrative example; the behavior and test results are hypothetical:
 
 ````markdown
-## Call graph
+Reduce routine SDK CI work while keeping the full compatibility matrix weekly.
 
-```text
-Before
-  boxlite exec <box> -- <cmd>                                              — user command
-  └─ exec_box            (BoxHandle · src/boxlite/src/portal/exec.rs:88)
-       └─ open_console   (Jailer · src/boxlite/src/jailer/console.rs:41)  ← BUG: returns before the socket binds
-            └─ attach_stdio (Guest · src/guest/src/io.rs:12)              — never reached; the user gets an empty prompt
+- PR changing both SDKs: 21 jobs → 11.
+- Every supported version still runs on Linux x64; macOS/ARM use the latest version.
+- Full cross-platform combinations run weekly and on manual requests.
 
-After
-  boxlite exec <box> -- <cmd>                                              — user command
-  └─ exec_box            (BoxHandle · src/boxlite/src/portal/exec.rs:88)
-       └─ open_console   (Jailer · src/boxlite/src/jailer/console.rs:41)  — awaits the bind future
-            └─ attach_stdio (Guest · src/guest/src/io.rs:12)              — guarded by console::binds_before_attach
-```
-
-Fixes #1042
-
-## Why
-
-- `open_console` returned as soon as the bind future existed, so `attach_stdio` raced the socket and the first `exec` showed an empty prompt.
-- Awaiting the bind is the smallest change that orders the two.
-- Rejected: polling the socket path; it races the unlink the jailer performs on restart.
-
-## User-facing change
-
-`boxlite exec` no longer shows an empty prompt on the first attach.
-
-## Verification
-
-- `cargo test -p boxlite console::binds_before_attach`: fails on the reverted change with "attach before bind", passes with it restored.
+Verification: `make test:apps:infra` → passed. Hosted CI timing has not been measured.
 ````

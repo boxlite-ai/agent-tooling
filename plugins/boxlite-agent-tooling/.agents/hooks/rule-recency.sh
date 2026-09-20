@@ -32,12 +32,11 @@ fi
 
 cat <<'EOF'
 REPLY SHAPE:
-- <=80 prose words; 2-7 items as bullets, 3+ attributes or conditions as a table, reasoning as sentences; exempt code (not comments), visuals, tables, paths, uncertainty, risk, failing tests.
-- Any subject: whenever possible, walk one example step by step on real data (values, facts, numbers), showing what changed at each step, tied to the general rule; omit only when none applies.
-- Prefer a renderable diagram, graph, image, or table over prose when clearer.
+- <=80 prose words by default; no walls of text. Keep uncertainty, risks, failures visible; link long evidence.
+- Choose call graph, sequence diagram, real example, bullets, table, or short prose by clarity; no form is mandatory.
+- Whenever useful, walk one real example step by step, showing what changes and the general rule. Label hypothetical values.
 - Answer first, in one sentence. No preamble, recap, praise, repetition, or closing offer.
-- Visualize relationships or 3+ entities. Code: `fn (Type, file:LOC) - role`; one Key line.
-- Explicit depth requests lift the cap; bare why does not.
+- Explicit depth requests allow more short sections, never dense text.
 - Non-trivial work: follow repository Workflow; research prior art before design.
 EOF
 exit 0
