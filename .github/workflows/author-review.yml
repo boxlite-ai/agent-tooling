@@ -1,0 +1,51 @@
+name: Author review
+
+# Run trusted code only. The same base-repository token can comment on fork PRs and
+# publish their commit statuses; it never needs to write to the contributor's branch.
+# Require the status "Author reviewed the PR" in the target branch rules. The job's
+# own check has a different name: issue_comment jobs run on the default branch.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, closed]
+  issue_comment:
+    types: [created, edited, deleted]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request to recheck (also posts instructions on existing PRs)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: write
+
+concurrency:
+  group: author-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || github.event.merge_group.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  acknowledgment:
+    name: Update author review status
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Reconcile author acknowledgment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          result=0
+          bash plugins/boxlite-agent-tooling/scripts/pr-author-review.sh "$GITHUB_EVENT_PATH" || result=$?
+          # Pending is a successfully processed event; API failures must fail the job.
+          if [ "$result" -gt 1 ]; then exit "$result"; fi
