@@ -361,9 +361,12 @@ The PR author acknowledges reading the current diff by posting a new comment:
 ```
 
 Use the actual full head SHA from the bot's instruction comment. The workflow publishes
-`Author reviewed the PR` as pending until that comment exists, then success. A new commit
-needs its own acknowledgment. Editing or deleting the only valid acknowledgment revokes
-it; post a fresh comment instead of editing an old one. Only the PR author's GitHub user
+`Author reviewed the PR` as pending and converts the PR to draft until that comment exists.
+After the check succeeds, click **Ready for review** when you want reviews. The workflow
+leaves that choice to the author, including for PRs that were already drafts. A new commit
+needs its own acknowledgment and returns the PR to draft. Editing or deleting the only
+valid acknowledgment also revokes it and drafts the PR; post a fresh comment instead of
+editing an old one. Only the PR author's GitHub user
 id and a `User` account count; bot authors have no automatic exemption. Fork PRs follow
 the same flow, with no writes to the contributor's branch.
 

@@ -75,6 +75,13 @@ case "$method $endpoint" in
   "POST repos/boxlite-ai/agent-tooling/statuses/"*) printf '{}\n' ;;
   "POST repos/boxlite-ai/agent-tooling/issues/7/comments") printf '{"id":90}\n' ;;
   "PATCH repos/boxlite-ai/agent-tooling/issues/comments/"*) printf '{}\n' ;;
+  "POST graphql")
+    if [[ -f "$STUB_DIR/draft-response.json" ]]; then
+      cat "$STUB_DIR/draft-response.json"
+    else
+      printf '{"data":{"convertPullRequestToDraft":{"pullRequest":{"id":"PR_test","isDraft":true}}}}\n'
+    fi
+    ;;
   *) printf 'unexpected API operation: %s %s\n' "$method" "$endpoint" >&2; exit 3 ;;
 esac
 STUB
@@ -148,9 +155,23 @@ edit_json() { # file, jq transformation
 
 only_pr_metadata_writes() {
   jq -se 'all(.[]; .method == "GET" or
-    (.endpoint | test("^repos/boxlite-ai/agent-tooling/(statuses/[0-9a-f]{40}|issues/7/comments|issues/comments/[0-9]+)$")))' \
+    (.endpoint | test("^repos/boxlite-ai/agent-tooling/(statuses/[0-9a-f]{40}|issues/7/comments|issues/comments/[0-9]+)$")) or
+    (.method == "POST" and .endpoint == "graphql" and
+      (.body.query | contains("convertPullRequestToDraft")) and
+      (.body.query | contains("markPullRequestReadyForReview") | not)))' \
     "$TEST_DIR/calls" >/dev/null
 }
+
+draft_requested() {
+  jq -se '[.[] | select(.method == "POST" and .endpoint == "graphql")] |
+    length == 1 and (.[0].body.query | contains("convertPullRequestToDraft")) and
+    .[0].body.variables.input.pullRequestId == "PR_test"' "$TEST_DIR/calls" >/dev/null
+}
+
+drafted() { pending && draft_requested; }
+no_draft_write() { jq -se 'all(.[]; .endpoint != "graphql")' "$TEST_DIR/calls" >/dev/null; }
+pending_without_draft_write() { pending && no_draft_write; }
+acknowledged_without_draft_write() { acknowledged && no_draft_write; }
 
 prompt_has_live_sha() {
   jq -se --arg sha "$HEAD_SHA" --arg old "$OLD_SHA" '
@@ -163,7 +184,60 @@ reset_case
 run_gate
 report "an external fork without acknowledgment stays pending" pending
 report "instructions name the live SHA instead of the event SHA" prompt_has_live_sha
-report "the gate writes only PR comments and statuses" only_pr_metadata_writes
+report "an unacknowledged fork PR is converted to draft" drafted
+report "the gate writes only PR comments, statuses, and draft state" only_pr_metadata_writes
+pending_before_draft() {
+  jq -se '.[1].body.state == "pending" and
+    ([.[] | .endpoint] | index("graphql")) > 1' "$TEST_DIR/calls" >/dev/null
+}
+report "pending status is published before drafting" pending_before_draft
+prompt_explains_ready() {
+  jq -se 'any(.[]; .method == "POST" and (.endpoint | endswith("/comments")) and
+    (.body.body | contains("Ready for review")))' "$TEST_DIR/calls" >/dev/null
+}
+report "instructions explain how to leave draft after acknowledging" prompt_explains_ready
+
+reset_case
+edit_json "$TEST_DIR/pr.json" '.draft = true'
+run_gate
+report "an existing draft stays pending without another draft mutation" pending_without_draft_write
+
+reset_case
+edit_json "$TEST_DIR/event.json" '.action = "ready_for_review"'
+run_gate
+report "marking ready without acknowledgment returns the PR to draft" drafted
+
+reset_case
+acknowledge
+run_gate
+report "a reviewed ready PR is not drafted" acknowledged_without_draft_write
+
+reset_case
+edit_json "$TEST_DIR/pr.json" '.draft = true'
+acknowledge
+run_gate
+report "acknowledgment preserves a draft until its author marks ready" acknowledged_without_draft_write
+
+reset_case
+run_gate STUB_ERROR_ENDPOINT=graphql
+report "a failed draft mutation fails the handler and leaves pending status" failed_closed
+
+for response in '{}' \
+  '{"data":{"convertPullRequestToDraft":{"pullRequest":{"id":"PR_test","isDraft":false}}}}' \
+  '{"data":{"convertPullRequestToDraft":{"pullRequest":{"id":"another_PR","isDraft":true}}}}' \
+  '{"errors":[{"message":"denied"}],"data":{"convertPullRequestToDraft":{"pullRequest":{"id":"PR_test","isDraft":true}}}}'; do
+  reset_case
+  printf '%s\n' "$response" > "$TEST_DIR/draft-response.json"
+  run_gate
+  report "an unconfirmed draft conversion fails closed: $response" failed_closed
+done
+
+for invalid in '.node_id = ""' '.node_id = null' '.draft = "false"' 'del(.draft)'; do
+  reset_case
+  edit_json "$TEST_DIR/pr.json" "$invalid"
+  run_gate
+  report "invalid draft identity/state fails before mutation: $invalid" failed_closed
+done
 
 reset_case
 jq -n --arg repo "$BASE_REPO" '{repository:{full_name:$repo},inputs:{pr_number:"7"}}' > "$TEST_DIR/event.json"
@@ -218,6 +292,7 @@ reset_case
 edit_json "$TEST_DIR/pr.json" '.head.repo.full_name = "boxlite-ai/agent-tooling"'
 run_gate
 report "same-repository PRs require the same acknowledgment" pending
+report "an unacknowledged same-repository PR is also drafted" drafted
 
 for action in created edited deleted; do
   reset_case
@@ -259,12 +334,14 @@ reset_case
 comment_event deleted
 run_gate
 report "deleting the only acknowledgment revokes success" pending
+report "deleting the only acknowledgment drafts the PR" drafted
 
 reset_case
 acknowledge
 jq '.[0] | .body = "withdrawn"' "$TEST_DIR/comments-1.json" > "$TEST_DIR/comment-live.json"
 run_gate
 report "an acknowledgment changed since pagination does not pass" pending
+report "an edited acknowledgment drafts the PR" drafted
 
 reset_case
 acknowledge
@@ -285,6 +362,7 @@ acknowledge
 jq -n --arg sha "$HEAD_SHA" '[{number:8,state:"open",head:{sha:$sha}}]' > "$TEST_DIR/associated.json"
 run_gate
 report "another open PR sharing the head cannot inherit this acknowledgment" pending
+report "an acknowledgment blocked by a shared head keeps the PR in draft" drafted
 
 reset_case
 acknowledge
@@ -302,6 +380,7 @@ head_change_pending() {
     "$TEST_DIR/calls" >/dev/null
 }
 report "a head change during evaluation requires acknowledgment of the new head" head_change_pending
+report "an unacknowledged replacement head drafts the PR" draft_requested
 
 reset_case
 for read_count in $(seq 1 6); do
@@ -317,6 +396,7 @@ run_gate
 jq -s '[.[] | select(.method == "POST" and (.endpoint | endswith("/comments"))) |
   {id:90,user:{id:41898282,login:"github-actions[bot]",type:"Bot"},body:.body.body}]' \
   "$TEST_DIR/calls" > "$TEST_DIR/comments-1.json"
+edit_json "$TEST_DIR/pr.json" '.draft = true'
 rm "$TEST_DIR/calls" "$TEST_DIR/pr-reads"
 run_gate
 no_prompt_write() {
@@ -353,6 +433,7 @@ done
 reset_case
 run_gate STUB_ERROR_ENDPOINT='/issues/7/comments' STUB_ERROR_METHOD=POST
 report "a failed instruction comment leaves the status pending" failed_closed
+report "a failed instruction comment does not prevent drafting" draft_requested
 
 reset_case
 acknowledge

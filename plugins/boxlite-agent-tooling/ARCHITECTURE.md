@@ -50,12 +50,12 @@ code. `scripts/pr-author-review.sh` checks dependencies and calls the single fac
 `pr_author_review_run` in `.agents/lib/pr-author-review.sh`. This gate is independent of
 all local hooks above.
 
-| Current PR state | Published `Author reviewed the PR` status | Contributor action |
+| Current PR state | Gate result | Contributor action |
 | --- | --- | --- |
-| No author acknowledgment for the current head | Pending | Read the diff and post `/reviewed <full-head-SHA>` as a new comment. |
-| An unedited comment from the PR author's GitHub user id names the current head | Success | Merge after the other required checks and approvals pass. |
-| The head changes, or the only acknowledgment is edited or deleted | Pending | Read the current diff and post a fresh acknowledgment. |
-| Another open PR shares the acknowledged head SHA | Pending | Push a distinct commit so one PR's status cannot satisfy another's gate. |
+| No author acknowledgment for the current head | Pending; convert to draft | Read the diff, post `/reviewed <full-head-SHA>` as a new comment, then click **Ready for review** after the check succeeds. |
+| An unedited comment from the PR author's GitHub user id names the current head | Success; preserve the current draft state | Mark ready when you want reviews, then merge after other required checks and approvals pass. |
+| The head changes, or the only acknowledgment is edited or deleted | Pending; convert to draft | Read the current diff and post a fresh acknowledgment before marking ready. |
+| Another open PR shares the acknowledged head SHA | Pending; convert to draft | Push a distinct commit so one PR's status cannot satisfy another's gate. |
 | A GitHub read or write fails, state is malformed, or a scan reaches 1000 comments/associated PRs | Pending when it could be published; handler fails | Resolve the error and rerun the workflow. |
 | The PR is closed, or a comment belongs to an ordinary issue | No write | None. |
 | A merge queue requests checks on its temporary commit | Success, carried forward from queue admission | None; the PR status must be required before admission. |
@@ -77,9 +77,13 @@ at most three times. A matching comment is fetched again before granting success
 Only new, unedited comments count because maintainers can edit other users' comments.
 Bots are not exempt and cannot acknowledge on a human author's behalf.
 
-The gate revokes a previous success to pending before scanning. It maintains one bot
-instruction comment, updates it when necessary, and never writes repository contents or
-changes draft state. Forks follow the same path. The comment is the acknowledgment record;
+The gate revokes a previous success to pending before scanning. Once live state confirms
+the acknowledgment is missing or cannot pass, it converts a ready PR to draft using
+GitHub's `convertPullRequestToDraft` mutation and verifies the returned identity and draft
+state. Existing drafts need no mutation. A later acknowledgment preserves the draft until
+a person chooses **Ready for review**; trying that before acknowledgment drafts it again.
+It maintains one bot instruction comment, updates it when necessary, and never writes
+repository contents. Forks follow the same path. The comment is the acknowledgment record;
 there is no signature file, database, personal token, or separate GitHub App.
 
 Require the commit status `Author reviewed the PR`, sourced from GitHub Actions, in every
