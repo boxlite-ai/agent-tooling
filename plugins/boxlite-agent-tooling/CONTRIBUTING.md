@@ -40,7 +40,7 @@ Extra views, only when the graph cannot carry the feature:
 
 - `.github/PULL_REQUEST_TEMPLATE.md` carries this shape for PRs opened in the web UI, which the hook never sees.
 - Paste bodies into `gh pr create --body '…'` single-quoted: the fence's backticks are command substitution inside double quotes, and the hook denies the command.
-- CI posts an author-review prompt on each PR. After reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a new, unedited comment. `Author reviewed the PR` passes for that commit; a new push or editing/deleting the only acknowledgment requires a fresh comment. Forks use the same flow. Maintainer approval remains separate.
+- CI posts an author-review prompt and converts unacknowledged PRs to draft. After reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a new, unedited comment. Once `Author reviewed the PR` passes, the author can click **Ready for review**. A new push or editing/deleting the only acknowledgment returns the PR to draft and requires a fresh comment. Forks use the same flow. Maintainer approval remains separate.
 
 ````markdown
 ## Call graph

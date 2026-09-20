@@ -45,13 +45,15 @@ _pr_review_state() { # base repository, PR number -> validated JSON snapshot
   response="$(_pr_review_gh api "repos/$1/pulls/$2")" || return 2
   jq -ce --arg repo "$1" --argjson number "$2" '
     if .number != $number or .base.repo.full_name != $repo or
+       (.node_id | type != "string") or (.node_id | length == 0) or
+       (.draft | type != "boolean") or
        (.head.sha | type != "string") or (.head.sha | test("^[0-9a-f]{40}$") | not) or
        (.user.id | type != "number") or .user.id <= 0 or (.user.id | floor != .) or
        (.user.login | type != "string") or
        (.user.login | test("^[A-Za-z0-9][A-Za-z0-9-]*(\\[bot\\])?$") | not) or
        (.user.type != "User" and .user.type != "Bot") or
        (.state != "open" and .state != "closed") then error("invalid PR state")
-    else {sha:.head.sha,author_id:.user.id,author:.user.login,author_type:.user.type,state} end
+    else {id:.node_id,draft,sha:.head.sha,author_id:.user.id,author:.user.login,author_type:.user.type,state} end
   ' <<<"$response"
 }
 
@@ -60,6 +62,19 @@ _pr_review_status() { # repository, PR number, SHA, state, description, optional
     --arg url "${6:-${GITHUB_SERVER_URL:-https://github.com}/$1/pull/$2}" \
     '{state:$state,context:"Author reviewed the PR",description:$description,target_url:$url}' |
     _pr_review_gh api -X POST "repos/$1/statuses/$3" --input - >/dev/null
+}
+
+_pr_review_draft() { # validated PR node id -> confirmed draft conversion
+  local response
+  response="$(jq -n --arg id "$1" '{
+    query:"mutation($input: ConvertPullRequestToDraftInput!) { convertPullRequestToDraft(input: $input) { pullRequest { id isDraft } } }",
+    variables:{input:{pullRequestId:$id}}
+  }' | _pr_review_gh api -X POST graphql --input -)" || return 2
+  jq -e --arg id "$1" '
+    ((.errors // []) | length == 0) and
+    .data.convertPullRequestToDraft.pullRequest.id == $id and
+    .data.convertPullRequestToDraft.pullRequest.isDraft == true
+  ' <<<"$response" >/dev/null
 }
 
 _pr_review_ack() { # author id, SHA; stdin: comment array -> first valid acknowledgment
@@ -122,6 +137,7 @@ _pr_review_prompt() { # repository, PR number, SHA, author login, existing promp
     '### Author review acknowledgment' '' "$6" '' \
     "@$4: after reading the current diff, post this as a new PR comment:" '' \
     '```text' "/reviewed $3" '```' '' \
+    'Unacknowledged PRs are converted to draft. After this check passes, click **Ready for review** when you want reviews.' \
     'Only a new, unedited comment from the PR author counts. A new commit requires a new acknowledgment.' \
     "This records the author's acknowledgment; maintainer approval is separate.")"
   previous="$(jq -r '.body // ""' <<<"$5")" || return 2
@@ -197,6 +213,11 @@ pr_author_review_run() { # trusted GitHub event file
       _pr_review_error "could not recheck current state of $repo#$number"; return 2;
     }
     [[ "$latest" == "$state" ]] || continue
+    if [[ "$verdict" == pending && "$(jq -r .draft <<<"$state")" == false ]]; then
+      _pr_review_draft "$(jq -r .id <<<"$state")" || {
+        _pr_review_error "could not convert $repo#$number to draft"; return 2;
+      }
+    fi
     _pr_review_prompt "$repo" "$number" "$sha" "$author" "$notice" "$result" || {
       _pr_review_error "could not update review instructions for $repo#$number"; return 2;
     }
