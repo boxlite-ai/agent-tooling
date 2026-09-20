@@ -2,8 +2,8 @@
 # Tests for .agents/hooks/stop-gate.sh, the Stop hook that runs the small-reply rule
 # around preflight-verdict-check.sh.
 #
-#   - judged allow + last reply over 60 words  -> continue once for the result in few
-#     of prose                                    words: drawings, else 3 bullets
+#   - judged allow + last reply over 60 words  -> continue once with the editable
+#     of prose                                    reply-summary prompt
 #   - that reply, at most 120 words counting   -> ends the turn; the verdict check is
 #     code blocks, no tool since the ask          not run again
 #   - anything else                            -> the verdict check's own output, exit
@@ -17,7 +17,7 @@ set -uo pipefail
 
 # Hermetic baseline, as in preflight-verdict-check.test.sh: hard mode, no live
 # classifier, no custom extractor.
-unset VERDICT_GATE_HARD_BLOCK VERDICT_EXTRACTOR_CMD
+unset VERDICT_GATE_HARD_BLOCK VERDICT_EXTRACTOR_CMD HOOK_STDERR
 export VERDICT_CLASSIFIER_CMD='false'
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -127,7 +127,7 @@ run_in_repo() {  # repo script classifier-answer host payload
     [[ "$4" != claude ]] || export CLAUDE_PLUGIN_ROOT="$REPO_ROOT"
     BASH_ENV="$INJECT_BASH_ENV" CLAUDE_PROJECT_DIR="$1" VERDICT_GATE_HARD_BLOCK="$HARD_BLOCK" \
       VERDICT_CLASSIFIER_CMD="$(cls_stub "$1" "$3")" bash "$2"
-  ) 2>/dev/null
+  ) 2>"${HOOK_STDERR:-/dev/null}"
 }
 gate_stop() {  # repo session stop-hook-active last-message classifier-answer [claude]
   run_in_repo "$1" "$HOOK" "$5" "${6:-}" "$(stop_payload "$1" "$2" "$3" "$4")"
@@ -138,14 +138,21 @@ decision_of() {
   if [[ -z "$1" ]]; then printf allow; return; fi
   [[ "$(field "$1" '.decision')" == block ]] && printf block || printf allow
 }
-request_marker="drawings of any kind"
+# Compare delivery with the editable template, without pinning its wording here.
+expected_request="$(
+  # shellcheck source=../lib/subagent.sh
+  source "$REPO_ROOT/.agents/lib/subagent.sh"
+  subagent_prompt reply-summary "$REPO_ROOT" max_words=60
+)"
 asked_as_context() {
   [[ "$(field "$1" '.hookSpecificOutput.hookEventName')" == Stop \
-     && "$(field "$1" '.hookSpecificOutput.additionalContext')" == *"$request_marker"* \
+     && -n "$expected_request" \
+     && "$(field "$1" '.hookSpecificOutput.additionalContext')" == "$expected_request" \
      && -z "$(field "$1" '.decision')" ]]
 }
 asked_as_block() {
-  [[ "$(field "$1" '.decision')" == block && "$(field "$1" '.reason')" == *"$request_marker"* ]]
+  [[ "$(field "$1" '.decision')" == block && -n "$expected_request" \
+     && "$(field "$1" '.reason')" == "$expected_request" ]]
 }
 asked() { asked_as_context "$1" || asked_as_block "$1"; }
 not_asked() { ! asked "$1"; }
@@ -234,7 +241,7 @@ append_assistant "$R" "$overshoot"
 rm -f "$R/CLASSIFIER_RAN"
 out="$(gate_stop "$R" "$S" true "$overshoot" YES claude)"
 ended_unjudged "$out" "$R"
-expect "an answer up to twice the word target still ends as a restatement" \
+expect "an answer up to twice the trigger threshold still ends as a restatement" \
   "$?" "out=$out classifier=$(classifier_ran "$R")"
 rm -rf "$R"
 
@@ -563,6 +570,49 @@ expect "a termination to the gate alone during triage stops the check before any
 printf '\n## Invariant: the ask record is gitignored, so it never enters the tree hash\n'
 git -C "$REPO_ROOT" check-ignore -q .agents/state/reply-summary-ask
 expect ".agents/state/reply-summary-ask is gitignored" "$?" "not ignored"
+
+printf '\n## Reply-summary prompts are loaded from the plugin on each request\n'
+# Edit an isolated plugin copy: live prompt edits must not affect another test or
+# the developer's installed hook. The path also exercises checkout names with spaces.
+prompt_fixture="$(mktemp -d)"
+cp -R "$REPO_ROOT" "$prompt_fixture/plugin copy"
+original_hook="$HOOK"
+HOOK="$prompt_fixture/plugin copy/.agents/hooks/stop-gate.sh"
+prompt_file="$prompt_fixture/plugin copy/.agents/prompts/reply-summary.md"
+HOOK_STDERR="$prompt_fixture/stderr"
+edits_status=0
+for host in claude codex; do
+  if [[ "$host" == claude ]]; then
+    prompt_field='.hookSpecificOutput.additionalContext'
+  else
+    prompt_field='.reason'
+  fi
+  printf '%s: summarize in {{max_words}} words.\n' "$host" > "$prompt_file"
+  S="prompt-$host"; R="$(new_repo "$S")"
+  append_assistant "$R" "$long_reply"
+  out="$(gate_stop "$R" "$S" false "$long_reply" NO "$host")"
+  [[ "$(field "$out" "$prompt_field")" == "$host: summarize in 60 words." ]] \
+    && keeps_triage_note "$out" || edits_status=1
+  rm -rf "$R"
+done
+expect "both hosts pick up successive template edits and substitute max_words" "$edits_status" "out=$out"
+
+rm -f "$prompt_file"
+S="prompt-missing"; R="$(new_repo "$S")"
+append_assistant "$R" "$long_reply"
+out="$(gate_stop "$R" "$S" false "$long_reply" NO codex)"
+status=$?
+[[ "$status" == 0 && "$(decision_of "$out")" == allow \
+   && ! -e "$(session_state_path "$R" reply-summary-ask "$S")" ]] \
+  && keeps_triage_note "$out" \
+  && ! logged_rung "$R" "$S" 'summary ask-continue' \
+  && grep -q 'no such prompt' "$HOOK_STDERR"
+expect "a missing template reports an error without asking or changing the verdict" \
+  "$?" "status=$status out=$out stderr=$(cat "$HOOK_STDERR")"
+rm -rf "$R"
+HOOK="$original_hook"
+unset HOOK_STDERR
+rm -rf "$prompt_fixture"
 
 echo
 echo "RESULT: $pass passed, $fail failed"
