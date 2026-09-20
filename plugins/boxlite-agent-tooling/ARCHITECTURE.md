@@ -45,45 +45,55 @@ Producers for callers with no agent runtime.
 An agent with a built-in spawns the auditor itself, `Task` on Claude Code and
 `collaboration.spawn_agent` on Codex, from the specs in `.claude/agents/`.
 
-GitHub events, in a repository whose `.github/workflows/unreviewed-pr.yml` runs
-`scripts/pr-unreviewed-file.sh` from a trusted base-branch checkout (`pull_request_target`).
-Independent of every hook above.
+GitHub events run `.github/workflows/author-review.yml` from trusted base/default-branch
+code. `scripts/pr-author-review.sh` checks dependencies and calls the single facade
+`pr_author_review_run` in `.agents/lib/pr-author-review.sh`. This gate is independent of
+all local hooks above.
 
-| On `opened`, `reopened`, `synchronize` or `ready_for_review` | The step does |
-| --- | --- |
-| The head carries `UNREVIEWED.md` | Converts the pull request to a draft and fails. |
-| The head lacks it and the pull request carries a valid marking commit | Passes: the file was added and then deleted. |
-| The head lacks it and the pull request lacks that commit | Commits the file, reports `Author reviewed the PR` as failing on that commit, converts to a draft and fails. |
-| No such commit among the 250 GitHub lists, the most it returns | Fails closed: one past that end would be invisible, and marking again would loop. |
-| The head branch lives in a fork, opened by an owner, member or collaborator | Converts to a draft and fails: that token cannot mark a fork, and opening from one would otherwise be the way around this gate. |
-| The head branch lives in a fork, opened by anyone else | Passes, unmarked and undrafted: they cannot merge it either, so whoever merges it is reading it. |
+| Current PR state | Published `Author reviewed the PR` status | Contributor action |
+| --- | --- | --- |
+| No author acknowledgment for the current head | Pending | Read the diff and post `/reviewed <full-head-SHA>` as a new comment. |
+| An unedited comment from the PR author's GitHub user id names the current head | Success | Merge after the other required checks and approvals pass. |
+| The head changes, or the only acknowledgment is edited or deleted | Pending | Read the current diff and post a fresh acknowledgment. |
+| Another open PR shares the acknowledged head SHA | Pending | Push a distinct commit so one PR's status cannot satisfy another's gate. |
+| A GitHub read or write fails, state is malformed, or a scan reaches 1000 comments/associated PRs | Pending when it could be published; handler fails | Resolve the error and rerun the workflow. |
+| The PR is closed, or a comment belongs to an ordinary issue | No write | None. |
+| A merge queue requests checks on its temporary commit | Success, carried forward from queue admission | None; the PR status must be required before admission. |
 
-The verdict reaches the pull request as this job's own check run, which GitHub attaches to
-the head under `pull_request_target` as under `pull_request`. The marking commit is the one
-thing that never gets a run, because a commit made with the workflow's token starts none, so
-the step posts a status on it under the job name; one required check covers both. Draft is
-the enforcement that needs no branch protection. The step only ever converts to draft: a
-person marks the pull request ready. A fork is the one head this token cannot mark at all,
-so the gate reads who opened it: refusing every fork would close the contribution route of
-any repository that asks people to fork, and passing every fork would let anyone with push
-access walk around the gate by opening from one. Require approvals on the base branch to
-hold the side this cannot.
+The workflow subscribes to `pull_request_target` (opened, reopened, synchronize,
+ready_for_review, closed) and `issue_comment` (created, edited, deleted). It serializes
+runs per PR without canceling the active run, with a five-minute job limit. A human can
+post `/recheck-author-review` to initialize an existing PR or retry; any new non-bot PR
+comment recomputes live state without granting acknowledgment by itself. Rechecks use
+the default-branch `issue_comment` workflow rather than a caller-selected workflow ref.
+The script ignores newly created bot comments, but reconciles edits and deletions so
+modified or deleted instruction comments are repaired. The workflow routes all PR comment
+events to that script; idempotent prompt updates avoid repeated writes.
+`merge_group` runs use their temporary SHA as the concurrency key and publish a success
+carried forward from the required PR admission check. GitHub may
+replace queued runs; every run therefore recomputes from live PR/comments, never the
+event's SHA, comment text, or author association. Head changes during evaluation retry
+at most three times. A matching comment is fetched again before granting success.
+Only new, unedited comments count because maintainers can edit other users' comments.
+Bots are not exempt and cannot acknowledge on a human author's behalf.
 
-A valid marking commit names this pull request in its subject, is authored by
-`github-actions[bot]`, is committed by `web-flow`, verifies, and its own diff added the
-file. Those five are tamper-evidence, not access control: both logins come from commit
-email addresses anyone can set, and they mean something only alongside the signature, which
-GitHub verifies against the committer. What they rule out is a typed subject, a real marker
-minted for another pull request and merged in on a stacked branch, a locally signed commit
-wearing the bot's author email, an unsigned commit, and an empty one. What they cannot rule
-out is someone with write access adding a workflow, whose token makes a real marking commit.
-Draft is the block that does not rest on any of it; branch protection and review of
-`.github/workflows` are the controls.
+The gate revokes a previous success to pending before scanning. It maintains one bot
+instruction comment, updates it when necessary, and never writes repository contents or
+changes draft state. Forks follow the same path. The comment is the acknowledgment record;
+there is no signature file, database, personal token, or separate GitHub App.
 
-Every read is of current state, the pull request's head sha and its commits, never the
-event's own sha, so a queued run cannot pass a head that still carries the file. A pull
-request merged unreviewed carries the file onto the default branch. The workflow names this
-repository's script path, so a consumer copies the script with it.
+Require the commit status `Author reviewed the PR`, sourced from GitHub Actions, in every
+target branch's rules. The workflow job is named `Update author review status` so its own
+check cannot substitute for the acknowledgment. Comment-triggered jobs run on the default
+branch; the script explicitly posts the status on the PR's live head in the base repository.
+Exit 0 means acknowledged/irrelevant, 1 means awaiting acknowledgment, and 2 means an error;
+the workflow treats 1 as a handled event. Failure to write to GitHub cannot revoke a remote
+success, so the failed handler must be investigated rather than treated as proof of review.
+An acknowledgment records an assertion of review, not proof that a human read the diff.
+Branch rules and review of privileged workflows remain the enforcement boundary.
+Merge queues must require this same status on PRs before admission; the queue-generated
+commit adds no new author acknowledgment. See the equivalent queue carry-forward in
+[514-labs/cla-bot](https://github.com/514-labs/cla-bot/blob/main/SPEC.md#10-additional-scenarios-commonly-missed).
 
 ## State files
 
@@ -199,7 +209,7 @@ non-blocking `advisories`, which never decide the verdict.
 - **twins**: `hooks/hooks.json` and `hooks/codex-hooks.json`, behaviourally identical except `asyncRewake` against `async` and the events only one host has.
 - **watch**: one run of `.agents/watch/pr-watch.sh` after a push, streaming CI and PR events as JSON lines under one watch id.
 - **wake**: the turn Claude Code starts when an `asyncRewake` hook exits 2; its prompt carries the hook's stderr in a reminder after the host's envelope, and it is internal only while its one-time nonce is unspent.
-- **unreviewed file**: `UNREVIEWED.md`, committed by CI to a new pull request, which it also drafts; a person deletes the file after reading the diff and marks the pull request ready, and a PR merged without that brings the file onto the default branch.
+- **author review acknowledgment**: a new, unedited `/reviewed <full-head-SHA>` PR comment from the PR author; the CI gate publishes its verdict on that commit.
 
 ## Code map
 
@@ -212,7 +222,7 @@ hooks/                  the twin host hook manifests
 .agents/skills/         shell-engineering, boxlite-diagrams, adversarial-iteration
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
-scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, unreviewed-PR file
+scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
 guidance/workflow.md    the canonical guidance spliced into consumers
 host-parity.test.sh     what keeps the three hosts loading the same assets
 architecture.test.sh    what keeps this map honest

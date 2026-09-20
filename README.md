@@ -352,6 +352,58 @@ After installation, configure repository Git hooks explicitly:
 plugins/boxlite-agent-tooling/scripts/setup.sh /path/to/consumer
 ```
 
+## Author review acknowledgment
+
+The PR author acknowledges reading the current diff by posting a new comment:
+
+```text
+/reviewed 0123456789abcdef0123456789abcdef01234567
+```
+
+Use the actual full head SHA from the bot's instruction comment. The workflow publishes
+`Author reviewed the PR` as pending until that comment exists, then success. A new commit
+needs its own acknowledgment. Editing or deleting the only valid acknowledgment revokes
+it; post a fresh comment instead of editing an old one. Only the PR author's GitHub user
+id and a `User` account count; bot authors have no automatic exemption. Fork PRs follow
+the same flow, with no writes to the contributor's branch.
+
+For consumers:
+
+1. Install the event wiring and permissions from `.github/workflows/author-review.yml`.
+   Keep its job name distinct from `Author reviewed the PR` and handle both PR events and
+   comment creation, editing, and deletion.
+2. Check out a reviewed, immutable `boxlite-ai/agent-tooling` commit in a separate directory
+   with `persist-credentials: false`, then run its
+   `plugins/boxlite-agent-tooling/scripts/pr-author-review.sh` with `$GITHUB_EVENT_PATH`.
+   Keep the script and its `.agents/lib/pr-author-review.sh` together. Never check out or
+   execute the PR head in this privileged workflow, or run the floating installer there.
+3. Make `Author reviewed the PR` a required status check from GitHub Actions on the target
+   branches. Do this after the workflow is deployed and has published that status.
+   The handler job's success only means the event was processed.
+   For existing PRs, post `/recheck-author-review` as a PR comment to publish their status
+   and instructions before enabling the rule. Any new non-bot PR comment rechecks live
+   state; this command does not acknowledge the diff. Comment events use the default-branch
+   workflow, so initialization cannot select a branch's modified workflow definition.
+4. When replacing the old file gate, remove its workflow and any remaining `UNREVIEWED.md`.
+   Existing draft PRs must be marked ready by a person. A consumer's pinned workflow does
+   not update automatically when the plugin is installed or upgraded.
+
+The PR comment is the acknowledgment record. There is no extra database, App, or personal
+token. Branch rules enforce the requirement. Rule bypass roles and identities able to
+publish this status remain trusted; protect workflow authoring and token permissions.
+Maintainer approval is a separate requirement. A shared head SHA
+across open PRs is withheld from success because GitHub statuses belong to commits, not PRs.
+Merge queues require the same status before admission. On `merge_group`, the workflow
+carries that result forward to the queue-generated commit; it does not ask authors to
+acknowledge the temporary merge commit. This depends on keeping the PR status required.
+Scans stop at 1000 comments/associated PRs and fail closed. A GitHub write outage can prevent
+revoking an existing status; investigate a failed handler rather than interpreting it as
+an acknowledgment.
+
+```sh
+bash plugins/boxlite-agent-tooling/scripts/pr-author-review.test.sh
+```
+
 ## Turns cut off by an API error
 
 In an interactive Claude Code session, a turn that an API error cuts off resumes by
