@@ -21,7 +21,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | A denial naming the required description shape, then a request for the human's typed `reviewed:` acknowledgment. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
-| Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | Nothing on PASS, unless the last reply runs over 60 words of prose: then one request to show the result in few words, drawn where a drawing can express it. The findings on FAIL. See the decision table below. |
+| Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | Nothing on PASS, unless the last reply runs over 60 words of prose: then one request using the reply-summary prompt template. The findings on FAIL. See the decision table below. |
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
 | Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
 
@@ -111,6 +111,7 @@ than one session can share a checkout.
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Reply-summary ask: prompt epoch, how the request went out, and the judged turn's tool count (`.agents/lib/reply-summary.sh`).
 - Stop gate to verdict check: `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/preflight-verdict-check.sh` and passes its output, stderr and exit status through. It learns which rung decided from the `VERDICT_DECISION_OUT` file it names.
+- Summary wording: edit `.agents/prompts/reply-summary.md` in the active plugin checkout. `.agents/lib/reply-summary.sh` reads it on each request through `subagent_prompt`, substituting `{{max_words}}` with the gate's word threshold. Edits take effect on the next request without changing the hook; the threshold and restatement checks remain in code. A missing, empty, or unrenderable prompt reports stderr and leaves the verdict check's result intact, without recording an ask.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`. One refresh runs at a time, held by `.git/agent-tooling/.refresh.lock` (`scripts/refresh-installation.sh:31`), and a refresh that finds it held skips. Breaking that lock would race its holder, so one left behind by a killed run is reported rather than cleared: `scripts/verify-installation.sh:22`, which every commit and push runs, names it once it is an hour old. Without that, the automatic refresh is dead and only a log nobody reads would say so.
 
 ## Invariants
@@ -123,8 +124,8 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A turn the gate cannot read ends unjudged under `blind-allow`, never blocked. `.agents/hooks/preflight-verdict-check.sh:52`
 - A message is never judged twice. `.agents/hooks/preflight-verdict-check.sh:61`
 - A parked FAIL serves only the next audit of the same round. `.agents/hooks/preflight-verdict-check.sh:212`
-- The Stop gate asks for the result only after the verdict check judged and allowed the turn, or a user's override let it end, and never twice in a row. `.agents/hooks/stop-gate.sh:180`
-- An answer to that ask ends unjudged only at 120 words or fewer, code included, with no tool call since the ask. `.agents/hooks/stop-gate.sh:117`
+- The Stop gate asks for the result only after the verdict check judged and allowed the turn, or a user's override let it end, and never twice in a row. `.agents/hooks/stop-gate.sh:178`
+- An answer to that ask ends unjudged only at 120 words or fewer, code included, with no tool call since the ask. `.agents/hooks/stop-gate.sh:115`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
 - Humans are not gated; named harness variables gate, never prefix wildcards. `.githooks/pre-commit:9`
@@ -147,7 +148,7 @@ first.
 
 | Rung | Outcome | When | Line |
 | --- | --- | --- | --- |
-| summary | restatement-allow | The previous Stop asked for the result, this answer is 120 words or fewer counting code, and no tool ran since the ask; it ends the turn and the verdict check does not run. | 130 |
+| summary | restatement-allow | The previous Stop asked for the result, this answer is 120 words or fewer counting code, and no tool ran since the ask; it ends the turn and the verdict check does not run. | 128 |
 | override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 715 |
 | extract | truncated-block | The bounded final-turn snapshot exceeded its byte limit; an independent FAIL dossier is required. | 1782 |
 | extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1789 |
@@ -168,7 +169,7 @@ first.
 | triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2155 |
 | regex | none-allow | No model reachable and no fallback pattern matched. | 2163 |
 | regex | match-block | No model reachable and a fallback pattern matched. | 2167 |
-| summary | ask-continue | The verdict check ended on overridden, PASS, IN_PROGRESS, NO or none, the last reply runs over 60 words of prose, and the previous Stop did not ask. The turn continues once: `additionalContext` on Claude Code, `decision: block` elsewhere. | 204 |
+| summary | ask-continue | The verdict check ended on overridden, PASS, IN_PROGRESS, NO or none, the last reply runs over 60 words of prose, and the previous Stop did not ask. The turn continues once: `additionalContext` on Claude Code, `decision: block` elsewhere. | 205 |
 
 Dossier shape, from `.claude/agents/verdict-auditor.md`: `branch`, `head`, `tree_hash`,
 `generation`, a `verdict` of `PASS`, `FAIL` or `IN_PROGRESS`, and `findings`. The
@@ -206,6 +207,7 @@ non-blocking `advisories`, which never decide the verdict.
 hooks/                  the twin host hook manifests
 .agents/hooks/          one script per gate or producer, listed above
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
+.agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
 .agents/skills/         shell-engineering, boxlite-diagrams, adversarial-iteration
 .claude/agents/         the two auditor specs

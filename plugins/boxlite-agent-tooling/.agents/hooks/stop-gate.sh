@@ -6,9 +6,7 @@
 #   2. preflight-verdict-check.sh judges the turn. Its block, error or allow is the
 #      answer, except that
 #   3. an allow that followed a judgment, on a last reply over 60 words, continues the
-#      turn once to ask for a closing reply that shows the result in few words:
-#      drawings of any kind, as many as it takes, or at most 3 bullet points where a
-#      drawing cannot express it.
+#      turn once with the closing-reply prompt in .agents/prompts/reply-summary.md.
 # The reply-summary rule and its record live in .agents/lib/reply-summary.sh. Both
 # decisions here join the verdict check's per-session decision log.
 #
@@ -33,15 +31,15 @@ run_verdict_check_alone() {
 for required_command in jq perl git; do
   command -v "$required_command" >/dev/null 2>&1 || run_verdict_check_alone
 done
-for library in verdict-audit-state.sh reply-summary.sh hook-host.sh; do
+for library in verdict-audit-state.sh reply-summary.sh subagent.sh hook-host.sh; do
   [[ -r "$tooling_root/.agents/lib/$library" ]] || run_verdict_check_alone
 done
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$tooling_root/.agents/lib/verdict-audit-state.sh"
 # shellcheck source=../lib/reply-summary.sh
 source "$tooling_root/.agents/lib/reply-summary.sh"
-# shellcheck source=../lib/hook-host.sh
-source "$tooling_root/.agents/lib/hook-host.sh"
+# shellcheck source=../lib/subagent.sh
+source "$tooling_root/.agents/lib/subagent.sh"
 
 # ── Input: the payload fields this gate reads; anything malformed is the verdict
 #    check's to report ─────────────────────────────────────────────────────────
@@ -190,7 +188,10 @@ ask_is_due() {
   (( length_status == 0 ))
 }
 ask_for_reply_summary() {
-  local mode=block tools note
+  local mode=block tools note request
+  # Load before recording the ask: a broken template must not leave a continuation
+  # record for a request that never reached the agent.
+  request="$(reply_summary_request "$tooling_root")" || return 1
   [[ "$(hook_host_kind)" == claude ]] && mode=context
   tools="$(final_turn_tool_count)" || tools="-"
   reply_summary_record_ask "$ask_file" "$entry_prompt_epoch" "$mode" "$tools" \
@@ -204,11 +205,11 @@ ask_for_reply_summary() {
   log_decision summary ask-continue
   note="$(printf '%s' "$verdict_output" | jq -r '.systemMessage // empty' 2>/dev/null)"
   if [[ "$mode" == context ]]; then
-    jq -nc --arg c "$(reply_summary_request)" --arg m "$note" \
+    jq -nc --arg c "$request" --arg m "$note" \
       '{hookSpecificOutput:{hookEventName:"Stop", additionalContext:$c}}
        + (if $m == "" then {} else {systemMessage:$m} end)'
   else
-    jq -nc --arg r "$(reply_summary_request)" --arg m "$note" \
+    jq -nc --arg r "$request" --arg m "$note" \
       '{decision:"block", reason:$r}
        + (if $m == "" then {} else {systemMessage:$m} end)'
   fi

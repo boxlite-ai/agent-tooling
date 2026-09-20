@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # The closing reply that stop-gate.sh asks for after a long one. Source this file; it
-# performs no work on load. Requires verdict-audit-state.sh to be sourced first, and
-# perl and jq on PATH; callers own those checks and all reporting.
+# performs no work on load. Requires sourced verdict-audit-state.sh and subagent.sh,
+# and perl and jq on PATH; callers own those checks and all reporting.
 #
-# A turn that ends on a long reply gets one more message showing the result in few
-# words: drawings of any kind, as many as it takes, or at most three bullet points
-# where a drawing cannot express it. The long reply stays as written and the result
-# follows it, so the last thing on screen is quick to read. A drawing that needs a tool
-# to render or send is new tool work, so the verdict check judges that answer as usual.
+# A turn ending on a long reply gets one more message using the prompt in
+# .agents/prompts/reply-summary.md. The long reply stays as written and the result
+# follows it. A summary that needs a tool to render or send is new tool work, so the
+# verdict check judges that answer as usual.
 # The Stop gate asks only after the verdict check has judged and allowed the turn, or a
 # user's override let it end, and never twice in a row, so a model that cannot shorten
 # its answer ends the turn on the next Stop instead of looping.
@@ -27,8 +26,8 @@
 reply_summary_max_words=60
 # The answer to the ask ends unjudged only up to this many words, counted everywhere,
 # fenced blocks included. Words, not size: drawings may be many and large as long as
-# their labels are few, while a pasted log or code dump is words and counts. Models
-# overshoot a word target, so twice the ask threshold leaves room.
+# their labels are few, while a pasted log or code dump is words and counts. Twice the
+# trigger threshold bounds how much text can bypass another verdict check.
 reply_summary_restatement_max_words=$(( 2 * reply_summary_max_words ))
 # The same bounds the verdict check puts on the transcript it reads.
 reply_summary_transcript_max_bytes=67108864
@@ -89,9 +88,14 @@ reply_summary_tool_count() {  # transcript-path scratch-dir
   printf '%s' "$count"
 }
 
-reply_summary_request() {
-  printf 'Your reply above runs over %s words. End the turn with one more message that shows the result in few words: drawings of any kind that express it, as many as it takes; where a drawing cannot express it, at most 3 bullet points. Put anything the user must decide last. Restate only what the reply above says; use a tool only to render or send a drawing.' \
-    "$reply_summary_max_words"
+reply_summary_request() {  # tooling-root
+  local request
+  request="$(subagent_prompt reply-summary "$1" "max_words=$reply_summary_max_words")" || return $?
+  if [[ "$request" != *[![:space:]]* ]]; then
+    printf 'reply-summary: empty prompt: %s/.agents/prompts/reply-summary.md\n' "$1" >&2
+    return 1
+  fi
+  printf '%s' "$request"
 }
 
 reply_summary_record_ask() {  # record-path prompt-epoch mode tool-count

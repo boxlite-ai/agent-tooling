@@ -57,7 +57,7 @@ in_sources() {
 
 echo "== every path the map names exists =="
 # shellcheck disable=SC2016 # the backticks are literal: they delimit code spans in the map
-for rel in $(grep -oE '`(\.agents/(hooks|lib|watch)/[A-Za-z0-9_.-]+|\.githooks/[A-Za-z0-9_-]+|scripts/[A-Za-z0-9_.-]+|\.claude/agents/[A-Za-z0-9_.-]+|hooks/[A-Za-z0-9_.-]+\.json|guidance/[A-Za-z0-9_.-]+|templates/[A-Za-z0-9_.-]+|[a-z-]+\.test\.sh)`' "$DOC" | tr -d '`' | sort -u); do
+for rel in $(grep -oE '`(\.agents/(hooks|lib|watch|prompts)/[A-Za-z0-9_.-]+|\.githooks/[A-Za-z0-9_-]+|scripts/[A-Za-z0-9_.-]+|\.claude/agents/[A-Za-z0-9_.-]+|hooks/[A-Za-z0-9_.-]+\.json|guidance/[A-Za-z0-9_.-]+|templates/[A-Za-z0-9_.-]+|[a-z-]+\.test\.sh)`' "$DOC" | tr -d '`' | sort -u); do
   case "$rel" in
     templates/*) abs="$REPO_ROOT/$rel" ;;
     *)           abs="$PLUGIN/$rel" ;;
