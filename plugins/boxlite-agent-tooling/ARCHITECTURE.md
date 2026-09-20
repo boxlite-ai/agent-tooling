@@ -62,8 +62,13 @@ all local hooks above.
 
 The workflow subscribes to `pull_request_target` (opened, reopened, synchronize,
 ready_for_review, closed) and `issue_comment` (created, edited, deleted). It serializes
-runs per PR without canceling the active run, with a five-minute job limit. Manual
-`workflow_dispatch` runs take a validated `pr_number` to initialize existing PRs or retry.
+runs per PR without canceling the active run, with a five-minute job limit. A human can
+post `/recheck-author-review` to initialize an existing PR or retry; any new non-bot PR
+comment recomputes live state without granting acknowledgment by itself. Rechecks use
+the default-branch `issue_comment` workflow rather than a caller-selected workflow ref.
+The script ignores newly created bot comments, but reconciles edits and deletions so
+modified or deleted instruction comments are repaired. The workflow routes all PR comment
+events to that script; idempotent prompt updates avoid repeated writes.
 `merge_group` runs use their temporary SHA as the concurrency key and publish a success
 carried forward from the required PR admission check. GitHub may
 replace queued runs; every run therefore recomputes from live PR/comments, never the

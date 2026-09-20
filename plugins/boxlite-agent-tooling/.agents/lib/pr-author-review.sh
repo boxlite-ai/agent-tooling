@@ -15,6 +15,8 @@ _pr_review_event() {
     def positive_integer: type == "number" and . > 0 and floor == .;
     .action as $action |
     if .issue and (.issue.pull_request | not) then "skip"
+    elif .issue.pull_request and $action == "created" and .comment.user.type == "Bot"
+    then "skip"
     else
       if (.repository.full_name | type != "string") or
          (.repository.full_name | test("^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$") | not) or
@@ -31,9 +33,6 @@ _pr_review_event() {
          then .pull_request.number else error("unsupported PR event") end
        elif .issue.pull_request and (["created","edited","deleted"] | index($action))
        then .issue.number
-       elif (.inputs.pr_number | type == "string") and
-            (.inputs.pr_number | test("^[1-9][0-9]*$"))
-       then (.inputs.pr_number | tonumber)
        else error("unsupported PR event") end) as $number |
         if ($number | positive_integer | not) then error("invalid pull request identity")
         else ["pr", .repository.full_name, ($number | tostring)] | @tsv end

@@ -168,7 +168,25 @@ report "the gate writes only PR comments and statuses" only_pr_metadata_writes
 reset_case
 jq -n --arg repo "$BASE_REPO" '{repository:{full_name:$repo},inputs:{pr_number:"7"}}' > "$TEST_DIR/event.json"
 run_gate
-report "manual rechecks publish instructions for existing PRs" pending
+report "manual dispatch payloads are no longer accepted" invalid_event
+
+reset_case
+comment_event created
+edit_json "$TEST_DIR/event.json" '.comment.body = "/recheck-author-review"'
+run_gate
+report "a human recheck comment publishes instructions without acknowledging" pending
+
+reset_case
+comment_event created
+edit_json "$TEST_DIR/event.json" '.comment.user.type = "Bot"'
+run_gate
+report "new bot comments are ignored before GitHub calls" skipped
+
+reset_case
+comment_event deleted
+edit_json "$TEST_DIR/event.json" '.comment.user.type = "Bot"'
+run_gate
+report "deleting the bot instructions recreates the live-head prompt" prompt_has_live_sha
 
 reset_case
 jq -n --arg repo "$BASE_REPO" --arg sha "$HEAD_SHA" \
@@ -306,6 +324,8 @@ no_prompt_write() {
 }
 report "an unchanged bot prompt is neither duplicated nor edited" no_prompt_write
 
+comment_event edited
+edit_json "$TEST_DIR/event.json" '.comment.user.type = "Bot"'
 edit_json "$TEST_DIR/comments-1.json" '.[0].body += " outdated"'
 rm "$TEST_DIR/calls" "$TEST_DIR/pr-reads"
 run_gate
@@ -313,7 +333,7 @@ patched_prompt() {
   pending && jq -se 'any(.[]; .method == "PATCH" and .endpoint == "repos/boxlite-ai/agent-tooling/issues/comments/90")' \
     "$TEST_DIR/calls" >/dev/null
 }
-report "a stale bot prompt is updated in place" patched_prompt
+report "editing the bot instructions repairs the prompt in place" patched_prompt
 
 edit_json "$TEST_DIR/comments-1.json" '.[0].user = {id:43,login:"github-actions[bot]",type:"User"}'
 rm "$TEST_DIR/calls" "$TEST_DIR/pr-reads"

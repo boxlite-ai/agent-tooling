@@ -380,15 +380,18 @@ For consumers:
 3. Make `Author reviewed the PR` a required status check from GitHub Actions on the target
    branches. Do this after the workflow is deployed and has published that status.
    The handler job's success only means the event was processed.
-   For existing PRs, run the workflow manually with the `pr_number` input to publish
-   their status and instructions before enabling the rule.
+   For existing PRs, post `/recheck-author-review` as a PR comment to publish their status
+   and instructions before enabling the rule. Any new non-bot PR comment rechecks live
+   state; this command does not acknowledge the diff. Comment events use the default-branch
+   workflow, so initialization cannot select a branch's modified workflow definition.
 4. When replacing the old file gate, remove its workflow and any remaining `UNREVIEWED.md`.
    Existing draft PRs must be marked ready by a person. A consumer's pinned workflow does
    not update automatically when the plugin is installed or upgraded.
 
 The PR comment is the acknowledgment record. There is no extra database, App, or personal
-token. Branch rules enforce the requirement; administrators who can bypass those rules
-can bypass this gate too. Maintainer approval is a separate requirement. A shared head SHA
+token. Branch rules enforce the requirement. Rule bypass roles and identities able to
+publish this status remain trusted; protect workflow authoring and token permissions.
+Maintainer approval is a separate requirement. A shared head SHA
 across open PRs is withheld from success because GitHub statuses belong to commits, not PRs.
 Merge queues require the same status before admission. On `merge_group`, the workflow
 carries that result forward to the queue-generated commit; it does not ask authors to
