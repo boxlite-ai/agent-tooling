@@ -91,5 +91,6 @@ proves render, fit, and traceability — not composition or completeness.
 ## Respond
 
 Lead with the picture (topic tree: overview, then its outline). `Before`/`After`
-adjacent. Code path: call graph + one `Key:` line first. End with the evidence summary,
+adjacent when comparing revisions. A call graph is optional; use it only when it
+makes the code path easier to understand. Keep any explanation short. End with the evidence summary,
 the visual-QA statement, and the report path when files were requested.

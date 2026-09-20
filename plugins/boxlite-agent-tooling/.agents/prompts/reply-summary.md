@@ -5,8 +5,10 @@ placeholders: max_words
 description: Closing reply requested after a long, judged response.
 ---
 
-If the reply above consists only of visuals or examples, ignore this request and end the turn without another message, even if it exceeds {{max_words}} words.
+If the reply above is already concise and easy to scan, end the turn without another message.
 
-Otherwise, end the turn with one more message that summarizes the reply above. Choose a visual, an example, or bullet points—whichever makes the result easiest to understand.
+Otherwise, summarize it within {{max_words}} prose words. Choose a visual, an example,
+bullets, a table, or short prose—whichever makes the result easiest to understand.
+No form is mandatory. Walls of text are forbidden, including inside examples.
 
 Restate only information already given. Put any pending user decision last. Use a tool only to render or send a visual.

@@ -26,8 +26,8 @@
 #   option, without reimplementing gh's pflag parser.
 #
 # * Two deterministic content checks run before the ack gate — a Conventional-
-#   Commit `--title`, and an explicit, inspectable PR body carrying the
-#   before/after call graph (CONTRIBUTING.md #commit--pr-messages). A non-draft
+#   Commit `--title`, and an explicit, inspectable, concise PR body
+#   (CONTRIBUTING.md #commit--pr-messages). No diagram is required. A non-draft
 #   create without a body fails closed; neither check consumes the ack marker.
 #
 # * One-shot consumption: the marker file is `rm -f`'d on the allow path so
@@ -48,11 +48,9 @@ protected_count=0
 protected_subcmds=()
 protected_drafts=()
 protected_title_count=0
-protected_title_commands=()
 protected_titles=()
 protected_title_dynamics=()
 protected_body_count=0
-protected_body_commands=()
 protected_body_kinds=()
 protected_body_values=()
 unsafe_content_expansion_count=0
@@ -69,16 +67,14 @@ literal_assignment_names=()
 literal_assignment_values=()
 literal_assignment_dynamics=()
 record_title() {
-  protected_title_commands[$protected_title_count]="$1"
-  protected_titles[$protected_title_count]="$2"
-  protected_title_dynamics[$protected_title_count]="$3"
+  protected_titles[$protected_title_count]="$1"
+  protected_title_dynamics[$protected_title_count]="$2"
   protected_title_count=$((protected_title_count + 1))
 }
 
 record_body() {
-  protected_body_commands[$protected_body_count]="$1"
-  protected_body_kinds[$protected_body_count]="$2"
-  protected_body_values[$protected_body_count]="$3"
+  protected_body_kinds[$protected_body_count]="$1"
+  protected_body_values[$protected_body_count]="$2"
   protected_body_count=$((protected_body_count + 1))
 }
 
@@ -829,35 +825,35 @@ inspect_simple_command() {
         # recorded too and fail closed in the deterministic check below.
         (( next_unquoted_glob == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
-        record_title "$command_slot" "$next_value" "$next_dynamic"
+        record_title "$next_value" "$next_dynamic"
         index=$((index + 2))
         continue
         ;;
       --title=*)
         (( shell_word_unquoted_globs[$index] == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
-        record_title "$command_slot" "${token#--title=}" \
+        record_title "${token#--title=}" \
           "${shell_word_dynamics[$index]}"
         ;;
       -t=*)
         (( shell_word_unquoted_globs[$index] == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
-        record_title "$command_slot" "${token#-t=}" \
+        record_title "${token#-t=}" \
           "${shell_word_dynamics[$index]}"
         ;;
       -t?*)
         (( shell_word_unquoted_globs[$index] == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
-        record_title "$command_slot" "${token#-t}" \
+        record_title "${token#-t}" \
           "${shell_word_dynamics[$index]}"
         ;;
       --body-file|-F)
         (( next_unquoted_glob == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( next_dynamic )); then
-          record_body "$command_slot" opaque ""
+          record_body opaque ""
         else
-          record_body "$command_slot" file "$next_value"
+          record_body file "$next_value"
         fi
         index=$((index + 2))
         continue
@@ -866,36 +862,36 @@ inspect_simple_command() {
         (( shell_word_unquoted_globs[$index] == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( shell_word_dynamics[$index] )); then
-          record_body "$command_slot" opaque ""
+          record_body opaque ""
         else
-          record_body "$command_slot" file "${token#--body-file=}"
+          record_body file "${token#--body-file=}"
         fi
         ;;
       -F=*)
         (( shell_word_unquoted_globs[$index] == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( shell_word_dynamics[$index] )); then
-          record_body "$command_slot" opaque ""
+          record_body opaque ""
         else
-          record_body "$command_slot" file "${token#-F=}"
+          record_body file "${token#-F=}"
         fi
         ;;
       -F?*)
         (( shell_word_unquoted_globs[$index] == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( shell_word_dynamics[$index] )); then
-          record_body "$command_slot" opaque ""
+          record_body opaque ""
         else
-          record_body "$command_slot" file "${token#-F}"
+          record_body file "${token#-F}"
         fi
         ;;
       --body|-b)
         (( next_unquoted_glob == 0 )) \
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( next_quoted && next_dynamic == 0 )); then
-          record_body "$command_slot" text "$next_value"
+          record_body text "$next_value"
         else
-          record_body "$command_slot" opaque ""
+          record_body opaque ""
         fi
         index=$((index + 2))
         continue
@@ -905,9 +901,9 @@ inspect_simple_command() {
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( ${shell_word_quotes[$index]} \
            && ${shell_word_dynamics[$index]} == 0 )); then
-          record_body "$command_slot" text "${token#--body=}"
+          record_body text "${token#--body=}"
         else
-          record_body "$command_slot" opaque ""
+          record_body opaque ""
         fi
         ;;
       -b=*)
@@ -915,9 +911,9 @@ inspect_simple_command() {
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( ${shell_word_quotes[$index]} \
            && ${shell_word_dynamics[$index]} == 0 )); then
-          record_body "$command_slot" text "${token#-b=}"
+          record_body text "${token#-b=}"
         else
-          record_body "$command_slot" opaque ""
+          record_body opaque ""
         fi
         ;;
       -b?*)
@@ -925,13 +921,13 @@ inspect_simple_command() {
           || unsafe_content_expansion_count=$((unsafe_content_expansion_count + 1))
         if (( ${shell_word_quotes[$index]} \
            && ${shell_word_dynamics[$index]} == 0 )); then
-          record_body "$command_slot" text "${token#-b}"
+          record_body text "${token#-b}"
         else
-          record_body "$command_slot" opaque ""
+          record_body opaque ""
         fi
         ;;
       --fill|--fill-first|--fill-verbose|-f)
-        record_body "$command_slot" opaque ""
+        record_body opaque ""
         ;;
     esac
     index=$((index + 1))
@@ -1542,7 +1538,7 @@ fi
 # can synthesize, prompt for, or override either value after inspection.
 if (( invalid_create_contract_count > 0 )); then
   deny "A non-draft gh pr create must start with an inspectable title and body.
-Use: gh pr create --title \"type(scope): summary\" --body '<fenced graph>'
+Use: gh pr create --title \"type(scope): summary\" --body '<concise description>'
 Safe metadata flags may follow that prefix.
 Put --draft, -d, --draft=true, or -d=true first for a draft and do not override it later.
 Mixed short-flag clusters and fill/editor/template/recover/web flows are outside this gate."
@@ -1550,7 +1546,7 @@ fi
 
 if (( invalid_edit_contract_count > 0 )); then
   deny "A gh pr edit that changes description content must supply an inspectable title/body pair first.
-Use: gh pr edit [selector] --title \"type(scope): summary\" --body '<fenced graph>'
+Use: gh pr edit [selector] --title \"type(scope): summary\" --body '<concise description>'
 Safe metadata-only edits and safe metadata following that pair are supported.
 Base changes, inline environment mutation, dynamic argv splitting, and body files are outside this gate."
 fi
@@ -1587,7 +1583,7 @@ fi
 if [[ "$subcmd" == create ]] && (( protected_body_count == 0 )); then
   deny "A non-draft gh pr create must supply an inspectable inline --body.
 The gate cannot verify content produced later by an editor or repository template.
-Prepare the fenced before/after call graph, pass it explicitly, and retry."
+Prepare a concise description, pass it explicitly, and retry."
 fi
 
 # A body-file read is only a pre-execution snapshot: another process can replace
@@ -1597,7 +1593,7 @@ body_index=0
 while (( body_index < protected_body_count )); do
   if [[ "${protected_body_kinds[$body_index]}" == file ]]; then
     deny "A gh pr --body-file snapshot cannot be bound to the bytes gh reads later.
-Pass the complete fenced call graph as one literal inline --body value."
+Pass the complete concise description as one literal inline --body value."
   fi
   body_index=$((body_index + 1))
 done
@@ -1605,17 +1601,10 @@ done
 # Deterministic title check: every supplied literal `--title` / `-t` spelling
 # must be a Conventional-Commit subject <=72 chars. Dynamic values fail closed;
 # body quality / no-narrative is still confirmed in the acknowledgment below.
-protected_fix_flags=()
-protected_index=0
-while (( protected_index < protected_count )); do
-  protected_fix_flags[$protected_index]=0
-  protected_index=$((protected_index + 1))
-done
 title_re='^(feat|fix|docs|refactor|test|chore|perf|ci|build)(\([^)]+\))?!?:[[:space:]].+'
 title_index=0
 while (( title_index < protected_title_count )); do
   pr_title="${protected_titles[$title_index]}"
-  title_command="${protected_title_commands[$title_index]}"
   title_dynamic="${protected_title_dynamics[$title_index]}"
   if (( title_dynamic )) \
      || [[ -z "$pr_title" || ! "$pr_title" =~ $title_re ]] \
@@ -1624,196 +1613,37 @@ while (( title_index < protected_title_count )); do
 Use type(scope): summary; types: feat fix docs refactor test chore perf ci build.
 Fix --title and retry. See CONTRIBUTING.md #commit--pr-messages."
   fi
-  if [[ "$pr_title" =~ ^fix(\([^\)]+\))?!?: ]]; then
-    protected_fix_flags[$title_command]=1
-  fi
   title_index=$((title_index + 1))
 done
 
-# Deterministic body check: a supplied PR body must carry the before/after
-# end-to-end call graph mandated by CONTRIBUTING.md #commit--pr-messages.
-#
-# Only inspected when its command segment actually supplies a body. `gh pr ready`
-# and body-preserving edits carry nothing to read; non-draft creates were required
-# above to supply an inspectable body.
+# Check size, not presentation. Graphs, examples, bullets, and prose all use
+# the same budget. Count the whole supplied body, including fences/comments, so
+# formatting cannot hide a wall of text. Unicode length also bounds unspaced text.
+# Draft creates and body-preserving operations keep their existing exemption.
 body_index=0
 while (( body_index < protected_body_count )); do
-  body_command="${protected_body_commands[$body_index]}"
-  body_kind="${protected_body_kinds[$body_index]}"
-  body_value="${protected_body_values[$body_index]}"
-  pr_body=""
-  pr_title=""
-  (( protected_fix_flags[$body_command] == 0 )) || pr_title="fix: inspected"
-  if [[ "$body_kind" == text ]]; then
-    pr_body="$body_value"
+  if [[ "${protected_body_kinds[$body_index]}" != text ]]; then
+    deny "PR description must be inspectable literal text. Pass one quoted inline --body value."
   fi
-
-  # Line-start anchors below: an extracted body begins mid-line, glued to the flag.
-  pr_body=$'\n'"$pr_body"
-  body_lc="$(tr '[:upper:]' '[:lower:]' <<<"$pr_body")"
-  # The visual contract is deliberately a constrained prefix, not a partial
-  # Markdown parser. With the heading as the first non-blank body line and one
-  # exact column-one text fence immediately after it, no earlier comment, raw
-  # HTML block, outer fence, or indented block can hide or reinterpret the tree.
-  graph_records="$(awk '
-    BEGIN { state = "leading" }
-    function gfm_backtick_closer(line, spaces, position, count, rest) {
-      spaces = 0
-      while (spaces < 4 && substr(line, spaces + 1, 1) == " ") spaces++
-      if (spaces > 3) return 0
-      position = spaces + 1
-      count = 0
-      while (substr(line, position + count, 1) == "`") count++
-      if (count < 3) return 0
-      rest = substr(line, position + count)
-      return rest ~ /^[[:space:]]*$/
-    }
-    { sub(/\r$/, "", $0) }
-    state == "leading" {
-      if ($0 ~ /^[[:space:]]*$/) next
-      if ($0 != "## call graph") {
-        invalid = 1
-        exit
-      }
-      print "@heading"
-      state = "after_heading"
-      next
-    }
-    state == "after_heading" {
-      if ($0 ~ /^[[:space:]]*$/) next
-      if ($0 != "```text") {
-        invalid = 1
-        exit
-      }
-      state = "graph"
-      next
-    }
-    state == "graph" {
-      if ($0 == "```") {
-        print "@closed"
-        state = "after_graph"
-        next
-      }
-      if (gfm_backtick_closer($0)) {
-        invalid = 1
-        exit
-      }
-      if ($0 == "before") {
-        if (before_seen || after_seen) {
-          invalid = 1
-          exit
-        }
-        before_seen = 1
-        print "@before-label"
-        active_graph = 1
-        next
-      }
-      if ($0 == "after") {
-        if (!before_seen || after_seen) {
-          invalid = 1
-          exit
-        }
-        after_seen = 1
-        print "@after-label"
-        active_graph = 2
-        next
-      }
-      if (active_graph == 1) print "@before:" $0
-      if (active_graph == 2) print "@after:" $0
-      next
-    }
-    state == "after_graph" {
-      if (!post_recorded && $0 !~ /^[[:space:]]*$/) {
-        print "@post:" $0
-        post_recorded = 1
-      }
-    }
-    END {
-      if (invalid || state != "after_graph") print "@invalid"
-    }
-  ' <<<"$body_lc")"
-  # Herestrings, not pipes: `grep -q` exits on first match and would SIGPIPE the
-  # writer, which `set -o pipefail` would then read as a failed check.
-  has_graph_record() { grep -qFx "$1" <<<"$graph_records"; }
-  missing=""
-
-  if has_graph_record '@invalid' || ! has_graph_record '@closed'; then
-    missing+="
-  - the canonical body prefix: first non-blank line '## Call graph', then one closed column-one '\`\`\`text' fence"
+  pr_body="${protected_body_values[$body_index]}"
+  # Bound the argument before passing it to jq. A valid 2000-character UTF-8
+  # body uses at most 8000 bytes, regardless of the shell's character locale.
+  if (( ${#pr_body} > 8000 )); then
+    deny "PR description is too long. Keep it within 200 words and 2000 characters; link detailed evidence. No diagram is required."
   fi
-  has_graph_record '@before-label' \
-    || missing+="
-  - a 'Before' graph"
-  has_graph_record '@after-label' \
-    || missing+="
-  - an 'After' graph"
-  before_graph="$(sed -n 's/^@before://p' <<<"$graph_records")"
-  after_graph="$(sed -n 's/^@after://p' <<<"$graph_records")"
-  post_graph_line="$(sed -n 's/^@post://p' <<<"$graph_records")"
-  # Each graph needs a hop of its own, shaped like the documented
-  # `fn_name (Type · path/file.ext:LOC)`. Matching a bare `file.ext:LOC` was
-  # too loose — one occurs mid-sentence — so a paragraph mentioning a file in
-  # passing counted as a graph.
-  #
-  # What it actually requires: a `(` to the left of the reference and a `)` to
-  # the right. Not a balanced group, and neither side is stricter than the
-  # other. Being permissive is deliberate — a Type half carries its own
-  # parentheses in `(fn(u32) -> u32 · src/x.rs:5)`, and refusing to cross them
-  # denied a hop conforming to CONTRIBUTING.md's documented shape. The cost is
-  # that an unrelated parenthetical straddling the reference also satisfies it.
-  #
-  # So this only reaches "shaped like a hop". It cannot tell a real graph from
-  # a fabricated one, and no pattern here could — that judgment is left to the
-  # human on the typed `reviewed:` ack below.
-  #
-  # Per graph, not body-wide: a body-wide count lets a prose-only After ride
-  # along on Before's hops, which is not an end-to-end before/after graph.
-  hop_re='\(.*[A-Za-z0-9_./-]+\.[A-Za-z]+:[0-9]+.*\)'
-  before_hops="$(grep -cE "$hop_re" <<<"$before_graph" || true)"
-  after_hops="$(grep -cE "$hop_re" <<<"$after_graph" || true)"
-  # Reports what is checked — a parenthesised reference — rather than naming
-  # parts (`fn_name`, `Type`) the pattern does not require; the canonical shape
-  # is printed in full below.
-  (( before_hops >= 1 && after_hops >= 1 )) \
-    || missing+="
-  - a hop line inside a closed 'text' fence with a parenthesised 'path/file.ext:LOC' in each graph (found ${before_hops} in Before, ${after_hops} in After)"
-
-  # Bug-fix extras — only decidable when --title was inspectable above.
-  if [[ "$pr_title" =~ ^fix(\([^\)]+\))?!?: ]]; then
-    # "Mark the faulty hop" is literal: the marker has to sit on a hop line
-    # inside the Before graph. A `BUG:` loose in prose, or down in After, marks
-    # nothing. The arrow is deliberately not required — `←`, `<-` and a bare
-    # `BUG:` all read the same, and mandating one Unicode glyph is typing
-    # friction, not signal. The word boundary keeps `debug:` from qualifying.
-    marker_re='(^|[^[:alnum:]_])bug:'
-    # Same line, either order: `hop … ← BUG: why` or `← BUG: why … hop`.
-    marked_hop() {
-      grep -qE "${hop_re}.*${marker_re}" <<<"$before_graph" ||
-        grep -qE "${marker_re}.*${hop_re}" <<<"$before_graph"
-    }
-    marked_hop \
-      || missing+="
-  - fix: PR — '← BUG: <what goes wrong>' on a hop line inside the Before graph"
-    [[ "$post_graph_line" =~ ^fixes[[:space:]]+#[1-9][0-9]*$ ]] \
-      || missing+="
-  - fix: PR — 'Fixes #<positive issue number>' as the first non-blank line after the graph fence"
+  # --arg preserves UTF-8 across read-buffer boundaries on Apple's jq 1.7.1;
+  # raw slurp can replace a split multibyte character and overcount the body.
+  body_stats="$(jq -nr --arg body "$pr_body" '$body | [([scan("\\S+")] | length), length] | @tsv')"
+  IFS=$'\t' read -r body_words body_characters <<<"$body_stats"
+  if (( body_words == 0 )); then
+    deny "PR description is empty. Briefly explain the change and its verification; no diagram is required."
   fi
-
-  if [[ -n "$missing" ]]; then
-    deny "PR description needs the mandated before/after call graph.
-Missing:${missing}
-
-Required prefix; make this the first non-blank body content:
-  ## Call graph
-  \`\`\`text
-  Before
-    fn_name (Type · path/file.ext:LOC) <- BUG: what fails
-  After
-    fn_name (Type · path/file.ext:LOC) - new behavior
-  \`\`\`
-  Fixes #<n>
-For fix titles, mark the faulty Before hop and keep Fixes #<n> immediately after the fence.
-Use real symbols and current line numbers. Rewrite and retry; see CONTRIBUTING.md #commit--pr-messages."
+  if (( body_words > 200 || body_characters > 2000 )); then
+    deny "PR description is too long (${body_words} words, ${body_characters} characters).
+Keep the whole body within 200 words and 2000 characters, including diagrams and comments.
+Use bullets, a real example, a table, short prose, or a diagram—whichever is clearest.
+No diagram is required. Keep material risks and verification visible; link detailed evidence.
+See CONTRIBUTING.md #commit--pr-messages."
   fi
   body_index=$((body_index + 1))
 done

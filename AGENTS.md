@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=925d363d068f-dirty sha256=81d6fd1777b5 -->
+<!-- agent-tooling:guidance:begin rev=5bcae0cf70e1-dirty sha256=880fb3083027 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -84,9 +84,9 @@ Every change goes: understand → research → design → implement → test →
 
 **Communication**
 
-- Words: as concise and simple as possible, unless explicitly asked otherwise.
-- Form follows content, in docs, code comments, commit/PR text, and replies: numbered list for a sequence; bullets for 2 to 7 parallel items; description list for name plus description; table when items carry 3 or more attributes or several conditions decide an outcome; prose, message first, for reasoning and trade-offs. Never a list of one, a one-column table, or a paragraph in a cell.
-- A simple call graph (func name, class name, file name, LOC, short annotation) is the first choice when explaining code.
+- Help the human understand quickly. Choose a call graph, sequence diagram, real example, bullets, table, or short prose—whichever explains the point best. These are recommendations, not mandatory forms; do not force a diagram, source annotations, or fixed sections.
+- Walls of text are always forbidden. Keep paragraphs and items short, remove repetition, and link detailed evidence. Requests for depth allow more focused sections, not dense text. Keep material risks, failures, and uncertainty visible.
+- PR descriptions: state the problem, resulting behavior, and decisive verification once. Keep the whole body within 200 words and 2000 characters, including diagrams and Markdown. Omit work logs, file inventories, and exhaustive test counts. Repository templates are starting points; use any clearer form.
 
 Adapted from Clean Code (Robert C. Martin) via the polygala-inc AGENTS.md distillation.
 <!-- agent-tooling:guidance:end -->

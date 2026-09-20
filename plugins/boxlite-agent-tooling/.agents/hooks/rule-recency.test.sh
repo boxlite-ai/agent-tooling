@@ -71,29 +71,8 @@ for prompt in "ok explain it" "yes because it failed" "stop the server" \
     "$(emit "near-match" "$prompt")" "REPLY SHAPE:"
 done
 
-# Every substantive prompt pays for this block, so the budget is a hard stop rather
-# than a guideline: raising it must be a deliberate edit here, not a side effect of a
-# reworded rule. It went 640 -> 700 for the worked-example rule, which costs 668 and
-# misses the old cap even with the data points unnamed (643). Getting back under means
-# cutting a clause the rule needs — the per-step state requirement (633) or the escape
-# hatch (639) — so the cap moved instead of the rule.
-# A bullet of its own for the answer-first rule lands at 701, so the clause shares the
-# framing bullet (699) instead of moving the cap again.
-# It went 700 -> 720 for comments, which rode out on `exempt code` — a comment ships
-# inside code, so it inherited the exemption and no prose rule reached it. Narrowing
-# that clause (714) is the cheapest of the three fixes and the only one that adds no
-# rule: answer-first, no-recap, and the word cap all bind a comment through the bullet
-# it already sits under. Naming "why, not what" here instead costs 728 folded into the
-# framing bullet and 757 as its own, and both duplicate guidance/workflow.md.
-# It went 720 -> 800 for the form-follows-content rule (800): 2-7 items as bullets, 3+
-# attributes or conditions as a table, reasoning as sentences. The clause shares the
-# prose-budget bullet because it says what the non-prose remainder looks like and
-# where prose stays required. A blanket "narrative as bullets or a table" (747) was
-# tried first and dropped: the style guides and the comprehension evidence send
-# reasoning back to full sentences, so the shorter rule was wrong, not just shorter.
-# The 2-7 bound (796 without it) is kept because "items as bullets" alone permits a
-# list of one, which the canonical rule forbids.
-# The existing "table over prose when clearer" line stays a preference for visuals.
+# Every substantive prompt pays for this reminder. Keep it small enough that
+# the readability guidance does not become another wall of text.
 bytes="$(LC_ALL=C printf '%s' "$first" | wc -c | tr -d ' ')"
 if (( bytes <= 800 )); then
   ok "reminder stays within 800 bytes ($bytes)"
@@ -103,51 +82,18 @@ fi
 
 assert_contains "keeps reply-shape marker" "$first" "REPLY SHAPE:"
 assert_contains "keeps prose budget" "$first" "<=80"
-assert_contains "2 to 7 items go as bullets" "$first" "2-7 items as bullets"
-assert_contains "attributes and conditions go as a table" "$first" \
-  "3+ attributes or conditions as a table"
-assert_contains "reasoning stays in sentences" "$first" "reasoning as sentences"
-# Comments left through this exemption: `code` covered the block and everything written
-# inside it. Assert the narrowing and the surviving list apart, so restoring the blanket
-# clause fails on its own instead of passing on the leftovers.
-assert_contains "keeps evidence exemptions" "$first" \
-  "visuals, tables, paths, uncertainty, risk, failing tests"
-assert_contains "exempts code but not its comments" "$first" \
-  "exempt code (not comments)"
-assert_not_contains "does not exempt comments along with the code" "$first" \
-  "exempt code, visuals"
-assert_contains "keeps concise-prose rule" "$first" \
-  "No preamble, recap, praise, repetition, or closing offer."
-assert_contains "answer leads, in one sentence" "$first" \
-  "Answer first, in one sentence."
-assert_contains "prefers renderable visuals when clearer" "$first" \
-  "renderable diagram, graph, image, or table over prose when clearer"
-assert_contains "visualizes relationships first" "$first" \
-  "Visualize relationships or 3+ entities"
-# The worked example carries the explanation; a reader who cannot follow the abstract
-# rule follows the trace. Assert each half on its own — subject scope, a step-by-step
-# walk, real data points rather than placeholders, the state each step changes, the tie
-# back to the rule — so dropping any one fails loudly instead of degrading into a
-# summary. The data enumeration is spelled out because "concrete example" alone reads
-# as satisfied by a named-but-unvalued one.
-assert_contains "examples apply to any subject" "$first" "Any subject:"
-assert_contains "an example is the default, not a fallback" "$first" \
-  "whenever possible"
-assert_contains "walks one example step by step" "$first" \
-  "walk one example step by step"
-assert_contains "grounds the walk in real data points" "$first" \
-  "on real data (values, facts, numbers)"
-assert_contains "shows what each step changes" "$first" \
-  "showing what changed at each step"
-assert_contains "connects examples to the general rule" "$first" \
-  "tied to the general rule"
-assert_contains "omits an example only when none applies" "$first" \
-  "omit only when none applies"
-assert_not_contains "does not force examples into every explanation" "$first" \
-  "Ground every explanation"
-assert_not_contains "does not ban supported render formats" "$first" \
-  "no Mermaid, images, or task boxes"
-assert_contains "keeps depth escape hatch" "$first" "bare why does not"
+assert_contains "forbids walls of text" "$first" "no walls of text"
+assert_contains "preserves material evidence" "$first" "Keep uncertainty, risks, failures visible"
+assert_contains "offers forms by clarity" "$first" \
+  "call graph, sequence diagram, real example, bullets, table, or short prose by clarity"
+assert_contains "no form is compulsory" "$first" "no form is mandatory"
+assert_not_contains "does not force relationship diagrams" "$first" "Visualize relationships"
+assert_not_contains "does not force typed source hops" "$first" 'fn (Type, file:LOC)'
+assert_contains "examples explain changing state" "$first" \
+  "walk one real example step by step, showing what changes"
+assert_contains "hypothetical examples are labeled" "$first" "Label hypothetical values"
+assert_contains "answer leads" "$first" "Answer first"
+assert_contains "explicit depth still avoids dense text" "$first" "never dense text"
 assert_contains "keeps host-neutral workflow pointer" "$first" "repository Workflow"
 assert_contains "keeps research-before-design" "$first" "research prior art before design"
 

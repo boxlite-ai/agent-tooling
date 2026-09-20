@@ -25,6 +25,13 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
 | Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
 
+The PR description contract in `CONTRIBUTING.md` permits any explanatory form.
+The hook requires nonempty, inspectable bodies of at most 200 words and 2000 Unicode
+characters, including Markdown, for non-draft creates and description edits. Drafts,
+body-preserving operations, web/API edits, and later bot additions are outside this
+content check. Clarity remains a reviewer judgment. `guidance/workflow.md` carries
+the same concise-writing rules into consumer instructions.
+
 Git gates. They run for any process and bind only when `CLAUDECODE`, `CODEX_SANDBOX`
 or `AGENT_GATED=1` is in the environment.
 
