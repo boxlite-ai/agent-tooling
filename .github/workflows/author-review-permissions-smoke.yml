@@ -1,0 +1,74 @@
+name: Author review permission smoke test
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+# Copied from author-review.yml for the real-token regression experiment.
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: write
+
+concurrency:
+  group: author-review-permission-smoke
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+
+jobs:
+  prepare:
+    if: >-
+      github.event.pull_request.head.ref == 'test/author-review-draft-permissions' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Prepare only this disposable fixture for draft conversion
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .draft)" = true
+          # $id is a GraphQL variable, supplied separately by gh.
+          # shellcheck disable=SC2016
+          gh api graphql -f query='mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }' -f id="$PR_NODE_ID" --jq '.data.markPullRequestReadyForReview.pullRequest.isDraft' | grep -qx false
+
+  reconcile:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 36e18a899ce91cf5d145d09b18bab31b8f445633
+          persist-credentials: false
+      - name: An unacknowledged ready PR must become draft and stay pending
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .draft)" = false
+          result=0
+          bash plugins/boxlite-agent-tooling/scripts/pr-author-review.sh "$GITHUB_EVENT_PATH" || result=$?
+          test "$result" -eq 1
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .draft | grep -qx true
+          head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$head_sha/status" --jq '.statuses[] | select(.context == "Author reviewed the PR") | .state' | grep -qx pending
+
+  restore:
+    needs: [prepare, reconcile]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Restore the fixture even when the regression fails
+        run: |
+          if test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .draft)" = false; then
+            # $id is a GraphQL variable, supplied separately by gh.
+            # shellcheck disable=SC2016
+            gh api graphql -f query='mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { isDraft } } }' -f id="$PR_NODE_ID" --jq '.data.convertPullRequestToDraft.pullRequest.isDraft' | grep -qx true
+          fi
