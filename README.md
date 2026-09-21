@@ -34,6 +34,14 @@ Codex's repository marketplace uses a typed Git-subdirectory source. The nested
 `path`; omitting it makes the plugin undiscoverable. Profile validation and the
 host-parity suite pin that complete shape.
 
+## Example-led explanations
+
+The shared [boxlite-examples skill](plugins/boxlite-agent-tooling/.agents/skills/boxlite-examples/SKILL.md)
+explains through concrete state shapes, roles, relationships, and changes over time,
+choosing diagrams, tables, or prose for clarity. It includes source-backed Commerce
+top-up and VMM memory walkthroughs with illustrative values.
+Try: "Use boxlite-examples to explain how Commerce top-up works."
+
 ## Automatic Codex bootstrap
 
 A consumer that already carries the standard `.agent-tooling/install.sh`,
