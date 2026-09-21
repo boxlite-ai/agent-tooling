@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author review acknowledgment. Source-only; pr_author_review_run is the facade.
-# Requires jq and authenticated gh (GH_BIN is the API double used by the tests).
+# Requires jq, subagent_prompt and authenticated gh (GH_BIN is the API test double).
 # Comments are the record; commit statuses enforce the record on the base repository.
 
 _pr_review_gh() { "${GH_BIN:-gh}" "$@"; }
@@ -131,15 +131,19 @@ _pr_review_exclusive_head() { # repository, PR number, SHA; 0 unique, 1 shared, 
   _pr_review_error "too many pull requests associated with $1@$3"
 }
 
-_pr_review_prompt() { # repository, PR number, SHA, author login, existing prompt, result
-  local body previous id
-  body="$(printf '%s\n' '<!-- boxlite-agent-tooling:author-review -->' \
-    '### Author review acknowledgment' '' "$6" '' \
-    "@$4: after reading the current diff, post this as a new PR comment:" '' \
-    '```text' "/reviewed $3" '```' '' \
-    'Unacknowledged PRs are converted to draft. After this check passes, click **Ready for review** when you want reviews.' \
-    'Only a new, unedited comment from the PR author counts. A new commit requires a new acknowledgment.' \
-    "This records the author's acknowledgment; maintainer approval is separate.")"
+_pr_review_prompt() { # repository, PR number, SHA, author login, existing prompt, result, tooling root
+  local body previous id review_question
+  review_question="$(subagent_prompt pr-review-question "$7")" || return 2
+  [[ "$review_question" == *[![:space:]]* ]] || {
+    _pr_review_error "empty prompt: $7/.agents/prompts/pr-review-question.md"; return 2;
+  }
+  body="$(subagent_prompt pr-author-review "$7" \
+    "result=$6" "author=$4" "sha=$3" "review_question=$review_question")" || return 2
+  [[ "$body" == *[![:space:]]* ]] || {
+    _pr_review_error "empty prompt: $7/.agents/prompts/pr-author-review.md"; return 2;
+  }
+  # The comment identity is protocol metadata, independent of editable wording.
+  body="$(printf '%s\n%s' '<!-- boxlite-agent-tooling:author-review -->' "$body")"
   previous="$(jq -r '.body // ""' <<<"$5")" || return 2
   [[ "$previous" != "$body" ]] || return 0
   id="$(jq -r '.id // ""' <<<"$5")" || return 2
@@ -152,7 +156,7 @@ _pr_review_prompt() { # repository, PR number, SHA, author login, existing promp
   fi
 }
 
-pr_author_review_run() { # trusted GitHub event file
+pr_author_review_run() { # trusted GitHub event file, tooling root
   local identity kind repo number state latest sha author_id author comments ack notice live
   local attempt verdict result unique_rc
   [[ -n "$1" && -f "$1" && -r "$1" ]] || {
@@ -218,7 +222,7 @@ pr_author_review_run() { # trusted GitHub event file
         _pr_review_error "could not convert $repo#$number to draft"; return 2;
       }
     fi
-    _pr_review_prompt "$repo" "$number" "$sha" "$author" "$notice" "$result" || {
+    _pr_review_prompt "$repo" "$number" "$sha" "$author" "$notice" "$result" "$2" || {
       _pr_review_error "could not update review instructions for $repo#$number"; return 2;
     }
     if [[ "$verdict" == success ]]; then

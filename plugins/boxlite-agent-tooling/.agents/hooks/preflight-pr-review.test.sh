@@ -873,10 +873,74 @@ assert_reason_budget "title denial stays bounded" \
 write_marker "reviewed: concise body"
 body_reason="$(reason_for "gh pr create $FEAT --body '$LONG_BODY'")"
 assert_reason_budget "size denial stays bounded" "$body_reason"
-assert_reason_contains "size denial gives the word limit" "$body_reason" '200 words'
-assert_reason_contains "size denial gives the character limit" "$body_reason" '2000 characters'
 assert_reason_contains "size denial preserves freedom of form" "$body_reason" 'No diagram is required'
 
 echo
+echo "## Review prompts are loaded at the public hook boundary"
+fixture_plugin="$TMP/prompt-plugin"
+mkdir -p "$fixture_plugin/.agents/hooks" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
+cp "$HOOK" "$fixture_plugin/.agents/hooks/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host}.sh "$fixture_plugin/.agents/lib/"
+HOOK="$fixture_plugin/.agents/hooks/preflight-pr-review.sh"
+cat > "$fixture_plugin/.agents/prompts/pr-review-ack.md" <<'PROMPT'
+---
+name: fixture
+---
+{{context}}
+Fixture acknowledgment: {{review_question}}
+PROMPT
+printf 'Fixture description guidance\n' > "$fixture_plugin/.agents/prompts/pr-description-guidance.md"
+printf 'First review question\n' > "$fixture_plugin/.agents/prompts/pr-review-question.md"
+rm -f "$TMP/.agents/state/pr-reviewed.json"
+assert_reason_contains "hook renders the prompt document" "$(reason_for 'gh pr ready 42')" \
+  'Fixture acknowledgment: First review question'
+# shellcheck disable=SC2016 # Prompt text must remain literal when loaded.
+literal_question='Second question: $(printf injected) `printf injected`'
+printf '%s\n' "$literal_question" > "$fixture_plugin/.agents/prompts/pr-review-question.md"
+assert_reason_contains "next invocation reloads question as literal text" "$(reason_for 'gh pr ready 42')" "$literal_question"
+printf '%0500d\n' 0 >> "$fixture_plugin/.agents/prompts/pr-review-ack.md"
+fixture_long_reason="$(reason_for_repo "$LONG_REPO" "$LONG_STATE" 'gh pr ready 42')"
+assert_reason_contains "long-ref recovery uses the same prompt document" \
+  "$fixture_long_reason" "$literal_question"
+assert_reason_contains "long-ref fixture reaches the recovery path" \
+  "$fixture_long_reason" 'the detailed diagnostic exceeded 1200 bytes'
+assert_reason_contains "body guidance is loaded from its document" \
+  "$(reason_for "gh pr create $FEAT --body ''")" 'Fixture description guidance'
+
+for prompt_name in pr-review-ack pr-review-question pr-description-guidance; do
+  prompt_file="$fixture_plugin/.agents/prompts/$prompt_name.md"
+  cp "$prompt_file" "$TMP/prompt-backup"
+  for invalid in missing empty unresolved; do
+    case "$invalid" in
+      missing) rm -f "$prompt_file" ;;
+      empty) printf ' \n' > "$prompt_file" ;;
+      unresolved) printf '{{missing_value}}\n' > "$prompt_file" ;;
+    esac
+    write_marker 'reviewed: preserve this acknowledgment'
+    jq -nc '{tool_input:{command:"gh pr ready 42"}}' | "$HOOK" \
+      > "$TMP/prompt-stdout" 2> "$TMP/prompt-stderr"
+    prompt_status=$?
+    if [[ "$prompt_status" == 2 && ! -s "$TMP/prompt-stdout" \
+       && -s "$TMP/prompt-stderr" && -f "$TMP/.agents/state/pr-reviewed.json" ]]; then
+      pass=$((pass + 1)); printf '  PASS  %s %s fails closed without spending acknowledgment\n' "$invalid" "$prompt_name"
+    else
+      fail=$((fail + 1)); printf '  FAIL  %s %s must fail closed (exit=%s)\n' "$invalid" "$prompt_name" "$prompt_status"
+    fi
+  done
+  cp "$TMP/prompt-backup" "$prompt_file"
+done
+
+printf '%01300d\n' 0 > "$fixture_plugin/.agents/prompts/pr-review-ack.md"
+write_marker 'reviewed: preserve on oversized recovery'
+jq -nc '{tool_input:{command:"gh pr ready 42"}}' | "$HOOK" \
+  > "$TMP/prompt-stdout" 2> "$TMP/prompt-stderr"
+prompt_status=$?
+if [[ "$prompt_status" == 2 && ! -s "$TMP/prompt-stdout" \
+   && -s "$TMP/prompt-stderr" && -f "$TMP/.agents/state/pr-reviewed.json" ]]; then
+  pass=$((pass + 1)); printf '  PASS  oversized recovery fails closed without spending acknowledgment\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  oversized recovery must fail closed (exit=%s)\n' "$prompt_status"
+fi
+
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

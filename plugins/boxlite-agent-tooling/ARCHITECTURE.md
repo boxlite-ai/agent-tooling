@@ -25,12 +25,21 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
 | Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
 
-The PR description contract in `CONTRIBUTING.md` permits any explanatory form.
+The PR description contract in `CONTRIBUTING.md` requires every PR to explain how
+the change produces its intended result, using the form best suited to the PR.
 The hook requires nonempty, inspectable bodies of at most 200 words and 2000 Unicode
 characters, including Markdown, for non-draft creates and description edits. Drafts,
 body-preserving operations, web/API edits, and later bot additions are outside this
 content check. Clarity remains a reviewer judgment. `guidance/workflow.md` carries
 the same concise-writing rules into consumer instructions.
+
+PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr-review-question.md`
+supplies the shared explanation check, `.agents/prompts/pr-review-ack.md` supplies both
+normal and bounded local acknowledgment instructions, `.agents/prompts/pr-description-guidance.md`
+supplies body-writing guidance, and `.agents/prompts/pr-author-review.md` supplies the
+GitHub comment. Missing, empty, or unrenderable prompts fail closed before consuming
+a local acknowledgment or publishing GitHub acknowledgment success. A local recovery
+prompt over 1200 bytes also fails closed. No embedded fallback copy is kept in Bash.
 
 Git gates. They run for any process and bind only when `CLAUDECODE`, `CODEX_SANDBOX`
 or `AGENT_GATED=1` is in the environment.
@@ -56,6 +65,9 @@ GitHub events run `.github/workflows/author-review.yml` from trusted base/defaul
 code. `scripts/pr-author-review.sh` checks dependencies and calls the single facade
 `pr_author_review_run` in `.agents/lib/pr-author-review.sh`. This gate is independent of
 all local hooks above.
+Both review prompts ask whether the description explains the mechanism in the diff;
+acknowledgment remains bound to the commit SHA and does not certify description quality
+or expire on body edits.
 
 | Current PR state | Gate result | Contributor action |
 | --- | --- | --- |

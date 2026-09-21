@@ -479,5 +479,53 @@ for invalid in '{bad' '{}' '{"repository":{"full_name":"../repo"},"pull_request"
   report "invalid events fail before GitHub: $invalid" invalid_event
 done
 
+fixture_plugin="$TEST_DIR/prompt-plugin"
+mkdir -p "$fixture_plugin/scripts" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
+cp "$SCRIPT" "$fixture_plugin/scripts/"
+cp "$PLUGIN_ROOT/.agents/lib/"{pr-author-review,subagent,hook-host}.sh "$fixture_plugin/.agents/lib/"
+SCRIPT="$fixture_plugin/scripts/pr-author-review.sh"
+cat > "$fixture_plugin/.agents/prompts/pr-author-review.md" <<'PROMPT'
+---
+name: fixture
+---
+Fixture author @{{author}} at {{sha}}: {{result}}
+{{review_question}}
+PROMPT
+printf 'First review question\n' > "$fixture_plugin/.agents/prompts/pr-review-question.md"
+prompt_contains_fixture() {
+  pending && jq -se --arg sha "$HEAD_SHA" --arg question "$expected_question" '
+    any(.[]; .method == "POST" and (.endpoint | endswith("/comments")) and
+      (.body.body | contains("Fixture author @author at " + $sha)) and
+      (.body.body | contains($question)) and
+      (.body.body | contains("name: fixture") | not))' "$TEST_DIR/calls" >/dev/null
+}
+reset_case
+expected_question='First review question'
+run_gate
+report "author review renders the prompt document and shared question" prompt_contains_fixture
+# shellcheck disable=SC2016 # Prompt text must remain literal when loaded.
+expected_question='Reloaded question: $(printf injected) `printf injected`'
+printf '%s\n' "$expected_question" > "$fixture_plugin/.agents/prompts/pr-review-question.md"
+reset_case
+run_gate
+report "next author review reloads the shared question as literal text" prompt_contains_fixture
+
+for prompt_name in pr-author-review pr-review-question; do
+  prompt_file="$fixture_plugin/.agents/prompts/$prompt_name.md"
+  cp "$prompt_file" "$TEST_DIR/prompt-backup"
+  for invalid in missing empty unresolved; do
+    case "$invalid" in
+      missing) rm -f "$prompt_file" ;;
+      empty) printf ' \n' > "$prompt_file" ;;
+      unresolved) printf '{{missing_value}}\n' > "$prompt_file" ;;
+    esac
+    reset_case
+    acknowledge
+    run_gate
+    report "$invalid $prompt_name prevents acknowledgment success" failed_closed
+  done
+  cp "$TEST_DIR/prompt-backup" "$prompt_file"
+done
+
 printf '\nRESULT: %s passed, %s failed\n' "$pass" "$fail"
 (( fail == 0 ))

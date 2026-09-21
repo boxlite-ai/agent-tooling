@@ -389,7 +389,7 @@ For consumers:
 2. Check out a reviewed, immutable `boxlite-ai/agent-tooling` commit in a separate directory
    with `persist-credentials: false`, then run its
    `plugins/boxlite-agent-tooling/scripts/pr-author-review.sh` with `$GITHUB_EVENT_PATH`.
-   Keep the script and its `.agents/lib/pr-author-review.sh` together. Never check out or
+   Keep the plugin's scripts, libraries, and `.agents/prompts/` together. Never check out or
    execute the PR head in this privileged workflow, or run the floating installer there.
 3. Make `Author reviewed the PR` a required status check from GitHub Actions on the target
    branches. Do this after the workflow is deployed and has published that status.
