@@ -135,6 +135,14 @@ than one session can share a checkout.
 - Summary wording: edit `.agents/prompts/reply-summary.md` in the active plugin checkout. `.agents/lib/reply-summary.sh` reads it on each request through `subagent_prompt`, substituting `{{max_words}}` with the summary's 60-word prose budget. The trigger separately measures paragraphs over 80 words or list items over 40, joining soft-wrapped lines and excluding headings, Markdown tables and fenced blocks. This is a readability heuristic; the prompt can skip an unnecessary summary. A missing, empty, or unrenderable prompt reports stderr and leaves the verdict check's result intact, without recording an ask.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`. One refresh runs at a time, held by `.git/agent-tooling/.refresh.lock` (`scripts/refresh-installation.sh:31`), and a refresh that finds it held skips. Breaking that lock would race its holder, so one left behind by a killed run is reported rather than cleared: `scripts/verify-installation.sh:22`, which every commit and push runs, names it once it is an hour old. Without that, the automatic refresh is dead and only a log nobody reads would say so.
 
+- Offline installation repair: `templates/install.sh` routes the recorded cache through
+  the installation lock, cache revision check, and `scripts/setup.sh`, then runs
+  `scripts/verify-installation.sh` before success. This repairs worktree-local hooks
+  without changing the shared record, adoption history, or last-check stamp. An invalid
+  cache or profile fails closed. `templates/codex-plugin-bootstrap.sh` and
+  `templates/claude-plugin-bootstrap.sh` keep the initial validity probe quiet, but
+  report verifier and installer diagnostics if repair or pre-upgrade refresh fails.
+
 ## Invariants
 
 Often stated as an absence. Each names the line that states or enforces it.

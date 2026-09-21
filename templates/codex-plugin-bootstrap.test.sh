@@ -198,6 +198,21 @@ check_eq "moved checkout expects plugin release 0.1.6" "$(adopted_codex_version)
 check_eq "host remains on plugin release 0.1.5 before refresh" \
   "$(head -n1 "$FAKE_STATE/plugin-version")" "0.1.5"
 
+echo "## Failed refresh preserves installer and verifier diagnostics"
+before_failed_refresh="$(command_count '^plugin marketplace upgrade ')"
+FAKE_AGENT_TOOLING_INVALID_INSTALL=1 run_hook > "$TMP/out" 2> "$TMP/err"
+check_eq "invalid refreshed tooling is rejected" "$?" 1
+for detail in 'fixture network unavailable' 'fixture configured hooks do not match'; do
+  if grep -q "$detail" "$TMP/err"; then
+    ok "failed refresh preserves $detail"
+  else
+    bad "failed refresh preserves $detail (stderr=$(cat "$TMP/err"))"
+  fi
+done
+check_eq "invalid refreshed tooling prevents marketplace mutation" \
+  "$(command_count '^plugin marketplace upgrade ')" "$before_failed_refresh"
+rm "$FAKE_STATE/invalid-install"
+
 before_manifest_upgrade_commands="$(command_count '^plugin marketplace upgrade ')"
 FAKE_CODEX_MARKETPLACE_VERSION=0.1.6 \
 FAKE_CODEX_FALSE_SUCCESS_MARKETPLACE_MANIFEST=1 \
@@ -386,6 +401,20 @@ check_eq "tooling failure prevents marketplace mutation" \
   "$(command_count '^plugin marketplace add ')" "$before_marketplaces"
 
 rm -f "$FAKE_STATE/marketplace" "$FAKE_STATE/plugin-installed" "$FAKE_STATE/plugin-enabled"
+FAKE_AGENT_TOOLING_INVALID_INSTALL=1 run_hook > "$TMP/out" 2> "$TMP/err"
+check_eq "invalid repaired tooling is rejected" "$?" 1
+check_eq "invalid repair emits no model-visible output" "$(wc -c < "$TMP/out" | tr -d ' ')" 0
+for detail in 'fixture network unavailable' 'fixture configured hooks do not match'; do
+  if grep -q "$detail" "$TMP/err"; then
+    ok "failed repair preserves $detail"
+  else
+    bad "failed repair preserves $detail (stderr=$(cat "$TMP/err"))"
+  fi
+done
+check_eq "invalid repaired tooling prevents marketplace mutation" \
+  "$(command_count '^plugin marketplace add ')" "$before_marketplaces"
+rm "$FAKE_STATE/invalid-install"
+
 FAKE_CODEX_FAIL_MARKETPLACE_ADD=1 run_hook > "$TMP/out" 2> "$TMP/err"
 check_eq "marketplace add failure is nonzero" "$?" 1
 if grep -q 'could not add Codex marketplace' "$TMP/err"; then

@@ -474,7 +474,18 @@ and never adopted.
 
 Commits and pushes verify against that record with a pure local check: offline work
 keeps running on the last adopted revision, and only the very first installation
-needs the network. Checkouts, merge-based pulls, rebases, and amended commits repair
+needs the network. If branch resolution fails, the installer validates the recorded
+cache, repairs the current worktree's hook path, and verifies the installation before
+returning success. An offline repair leaves the adoption history and last-check stamp
+unchanged. Invalid caches and consumer profiles fail closed. Host bootstraps preserve
+installer and verification diagnostics when repair fails; plugin downloads still
+require network access.
+
+Consumer bootstrap scripts are committed copies: copy updated
+`templates/install.sh` and host bootstrap scripts into `.agent-tooling/` to adopt these
+fixes; updating the shared plugin alone does not replace them.
+
+Checkouts, merge-based pulls, rebases, and amended commits repair
 a broken installation in the foreground and otherwise spawn a throttled background
 refresh (`scripts/refresh-installation.sh`) that adopts a moved tip. Set
 `AGENT_TOOLING_REFRESH=0` to disable the polling, `AGENT_TOOLING_REFRESH_MINUTES` to
