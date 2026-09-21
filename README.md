@@ -38,8 +38,8 @@ host-parity suite pin that complete shape.
 
 The shared [boxlite-examples skill](plugins/boxlite-agent-tooling/.agents/skills/boxlite-examples/SKILL.md)
 explains through concrete state shapes, roles, relationships, and changes over time,
-choosing diagrams, tables, or prose for clarity. It includes a source-backed top-up
-walkthrough with illustrative amounts.
+choosing diagrams, tables, or prose for clarity. It includes source-backed Commerce
+top-up and VMM memory walkthroughs with illustrative values.
 Try: "Use boxlite-examples to explain how Commerce top-up works."
 
 ## Automatic Codex bootstrap

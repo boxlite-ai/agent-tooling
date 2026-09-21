@@ -46,5 +46,11 @@ when simplifying. If an analogy helps, explain its mapping and limits.
 Keep comparisons on the same input and snapshots focused on relevant fields.
 Adapt detail to the question; simpler explanations need only the useful parts.
 
-For one worked example, read [the top-up walkthrough](references/top-up-example.md).
-Its choice of visuals is illustrative, not a required template.
+Read the worked example relevant to the question:
+
+- [Commerce top-up](references/top-up-example.md): linked database records and
+  payment interactions over time.
+- [VMM memory](references/vmm-memory-example.md): a whole-memory ASCII layout,
+  mapping records, and one byte traced through guest and host addresses.
+
+Their choice of visuals is illustrative, not a required template.
