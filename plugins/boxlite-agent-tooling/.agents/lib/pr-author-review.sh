@@ -29,7 +29,7 @@ _pr_review_event() {
         else ["queue", .repository.full_name, .merge_group.head_sha] | @tsv end
       else
         (if .pull_request then
-         if (["opened","reopened","edited","synchronize","ready_for_review","closed"] | index($action))
+         if (["opened","reopened","synchronize","ready_for_review","closed"] | index($action))
          then .pull_request.number else error("unsupported PR event") end
        elif .issue.pull_request and (["created","edited","deleted"] | index($action))
        then .issue.number

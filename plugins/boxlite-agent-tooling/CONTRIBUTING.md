@@ -51,9 +51,8 @@ unedited comment. Once `Author reviewed the PR` passes, the author can click
 **Ready for review**. A new push or editing/deleting the only acknowledgment
 returns the PR to draft and requires a fresh comment. Forks use the same flow.
 Both the local acknowledgment prompt and GitHub comment ask the explanation question.
-GitHub PR edits refresh the review instructions; acknowledgments still bind to the
-commit SHA, so a description edit alone does not revoke one. Description quality is
-a human review criterion. Maintainer approval remains separate.
+Acknowledgments bind to the commit SHA, so a description edit alone does not revoke
+one. Description quality is a human review criterion. Maintainer approval remains separate.
 
 Illustrative example; the behavior and test results are hypothetical:
 

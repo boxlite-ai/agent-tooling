@@ -203,13 +203,6 @@ run_gate
 report "an existing draft stays pending without another draft mutation" pending_without_draft_write
 
 reset_case
-edit_json "$TEST_DIR/event.json" '.action = "edited"'
-edit_json "$TEST_DIR/pr.json" '.draft = true'
-run_gate
-report "description edits refresh review instructions on drafts" pending_without_draft_write
-report "description edits publish the live-head instructions" prompt_has_live_sha
-
-reset_case
 edit_json "$TEST_DIR/event.json" '.action = "ready_for_review"'
 run_gate
 report "marking ready without acknowledgment returns the PR to draft" drafted

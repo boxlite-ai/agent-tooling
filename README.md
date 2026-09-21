@@ -382,7 +382,7 @@ For consumers:
 
 1. Install the event wiring and permissions from `.github/workflows/author-review.yml`.
    Keep its job name distinct from `Author reviewed the PR` and handle both PR events and
-   description edits plus comment creation, editing, and deletion. Draft conversion requires `contents: write`
+   comment creation, editing, and deletion. Draft conversion requires `contents: write`
    as well as `pull-requests: write`; `statuses: write` publishes the acknowledgment.
    The contents permission authorizes the GraphQL mutation; the workflow does not push
    commits or write to the contributor's branch.

@@ -65,9 +65,9 @@ GitHub events run `.github/workflows/author-review.yml` from trusted base/defaul
 code. `scripts/pr-author-review.sh` checks dependencies and calls the single facade
 `pr_author_review_run` in `.agents/lib/pr-author-review.sh`. This gate is independent of
 all local hooks above.
-PR edits refresh the instructions, including for drafts. Both review prompts ask whether
-the description explains the mechanism in the diff; acknowledgment remains bound to
-the commit SHA and does not certify description quality or expire on body edits.
+Both review prompts ask whether the description explains the mechanism in the diff;
+acknowledgment remains bound to the commit SHA and does not certify description quality
+or expire on body edits.
 
 | Current PR state | Gate result | Contributor action |
 | --- | --- | --- |
