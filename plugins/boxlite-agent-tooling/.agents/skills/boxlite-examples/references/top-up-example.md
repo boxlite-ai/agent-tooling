@@ -1,11 +1,8 @@
 # Top-up: records and payment flow
 
-Add $25 to a wallet holding $5. IDs and amounts are illustrative; monetary fields
-below use cents. Assume a successful manual payment with no concurrent spending.
-This is a source walkthrough at Commerce revision `13e721ea`, not a live payment.
-
-The relationship map explains the record links; the table compares field values;
-one sequence diagram shows who acts across T1–T5. Each view serves a different purpose.
+**$5 wallet + $25 top-up = $30.** Illustrative IDs and values; fields use cents.
+Successful manual payment, no concurrent spending. Source snapshot: Commerce
+`13e721ea`, not a live payment; recheck before claiming current behavior.
 
 ## Shapes and roles
 
@@ -33,13 +30,12 @@ Stripe S1 ◀─provider_checkout_session_id─ Payment P1
                                 Wallet W1          Invoice I1
 ```
 
-These links route a payment notification to the credit, wallet, and invoice for
-the same purchase. [Creation](https://github.com/boxlite-ai/boxlite-commerce/blob/13e721eafcf9affd79b7e4f5b219cd2c39ba7eaa/src/wallets/services/top-up-wallet.ts#L62-L100)
+[Creation](https://github.com/boxlite-ai/boxlite-commerce/blob/13e721eafcf9affd79b7e4f5b219cd2c39ba7eaa/src/wallets/services/top-up-wallet.ts#L62-L100)
 and [Stripe metadata](https://github.com/boxlite-ai/boxlite-commerce/blob/13e721eafcf9affd79b7e4f5b219cd2c39ba7eaa/src/payments/provider/stripe/stripe-provider.ts#L172-L195).
 
 ## State immediately before each step
 
-Values stay unchanged unless shown otherwise. T1–T5 express event order.
+T1–T5 express event order.
 
 | Before | W1 balance | P1 amount / status | C1 amount / status | I1 total / paid / payment status | S1 payment status |
 | --- | --- | --- | --- | --- | --- |
@@ -81,13 +77,6 @@ sequenceDiagram
     C-->>S: Acknowledge
 ```
 
-Payment success credits this purchase once. The customer's total card balance is
-not supplied by this flow. [Settlement](https://github.com/boxlite-ai/boxlite-commerce/blob/13e721eafcf9affd79b7e4f5b219cd2c39ba7eaa/src/wallets/services/settle-top-up.ts#L46-L139)
+**Credit once.** This flow does not supply the customer's total card balance.
+[Settlement](https://github.com/boxlite-ai/boxlite-commerce/blob/13e721eafcf9affd79b7e4f5b219cd2c39ba7eaa/src/wallets/services/settle-top-up.ts#L46-L139)
 and [invoice payment fields](https://github.com/boxlite-ai/boxlite-commerce/blob/13e721eafcf9affd79b7e4f5b219cd2c39ba7eaa/src/invoices/repositories/credit-invoice.repository.ts#L235-L248).
-Recheck source before presenting this snapshot as current behavior.
-
-## Design references
-
-- [explain-step-by-step](https://github.com/narumiruna/skills/blob/519bdaa68d762fe8c65296916c5d8ed5b6e3c119/skills/optional/explain-step-by-step/SKILL.md#L12-L34): evidence boundaries and state changes.
-- [ELI5](https://github.com/DreambigOu/ELI5/blob/a766623b062331fdde53467001379b4ddf3acc2f/skills/eli5/SKILL.md#L32-L40): adapt to the reader's concerns.
-- [deep-explainer](https://github.com/ViviQuan/deep-explainer/blob/95345df04d3a7b7fe7847b3b5e20cb28584a80a6/SKILL.md#L485-L497): carry one input through a method.

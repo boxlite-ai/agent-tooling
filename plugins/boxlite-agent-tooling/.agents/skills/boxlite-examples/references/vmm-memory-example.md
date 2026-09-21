@@ -1,14 +1,9 @@
 # VMM memory: whole layout, mapping records, and one byte
 
-Imagine a tiny BoxLite VM with **12 KiB of RAM**: 4 KiB for a program and 8 KiB
-for its data. This illustrates the Linux/KVM design with a 4 KiB host page size.
-Addresses, contents, and slot choices are illustrative; this is not a live dump
-or a bootable Linux layout. At BoxLite revision `566f07eb`, the memory contract
-exists and the native backend is still a
+**12 KiB RAM: 4 KiB program + 8 KiB data.** Linux/KVM, 4 KiB host pages.
+Illustrative addresses, contents, and slots; not a live dump or bootable Linux.
+At BoxLite `566f07eb`, the contract exists; the native backend remains a
 [skeleton](https://github.com/boxlite-ai/boxlite/blob/566f07eb12893a2950a37a40279d16103974812f/src/hypervisor/README.md#L15-L29).
-
-The spatial sketch shows both regions together. The slot table separates mapping
-metadata from RAM contents; the timeline follows one concrete byte.
 
 ## Whole memory layout after registration
 
@@ -40,8 +35,7 @@ Guest physical addresses                Host virtual addresses
 <=======> means two address views of the SAME backing bytes.
 ```
 
-All displayed end addresses are inclusive. These host addresses are process
-virtual addresses; the drawing does not imply contiguous physical host RAM.
+Inclusive end addresses. Host addresses are virtual, not physical.
 
 ## Slot records and ownership
 
@@ -52,8 +46,7 @@ virtual addresses; the drawing does not imply contiguous physical host RAM.
 | 0 | `0x1000` | `0x70000000` | 4,096 bytes |
 | 1 | `0x2000` | `0x90000000` | 8,192 bytes |
 
-A slot describes a range; its size varies. Registration connects existing host
-memory to guest addresses.
+Each slot maps a variable-sized range of existing host memory.
 [KVM memory registration](https://docs.kernel.org/virt/kvm/api.html#kvm-set-user-memory-region).
 
 ```text
@@ -67,16 +60,14 @@ boxlite-hypervisor::kvm      Assigns private slot IDs and registers mappings
 KVM                         Makes those ranges accessible to the guest
 ```
 
-The shared
+Shared fields:
 [`MemoryRegion`](https://github.com/boxlite-ai/boxlite/blob/566f07eb12893a2950a37a40279d16103974812f/src/hypervisor/src/memory.rs#L8-L21)
-contains no KVM slot ID. Slot allocation stays inside the
-[KVM backend](https://github.com/boxlite-ai/boxlite/blob/566f07eb12893a2950a37a40279d16103974812f/src/hypervisor/README.md#L26-L29).
+(no slot ID).
 
 ## Follow one byte
 
-Initially, no host allocations or registered slots exist. Assume the guest and
-host access the byte in the order shown, with no concurrent writer. T1–T4 indicate
-order, not measured duration; the layout above is the state after T2.
+Initially: no allocations or slots. Ordered accesses, no concurrent writers.
+The drawing shows the state after T2.
 
 | Time | Input/action | State change | Output |
 | --- | --- | --- | --- |
@@ -90,10 +81,8 @@ Offset within slot 1 = 0x2010 - 0x2000 = 0x10
 Host address         = 0x90000000 + 0x10 = 0x90000010
 ```
 
-The guest write and host read access **the same byte**. This calculation locates
-the host pointer; it is not an extra guest hardware translation stage.
+Both accesses reach **the same byte**; the arithmetic locates a host pointer.
 
-Keep the backing alive until the guest mapping is gone and every host user has
-finished, as required by the
+Release backing only after guest mappings and host accesses end:
 [memory lifetime contract](https://github.com/boxlite-ai/boxlite/blob/566f07eb12893a2950a37a40279d16103974812f/src/hypervisor/src/vm.rs#L19-L41).
-Recheck source before presenting this design snapshot as current implementation.
+Recheck before claiming current implementation.
