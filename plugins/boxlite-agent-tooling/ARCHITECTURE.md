@@ -230,7 +230,7 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         shell-engineering, boxlite-diagrams, adversarial-iteration
+.agents/skills/         shell-engineering, boxlite-diagrams, boxlite-examples, adversarial-iteration
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
