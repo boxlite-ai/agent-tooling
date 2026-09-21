@@ -8,4 +8,4 @@ description: Closing reply requested after a dense, judged response.
 Walls of text are forbidden. Skip the summary if the reply is already concise and easy to scan.
 Otherwise, prefer: visuals > tables > bullets > prose (under {{max_words}} words; 120 for complex topics).
 
-Restate only information already given. Always include a brief real example when it helps the user understand. Put any pending user decision last. Use a tool only to render or send a visual.
+Always include a brief real example when it helps the user understand.
