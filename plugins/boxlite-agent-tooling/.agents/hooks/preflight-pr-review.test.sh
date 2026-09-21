@@ -873,8 +873,6 @@ assert_reason_budget "title denial stays bounded" \
 write_marker "reviewed: concise body"
 body_reason="$(reason_for "gh pr create $FEAT --body '$LONG_BODY'")"
 assert_reason_budget "size denial stays bounded" "$body_reason"
-assert_reason_contains "size denial gives the word limit" "$body_reason" '200 words'
-assert_reason_contains "size denial gives the character limit" "$body_reason" '2000 characters'
 assert_reason_contains "size denial preserves freedom of form" "$body_reason" 'No diagram is required'
 
 echo

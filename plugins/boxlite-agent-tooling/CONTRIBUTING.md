@@ -25,8 +25,7 @@ No diagram, Before/After layout, source annotation, or section order is mandator
   Explain each fact once.
 - Before creating a PR (including drafts) and after editing its description, check:
   **Does the description accurately explain the mechanism shown in the diff?**
-- Keep the entire description within **200 words and 2000 characters**, including
-  diagrams and Markdown. Walls of text are forbidden; splitting one into many
+- Keep the description concise. Walls of text are forbidden; splitting one into many
   bullets or hiding it in a collapsed section does not make it concise.
 - Keep material trade-offs, risks, and untested behavior visible. Link detailed
   evidence instead of pasting logs, file inventories, or exhaustive test counts.
@@ -36,8 +35,9 @@ No diagram, Before/After layout, source annotation, or section order is mandator
 - Link the relevant issue when one exists, using `Fixes #<n>` when the PR closes it.
   No issue or inline bug marker is required just to satisfy a format.
 
-The preflight hook checks explicit nonempty bodies against the size limits for
-non-draft creates and description edits. It does not judge the explanatory form.
+The preflight hook checks explicit nonempty bodies for non-draft creates and
+description edits, with its current size checks documented in
+[ARCHITECTURE.md](ARCHITECTURE.md). It does not judge the explanatory form.
 Draft creates, body-preserving operations, web/API edits, and later bot additions
 are outside this content check; the writing rules still apply.
 

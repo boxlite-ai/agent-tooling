@@ -6,7 +6,7 @@ explains this PR to the reviewer.
 Show the key steps or decisions that produce the result; listing files is not an explanation.
 Check drafts and description edits too: does this explanation match the diff?
 These headings are optional. No diagram or source annotation is required.
-Keep the whole body within 200 words and 2000 characters. No walls of text. -->
+No walls of text. -->
 
 ## Verification
 
