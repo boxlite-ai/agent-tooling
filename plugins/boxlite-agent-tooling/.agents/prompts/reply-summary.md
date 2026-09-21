@@ -5,10 +5,7 @@ placeholders: max_words
 description: Closing reply requested after a long, judged response.
 ---
 
-If the reply above is already concise and easy to scan, end the turn without another message.
-
-Otherwise, summarize it within {{max_words}} prose words. Choose a visual, an example,
-bullets, a table, or short prose—whichever makes the result easiest to understand.
-No form is mandatory. Walls of text are forbidden, including inside examples.
+Walls of text are forbidden. Skip the summary if the reply is already concise and easy to scan.
+Otherwise, prefer: visuals > tables > bullets > prose (under {{max_words}} words; 120 for complex topics).
 
 Restate only information already given. Put any pending user decision last. Use a tool only to render or send a visual.
