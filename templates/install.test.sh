@@ -19,8 +19,8 @@
 #
 #   - current is written LAST: a tip that fetches but fails validation must leave the
 #     previous revision adopted and verifiable (validate-before-adopt).
-#   - resolution failure with an installed revision is a warning, not an error;
-#     without one it is an error (only the first install needs the network).
+#   - resolution failure repairs from a validated recorded cache; a missing cache,
+#     wrong cached revision, or invalid consumer must never report success.
 #   - a hold is obeyed without any resolution at all, a malformed hold stops
 #     everything, and the gates stay closed until a new hold is adopted.
 #   - the gates never touch the network: verify passes and fails identically with
@@ -211,9 +211,62 @@ grep -q 'could not resolve' "$TMP/err" && ok "explains it kept the record" \
 check_eq "record survives the failed resolution" "$(record)" "$TIP_TWO"
 run_verify >/dev/null 2>&1
 check_eq "gates verify with the remote unreachable" "$?" 0
+if grep -Fq "$TMP/void" "$TMP/err"; then
+  ok "offline warning preserves the Git failure detail"
+else
+  bad "offline warning preserves the Git failure detail (stderr=$(cat "$TMP/err"))"
+fi
 
-# An existing record must not bypass runtime dependency validation on the offline fast
-# path. The state hooks require Perl, so install and local verification both fail loudly
+echo
+echo "## Offline repair reconciles a stale linked worktree against the shared record"
+OFFLINE_WT="$TMP/offline-wt"
+git -C "$CONSUMER" -c core.hooksPath=/dev/null worktree add -q "$OFFLINE_WT" -b offline
+cp "$REPO_ROOT/templates/install.sh" "$OFFLINE_WT/.agent-tooling/install.sh"
+git -C "$OFFLINE_WT" config --worktree core.hooksPath "$(installed_plugin "$TIP_ONE")/.githooks"
+OFFLINE_GIT_DIR="$(git -C "$OFFLINE_WT" rev-parse --absolute-git-dir)"
+cp "$CACHE/history.log" "$TMP/history-before-offline"
+touch -t 200001010000 "$CACHE/last-check"
+cp -p "$CACHE/last-check" "$TMP/last-check-before-offline"
+(cd "$OFFLINE_WT" && GIT_DIR="$OFFLINE_GIT_DIR" AGENT_TOOLING_SYNC_ACTIVE=1 \
+  ./.agent-tooling/install.sh) > "$TMP/out" 2> "$TMP/err"
+check_eq "offline linked-worktree repair succeeds" "$?" 0
+check_eq "offline repair configures the recorded revision's hooks" \
+  "$(git -C "$OFFLINE_WT" config --worktree --get core.hooksPath)" "$(installed_plugin "$TIP_TWO")/.githooks"
+"$(installed_plugin "$TIP_TWO")/scripts/verify-installation.sh" "$OFFLINE_WT" > "$TMP/out" 2> "$TMP/err"
+check_eq "repaired worktree passes the real installation verifier" "$?" 0
+check_eq "offline repair keeps the shared adoption record" "$(record)" "$TIP_TWO"
+cmp -s "$CACHE/history.log" "$TMP/history-before-offline"
+check_eq "offline repair does not log a new adoption" "$?" 0
+if [[ "$CACHE/last-check" -nt "$TMP/last-check-before-offline" ||
+      "$CACHE/last-check" -ot "$TMP/last-check-before-offline" ]]; then
+  bad "offline repair does not change the remote-check timestamp"
+else
+  ok "offline repair does not change the remote-check timestamp"
+fi
+
+echo
+echo "## Offline fallback validates the cache and consumer before reporting success"
+cp "$CACHE/$TIP_TWO/.git/HEAD" "$TMP/cached-head"
+printf '%040d\n' 0 > "$CACHE/$TIP_TWO/.git/HEAD"
+run_install > "$TMP/out" 2> "$TMP/err"
+check_eq "offline install rejects a cache with the wrong HEAD" "$?" 1
+if grep -q 'unexpected HEAD' "$TMP/err"; then
+  ok "offline cache failure is actionable"
+else
+  bad "offline cache failure is actionable (stderr=$(cat "$TMP/err"))"
+fi
+cp "$TMP/cached-head" "$CACHE/$TIP_TWO/.git/HEAD"
+cp "$CONSUMER/.agent-tooling/profile.json" "$TMP/offline-profile"
+jq '.schemaVersion = 999' "$TMP/offline-profile" > "$CONSUMER/.agent-tooling/profile.json"
+run_install > "$TMP/out" 2> "$TMP/err"
+check_eq "offline install rejects an invalid consumer profile" "$?" 1
+cp "$TMP/offline-profile" "$CONSUMER/.agent-tooling/profile.json"
+check_eq "failed offline repair leaves the record unchanged" "$(record)" "$TIP_TWO"
+run_verify > "$TMP/out" 2> "$TMP/err"
+check_eq "restored cache and profile remain verifiable" "$?" 0
+
+# An existing record must not bypass runtime dependency validation during offline
+# repair. The state hooks require Perl, so install and local verification both fail loudly
 # if a machine loses it after adoption.
 ( cd "$CONSUMER" && PATH="$NO_PERL_BIN" ./.agent-tooling/install.sh ) \
   > "$TMP/offline-no-perl.out" 2> "$TMP/offline-no-perl.err"

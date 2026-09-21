@@ -36,4 +36,8 @@ jq -nc --arg version "$tooling_version" \
   '{name:"boxlite-agent-tooling",version:$version}' \
   > "$plugin_dir/.codex-plugin/plugin.json"
 printf '%s\n' "$tooling_sha" > "$record_file"
+if [[ "${FAKE_AGENT_TOOLING_INVALID_INSTALL:-0}" == 1 ]]; then
+  touch "$state/invalid-install"
+  printf 'fixture network unavailable; keeping cached revision\n' >&2
+fi
 printf 'fixture installer progress that a SessionStart hook must suppress\n'
