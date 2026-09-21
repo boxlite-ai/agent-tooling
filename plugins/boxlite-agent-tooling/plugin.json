@@ -1,6 +1,6 @@
 {
   "name": "boxlite-agent-tooling",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Shared BoxLite coding-agent skills, auditors, hooks, and repository tooling.",
   "author": {
     "name": "BoxLite",
