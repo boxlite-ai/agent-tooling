@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# The closing reply that stop-gate.sh asks for after a long one. Source this file; it
+# The closing reply that stop-gate.sh asks for after a dense one. Source this file; it
 # performs no work on load. Requires sourced verdict-audit-state.sh and subagent.sh,
 # and perl and jq on PATH; callers own those checks and all reporting.
 #
-# A turn ending on a long reply gets one more message using the prompt in
-# .agents/prompts/reply-summary.md. The long reply stays as written and the result
+# A turn ending on a dense reply gets one more message using the prompt in
+# .agents/prompts/reply-summary.md. The original reply stays as written and the result
 # follows it. A summary that needs a tool to render or send is new tool work, so the
 # verdict check judges that answer as usual.
 # The Stop gate asks only after the verdict check has judged and allowed the turn, or a
@@ -21,14 +21,15 @@
 # Tool calls since the ask are what separate a restatement of an already-judged turn
 # from new work, which the verdict check must judge.
 
-# A reply over this many words of prose gets the ask. A fenced block, a drawing or code,
-# is not prose, so it does not count here.
+# The prompt's prose budget is independent of what triggers a summary request.
 reply_summary_max_words=60
+reply_summary_paragraph_max_words=80
+reply_summary_item_max_words=40
 # The answer to the ask ends unjudged only up to this many words, counted everywhere,
 # fenced blocks included. Words, not size: drawings may be many and large as long as
-# their labels are few, while a pasted log or code dump is words and counts. Twice the
-# trigger threshold bounds how much text can bypass another verdict check.
-reply_summary_restatement_max_words=$(( 2 * reply_summary_max_words ))
+# their labels are few, while a pasted log or code dump is words and counts. This
+# bound must not grow when the readability thresholds change.
+reply_summary_restatement_max_words=120
 # The same bounds the verdict check puts on the transcript it reads.
 reply_summary_transcript_max_bytes=67108864
 reply_summary_snapshot_max_bytes=262144
@@ -36,37 +37,118 @@ reply_summary_snapshot_max_bytes=262144
 # A word is a whitespace-separated token holding a letter or digit, so table pipes,
 # list markers and box-drawing lines do not count. Chinese and Japanese, written
 # without spaces, count one word per character, the usual convention for them; Korean
-# spaces its words and counts like English. The second argument skips fenced blocks
-# (1) or counts them (0).
-_reply_summary_words() {  # text skip-fenced(1|0)
-  local words
-  words="$(printf '%s\n' "${1-}" | perl -CSD -ne '
-    BEGIN { $skip_fenced = shift @ARGV }
-    if ($skip_fenced && /^\s*(?:```|~~~)/) { $fenced = !$fenced; next }
-    next if $fenced;
-    for my $token (split) {
-      my $unspaced = () = $token =~ /[\p{Han}\p{Hiragana}\p{Katakana}]/g;
-      (my $rest = $token) =~ s/[\p{Han}\p{Hiragana}\p{Katakana}]/ /g;
-      $words += $unspaced + grep { /[\p{L}\p{N}]/ } split " ", $rest;
+# spaces its words and counts like English. Readability is a Markdown heuristic:
+# blank lines delimit paragraphs, list markers delimit items, and indented item
+# continuations stay together across blank lines. Soft wraps do not split blocks.
+# Fenced blocks, headings and tables with a delimiter row are excluded from the
+# block maxima only.
+_reply_summary_word_counts() {  # text -> total largest-paragraph largest-item
+  local counts
+  counts="$(printf '%s\n' "${1-}" | perl -CSD -0777 -ne '
+    use strict;
+    use warnings;
+    sub count_words {
+      my $count = 0;
+      for my $token (split " ", $_[0]) {
+        my $unspaced = () = $token =~ /[\p{Han}\p{Hiragana}\p{Katakana}]/g;
+        (my $rest = $token) =~ s/[\p{Han}\p{Hiragana}\p{Katakana}]/ /g;
+        $count += $unspaced + grep { /[\p{L}\p{N}]/ } split " ", $rest;
+      }
+      return $count;
     }
-    END { print $words + 0 }' "$2" 2>/dev/null)" || return 1
-  [[ "$words" =~ ^[0-9]+$ ]] || return 1
-  printf '%s' "$words"
+    sub table_cells {
+      my ($row) = @_;
+      $row =~ s/^\s*\|//;
+      $row =~ s/(?<!\\)\|\s*$//;
+      return scalar split /(?<!\\)\|/, $row, -1;
+    }
+    my $total = count_words($_);
+    my @lines = split /\n/;
+    my @quoted = map { /^\s*>/ ? 1 : 0 } @lines;
+    s/^\s*(?:>\s*)+// for @lines;
+    my ($block_words, $is_item, $paragraph_max, $item_max) = (0, 0, 0, 0);
+    my ($item_indent, $after_blank) = (0, 0);
+    my ($fence, $table) = ("", 0);
+    my $finish_block = sub {
+      if ($is_item) {
+        $item_max = $block_words if $block_words > $item_max;
+      } else {
+        $paragraph_max = $block_words if $block_words > $paragraph_max;
+      }
+      ($block_words, $is_item) = (0, 0);
+      ($item_indent, $after_blank) = (0, 0);
+    };
+    for my $index (0 .. $#lines) {
+      my $line = $lines[$index];
+      if (length $fence) {
+        my $marker = substr $fence, 0, 1;
+        $fence = "" if $line =~ /^\s*\Q$fence\E\Q$marker\E*\s*$/;
+        next;
+      }
+      if ($line =~ /^\s*$/) {
+        $is_item ? ($after_blank = 1) : $finish_block->();
+        $table = 0;
+        next;
+      }
+      if ($after_blank) {
+        my ($indent) = $line =~ /^(\s*)/;
+        $indent =~ s/\t/    /g;
+        $finish_block->() if length($indent) < $item_indent;
+        $after_blank = 0;
+      }
+      if ($line =~ /^\s*(`{3,}|~{3,})/) {
+        $fence = $1;
+        $finish_block->() unless $is_item;
+        $table = 0;
+        next;
+      }
+      if ($line =~ /^\s*\#{1,6}(?:\s|$)/) {
+        $finish_block->();
+        $table = 0;
+        next;
+      }
+      $table = 0 if $index && $quoted[$index] != $quoted[$index - 1];
+      if ($line =~ s/^(\s*(?:[-+*]|[0-9]+[.)])\s+)//) {
+        my $prefix = $1;
+        $prefix =~ s/\t/    /g;
+        $finish_block->();
+        $is_item = 1;
+        $item_indent = length $prefix;
+        $table = 0;
+      }
+      if ($line =~ /\|/ && $index < $#lines &&
+          $lines[$index + 1] =~ /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/ &&
+          table_cells($line) == table_cells($lines[$index + 1])) {
+        $finish_block->() unless $is_item;
+        $table = 1;
+        next;
+      }
+      next if $table;
+      $block_words += count_words($line);
+    }
+    $finish_block->();
+    print "$total $paragraph_max $item_max";
+  ' 2>/dev/null)" || return 1
+  [[ "$counts" =~ ^[0-9]+[[:space:]][0-9]+[[:space:]][0-9]+$ ]] || return 1
+  printf '%s' "$counts"
 }
 
-# 0 when the reply is long enough to ask for the result, 1 when it is not, 2 when it
-# could not be counted.
-reply_summary_is_long() {  # text
-  local words
-  words="$(_reply_summary_words "${1-}" 1)" || return 2
-  (( words > reply_summary_max_words )) && return 0
+# 0 when a paragraph or list item is dense enough to ask, 1 when none is, 2 when
+# the text could not be counted.
+reply_summary_is_dense() {  # text
+  local counts _total paragraph_words item_words
+  counts="$(_reply_summary_word_counts "${1-}")" || return 2
+  read -r _total paragraph_words item_words <<< "$counts"
+  (( paragraph_words > reply_summary_paragraph_max_words \
+     || item_words > reply_summary_item_max_words )) && return 0
   return 1
 }
 
 # 0 only for a counted answer with few enough words to restate a judged turn.
 reply_summary_fits_restatement() {  # text
-  local words
-  words="$(_reply_summary_words "${1-}" 0)" || return 1
+  local counts words
+  counts="$(_reply_summary_word_counts "${1-}")" || return 1
+  words="${counts%% *}"
   (( words <= reply_summary_restatement_max_words ))
 }
 

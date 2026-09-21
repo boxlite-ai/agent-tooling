@@ -2,8 +2,8 @@
 # Tests for .agents/hooks/stop-gate.sh, the Stop hook that runs the small-reply rule
 # around preflight-verdict-check.sh.
 #
-#   - judged allow + last reply over 60 words  -> continue once with the editable
-#     of prose                                    reply-summary prompt
+#   - judged allow + paragraph over 80 words  -> continue once with the editable
+#     or list item over 40 words                 reply-summary prompt
 #   - that reply, at most 120 words counting   -> ends the turn; the verdict check is
 #     code blocks, no tool since the ask          not run again
 #   - anything else                            -> the verdict check's own output, exit
@@ -166,9 +166,70 @@ logged_rung() {  # repo session "rung outcome"
   grep -q " $3\$" "$(session_state_path "$1" verdict-decisions.log "$2")" 2>/dev/null
 }
 
-long_reply="$(printf 'word%.0s ' {1..61})"
+long_reply="$(printf 'word%.0s ' {1..81})"
 short_reply="Done: the gate asks for a small closing reply. Say go to commit."
 long_claim="$(printf 'more%.0s ' {1..121})and the root cause is the stale index."
+
+printf '## Summary requests follow text-block density\n'
+check_summary_density() {  # name reply ask|skip
+  local name="$1" reply="$2" expected="$3" repo output status
+  repo="$(new_repo "density-$name")"
+  append_assistant "$repo" "$reply"
+  output="$(gate_stop "$repo" "density-$name" false "$reply" NO claude)"
+  status=$?
+  if [[ "$expected" == ask ]]; then
+    [[ "$status" == 0 ]] && asked "$output"
+  else
+    [[ "$status" == 0 ]] && judged_without_ask "$output" "$repo"
+  fi
+  expect "$name: $expected summary" "$?" "status=$status out=$output"
+  rm -rf "$repo"
+}
+check_summary_density "80-word paragraph" "$(printf 'word%.0s ' {1..80})" skip
+check_summary_density "81-word paragraph" "$(printf 'word%.0s ' {1..81})" ask
+check_summary_density "two 60-word paragraphs" \
+  "$(printf 'word%.0s ' {1..60}; printf '\n\n'; printf 'word%.0s ' {1..60})" skip
+check_summary_density "40-word bullet" "- $(printf 'word%.0s ' {1..40})" skip
+check_summary_density "41-word bullet" "- $(printf 'word%.0s ' {1..41})" ask
+check_summary_density "ten short bullets" \
+  "$(for item in {1..10}; do printf -- '- '; printf 'word%.0s ' {1..20}; printf '\n'; done)" skip
+check_summary_density "ten short numbered items" \
+  "$(for item in {1..10}; do printf '%s. ' "$item"; printf 'word%.0s ' {1..20}; printf '\n'; done)" skip
+check_summary_density "200-word table" \
+  "$(printf '| Result | Details |\n| --- | --- |\n| Done | '; printf 'word%.0s ' {1..200}; printf '|\n')" skip
+check_summary_density "200-word table without outer pipes" \
+  "$(printf 'Result | Details\n--- | ---\nDone | '; printf 'word%.0s ' {1..200}; printf '\n')" skip
+check_summary_density "soft-wrapped 81-word paragraph" \
+  "$(printf 'word%.0s ' {1..40}; printf '\n'; printf 'word%.0s ' {1..41})" ask
+check_summary_density "wrapped 41-word bullet" \
+  "$(printf -- '- '; printf 'word%.0s ' {1..20}; printf '\n  '; printf 'word%.0s ' {1..21})" ask
+check_summary_density "41-word numbered item" "1. $(printf 'word%.0s ' {1..41})" ask
+check_summary_density "70-character Chinese paragraph" "$(printf '长%.0s' {1..70})" skip
+check_summary_density "41-character Chinese bullet" "- $(printf '长%.0s' {1..41})" ask
+check_summary_density "two paragraphs inside one 50-word bullet" \
+  "$(printf -- '- '; printf 'word%.0s ' {1..25}; printf '\n\n  '; printf 'word%.0s ' {1..25})" ask
+check_summary_density "40-word bullet followed by a 60-word paragraph" \
+  "$(printf -- '- '; printf 'word%.0s ' {1..40}; printf '\n\n'; printf 'word%.0s ' {1..60})" skip
+check_summary_density "headings separate short paragraphs" \
+  "$(printf 'word%.0s ' {1..60}; printf '\n# Next\n'; printf 'word%.0s ' {1..60})" skip
+check_summary_density "a pipe does not make prose a table" \
+  "$(printf 'left | right '; printf 'word%.0s ' {1..79})" ask
+check_summary_density "a table does not hide a following dense bullet" \
+  "$(printf '| Result | Details |\n| --- | --- |\n| Done | Clear |\n\n- '; printf 'word%.0s ' {1..41})" ask
+check_summary_density "a bullet interrupts a table without a blank line" \
+  "$(printf '| Result | Details |\n| --- | --- |\n| Done | Clear |\n- left | right '; printf 'word%.0s ' {1..39})" ask
+check_summary_density "table body rows can omit pipes" \
+  "$(printf '| Result | Details |\n| --- | --- |\n'; printf 'word%.0s ' {1..200})" skip
+check_summary_density "a single-column table is excluded" \
+  "$(printf '| Details |\n| --- |\n| '; printf 'word%.0s ' {1..200}; printf '|\n')" skip
+check_summary_density "mismatched table columns remain prose" \
+  "$(printf '| Result | Details |\n| --- |\n| '; printf 'word%.0s ' {1..81}; printf '|\n')" ask
+check_summary_density "a block quote interrupts a table" \
+  "$(printf '| Result | Details |\n| --- | --- |\n| Done | Clear |\n> '; printf 'word%.0s ' {1..81})" ask
+check_summary_density "nested fence markers stay inside their fence" \
+  "$(printf '\140\140\140\140text\n\140\140\140\n'; printf 'word%.0s ' {1..200}; printf '\n\140\140\140\140\n')" skip
+check_summary_density "a fenced block does not hide following dense prose" \
+  "$(printf '\140\140\140text\nexample\n\140\140\140\n'; printf 'word%.0s ' {1..81})" ask
 
 printf '## Claude Code: ask as context, then end on the small reply\n'
 S="context"; R="$(new_repo "$S")"
@@ -241,7 +302,7 @@ append_assistant "$R" "$overshoot"
 rm -f "$R/CLASSIFIER_RAN"
 out="$(gate_stop "$R" "$S" true "$overshoot" YES claude)"
 ended_unjudged "$out" "$R"
-expect "an answer up to twice the trigger threshold still ends as a restatement" \
+expect "an answer within the independent 120-word bound still ends as a restatement" \
   "$?" "out=$out classifier=$(classifier_ran "$R")"
 rm -rf "$R"
 
@@ -327,7 +388,7 @@ INJECT
 }
 S="superseded-decision"; R="$(new_repo "$S")"
 append_assistant "$R" "$long_reply"
-INJECT_BASH_ENV="$(epoch_moves_before reply_summary_is_long)"
+INJECT_BASH_ENV="$(epoch_moves_before reply_summary_is_dense)"
 out="$(gate_stop "$R" "$S" false "$long_reply" NO claude)"
 rm -f "$INJECT_BASH_ENV"; INJECT_BASH_ENV=""
 not_asked "$out" && [[ ! -e "$(session_state_path "$R" reply-summary-ask "$S")" ]]
@@ -345,11 +406,11 @@ rm -rf "$R"
 
 # Chinese and Japanese count one word per character.
 S="unspaced-long"; R="$(new_repo "$S")"
-unspaced_long="$(printf '长%.0s' {1..70})"
+unspaced_long="$(printf '长%.0s' {1..81})"
 append_assistant "$R" "$unspaced_long"
 out="$(gate_stop "$R" "$S" false "$unspaced_long" NO claude)"
 asked "$out"
-expect "a Chinese reply of 70 characters is long enough to ask" "$?" "out=$out"
+expect "a Chinese paragraph of 81 characters is dense enough to ask" "$?" "out=$out"
 rm -rf "$R"
 
 S="unspaced-answer"; R="$(new_repo "$S")"

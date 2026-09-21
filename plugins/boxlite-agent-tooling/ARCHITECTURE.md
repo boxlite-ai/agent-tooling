@@ -21,7 +21,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | A denial naming the required description shape, then a request for the human's typed `reviewed:` acknowledgment. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
-| Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | Nothing on PASS, unless the last reply runs over 60 words of prose: then one request using the reply-summary prompt template. The findings on FAIL. See the decision table below. |
+| Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | Nothing on PASS, unless the last reply has a paragraph over 80 words or a list item over 40: then one request using the reply-summary prompt template. The findings on FAIL. See the decision table below. |
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
 | Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
 
@@ -132,7 +132,7 @@ than one session can share a checkout.
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Reply-summary ask: prompt epoch, how the request went out, and the judged turn's tool count (`.agents/lib/reply-summary.sh`).
 - Stop gate to verdict check: `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/preflight-verdict-check.sh` and passes its output, stderr and exit status through. It learns which rung decided from the `VERDICT_DECISION_OUT` file it names.
-- Summary wording: edit `.agents/prompts/reply-summary.md` in the active plugin checkout. `.agents/lib/reply-summary.sh` reads it on each request through `subagent_prompt`, substituting `{{max_words}}` with the gate's word threshold. Edits take effect on the next request without changing the hook; the threshold and restatement checks remain in code. A missing, empty, or unrenderable prompt reports stderr and leaves the verdict check's result intact, without recording an ask.
+- Summary wording: edit `.agents/prompts/reply-summary.md` in the active plugin checkout. `.agents/lib/reply-summary.sh` reads it on each request through `subagent_prompt`, substituting `{{max_words}}` with the summary's 60-word prose budget. The trigger separately measures paragraphs over 80 words or list items over 40, joining soft-wrapped lines and excluding headings, Markdown tables and fenced blocks. This is a readability heuristic; the prompt can skip an unnecessary summary. A missing, empty, or unrenderable prompt reports stderr and leaves the verdict check's result intact, without recording an ask.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`. One refresh runs at a time, held by `.git/agent-tooling/.refresh.lock` (`scripts/refresh-installation.sh:31`), and a refresh that finds it held skips. Breaking that lock would race its holder, so one left behind by a killed run is reported rather than cleared: `scripts/verify-installation.sh:22`, which every commit and push runs, names it once it is an hour old. Without that, the automatic refresh is dead and only a log nobody reads would say so.
 
 ## Invariants
@@ -140,7 +140,7 @@ than one session can share a checkout.
 Often stated as an absence. Each names the line that states or enforces it.
 
 - A gate never produces the verdict it checks. `.agents/hooks/preflight-commit-push.sh:6`
-- A PASS never reaches the model: nothing of a consumed PASS or its advisories is shown to the model, and advisories go to the human only. After a long reply the model sees only the request for the result in few words. `.agents/hooks/preflight-verdict-check.sh:17`
+- A PASS never reaches the model: nothing of a consumed PASS or its advisories is shown to the model, and advisories go to the human only. After a dense reply the model sees only the request for the result in few words. `.agents/hooks/preflight-verdict-check.sh:17`
 - A stale or mismatched turn dossier is discarded, never blocked on. `.agents/hooks/preflight-verdict-check.sh:28`
 - A turn the gate cannot read ends unjudged under `blind-allow`, never blocked. `.agents/hooks/preflight-verdict-check.sh:52`
 - A message is never judged twice. `.agents/hooks/preflight-verdict-check.sh:61`
@@ -190,7 +190,7 @@ first.
 | triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2155 |
 | regex | none-allow | No model reachable and no fallback pattern matched. | 2163 |
 | regex | match-block | No model reachable and a fallback pattern matched. | 2167 |
-| summary | ask-continue | The verdict check ended on overridden, PASS, IN_PROGRESS, NO or none, the last reply runs over 60 words of prose, and the previous Stop did not ask. The turn continues once: `additionalContext` on Claude Code, `decision: block` elsewhere. | 205 |
+| summary | ask-continue | The verdict check ended on overridden, PASS, IN_PROGRESS, NO or none, the last reply has a paragraph over 80 words or a list item over 40, and the previous Stop did not ask. The turn continues once: `additionalContext` on Claude Code, `decision: block` elsewhere. | 205 |
 
 Dossier shape, from `.claude/agents/verdict-auditor.md`: `branch`, `head`, `tree_hash`,
 `generation`, a `verdict` of `PASS`, `FAIL` or `IN_PROGRESS`, and `findings`. The
