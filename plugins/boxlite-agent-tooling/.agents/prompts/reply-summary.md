@@ -2,7 +2,7 @@
 name: reply-summary
 used-by: .agents/lib/reply-summary.sh
 placeholders: max_words
-description: Closing reply requested after a long, judged response.
+description: Closing reply requested after a dense, judged response.
 ---
 
 Walls of text are forbidden. Skip the summary if the reply is already concise and easy to scan.

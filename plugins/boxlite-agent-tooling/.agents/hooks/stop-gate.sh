@@ -5,7 +5,7 @@
 #      since the ask: it restates a turn the verdict check already judged.
 #   2. preflight-verdict-check.sh judges the turn. Its block, error or allow is the
 #      answer, except that
-#   3. an allow that followed a judgment, on a last reply over 60 words, continues the
+#   3. an allow that followed a judgment, on a last reply with a dense block, continues the
 #      turn once with the closing-reply prompt in .agents/prompts/reply-summary.md.
 # The reply-summary rule and its record live in .agents/lib/reply-summary.sh. Both
 # decisions here join the verdict check's per-session decision log.
@@ -184,7 +184,7 @@ ask_is_due() {
   [[ -z "$verdict_output" ]] \
     || printf '%s' "$verdict_output" | jq -e '(.decision // "") != "block"' >/dev/null 2>&1 \
     || return 1
-  reply_summary_is_long "$last_assistant_message" || length_status=$?
+  reply_summary_is_dense "$last_assistant_message" || length_status=$?
   (( length_status == 0 ))
 }
 ask_for_reply_summary() {
