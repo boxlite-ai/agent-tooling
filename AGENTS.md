@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=af7481f363b2-dirty sha256=958e059bf437 -->
+<!-- agent-tooling:guidance:begin rev=344daafa3c65-dirty sha256=d4f957109006 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -86,7 +86,7 @@ Every change goes: understand → research → design → implement → test →
 
 - Help the human understand quickly. Choose a call graph, sequence diagram, real example, bullets, table, or short prose—whichever explains the point best. These are recommendations, not mandatory forms; do not force a diagram, source annotations, or fixed sections.
 - Walls of text are always forbidden. Keep paragraphs and items short, remove repetition, and link detailed evidence. Requests for depth allow more focused sections, not dense text. Keep material risks, failures, and uncertainty visible.
-- PR descriptions: state the problem, resulting behavior, and decisive verification once. Keep the whole body within 200 words and 2000 characters, including diagrams and Markdown. Omit work logs, file inventories, and exhaustive test counts. Repository templates are starting points; use any clearer form.
+- Every PR description must explain how the change produces its intended result through the key steps or decisions, using the form best suited to that PR. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Review the explanation against the diff, including for drafts and after description edits. Keep the whole body within 200 words and 2000 characters, including diagrams and Markdown. Link detailed evidence; omit work logs and exhaustive test counts. Repository templates are starting points.
 
 Adapted from Clean Code (Robert C. Martin) via the polygala-inc AGENTS.md distillation.
 <!-- agent-tooling:guidance:end -->

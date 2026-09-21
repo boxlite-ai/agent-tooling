@@ -6,7 +6,7 @@ name: Author review
 # own check has a different name: issue_comment jobs run on the default branch.
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review, closed]
+    types: [opened, reopened, edited, synchronize, ready_for_review, closed]
   issue_comment:
     types: [created, edited, deleted]
   merge_group:

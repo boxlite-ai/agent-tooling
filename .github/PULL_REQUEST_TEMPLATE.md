@@ -1,7 +1,10 @@
 ## Summary
 
-<!-- Explain the problem and result. Use bullets, a real example, a table,
-call graph, sequence diagram, or short prose—whichever is clearest.
+<!-- Explain the problem, how the change works, and the result. Use bullets, a real
+example, a table, call graph, sequence diagram, or short prose—whichever best
+explains this PR to the reviewer.
+Show the key steps or decisions that produce the result; listing files is not an explanation.
+Check drafts and description edits too: does this explanation match the diff?
 These headings are optional. No diagram or source annotation is required.
 Keep the whole body within 200 words and 2000 characters. No walls of text. -->
 

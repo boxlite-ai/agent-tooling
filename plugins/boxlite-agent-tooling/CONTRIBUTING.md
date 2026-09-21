@@ -15,11 +15,16 @@ The preflight hook's denials point here as `CONTRIBUTING.md #commit--pr-messages
 
 ### Pull request descriptions
 
-Help a human understand the change quickly. Use a call graph, sequence diagram,
-real example, bullets, table, or short prose—whichever makes the point clearest.
+Every PR description must explain how the change produces its intended result. Use a
+call graph, sequence diagram, real example, bullets, table, or short prose—whichever
+best explains that PR.
 No diagram, Before/After layout, source annotation, or section order is mandatory.
 
-- Lead with the problem and resulting behavior. Explain each fact once.
+- Lead with the problem and resulting behavior, then explain the key steps or
+  decisions that produce that result. Listing modified files is not an explanation.
+  Explain each fact once.
+- Before creating a PR (including drafts) and after editing its description, check:
+  **Does the description accurately explain the mechanism shown in the diff?**
 - Keep the entire description within **200 words and 2000 characters**, including
   diagrams and Markdown. Walls of text are forbidden; splitting one into many
   bullets or hiding it in a collapsed section does not make it concise.
@@ -45,16 +50,20 @@ reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a n
 unedited comment. Once `Author reviewed the PR` passes, the author can click
 **Ready for review**. A new push or editing/deleting the only acknowledgment
 returns the PR to draft and requires a fresh comment. Forks use the same flow.
-Maintainer approval remains separate.
+Both the local acknowledgment prompt and GitHub comment ask the explanation question.
+GitHub PR edits refresh the review instructions; acknowledgments still bind to the
+commit SHA, so a description edit alone does not revoke one. Description quality is
+a human review criterion. Maintainer approval remains separate.
 
 Illustrative example; the behavior and test results are hypothetical:
 
 ````markdown
 Reduce routine SDK CI work while keeping the full compatibility matrix weekly.
 
+- The workflow selects a reduced SDK matrix for PRs and the full matrix for weekly
+  and manual runs.
 - PR changing both SDKs: 21 jobs → 11.
 - Every supported version still runs on Linux x64; macOS/ARM use the latest version.
-- Full cross-platform combinations run weekly and on manual requests.
 
 Verification: `make test:apps:infra` → passed. Hosted CI timing has not been measured.
 ````

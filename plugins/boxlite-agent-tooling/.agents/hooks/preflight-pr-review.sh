@@ -1462,24 +1462,38 @@ if [[ ! -r "$state_lib" ]]; then
 fi
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$state_lib"
+subagent_lib="$tooling_root/.agents/lib/subagent.sh"
+if [[ ! -r "$subagent_lib" ]]; then
+  printf 'preflight-pr-review: prompt loader is unavailable: %s\n' "$subagent_lib" >&2
+  exit 2
+fi
+# shellcheck source=../lib/subagent.sh
+source "$subagent_lib"
 marker_selection=""
 marker_selected_identity=""
 
-# If caller-controlled path/ref length pushes a diagnostic over the context budget,
-# retain a complete recovery protocol without echoing those values again. A generic
-# "read CONTRIBUTING" denial is fail-closed but unsatisfiable: neither host can infer
-# the typed acknowledgment or marker shape needed for the retry.
-bounded_ack_recovery="PR-review acknowledgment required; the detailed diagnostic exceeded 1200 bytes.
-Use AskUserQuestion on Claude or request_user_input on Codex. Ask the human to choose
-Other and type:
-  reviewed: <one-line summary in their own words of what this PR changes>
-Read the free-form Other text (Claude calls it notes). If it starts with 'reviewed: ',
-write it verbatim to .agents/state/pr-reviewed.json under the project root as:
-  { \"branch\": \"<current branch>\", \"head\": \"<current HEAD>\",
-    \"message\": \"<verbatim Other text>\" }
-Then retry the same gh command. Abort means no write or retry; Show me the diff means
-show the current diff/log and re-ask. Invalid text means re-ask without writing.
-Never infer the acknowledgment. Never fabricate, paraphrase, or pre-fill it."
+load_review_prompt() { # prompt name, tooling root, optional key=value pairs
+  local rendered
+  rendered="$(subagent_prompt "$@")" || return 2
+  if [[ "$rendered" != *[![:space:]]* ]]; then
+    printf 'preflight-pr-review: empty prompt: %s/.agents/prompts/%s.md\n' "$2" "$1" >&2
+    return 2
+  fi
+  printf '%s' "$rendered"
+}
+
+# Render before selecting or consuming the acknowledgment. The same document handles
+# normal denials and long-ref recovery, so the review question cannot drift out of one.
+review_question="$(load_review_prompt pr-review-question "$tooling_root")" || exit 2
+description_guidance="$(load_review_prompt pr-description-guidance "$tooling_root")" || exit 2
+ack_instruction="$(load_review_prompt pr-review-ack "$tooling_root" \
+  "review_question=$review_question" "context= for gh pr $subcmd; bind $branch@$head")" || exit 2
+bounded_ack_recovery="$(load_review_prompt pr-review-ack "$tooling_root" \
+  "review_question=$review_question" "context=; the detailed diagnostic exceeded 1200 bytes")" || exit 2
+if (( $(LC_ALL=C printf '%s' "$bounded_ack_recovery" | wc -c) > 1200 )); then
+  printf 'preflight-pr-review: rendered pr-review-ack.md recovery exceeds 1200 bytes\n' >&2
+  exit 2
+fi
 
 cleanup_marker_selection() {
   if [[ -n "$marker_selection" && -n "$marker_selected_identity" ]]; then
@@ -1629,48 +1643,25 @@ while (( body_index < protected_body_count )); do
   # Bound the argument before passing it to jq. A valid 2000-character UTF-8
   # body uses at most 8000 bytes, regardless of the shell's character locale.
   if (( ${#pr_body} > 8000 )); then
-    deny "PR description is too long. Keep it within 200 words and 2000 characters; link detailed evidence. No diagram is required."
+    deny "PR description is too long.
+${description_guidance}"
   fi
   # --arg preserves UTF-8 across read-buffer boundaries on Apple's jq 1.7.1;
   # raw slurp can replace a split multibyte character and overcount the body.
   body_stats="$(jq -nr --arg body "$pr_body" '$body | [([scan("\\S+")] | length), length] | @tsv')"
   IFS=$'\t' read -r body_words body_characters <<<"$body_stats"
   if (( body_words == 0 )); then
-    deny "PR description is empty. Briefly explain the change and its verification; no diagram is required."
+    deny "PR description is empty.
+${description_guidance}"
   fi
   if (( body_words > 200 || body_characters > 2000 )); then
     deny "PR description is too long (${body_words} words, ${body_characters} characters).
-Keep the whole body within 200 words and 2000 characters, including diagrams and comments.
-Use bullets, a real example, a table, short prose, or a diagram—whichever is clearest.
-No diagram is required. Keep material risks and verification visible; link detailed evidence.
-See CONTRIBUTING.md #commit--pr-messages."
+${description_guidance}"
   fi
   body_index=$((body_index + 1))
 done
 
-# The acknowledgment UX is repeated on every missing/stale/malformed-marker
-# denial. Keep the typed `reviewed:` shape, Other/notes transport, marker binding,
-# abort/diff branches, and anti-fabrication rule inside the 1200-byte reason cap.
-# Do not interpolate the raw command or marker contents; either can be unbounded.
 REQUIRED_MESSAGE_RE='^reviewed:[[:space:]]+[^[:space:]]'
-
-ack_instruction="PR-review acknowledgment required for gh pr ${subcmd}; bind ${branch}@${head}.
-Use the host's native input tool (AskUserQuestion on Claude; request_user_input on
-Codex). Ask the human to confirm the PR template has no internal/AI narrative,
-pasted logs, or secrets; they must choose 'Other' and type:
-  reviewed: <one-line summary in their own words of what this PR changes>
-Options: 'Abort' and 'Show me the diff'.
-Read the free-form Other text from the tool result (Claude calls it notes); never
-infer it from chat or an option selection.
-
-If that text matches ${REQUIRED_MESSAGE_RE}, write it verbatim to
-.agents/state/pr-reviewed.json under the project root as:
-  { \"branch\": \"<bound branch>\", \"head\": \"<bound HEAD>\",
-    \"message\": \"<verbatim notes>\" }
-Then retry the same gh command. Abort means no write/retry. Show me the diff: run
-git diff main...HEAD --stat and git log main..HEAD --oneline, then re-ask. Invalid
-text: re-ask without writing/retrying.
-Never infer the acknowledgment. Never fabricate, paraphrase, or pre-fill it."
 # ─────────────────────────────────────────────────────────────────────────────
 
 marker_selection="${marker_file}.inspect-$$-${RANDOM:-0}"
