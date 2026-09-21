@@ -5,8 +5,12 @@ placeholders:
 description: Writing guidance returned with empty or oversized PR-body denials.
 ---
 
-Explain how the change produces its intended result through the key steps or
-decisions. Choose the form best suited to the PR; listing modified files is not an
-explanation. No diagram is required. Include decisive verification and material risks.
-Keep the whole body within 200 words and 2000 characters, including Markdown and
-comments. Link detailed evidence. See CONTRIBUTING.md #commit--pr-messages.
+Walls of text are forbidden. Prefer: visuals > tables > bullets > prose.
+Choose the form that explains the PR best. No diagram is required.
+
+Explain how the key steps or decisions produce the intended result.
+Always include a brief real example when it helps the reviewer understand.
+
+Include decisive verification and material risks; link detailed evidence.
+Keep the whole body within 200 words and 2000 characters, including Markdown and comments.
+See CONTRIBUTING.md #commit--pr-messages.
