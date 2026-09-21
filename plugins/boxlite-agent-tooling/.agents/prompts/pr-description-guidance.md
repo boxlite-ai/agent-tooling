@@ -12,5 +12,4 @@ Explain how the key steps or decisions produce the intended result.
 Always include a brief real example when it helps the reviewer understand.
 
 Include decisive verification and material risks; link detailed evidence.
-Keep the whole body within 200 words and 2000 characters, including Markdown and comments.
 See CONTRIBUTING.md #commit--pr-messages.
