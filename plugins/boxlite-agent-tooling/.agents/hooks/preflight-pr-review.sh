@@ -1686,19 +1686,8 @@ Run one direct literal gh pr create/edit/ready command per tool call (command,
 exec, or env wrappers are supported). Nothing from this command was authorized."
 fi
 
-size_context="$(jq -nc --arg root "$repo_root" --arg project "$project_dir" --arg tooling "$tooling_root" \
-  --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
-  '{root:$root,project:$project,tooling:$tooling,session:$session}')"
-size_status=0
-size_reason="$(pr_size_check "$size_context" "${protected_size_args[@]}")" || size_status=$?
-if (( size_status )); then
-  [[ -n "$size_reason" ]] || size_reason="PR size check failed; nothing was authorized."
-  # Size prompts have their own recovery; never replace them with review approval.
-  jq -nc --arg reason "$size_reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
-  exit 0
-fi
-(( protected_ack_count > 0 )) || exit 0
-
+# Drafts skip title/review requirements; all PRs still require size validation.
+if (( protected_ack_count > 0 )); then
 # Defense in depth for the create prefix above: an interactive editor or
 # repository template is outside this pre-execution boundary. Ready/edit
 # operations may omit a body because they do not create one implicitly.
@@ -1757,6 +1746,22 @@ $writing_guidance"
   fi
   body_index=$((body_index + 1))
 done
+
+fi
+
+size_context="$(jq -nc --arg root "$repo_root" --arg project "$project_dir" --arg tooling "$tooling_root" \
+  --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
+  '{root:$root,project:$project,tooling:$tooling,session:$session}')"
+size_status=0
+size_reason="$(pr_size_check "$size_context" "${protected_size_args[@]}")" || size_status=$?
+if (( size_status )); then
+  [[ -n "$size_reason" ]] || size_reason="PR size check failed; nothing was authorized."
+  # Size prompts have their own recovery; never replace them with review approval.
+  jq -nc --arg reason "$size_reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+  exit 0
+fi
+
+(( protected_ack_count > 0 )) || exit 0
 
 mkdir -p "$project_dir/.agents/state" || exit 2
 request_spec="$(jq -nc --arg repo "$repo_root" --arg branch "$branch" --arg head "$head" \

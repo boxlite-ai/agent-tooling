@@ -34,6 +34,10 @@ call_hook() {
   jq -nc --arg command "$1" '{tool_input:{command:$command}}' \
     | bash "$plugin/.agents/hooks/preflight-pr-review.sh"
 }
+long_body="$(printf 'word %.0s' {1..81})"
+out="$(call_hook "gh pr create --title 'feat: validate text first' --body '$long_body'")"
+[[ "$out" == *'paragraph'* && "$out" != *'401'* ]] \
+  || { printf 'FAIL: size lookup preceded invalid-body rejection\n' >&2; exit 1; }
 out="$(call_hook 'gh pr create --draft --title wip --body "Fixture change."')"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision // empty' <<<"$out")" == deny ]] \
   || { printf 'FAIL: 401-line draft creation was allowed\n' >&2; exit 1; }
