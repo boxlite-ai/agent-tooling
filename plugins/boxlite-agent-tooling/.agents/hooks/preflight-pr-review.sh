@@ -2,7 +2,7 @@
 # PreToolUse hook: keep published GitHub writing as concise as reply summaries,
 # then gate `gh pr create` / `edit` / `ready` on a typed review acknowledgment.
 #
-# Draft PRs skip acknowledgment but still pass the writing check.
+# Draft PRs skip acknowledgment but must pass the writing and size checks.
 #
 # Flow on a missing-review denial:
 #   1. Hook denies the gh tool call.
@@ -90,6 +90,7 @@ inspect_github_writing() { # first gh argument index, literal context (default 1
 protected_count=0
 protected_subcmds=()
 protected_drafts=()
+protected_size_args=()
 protected_title_count=0
 protected_titles=()
 protected_title_dynamics=()
@@ -575,6 +576,7 @@ inspect_simple_command() {
   [[ "$subcmd" == create || "$subcmd" == edit || "$subcmd" == ready ]] \
     || return 0
 
+  protected_size_args=("${shell_words[@]:$subcmd_index}")
   command_slot="$protected_count"
   index=$((subcmd_index + 1))
 
@@ -1525,9 +1527,10 @@ if [[ -z "$subcmd" ]]; then
   if (( opaque_protected_count == 0 \
      && ambiguous_execution_context == 0 \
      && parsed_simple_count == 1 )); then
-    exit 0
+    subcmd="create"
+  else
+    subcmd="operation"
   fi
-  subcmd="operation"
 fi
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -1555,6 +1558,10 @@ timed_lib="$tooling_root/.agents/lib/timed-user-prompt.sh"
 [[ -r "$timed_lib" ]] || { printf 'preflight-pr-review: timed prompt library missing\n' >&2; exit 2; }
 # shellcheck source=../lib/timed-user-prompt.sh
 source "$timed_lib"
+size_lib="$tooling_root/.agents/lib/pr-size.sh"
+[[ -r "$size_lib" ]] || { printf 'preflight-pr-review: PR size library missing\n' >&2; exit 2; }
+# shellcheck source=../lib/pr-size.sh
+source "$size_lib"
 marker_selection=""
 marker_selected_identity=""
 
@@ -1679,6 +1686,8 @@ Run one direct literal gh pr create/edit/ready command per tool call (command,
 exec, or env wrappers are supported). Nothing from this command was authorized."
 fi
 
+# Drafts skip title/review requirements; all PRs still require size validation.
+if (( protected_ack_count > 0 )); then
 # Defense in depth for the create prefix above: an interactive editor or
 # repository template is outside this pre-execution boundary. Ready/edit
 # operations may omit a body because they do not create one implicitly.
@@ -1737,6 +1746,22 @@ $writing_guidance"
   fi
   body_index=$((body_index + 1))
 done
+
+fi
+
+size_context="$(jq -nc --arg root "$repo_root" --arg project "$project_dir" --arg tooling "$tooling_root" \
+  --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
+  '{root:$root,project:$project,tooling:$tooling,session:$session}')"
+size_status=0
+size_reason="$(pr_size_check "$size_context" "${protected_size_args[@]}")" || size_status=$?
+if (( size_status )); then
+  [[ -n "$size_reason" ]] || size_reason="PR size check failed; nothing was authorized."
+  # Size prompts have their own recovery; never replace them with review approval.
+  jq -nc --arg reason "$size_reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+  exit 0
+fi
+
+(( protected_ack_count > 0 )) || exit 0
 
 mkdir -p "$project_dir/.agents/state" || exit 2
 request_spec="$(jq -nc --arg repo "$repo_root" --arg branch "$branch" --arg head "$head" \

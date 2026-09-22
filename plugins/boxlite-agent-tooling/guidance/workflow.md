@@ -29,6 +29,19 @@ Every change goes: understand → research → design → implement → test →
 - Only what's used (Occam's razor) — design the simplest API that meets current requirements; no future-proofing. Delete dead code immediately.
 - No premature optimization — measure first.
 
+**PR size and decomposition (hard requirement)**
+
+- Target 100–200 changed lines; maximum 400 additions + deletions across the entire PR against its intended base. Count tests, docs, and generated text. Drafts have the same limit; splitting commits does not reduce PR size.
+- Estimate before implementing; measure before creating a PR and before each update. If the base or size cannot be determined, resolve that uncertainty before publishing. Never omit tests, compress code, or hide changes to meet the limit.
+- For work exceeding the limit, prepare a concrete split plan. Create a parent GitHub issue and child issues with scope, dependencies, acceptance criteria, and estimated size; group them in a milestone, using a Project for multiple workstreams.
+- Each child becomes a coherent, working PR within the limit, including its relevant tests. Link the child and parent issues. Implement and validate one slice at a time; re-plan if a slice grows beyond the limit.
+- A human developer may authorize an oversized PR only after seeing its measured size, exact base/head, and proposed split. Ask once, without a preselected approval, for a typed response: `pr-size-exception: <specific reason this change must remain one PR>`.
+- The reason must identify the affected change, the concrete constraint, and why the proposed split is unsafe or impractical. Bare approvals, “urgent,” “too much work,” and generic convenience claims do not qualify. Never invent, paraphrase, or pre-fill the developer's reason.
+- Wait up to **3 minutes** from that question using a non-blocking prompt and an actual deadline. Continue reversible split preparation while waiting. Invalid replies do not restart the timer; an explicit cancellation or revised user instruction takes precedence.
+- Without a valid exception by the deadline, automatically follow the split plan and continue with small PRs; do not end the task waiting for permission. Silence is never approval for an oversized PR. If timed prompting is unavailable, keep the size limit and continue splitting.
+- Bind an exception to the shown repository, base/head, and measured diff; any change to that diff invalidates it. Preserve the developer's exact reason with that context in the PR description and parent issue. An exception waives only size, never tests, review, or `reviewed:` acknowledgment.
+- A late reply cannot authorize the expired request or unrelated slices. Reassess the current work before requesting any new exception; never repeat the same request merely to extend the deadline.
+
 **Implement**
 
 - Boring code — obvious > clever. Code is read more than written.

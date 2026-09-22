@@ -28,13 +28,27 @@ trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_PROJECT_DIR="$TMP"
 mkdir -p "$TMP/.agents/state"
 
-# The hook resolves its repo from the AMBIENT cwd, while the marker below is
-# keyed to REPO_ROOT's branch and HEAD. Invoked from anywhere else the two
-# disagree, every marker looks stale, and the suite reports 42/12 instead of
-# 54/0 — green-looking from here, wrong from there. Pin cwd so they match.
-cd "$REPO_ROOT" || exit 1
-BRANCH="$(git -C "$REPO_ROOT" branch --show-current)"
-HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+# Use a real branch in an isolated checkout; GitHub is a small-PR test double.
+# The hook still comes from THIS suite's plugin, not from the fixture checkout.
+git init -q -b feature "$TMP/repo"
+git -C "$TMP/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m fixture
+cd "$TMP/repo" || exit 1
+BRANCH="$(git branch --show-current)"
+HEAD_SHA="$(git rev-parse HEAD)"
+mkdir "$TMP/gh-bin"
+cat > "$TMP/gh-bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$*" in
+  'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
+  'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
+  'api repos/example/repo/compare/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[]}' ;;
+  'pr view '*) jq -nc --arg sha "$(git rev-parse HEAD)" --arg branch "$(git branch --show-current)" \
+    '{baseRefOid:$sha,headRefOid:$sha,headRefName:$branch,additions:0,deletions:0}' ;;
+  *) exit 2 ;;
+esac
+GH
+chmod +x "$TMP/gh-bin/gh"
+export PATH="$TMP/gh-bin:$PATH"
 
 pass=0
 fail=0
@@ -887,7 +901,7 @@ echo "## Review prompts are loaded at the public hook boundary"
 fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
-cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-size}.sh "$fixture_plugin/.agents/lib/"
 cp "$REPO_ROOT/.agents/prompts/concise-writing.md" "$fixture_plugin/.agents/prompts/"
 cp "$REPO_ROOT/.agents/prompts/timed-user-prompt.md" "$fixture_plugin/.agents/prompts/"
 HOOK="$fixture_plugin/.agents/hooks/preflight-pr-review.sh"
