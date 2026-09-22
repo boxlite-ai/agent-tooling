@@ -54,6 +54,10 @@ timeout fallback for `pr-size-exception:` or `reviewed:` respectively. The libra
 serializes state transitions; its prompt renderer describes an agent-opened,
 non-blocking question. It never waits or opens a host dialog inside the state lock.
 
+The local PR gate uses this lifecycle for `reviewed:` acknowledgments, bound to
+checkout, branch/head, session, and request ID. A retry cannot restart the deadline;
+expiry leaves the PR draft or uncreated, and a successful operation consumes the reply.
+
 PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr-review-question.md`
 supplies the shared explanation check, `.agents/prompts/pr-review-ack.md` supplies both
 normal and bounded local acknowledgment instructions, `.agents/prompts/pr-description-guidance.md`
@@ -153,7 +157,8 @@ than one session can share a checkout.
 - `verdict-stop-message.jsonl`: Codex's Stop message preserved in transcript shape when no transcript exists.
 - `last-audit.json`: the commit or push dossier. `last-audit-handoff.json` carries the gate's request to the auditor.
 - `commit-audit-receipt.json`: the receipt commit-msg publishes and pre-push spends.
-- `pr-reviewed.json`: the typed PR-review acknowledgment, bound to branch and HEAD.
+- `pr-reviewed.json`: the typed PR-review acknowledgment, bound to branch, HEAD, and request ID.
+- `pr-review-request.json`: the review deadline and response lifecycle.
 - `auditor-control`: a directory of escalation, completion, grant and event records for running auditors and overrides.
 - `last-api-failure.json`: the kind of API error that ended a turn.
 - `api-resume`: the recent resumes and the unspent wake hashes of the API-failure resume.

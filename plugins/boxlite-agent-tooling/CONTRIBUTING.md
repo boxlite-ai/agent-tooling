@@ -54,6 +54,8 @@ reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a n
 unedited comment. Once `Author reviewed the PR` passes, the author can click
 **Ready for review**. A new push or editing/deleting the only acknowledgment
 returns the PR to draft and requires a fresh comment. Forks use the same flow.
+The local hook gives each `reviewed:` request three minutes; retries preserve that
+deadline. Expiry leaves the PR draft or uncreated. The GitHub comment flow is separate.
 Both the local acknowledgment prompt and GitHub comment ask the explanation question.
 Acknowledgments bind to the commit SHA, so a description edit alone does not revoke
 one. Description quality is a human review criterion. Maintainer approval remains separate.
