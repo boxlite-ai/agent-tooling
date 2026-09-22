@@ -53,7 +53,7 @@ state="$scratch/repo/.agents/state/pr-size-request.json"
 id="$(jq -r .id "$state")"
 deadline="$(jq -r .deadline "$state")"
 reason='pr-size-exception: This dependency update regenerates 612 lockfile lines; splitting it from the manifest leaves the dependency graph inconsistent.'
-bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" >/dev/null
+"$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" >/dev/null
 [[ -z "$(call_hook 'gh pr create --draft --title wip --body "Fixture change."')" ]]
 [[ "$(jq -r .deadline "$state")" == "$deadline" ]]
 export SIZE_TEST_BASE=1111111111111111111111111111111111111111
