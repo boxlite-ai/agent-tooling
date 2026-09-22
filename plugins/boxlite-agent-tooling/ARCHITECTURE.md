@@ -19,7 +19,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | One compact reply-shape reminder. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
-| Runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | A denial naming the required description shape, then a request for the human's typed `reviewed:` acknowledgment. |
+| Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | A request to shorten unpublishable text. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
 | Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | Nothing on PASS, unless the last reply has a paragraph over 80 words or a list item over 40: then one request using the reply-summary prompt template. The findings on FAIL. See the decision table below. |
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
@@ -27,11 +27,24 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 
 The PR description contract in `CONTRIBUTING.md` requires every PR to explain how
 the change produces its intended result, using the form best suited to the PR.
-The hook requires nonempty, inspectable bodies of at most 200 words and 2000 Unicode
-characters, including Markdown, for non-draft creates and description edits. Drafts,
-body-preserving operations, web/API edits, and later bot additions are outside this
-content check. Clarity remains a reviewer judgment. `guidance/workflow.md` carries
-the same concise-writing rules into consumer instructions.
+The same hook checks PR bodies (including drafts), issue/discussion bodies, comments,
+reviews, close/reopen comments, release notes, and REST body/description fields.
+`.agents/lib/github-writing.sh` applies `.agents/lib/reply-summary.sh`'s shared
+limits: at most 120 words total, paragraphs at most 80 and list items at
+most 40. Fences and tables still count toward the total; Chinese/Japanese characters
+count individually. Empty text and inputs over 8000 shell characters fail closed.
+Denials reuse `.agents/prompts/concise-writing.md`; clarity remains a reviewer judgment.
+
+The existing shell scanner supplies literal argv without executing it. Inline bodies
+are inspectable; body files, stdin, editors, generated text and GraphQL text mutations are
+rejected because their final published text is outside this check. Read-only commands
+and body-preserving operations, including close/reopen without comments, pass through.
+Visible writes behind unsupported launchers fail closed. GraphQL detection skips
+comments and quoted strings and recognizes all ignored token separators.
+This is a hook on recognized `gh`
+commands, not a GitHub server policy: other clients, script files, browser edits and
+later bot additions are outside it. Writing denials never consume an acknowledgment.
+`guidance/workflow.md` carries the same writing rules into consumer instructions.
 
 PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr-review-question.md`
 supplies the shared explanation check, `.agents/prompts/pr-review-ack.md` supplies both
@@ -144,7 +157,7 @@ than one session can share a checkout.
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Reply-summary ask: prompt epoch, how the request went out, and the judged turn's tool count (`.agents/lib/reply-summary.sh`).
 - Stop gate to verdict check: `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/preflight-verdict-check.sh` and passes its output, stderr and exit status through. It learns which rung decided from the `VERDICT_DECISION_OUT` file it names.
-- Summary wording: edit `.agents/prompts/reply-summary.md` in the active plugin checkout. `.agents/lib/reply-summary.sh` reads it on each request through `subagent_prompt`, substituting `{{max_words}}` with the summary's 60-word prose budget. The trigger separately measures paragraphs over 80 words or list items over 40, joining soft-wrapped lines and excluding headings, Markdown tables and fenced blocks. This is a readability heuristic; the prompt can skip an unnecessary summary. A missing, empty, or unrenderable prompt reports stderr and leaves the verdict check's result intact, without recording an ask.
+- Shared writing prompt: edit `.agents/prompts/concise-writing.md` in the active plugin checkout. `.agents/lib/concise-writing.sh` reads it for both Stop and GitHub hooks on each request through `subagent_prompt`, substituting `{{max_words}}` with the summary's 60-word prose budget. The trigger separately measures paragraphs over 80 words or list items over 40, joining soft-wrapped lines and excluding headings, Markdown tables and fenced blocks. This is a readability heuristic; the prompt can skip an unnecessary summary. A missing, empty, or unrenderable prompt reports stderr and leaves the verdict check's result intact, without recording an ask.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`. One refresh runs at a time, held by `.git/agent-tooling/.refresh.lock` (`scripts/refresh-installation.sh:31`), and a refresh that finds it held skips. Breaking that lock would race its holder, so one left behind by a killed run is reported rather than cleared: `scripts/verify-installation.sh:22`, which every commit and push runs, names it once it is an hour old. Without that, the automatic refresh is dead and only a log nobody reads would say so.
 
 - Offline installation repair: `templates/install.sh` routes the recorded cache through

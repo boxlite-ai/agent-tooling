@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The closing reply that stop-gate.sh asks for after a dense one. Source this file; it
-# performs no work on load. Requires sourced verdict-audit-state.sh and subagent.sh,
+# performs no work on load. Requires sourced verdict-audit-state.sh,
 # and perl and jq on PATH; callers own those checks and all reporting.
 #
 # A turn ending on a dense reply gets one more message using the prompt in
-# .agents/prompts/reply-summary.md. The original reply stays as written and the result
+# .agents/prompts/concise-writing.md. The original reply stays as written and the result
 # follows it. A summary that needs a tool to render or send is new tool work, so the
 # verdict check judges that answer as usual.
 # The Stop gate asks only after the verdict check has judged and allowed the turn, or a
@@ -21,8 +21,7 @@
 # Tool calls since the ask are what separate a restatement of an already-judged turn
 # from new work, which the verdict check must judge.
 
-# The prompt's prose budget is independent of what triggers a summary request.
-reply_summary_max_words=60
+# Readability thresholds are independent of the shared prompt's prose budget.
 reply_summary_paragraph_max_words=80
 reply_summary_item_max_words=40
 # The answer to the ask ends unjudged only up to this many words, counted everywhere,
@@ -168,16 +167,6 @@ reply_summary_tool_count() {  # transcript-path scratch-dir
     | jq -r '.evidence_summary.seen // empty' 2>/dev/null)" || return 1
   [[ "$count" =~ ^[0-9]+$ ]] || return 1
   printf '%s' "$count"
-}
-
-reply_summary_request() {  # tooling-root
-  local request
-  request="$(subagent_prompt reply-summary "$1" "max_words=$reply_summary_max_words")" || return $?
-  if [[ "$request" != *[![:space:]]* ]]; then
-    printf 'reply-summary: empty prompt: %s/.agents/prompts/reply-summary.md\n' "$1" >&2
-    return 1
-  fi
-  printf '%s' "$request"
 }
 
 reply_summary_record_ask() {  # record-path prompt-epoch mode tool-count

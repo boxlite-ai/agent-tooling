@@ -99,7 +99,7 @@ rm -f "$TMP/.agents/state/pr-reviewed.json"
 run "ls"                                "ls"                                "passthrough"
 run "gh pr list (different subcmd)"     "gh pr list"                        "passthrough"
 run "gh pr view (different subcmd)"     "gh pr view 123"                    "passthrough"
-run "gh issue create (different verb)"  "gh issue create -t foo"            "passthrough"
+run "gh issue create (different verb)"  "gh issue create -t foo -b Short"            "passthrough"
 run "gh issue operands named pr and ready" \
   "gh issue create --title pr --body ready"                                 "passthrough"
 run "echo literal mention"              "echo 'gh pr create'"               "passthrough"
@@ -121,11 +121,11 @@ run "multiline w/ backtick trigger"     $'git commit -m "fix bug"\n# `gh pr crea
 
 echo
 echo "## Matcher: draft exclusion (only on create)"
-run "gh pr create --draft"              "gh pr create --draft -t wip"       "passthrough"
-run "gh pr create -d short flag"        "gh pr create -d -t wip"            "passthrough"
+run "gh pr create --draft"              "gh pr create --draft -t wip -b Short"       "passthrough"
+run "gh pr create -d short flag"        "gh pr create -d -t wip -b Short"            "passthrough"
 run "draft may carry an explicit body"  "gh pr create --draft --body prose" "passthrough"
 run "draft body may start with a dash"   "gh pr create --draft --body -draft" "passthrough"
-run "draft may use --dry-run"           "gh pr create --draft --dry-run"    "passthrough"
+run "draft may use --dry-run"           "gh pr create --draft --body Short --dry-run"    "passthrough"
 run "noncanonical late draft stays gated" "gh pr create -t wip --draft"     "deny"
 run "label value --draft is not a draft flag" "gh pr create --label --draft" "deny"
 run "short label value -d is not a draft flag" "gh pr create -l -d"          "deny"
@@ -141,8 +141,8 @@ run "command substitution cannot inject a draft=false override" \
   'gh pr create --draft "$(printf -- --draft=false)" --title "not conventional" --body prose' "deny"
 run "compound all-draft source remains execution-ambiguous" \
   'gh pr create --draft && true' "deny"
-run "gh pr create --draft=true"         "gh pr create --draft=true -t wip"  "passthrough"
-run "gh pr create -d=true"              "gh pr create -d=true -t wip"       "passthrough"
+run "gh pr create --draft=true"         "gh pr create --draft=true -t wip -b Short"  "passthrough"
+run "gh pr create -d=true"              "gh pr create -d=true -t wip -b Short"       "passthrough"
 run "-- stops draft option parsing"     "gh pr create -- --draft"           "deny"
 run "-d inside a title is not a draft flag" \
   'gh pr create --title "feat(cli): document the -d option"'               "deny"
@@ -627,8 +627,8 @@ TABLE_BODY=$'| Trigger | Matrix |\n| --- | --- |\n| PR | Focused |\n| Weekly | F
 LEGACY_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
 LONG_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
 LONG_UNSPACED_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
-LIMIT_WORDS_BODY="$(awk 'BEGIN {for (i=1; i<=200; i++) printf "%sx", (i == 1 ? "" : " ")}')"
-LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<2000; i++) printf "字"}')"
+LIMIT_WORDS_BODY="$(printf 'x %.0s' {1..60})"$'\n\n'"$(printf 'x %.0s' {1..60})"
+LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<80; i++) printf "字"}')"
 OVER_WORDS_BODY="$LIMIT_WORDS_BODY x"
 OVER_CHARS_BODY="${LIMIT_CHARS_BODY}字"
 EMOJI_BODY="$(awk 'BEGIN {for (i=0; i<2000; i++) printf "😀"}')"
@@ -660,10 +660,10 @@ WHITESPACE_BODY=$' \n\t'
 run_body "whitespace body → deny" "gh pr create $FEAT --body '$WHITESPACE_BODY'" "deny"
 run_body "oversized description with valid legacy graph → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"
 run_body "unspaced text cannot evade the size limit → deny" "gh pr create $FEAT --body '$LONG_UNSPACED_BODY'" "deny"
-run_body "200 words at the boundary → allow" "gh pr create $FEAT --body '$LIMIT_WORDS_BODY'" "passthrough"
-run_body "201 words → deny" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "deny"
-run_body "2000 Unicode characters at the boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
-run_body "2001 Unicode characters → deny" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "deny"
+run_body "120 words in short paragraphs at the boundary → allow" "gh pr create $FEAT --body '$LIMIT_WORDS_BODY'" "passthrough"
+run_body "121 words → deny" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "deny"
+run_body "80 Chinese characters at the paragraph boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
+run_body "81 Chinese characters → deny" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "deny"
 run_body "2000 four-byte characters → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
 run_body "oversized argument → deny" "gh pr create $FEAT --body '$HUGE_BODY'" "deny"
 run_body "long body edit → deny" "gh pr edit 42 $FEAT --body '$LONG_BODY'" "deny"
@@ -873,14 +873,15 @@ assert_reason_budget "title denial stays bounded" \
 write_marker "reviewed: concise body"
 body_reason="$(reason_for "gh pr create $FEAT --body '$LONG_BODY'")"
 assert_reason_budget "size denial stays bounded" "$body_reason"
-assert_reason_contains "size denial preserves freedom of form" "$body_reason" 'No diagram is required'
+assert_reason_contains "size denial uses reply-summary guidance" "$body_reason" 'visuals > tables > bullets > prose'
 
 echo
 echo "## Review prompts are loaded at the public hook boundary"
 fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
-cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/prompts/concise-writing.md" "$fixture_plugin/.agents/prompts/"
 HOOK="$fixture_plugin/.agents/hooks/preflight-pr-review.sh"
 cat > "$fixture_plugin/.agents/prompts/pr-review-ack.md" <<'PROMPT'
 ---

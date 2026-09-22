@@ -35,11 +35,15 @@ No diagram, Before/After layout, source annotation, or section order is mandator
 - Link the relevant issue when one exists, using `Fixes #<n>` when the PR closes it.
   No issue or inline bug marker is required just to satisfy a format.
 
-The preflight hook checks explicit nonempty bodies for non-draft creates and
-description edits, with its current size checks documented in
-[ARCHITECTURE.md](ARCHITECTURE.md). It does not judge the explanatory form.
-Draft creates, body-preserving operations, web/API edits, and later bot additions
-are outside this content check; the writing rules still apply.
+For issues, comments, reviews, discussions and release notes, use the same
+[reply-summary prompt](.agents/prompts/concise-writing.md).
+
+The preflight hook checks explicit nonempty text, including draft PRs and REST body
+fields. It shares reply-summary's word and density checks; see
+[ARCHITECTURE.md](ARCHITECTURE.md) for the exact scope. Prepare generated text first,
+then pass literal inline text. Files, stdin, editors and GraphQL text mutations cannot
+bind the eventual published text at this boundary. Body-preserving operations need
+no new text. Browser edits and other clients remain outside the hook.
 
 `.github/PULL_REQUEST_TEMPLATE.md` is a starting point, not a required structure.
 Use safe shell quoting for inline bodies: Markdown backticks inside double quotes

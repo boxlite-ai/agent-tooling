@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# PreToolUse hook: gate `gh pr create` / `gh pr edit` / `gh pr ready` on a
-# user-TYPED acknowledgment that they have reviewed the PR.
+# PreToolUse hook: keep published GitHub writing as concise as reply summaries,
+# then gate `gh pr create` / `edit` / `ready` on a typed review acknowledgment.
 #
-# `gh pr create --draft` (and `-d`) is intentionally excluded — draft PRs are
-# not yet requesting review, so no ack is required.
+# Draft PRs skip acknowledgment but still pass the writing check.
 #
-# Flow on a denied attempt:
+# Flow on a missing-review denial:
 #   1. Hook denies the gh tool call.
 #   2. Reason text instructs the parent agent to obtain a TYPED confirmation
 #      from the human (not a yes/no click) and persist it verbatim to
@@ -39,6 +38,50 @@ set -euo pipefail
 
 payload="$(cat)"
 command="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')"
+tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+writing_error=""
+writing_loaded=0
+writing_inspected_count=0
+
+load_writing_policy() {
+  (( writing_loaded == 0 )) || return 0
+  local library dependency
+  for dependency in perl jq; do
+    command -v "$dependency" >/dev/null 2>&1 || {
+      printf 'preflight-pr-review: %s is required for GitHub writing checks.\n' "$dependency" >&2
+      exit 2
+    }
+  done
+  for library in reply-summary.sh github-writing.sh concise-writing.sh; do
+    [[ -r "$tooling_root/.agents/lib/$library" ]] || {
+      printf 'preflight-pr-review: writing library unavailable: %s\n' "$library" >&2
+      exit 2
+    }
+  done
+  # shellcheck source=../lib/reply-summary.sh
+  source "$tooling_root/.agents/lib/reply-summary.sh"
+  # shellcheck source=../lib/github-writing.sh
+  source "$tooling_root/.agents/lib/github-writing.sh"
+  # shellcheck source=../lib/concise-writing.sh
+  source "$tooling_root/.agents/lib/concise-writing.sh"
+  writing_loaded=1
+}
+
+inspect_github_writing() { # first gh argument index, literal context (default 1)
+  local start="$1" cursor="$1" literal="${2:-1}" reason
+  load_writing_policy
+  writing_inspected_count=$((writing_inspected_count + 1))
+  while (( cursor < ${#shell_words[@]} )); do
+    if (( shell_word_dynamics[$cursor] || shell_word_unquoted_globs[$cursor] \
+       || shell_word_redirections[$cursor] )); then
+      literal=0
+    fi
+    cursor=$((cursor + 1))
+  done
+  if ! reason="$(github_writing_check "$literal" "${shell_words[@]:$start}")"; then
+    [[ -n "$writing_error" ]] || writing_error="$reason"
+  fi
+}
 
 # Parse simple commands without `eval`. Keeping quotes as lexical state makes a
 # separator inside title/body data inert, while every real `&&`, `;`, newline,
@@ -502,6 +545,7 @@ inspect_simple_command() {
     opaque_protected_count=$((opaque_protected_count + 1))
     return 0
   fi
+  inspect_github_writing "$index"
   [[ "${shell_words[$index]}" == pr ]] || return 0
   subcmd_index=$((index + 1))
   while (( subcmd_index < word_count )); do
@@ -1057,6 +1101,9 @@ detect_visible_protected_sequence() {
         done
         break
       fi
+      # An unsupported launcher may transform even literal-looking arguments.
+      # Apply the same writing policy, but never authorize its published bytes.
+      inspect_github_writing "$noun_index" 0
       [[ "$token" == pr ]] || break
 
       verb_index=$((noun_index + 1))
@@ -1085,10 +1132,12 @@ detect_visible_protected_sequence() {
 
 finish_simple_command() {
   local protected_before="$protected_count" opaque_before="$opaque_protected_count"
+  local writing_before="$writing_inspected_count"
   finish_shell_word
   inspect_simple_command
   if (( protected_count == protected_before \
-     && opaque_protected_count == opaque_before )); then
+     && opaque_protected_count == opaque_before \
+     && writing_inspected_count == writing_before )); then
     detect_visible_protected_sequence
   fi
   shell_words=()
@@ -1371,7 +1420,28 @@ scan_command_fragment() {
         ;;
       ' '|$'\t'|$'\r') finish_shell_word ;;
       $'\n') finish_simple_command; skip_pending_heredoc ;;
-      ';'|'('|')'|'{'|'}')
+      '{'|'}')
+        # Braces are reserved words, not shell metacharacters. Keep launcher
+        # operands such as xargs -I{} in the same argv. A comma or sequence
+        # inside braces may expand and cannot establish literal arguments.
+        if [[ "$scan_char" == '{' && "$scan_next" == '}' ]]; then
+          shell_word+='{}'
+          shell_word_started=1
+          scan_index=$((scan_index + 1))
+        elif (( shell_word_started == 0 )) \
+          && [[ -z "$scan_next" || "$scan_next" =~ [[:space:]\;\&\|\(\)\<\>] ]]; then
+          ambiguous_execution_context=1
+          finish_simple_command
+        else
+          shell_word+="$scan_char"
+          shell_word_started=1
+          if [[ "$scan_char" == '{' && "${command_fragment:$scan_index}" =~ ^\{[^{}]*(,|\.\.) ]]; then
+            shell_word_dynamic=1
+            shell_word_unquoted_dynamic=1
+          fi
+        fi
+        ;;
+      ';'|'('|')')
         ambiguous_execution_context=1
         finish_simple_command
         ;;
@@ -1425,6 +1495,18 @@ scan_command_fragment() {
 
 scan_command_fragment "$command"
 
+# Writing denials never request or consume a human review acknowledgment.
+if [[ -n "$writing_error" ]]; then
+  # shellcheck source=../lib/subagent.sh
+  source "$tooling_root/.agents/lib/subagent.sh"
+  writing_guidance="$(concise_writing_prompt "$tooling_root")" || exit 2
+  jq -nc --arg reason "$writing_error
+
+$writing_guidance" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+  exit 0
+fi
+
 (( protected_count > 0 || opaque_protected_count > 0 )) || exit 0
 subcmd=""
 protected_ack_count=0
@@ -1450,7 +1532,6 @@ fi
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 project_dir="${CLAUDE_PROJECT_DIR:-$repo_root}"
-tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
 marker_file="$project_dir/.agents/state/pr-reviewed.json"
@@ -1485,6 +1566,7 @@ load_review_prompt() { # prompt name, tooling root, optional key=value pairs
 # Render before selecting or consuming the acknowledgment. The same document handles
 # normal denials and long-ref recovery, so the review question cannot drift out of one.
 review_question="$(load_review_prompt pr-review-question "$tooling_root")" || exit 2
+load_writing_policy
 description_guidance="$(load_review_prompt pr-description-guidance "$tooling_root")" || exit 2
 ack_instruction="$(load_review_prompt pr-review-ack "$tooling_root" \
   "review_question=$review_question" "context= for gh pr $subcmd; bind $branch@$head")" || exit 2
@@ -1630,33 +1712,22 @@ Fix --title and retry. See CONTRIBUTING.md #commit--pr-messages."
   title_index=$((title_index + 1))
 done
 
-# Check size, not presentation. Graphs, examples, bullets, and prose all use
-# the same budget. Count the whole supplied body, including fences/comments, so
-# formatting cannot hide a wall of text. Unicode length also bounds unspaced text.
-# Draft creates and body-preserving operations keep their existing exemption.
+# Apply the same summary budget to the body already bound by the PR argv parser.
 body_index=0
 while (( body_index < protected_body_count )); do
   if [[ "${protected_body_kinds[$body_index]}" != text ]]; then
     deny "PR description must be inspectable literal text. Pass one quoted inline --body value."
   fi
   pr_body="${protected_body_values[$body_index]}"
-  # Bound the argument before passing it to jq. A valid 2000-character UTF-8
-  # body uses at most 8000 bytes, regardless of the shell's character locale.
-  if (( ${#pr_body} > 8000 )); then
-    deny "PR description is too long.
+  if ! body_error="$(github_writing_check_body "$pr_body")"; then
+    if [[ "$pr_body" != *[![:space:]]* ]]; then
+      deny "$body_error
 ${description_guidance}"
-  fi
-  # --arg preserves UTF-8 across read-buffer boundaries on Apple's jq 1.7.1;
-  # raw slurp can replace a split multibyte character and overcount the body.
-  body_stats="$(jq -nr --arg body "$pr_body" '$body | [([scan("\\S+")] | length), length] | @tsv')"
-  IFS=$'\t' read -r body_words body_characters <<<"$body_stats"
-  if (( body_words == 0 )); then
-    deny "PR description is empty.
-${description_guidance}"
-  fi
-  if (( body_words > 200 || body_characters > 2000 )); then
-    deny "PR description is too long (${body_words} words, ${body_characters} characters).
-${description_guidance}"
+    fi
+    writing_guidance="$(concise_writing_prompt "$tooling_root")" || exit 2
+    deny "$body_error
+
+$writing_guidance"
   fi
   body_index=$((body_index + 1))
 done
