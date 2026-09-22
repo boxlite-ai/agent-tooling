@@ -46,6 +46,14 @@ commands, not a GitHub server policy: other clients, script files, browser edits
 later bot additions are outside it. Writing denials never consume an acknowledgment.
 `guidance/workflow.md` carries the same writing rules into consumer instructions.
 
+The 400-line policy in `guidance/workflow.md` is enforced for supported direct
+`gh pr create/edit/ready` commands by `.agents/lib/pr-size.sh`. It reads GitHub's
+published comparison (additions + deletions, including tests and generated text).
+Unknown or truncated comparisons fail closed. Creation requires a published branch;
+Base-changing edits, fork creation, and opaque invocations are unsupported.
+Git pushes, direct API calls, and browser writes are outside this size check;
+it is not a repository-wide enforcement boundary.
+
 `.agents/lib/timed-user-prompt.sh` provides the reusable three-minute confirmation
 lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-supplied
 context and a random ID; retries preserve the deadline, late replies are rejected,
@@ -53,6 +61,9 @@ and acceptance can be consumed once. Callers select `split` or `keep-draft` as t
 timeout fallback for `pr-size-exception:` or `reviewed:` respectively. The library
 serializes state transitions; its prompt renderer describes an agent-opened,
 non-blocking question. It never waits or opens a host dialog inside the state lock.
+
+Size exceptions bind to repository, base/head, measured size, and session. A reason
+needs at least 12 words; the agent must judge whether it names a concrete constraint.
 
 The local PR gate uses this lifecycle for `reviewed:` acknowledgments, bound to
 checkout, branch/head, session, and request ID. A retry cannot restart the deadline;
@@ -159,6 +170,7 @@ than one session can share a checkout.
 - `commit-audit-receipt.json`: the receipt commit-msg publishes and pre-push spends.
 - `pr-reviewed.json`: the typed PR-review acknowledgment, bound to branch, HEAD, and request ID.
 - `pr-review-request.json`: the review deadline and response lifecycle.
+- `pr-size-request.json`: the size exception deadline, diff binding, and exact reason.
 - `auditor-control`: a directory of escalation, completion, grant and event records for running auditors and overrides.
 - `last-api-failure.json`: the kind of API error that ended a turn.
 - `api-resume`: the recent resumes and the unspent wake hashes of the API-failure resume.
