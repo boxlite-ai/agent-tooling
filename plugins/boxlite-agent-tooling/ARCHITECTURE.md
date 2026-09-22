@@ -93,7 +93,6 @@ exception. Splitting resumes when the dialog returns; this is not a hard deadlin
 for dismissing a busy UI. The launcher affects other questions in that session too.
 Sources: [question timeout](https://code.claude.com/docs/en/tools-reference#question-auto-continue-timeout),
 [timeout override](https://code.claude.com/docs/en/env-vars).
-
 PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr-review-question.md`
 supplies the shared explanation check, `.agents/prompts/pr-review-ack.md` supplies both
 normal and bounded local acknowledgment instructions, `.agents/prompts/pr-description-guidance.md`
