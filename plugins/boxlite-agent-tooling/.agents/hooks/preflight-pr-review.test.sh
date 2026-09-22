@@ -28,13 +28,27 @@ trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_PROJECT_DIR="$TMP"
 mkdir -p "$TMP/.agents/state"
 
-# The hook resolves its repo from the AMBIENT cwd, while the marker below is
-# keyed to REPO_ROOT's branch and HEAD. Invoked from anywhere else the two
-# disagree, every marker looks stale, and the suite reports 42/12 instead of
-# 54/0 — green-looking from here, wrong from there. Pin cwd so they match.
-cd "$REPO_ROOT" || exit 1
-BRANCH="$(git -C "$REPO_ROOT" branch --show-current)"
-HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+# Use a real branch in an isolated checkout; GitHub is a small-PR test double.
+# The hook still comes from THIS suite's plugin, not from the fixture checkout.
+git init -q -b feature "$TMP/repo"
+git -C "$TMP/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m fixture
+cd "$TMP/repo" || exit 1
+BRANCH="$(git branch --show-current)"
+HEAD_SHA="$(git rev-parse HEAD)"
+mkdir "$TMP/gh-bin"
+cat > "$TMP/gh-bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$*" in
+  'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
+  'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
+  'api repos/example/repo/compare/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[]}' ;;
+  'pr view '*) jq -nc --arg sha "$(git rev-parse HEAD)" --arg branch "$(git branch --show-current)" \
+    '{baseRefOid:$sha,headRefOid:$sha,headRefName:$branch,additions:0,deletions:0}' ;;
+  *) exit 2 ;;
+esac
+GH
+chmod +x "$TMP/gh-bin/gh"
+export PATH="$TMP/gh-bin:$PATH"
 
 pass=0
 fail=0
@@ -58,9 +72,14 @@ run() {
 }
 
 write_marker() {
-  local message="$1"
-  jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" --arg m "$message" \
-        '{branch:$b, head:$h, message:$m}' \
+  local message="$1" spec request_id
+  rm -f "$TMP/.agents/state/pr-review-request.json"
+  spec="$(jq -nc --arg repo "$(git rev-parse --show-toplevel)" --arg branch "$BRANCH" --arg head "$HEAD_SHA" \
+    '{binding:{repo:$repo,branch:$branch,head:$head,session:""},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}')"
+  request_id="$(bash "$REPO_ROOT/scripts/timed-user-prompt.sh" request \
+    "$TMP/.agents/state/pr-review-request.json" "$spec" | jq -r .id)"
+  jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" --arg m "$message" --arg r "$request_id" \
+        '{branch:$b, head:$h, message:$m,request:$r}' \
         > "$TMP/.agents/state/pr-reviewed.json"
 }
 
@@ -359,7 +378,9 @@ CONCURRENT_PR_BARRIER="$TMP/concurrent-pr-barrier"
 CONCURRENT_PR_DATE="$TMP/concurrent-pr-date"
 mkdir -p "$CONCURRENT_PR_BARRIER" "$CONCURRENT_PR_DATE"
 CONCURRENT_PR_REAL_DATE="$(command -v date)"
+# shellcheck disable=SC2016 # These literals are the mock date executable's source.
 printf '%s\n' '#!/usr/bin/env bash' \
+  '[[ "${1:-}" != -u ]] || exec "$TEST_REAL_DATE" "$@"' \
   ': > "$TEST_BARRIER/$$"' \
   'deadline=$((SECONDS + 5))' \
   'while (( $(find "$TEST_BARRIER" -type f | wc -l) < 2 )); do' \
@@ -403,14 +424,15 @@ fi
 # replaces the canonical path before either consume. A replacement is not proof that
 # either selector spent the old one, so it must never let both commands through.
 write_marker "reviewed: concurrent selected marker"
-jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" \
-  '{branch:$b,head:$h,message:"reviewed: concurrent replacement marker"}' \
+jq '.message="reviewed: concurrent replacement marker"' "$TMP/.agents/state/pr-reviewed.json" \
   > "$TMP/concurrent-replacement-pr-reviewed.json"
 CONCURRENT_REPLACEMENT_BARRIER="$TMP/concurrent-replacement-pr-barrier"
 CONCURRENT_REPLACEMENT_DATE="$TMP/concurrent-replacement-pr-date"
 CONCURRENT_REPLACEMENT_LEADER="$TMP/concurrent-replacement-pr-leader"
 mkdir -p "$CONCURRENT_REPLACEMENT_BARRIER" "$CONCURRENT_REPLACEMENT_DATE"
+# shellcheck disable=SC2016 # These literals are the mock date executable's source.
 printf '%s\n' '#!/usr/bin/env bash' \
+  '[[ "${1:-}" != -u ]] || exec "$TEST_REAL_DATE" "$@"' \
   ': > "$TEST_BARRIER/$$"' \
   'deadline=$((SECONDS + 5))' \
   'while (( $(find "$TEST_BARRIER" -type f | wc -l) < 2 )); do' \
@@ -526,8 +548,7 @@ rm -f "$TMP/.agents/state/pr-reviewed.json"
 # allow path consumes it. The newer marker must survive, and the old selection must not
 # authorize because the gate could not atomically spend it at the canonical name.
 write_marker "reviewed: selected marker"
-jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" \
-  '{branch:$b,head:$h,message:"reviewed: replacement marker"}' \
+jq '.message="reviewed: replacement marker"' "$TMP/.agents/state/pr-reviewed.json" \
   > "$TMP/replacement-pr-reviewed.json"
 DATE_WRAP="$TMP/date-wrap"
 mkdir -p "$DATE_WRAP"
@@ -814,10 +835,9 @@ rm -f "$TMP/.agents/state/pr-reviewed.json"
 long_tail="$(printf '%04096d' 0 | tr 0 x)"
 ack_reason="$(reason_for "gh pr ready $long_tail")"
 assert_reason_budget "missing-ack reason stays bounded even for a long command" "$ack_reason"
-for contract in "AskUserQuestion" "request_user_input" "free-form Other text" \
-                "Claude calls it notes" "reviewed:" \
+for contract in "request_user_input_async" "reviewed:" \
                 ".agents/state/pr-reviewed.json" '"branch"' '"head"' '"message"' \
-                "Abort" "Show me the diff" "Never infer" "Never fabricate"; do
+                "Abort" "Show me the diff" "Never infer" "fabricate"; do
   assert_reason_contains "ack reason keeps '$contract'" "$ack_reason" "$contract"
 done
 
@@ -833,14 +853,15 @@ git -C "$LONG_REPO" -c user.email=t@t -c user.name=t \
 mkdir -p "$LONG_STATE/.agents/state"
 long_reason="$(reason_for_repo "$LONG_REPO" "$LONG_STATE" 'gh pr ready 42')"
 assert_reason_budget "long-ref fallback stays bounded" "$long_reason"
-for contract in "AskUserQuestion" "request_user_input" "reviewed:" \
+for contract in "request_user_input_async" "reviewed:" \
                 ".agents/state/pr-reviewed.json" '"branch"' '"head"' '"message"' \
-                "Then retry" "Never infer" "Never fabricate"; do
+                "Then retry" "Never infer" "fabricate"; do
   assert_reason_contains "long-ref fallback keeps '$contract'" "$long_reason" "$contract"
 done
 long_head="$(git -C "$LONG_REPO" rev-parse HEAD)"
 jq -nc --arg branch "$long_branch" --arg head "$long_head" \
-  '{branch:$branch,head:$head,message:"reviewed: long branch protocol"}' \
+  --arg request "$(jq -r .id "$LONG_STATE/.agents/state/pr-review-request.json")" \
+  '{branch:$branch,head:$head,message:"reviewed: long branch protocol",request:$request}' \
   > "$LONG_STATE/.agents/state/pr-reviewed.json"
 long_retry="$(printf '%s' 'gh pr ready 42' | jq -Rs '{tool_input:{command:.}}' \
   | (cd "$LONG_REPO" && CLAUDE_PROJECT_DIR="$LONG_STATE" "$HOOK"))"
@@ -857,14 +878,14 @@ mv "$TMP/.agents/state/pr-reviewed.next.json" "$TMP/.agents/state/pr-reviewed.js
 stale_reason="$(reason_for 'gh pr ready 42')"
 assert_reason_budget "state-mismatch reason stays bounded" "$stale_reason"
 assert_reason_contains "state-mismatch keeps native input route" \
-  "$stale_reason" "request_user_input"
+  "$stale_reason" "reviewed:"
 assert_reason_contains "state-mismatch keeps typed format" "$stale_reason" "reviewed:"
 
 write_marker "yes"
 malformed_reason="$(reason_for 'gh pr ready 42')"
 assert_reason_budget "malformed-marker reason stays bounded" "$malformed_reason"
 assert_reason_contains "malformed-marker keeps native input route" \
-  "$malformed_reason" "AskUserQuestion"
+  "$malformed_reason" "reviewed:"
 assert_reason_contains "malformed-marker keeps typed format" "$malformed_reason" "reviewed:"
 
 assert_reason_budget "title denial stays bounded" \
@@ -880,8 +901,9 @@ echo "## Review prompts are loaded at the public hook boundary"
 fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
-cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-size}.sh "$fixture_plugin/.agents/lib/"
 cp "$REPO_ROOT/.agents/prompts/concise-writing.md" "$fixture_plugin/.agents/prompts/"
+cp "$REPO_ROOT/.agents/prompts/timed-user-prompt.md" "$fixture_plugin/.agents/prompts/"
 HOOK="$fixture_plugin/.agents/hooks/preflight-pr-review.sh"
 cat > "$fixture_plugin/.agents/prompts/pr-review-ack.md" <<'PROMPT'
 ---

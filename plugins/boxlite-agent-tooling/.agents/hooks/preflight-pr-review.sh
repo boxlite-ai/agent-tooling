@@ -2,7 +2,7 @@
 # PreToolUse hook: keep published GitHub writing as concise as reply summaries,
 # then gate `gh pr create` / `edit` / `ready` on a typed review acknowledgment.
 #
-# Draft PRs skip acknowledgment but still pass the writing check.
+# Draft PRs skip acknowledgment but must pass the writing and size checks.
 #
 # Flow on a missing-review denial:
 #   1. Hook denies the gh tool call.
@@ -90,6 +90,7 @@ inspect_github_writing() { # first gh argument index, literal context (default 1
 protected_count=0
 protected_subcmds=()
 protected_drafts=()
+protected_size_args=()
 protected_title_count=0
 protected_titles=()
 protected_title_dynamics=()
@@ -575,6 +576,7 @@ inspect_simple_command() {
   [[ "$subcmd" == create || "$subcmd" == edit || "$subcmd" == ready ]] \
     || return 0
 
+  protected_size_args=("${shell_words[@]:$subcmd_index}")
   command_slot="$protected_count"
   index=$((subcmd_index + 1))
 
@@ -1525,9 +1527,10 @@ if [[ -z "$subcmd" ]]; then
   if (( opaque_protected_count == 0 \
      && ambiguous_execution_context == 0 \
      && parsed_simple_count == 1 )); then
-    exit 0
+    subcmd="create"
+  else
+    subcmd="operation"
   fi
-  subcmd="operation"
 fi
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -1536,6 +1539,7 @@ branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
 marker_file="$project_dir/.agents/state/pr-reviewed.json"
 max_age_seconds=600
+request_file="$project_dir/.agents/state/pr-review-request.json"
 state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
 if [[ ! -r "$state_lib" ]]; then
   printf 'preflight-pr-review: shared audit state library is unavailable.\n' >&2
@@ -1550,6 +1554,14 @@ if [[ ! -r "$subagent_lib" ]]; then
 fi
 # shellcheck source=../lib/subagent.sh
 source "$subagent_lib"
+timed_lib="$tooling_root/.agents/lib/timed-user-prompt.sh"
+[[ -r "$timed_lib" ]] || { printf 'preflight-pr-review: timed prompt library missing\n' >&2; exit 2; }
+# shellcheck source=../lib/timed-user-prompt.sh
+source "$timed_lib"
+size_lib="$tooling_root/.agents/lib/pr-size.sh"
+[[ -r "$size_lib" ]] || { printf 'preflight-pr-review: PR size library missing\n' >&2; exit 2; }
+# shellcheck source=../lib/pr-size.sh
+source "$size_lib"
 marker_selection=""
 marker_selected_identity=""
 
@@ -1593,7 +1605,12 @@ deny() {
   if (( reason_bytes > 1200 )); then
     # Fail closed without feeding an unbounded command, branch, path, or marker
     # value back into the model context.
-    reason="$bounded_ack_recovery"
+    reason="${timer_instruction:-}
+$bounded_ack_recovery"
+  fi
+  if (( $(LC_ALL=C printf '%s' "$reason" | wc -c) > 1200 )); then
+    printf 'preflight-pr-review: combined timed recovery exceeds 1200 bytes\n' >&2
+    exit 2
   fi
   jq -nc --arg r "$reason" '{
     hookSpecificOutput: {
@@ -1673,6 +1690,8 @@ Run one direct literal gh pr create/edit/ready command per tool call (command,
 exec, or env wrappers are supported). Nothing from this command was authorized."
 fi
 
+# Drafts skip title/review requirements; all PRs still require size validation.
+if (( protected_ack_count > 0 )); then
 # Defense in depth for the create prefix above: an interactive editor or
 # repository template is outside this pre-execution boundary. Ready/edit
 # operations may omit a body because they do not create one implicitly.
@@ -1732,7 +1751,37 @@ $writing_guidance"
   body_index=$((body_index + 1))
 done
 
-REQUIRED_MESSAGE_RE='^reviewed:[[:space:]]+[^[:space:]]'
+fi
+
+size_context="$(jq -nc --arg root "$repo_root" --arg project "$project_dir" --arg tooling "$tooling_root" \
+  --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
+  '{root:$root,project:$project,tooling:$tooling,session:$session}')"
+size_status=0
+size_reason="$(pr_size_check "$size_context" "${protected_size_args[@]}")" || size_status=$?
+if (( size_status )); then
+  [[ -n "$size_reason" ]] || size_reason="PR size check failed; nothing was authorized."
+  # Size prompts have their own recovery; never replace them with review approval.
+  jq -nc --arg reason "$size_reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+  exit 0
+fi
+
+(( protected_ack_count > 0 )) || exit 0
+
+mkdir -p "$project_dir/.agents/state" || exit 2
+request_spec="$(jq -nc --arg repo "$repo_root" --arg branch "$branch" --arg head "$head" \
+  --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
+  '{binding:{repo:$repo,branch:$branch,head:$head,session:$session},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}')"
+review_request="$(timed_user_prompt request "$request_file" "$request_spec")" || exit 2
+request_id="$(jq -r .id <<<"$review_request")"
+request_status="$(jq -r .status <<<"$review_request")"
+timer_instruction="$(timed_user_prompt_instruction "$tooling_root" "$review_request")" || exit 2
+if [[ "$request_status" == expired ]]; then
+  deny "Review confirmation timed out. Leave the PR in draft or uncreated; no publication was authorized."
+fi
+if [[ ! -e "$marker_file" && ! -L "$marker_file" ]]; then
+  deny "$timer_instruction
+$ack_instruction"
+fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 marker_selection="${marker_file}.inspect-$$-${RANDOM:-0}"
@@ -1759,11 +1808,12 @@ marker_document="$(printf '%s' "$marker_json" | jq -ecs '
     type == "string" and utf8bytelength <= $bytes
     and (explode | all(. != 0 and . != 10 and . != 13));
   if length == 1 and (.[0] | type) == "object"
-     and (.[0] | exact_keys(["branch", "head", "message"]))
+     and (.[0] | exact_keys(["branch", "head", "message", "request"]))
      and (.[0].branch | bounded_line(4096))
      and (.[0].head | type == "string"
           and test("^[0-9a-f]{40}([0-9a-f]{24})?$|^\\?$"))
      and (.[0].message | bounded_line(1024))
+     and (.[0].request | type == "string" and test("^[0-9a-f]{32}$"))
   then .[0] else empty end
 ' 2>/dev/null || true)"
 if [[ -z "$marker_document" || ! "$marker_mtime" =~ ^[0-9]+$ ]]; then
@@ -1784,10 +1834,15 @@ if [[ "$marker_branch" != "$branch" ]] || \
 ${ack_instruction}"
 fi
 
-if [[ ! "$marker_message" =~ $REQUIRED_MESSAGE_RE ]]; then
-  deny "PR-review acknowledgment is malformed; it must start with 'reviewed: '.
-${ack_instruction}"
+if [[ "$(jq -r .request <<<"$marker_document")" != "$request_id" ]]; then
+  deny "PR-review acknowledgment belongs to an old request. $ack_instruction"
 fi
+if [[ "$request_status" == pending ]]; then
+  review_request="$(timed_user_prompt respond "$request_file" "$request_id" "$marker_message")" \
+    || deny "Invalid or late review response. $ack_instruction"
+fi
+[[ "$(jq -r .response <<<"$review_request")" == "$marker_message" ]] \
+  || deny "Review response changed after acceptance. $ack_instruction"
 
 # Marker is valid for this exact branch+HEAD. Consume it so the next
 # gh pr create/edit/ready forces a fresh ack.
@@ -1798,5 +1853,7 @@ if (( consume_status != 0 )); then
   deny "The matching PR-review acknowledgment could not be consumed safely.
 ${ack_instruction}"
 fi
+timed_user_prompt consume "$request_file" "$request_id" >/dev/null \
+  || deny "Review confirmation could not be consumed; nothing was authorized."
 cleanup_marker_selection
 exit 0

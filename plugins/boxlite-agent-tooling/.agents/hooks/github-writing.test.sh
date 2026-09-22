@@ -5,6 +5,24 @@ set -uo pipefail
 PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$PLUGIN/.agents/hooks/preflight-pr-review.sh"
 pass=0 fail=0
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+git init -q -b feature "$scratch/repo"
+git -C "$scratch/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m fixture
+mkdir -p "$scratch/bin"
+cat > "$scratch/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$*" in
+  'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
+  'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
+  'api repos/example/repo/compare/'*)
+    jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[{additions:1,deletions:0}]}' ;;
+  *) exit 2 ;;
+esac
+GH
+chmod +x "$scratch/bin/gh"
+export PATH="$scratch/bin:$PATH" CLAUDE_PROJECT_DIR="$scratch/repo"
+cd "$scratch/repo" || exit 2
 
 check() {
   local name="$1" command="$2" expected="$3" output status=0 actual

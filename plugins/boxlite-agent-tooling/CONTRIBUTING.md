@@ -13,6 +13,26 @@ The preflight hook's denials point here as `CONTRIBUTING.md #commit--pr-messages
 - Body: the why. The problem, why this change solves it, the alternatives rejected.
 - Squash merges keep commit messages and drop the PR body, so a why that lives only in the PR never reaches `git log` or `git blame`.
 
+### Pull request size
+
+Follow the hard PR-size and decomposition requirements in
+[the shared workflow](guidance/workflow.md#workflow): target 100–200 changed lines,
+maximum 400, with a three-minute human exception window followed by automatic
+splitting if no valid reply arrives. The size exception is separate from `reviewed:`; both use the same timed-request library.
+The agent opens the question and performs the split. The hook enforces expiry;
+it does not open or dismiss a native dialog. For Claude, launch with
+`bash plugins/boxlite-agent-tooling/scripts/claude-with-timed-prompts.sh` to load
+this plugin and enable native idle dismissal for that session. Activity can keep
+the dialog open beyond the fixed deadline, but late replies remain invalid. See [enforcement scope](ARCHITECTURE.md#entry-points).
+
+Illustrative typed exception:
+
+> pr-size-exception: The dependency update regenerates 612 lockfile lines; splitting the proposed manifest and lockfile changes would leave the dependency graph inconsistent.
+
+The agent must show the actual diff and proposed split first. It must never supply
+that example as a pre-filled developer response. Record an accepted reason verbatim
+with the repository, base/head, and measured size in the PR and parent issue.
+
 ### Pull request descriptions
 
 Every PR description must explain how the change produces its intended result. Use a
@@ -33,7 +53,8 @@ No diagram, Before/After layout, source annotation, or section order is mandator
   report the failure with all production changes reverted and the pass with the
   complete fix restored. Do not present old results as newly verified.
 - Link the relevant issue when one exists, using `Fixes #<n>` when the PR closes it.
-  No issue or inline bug marker is required just to satisfy a format.
+  Large work requires the parent and child issues described above; small standalone
+  changes need no issue solely for formatting. No inline bug marker is required.
 
 For issues, comments, reviews, discussions and release notes, use the same
 [reply-summary prompt](.agents/prompts/concise-writing.md).
@@ -54,6 +75,8 @@ reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a n
 unedited comment. Once `Author reviewed the PR` passes, the author can click
 **Ready for review**. A new push or editing/deleting the only acknowledgment
 returns the PR to draft and requires a fresh comment. Forks use the same flow.
+The local hook gives each `reviewed:` request three minutes; retries preserve that
+deadline. Expiry leaves the PR draft or uncreated. The GitHub comment flow is separate.
 Both the local acknowledgment prompt and GitHub comment ask the explanation question.
 Acknowledgments bind to the commit SHA, so a description edit alone does not revoke
 one. Description quality is a human review criterion. Maintainer approval remains separate.

@@ -5,16 +5,9 @@ placeholders: context, review_question
 description: Human review acknowledgment and bounded recovery instructions.
 ---
 
-PR-review acknowledgment required{{context}}.
-Use AskUserQuestion on Claude or request_user_input on Codex. Ask the human:
-{{review_question}}
-Also confirm no internal/AI narrative, pasted logs, or secrets.
-They must choose Other and type:
-  reviewed: <one-line summary in their own words of what this PR changes>
-Options: Abort and Show me the diff.
-Read the free-form Other text (Claude calls it notes). If it starts with 'reviewed: '
-followed by nonblank text, write it verbatim to .agents/state/pr-reviewed.json:
-  { "branch": "<current branch>", "head": "<current HEAD>", "message": "<verbatim Other text>" }
-Then retry the same gh command. Abort means no write/retry. Show me the diff means
-show the current diff/log and re-ask. Invalid text means re-ask without writing.
-Never infer the acknowledgment. Never fabricate, paraphrase, or pre-fill it.
+Review required{{context}}. {{review_question}}
+Require human-typed reviewed: <what changed>; no AI narrative, logs, or secrets.
+Never infer or fabricate replies; never pre-fill. Abort and Show me the diff do not approve.
+Claude's native hook records replies. Otherwise write .agents/state/pr-reviewed.json:
+{"branch":"<current branch>","head":"<current HEAD>","message":"<verbatim response>","request":"<id>"}
+Read id from .agents/state/pr-review-request.json. Then retry the same command.
