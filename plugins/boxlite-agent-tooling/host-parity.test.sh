@@ -345,10 +345,19 @@ else
   bad "no claude-only event reaches the Codex twin (found: $leaked)"
 fi
 
-# Twin comparison, with the Claude-only events removed first: everything Codex CAN run
+# AskUserQuestion is a Claude-native tool; Codex uses its own asynchronous input.
+if jq -e '[.hooks.PreToolUse[],.hooks.PostToolUse[]] | map(select(.matcher=="AskUserQuestion")) | length==2' "$CLAUDE_HOOKS" >/dev/null \
+  && jq -e '[.hooks[][] | select(.matcher=="AskUserQuestion")] | length==0' "$CODEX_HOOKS" >/dev/null; then
+  ok "native question capture is wired only for Claude"
+else
+  bad "native question capture is wired only for Claude"
+fi
+
+# Twin comparison, with the Claude-only events and tool matcher removed: everything Codex CAN run
 # must still be byte-identical after async normalization.
 claude_normalized="$(jq -Sc --argjson claude_only "$claude_only_json" '
   .hooks |= with_entries(select(.key as $k | $claude_only | index($k) | not))
+  | .hooks |= with_entries(.value |= map(select(.matcher != "AskUserQuestion")))
   | .hooks.SubagentStart[].hooks[] |=
     (if has("asyncRewake") then .async = .asyncRewake | del(.asyncRewake) else . end)
 ' "$CLAUDE_HOOKS")"

@@ -20,6 +20,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | A request to shorten unpublishable text. PRs over 400 changed lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
+| Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely typed answer; idle expiry and selected options never authorize a PR. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
 | Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | Resumes a pending timed confirmation or its timeout fallback first. Otherwise, nothing on PASS, unless the last reply has a paragraph over 80 words or a list item over 40: then one request using the shared concise-writing prompt template. The findings on FAIL. See the decision table below. |
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
@@ -77,6 +78,21 @@ fallback once: split oversized work, or leave an unreviewed PR draft/uncreated.
 The agent performs the wait, issue creation, and splitting; these are not background
 jobs. `.agents/prompts/pr-size-exception.md` carries the size-specific wording.
 
+Claude sessions launched through `scripts/claude-with-timed-prompts.sh` load this
+plugin with `--plugin-dir` and enable 180-second native idle dismissal, without
+editing settings. The agent invokes the exact `AskUserQuestion` payload generated
+by the shared library. The Claude-only hook binds presentation and response to its
+tool call ID and original deadline, rejects prefilled answers and `afkTimeoutMs`
+auto-responses, and writes a valid `reviewed:` marker itself. Missing native timeout
+setup uses a plain-text, non-blocking question instead. Codex retains async input.
+Existing requests gain an empty native question ID without changing their deadline.
+
+Claude's idle timer resets on interaction; the shared deadline never does.
+An active dialog may remain visible past that deadline, but cannot grant a late
+exception. Splitting resumes when the dialog returns; this is not a hard deadline
+for dismissing a busy UI. The launcher affects other questions in that session too.
+Sources: [question timeout](https://code.claude.com/docs/en/tools-reference#question-auto-continue-timeout),
+[timeout override](https://code.claude.com/docs/en/env-vars).
 PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr-review-question.md`
 supplies the shared explanation check, `.agents/prompts/pr-review-ack.md` supplies both
 normal and bounded local acknowledgment instructions, `.agents/prompts/pr-description-guidance.md`
