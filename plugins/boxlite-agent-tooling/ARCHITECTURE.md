@@ -46,6 +46,14 @@ commands, not a GitHub server policy: other clients, script files, browser edits
 later bot additions are outside it. Writing denials never consume an acknowledgment.
 `guidance/workflow.md` carries the same writing rules into consumer instructions.
 
+`.agents/lib/timed-user-prompt.sh` provides the reusable three-minute confirmation
+lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-supplied
+context and a random ID; retries preserve the deadline, late replies are rejected,
+and acceptance can be consumed once. Callers select `split` or `keep-draft` as the
+timeout fallback for `pr-size-exception:` or `reviewed:` respectively. The library
+serializes state transitions; its prompt renderer describes an agent-opened,
+non-blocking question. It never waits or opens a host dialog inside the state lock.
+
 PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr-review-question.md`
 supplies the shared explanation check, `.agents/prompts/pr-review-ack.md` supplies both
 normal and bounded local acknowledgment instructions, `.agents/prompts/pr-description-guidance.md`
