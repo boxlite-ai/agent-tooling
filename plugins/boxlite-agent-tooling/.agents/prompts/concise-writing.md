@@ -1,8 +1,8 @@
 ---
-name: reply-summary
-used-by: .agents/lib/reply-summary.sh
+name: concise-writing
+used-by: .agents/lib/concise-writing.sh
 placeholders: max_words
-description: Closing reply requested after a dense, judged response.
+description: Shared wording for reply summaries and GitHub writing checks.
 ---
 
 Walls of text are forbidden. Skip the summary if the reply is already concise and easy to scan.

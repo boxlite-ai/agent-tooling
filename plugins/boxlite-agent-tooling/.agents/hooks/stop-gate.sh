@@ -6,7 +6,7 @@
 #   2. preflight-verdict-check.sh judges the turn. Its block, error or allow is the
 #      answer, except that
 #   3. an allow that followed a judgment, on a last reply with a dense block, continues the
-#      turn once with the closing-reply prompt in .agents/prompts/reply-summary.md.
+#      turn once with the shared prompt in .agents/prompts/concise-writing.md.
 # The reply-summary rule and its record live in .agents/lib/reply-summary.sh. Both
 # decisions here join the verdict check's per-session decision log.
 #
@@ -31,13 +31,15 @@ run_verdict_check_alone() {
 for required_command in jq perl git; do
   command -v "$required_command" >/dev/null 2>&1 || run_verdict_check_alone
 done
-for library in verdict-audit-state.sh reply-summary.sh subagent.sh hook-host.sh; do
+for library in verdict-audit-state.sh reply-summary.sh concise-writing.sh subagent.sh hook-host.sh; do
   [[ -r "$tooling_root/.agents/lib/$library" ]] || run_verdict_check_alone
 done
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$tooling_root/.agents/lib/verdict-audit-state.sh"
 # shellcheck source=../lib/reply-summary.sh
 source "$tooling_root/.agents/lib/reply-summary.sh"
+# shellcheck source=../lib/concise-writing.sh
+source "$tooling_root/.agents/lib/concise-writing.sh"
 # shellcheck source=../lib/subagent.sh
 source "$tooling_root/.agents/lib/subagent.sh"
 
@@ -191,7 +193,7 @@ ask_for_reply_summary() {
   local mode=block tools note request
   # Load before recording the ask: a broken template must not leave a continuation
   # record for a request that never reached the agent.
-  request="$(reply_summary_request "$tooling_root")" || return 1
+  request="$(concise_writing_prompt "$tooling_root")" || return 1
   [[ "$(hook_host_kind)" == claude ]] && mode=context
   tools="$(final_turn_tool_count)" || tools="-"
   reply_summary_record_ask "$ask_file" "$entry_prompt_epoch" "$mode" "$tools" \

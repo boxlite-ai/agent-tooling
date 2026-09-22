@@ -142,7 +142,7 @@ decision_of() {
 expected_request="$(
   # shellcheck source=../lib/subagent.sh
   source "$REPO_ROOT/.agents/lib/subagent.sh"
-  subagent_prompt reply-summary "$REPO_ROOT" max_words=60
+  subagent_prompt concise-writing "$REPO_ROOT" max_words=60
 )"
 asked_as_context() {
   [[ "$(field "$1" '.hookSpecificOutput.hookEventName')" == Stop \
@@ -639,7 +639,7 @@ prompt_fixture="$(mktemp -d)"
 cp -R "$REPO_ROOT" "$prompt_fixture/plugin copy"
 original_hook="$HOOK"
 HOOK="$prompt_fixture/plugin copy/.agents/hooks/stop-gate.sh"
-prompt_file="$prompt_fixture/plugin copy/.agents/prompts/reply-summary.md"
+prompt_file="$prompt_fixture/plugin copy/.agents/prompts/concise-writing.md"
 HOOK_STDERR="$prompt_fixture/stderr"
 edits_status=0
 for host in claude codex; do
@@ -654,9 +654,18 @@ for host in claude codex; do
   out="$(gate_stop "$R" "$S" false "$long_reply" NO "$host")"
   [[ "$(field "$out" "$prompt_field")" == "$host: summarize in 60 words." ]] \
     && keeps_triage_note "$out" || edits_status=1
+  for operation in 'pr comment 7' 'pr create --title "feat: share prompt"'; do
+    github_output="$(jq -nc --arg command "gh $operation --body '$long_reply'" \
+      '{tool_input:{command:$command}}' \
+      | bash "$prompt_fixture/plugin copy/.agents/hooks/preflight-pr-review.sh")"
+    github_reason="$(field "$github_output" '.hookSpecificOutput.permissionDecisionReason')"
+    [[ "$(field "$github_output" '.hookSpecificOutput.permissionDecision')" == deny \
+       && "${github_reason#*$'\n\n'}" == "$host: summarize in 60 words." ]] || edits_status=1
+  done
   rm -rf "$R"
 done
-expect "both hosts pick up successive template edits and substitute max_words" "$edits_status" "out=$out"
+expect "Stop and GitHub hooks on both hosts render the same edited shared prompt" \
+  "$edits_status" "stop=$out github=$github_output"
 
 rm -f "$prompt_file"
 S="prompt-missing"; R="$(new_repo "$S")"
