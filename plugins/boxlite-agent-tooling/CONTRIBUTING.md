@@ -20,7 +20,10 @@ Follow the hard PR-size and decomposition requirements in
 maximum 400, with a three-minute human exception window followed by automatic
 splitting if no valid reply arrives. The size exception is separate from `reviewed:`; both use the same timed-request library.
 The agent opens the question and performs the split. The hook enforces expiry;
-it does not open or dismiss a native dialog. See [enforcement scope](ARCHITECTURE.md#entry-points).
+it does not open a native dialog. For Claude, launch with
+`bash plugins/boxlite-agent-tooling/scripts/claude-with-timed-prompts.sh` to load
+this plugin and enable native idle dismissal for that session. Activity can keep
+the dialog open beyond the fixed deadline, but late replies remain invalid. See [enforcement scope](ARCHITECTURE.md#entry-points).
 
 Illustrative typed exception:
 

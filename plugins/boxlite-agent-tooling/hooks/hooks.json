@@ -47,6 +47,16 @@
             "statusMessage": "Checking PR review acknowledgement"
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -57,6 +67,16 @@
             "type": "command",
             "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/post-remote-write-watch.sh\"",
             "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
+            "timeout": 10
           }
         ]
       }

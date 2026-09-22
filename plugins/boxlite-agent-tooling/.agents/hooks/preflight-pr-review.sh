@@ -1608,6 +1608,10 @@ deny() {
     reason="${timer_instruction:-}
 $bounded_ack_recovery"
   fi
+  if (( $(LC_ALL=C printf '%s' "$reason" | wc -c) > 1200 )); then
+    printf 'preflight-pr-review: combined timed recovery exceeds 1200 bytes\n' >&2
+    exit 2
+  fi
   jq -nc --arg r "$reason" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
