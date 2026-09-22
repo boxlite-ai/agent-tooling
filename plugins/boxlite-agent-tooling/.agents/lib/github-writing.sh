@@ -38,6 +38,21 @@ _github_writing_opaque() {
   return 1
 }
 
+_github_writing_graphql_nonwriting() { # literal query
+  # Ignore comments and string tokens before matching field calls. GraphQL also
+  # permits commas and BOMs between tokens; hashes inside strings are not comments.
+  # https://spec.graphql.org/September2025/#sec-Language.Source-Text.Ignored-Tokens
+  printf '%s' "$1" | perl -CS -0777 -e '
+    my $query = <STDIN> // "";
+    $query =~ s{
+      \#[^\r\n]*
+      | """ (?: \\""" | (?! """) [\s\S] )* """
+      | " (?: \\[\s\S] | [^"\\] )* "
+    }{ }gx;
+    exit($query =~ /\b(?:addComment|updateIssueComment|createIssue|updateIssue|updatePullRequest|addPullRequestReview|addPullRequestReviewComment|addPullRequestReviewThread|updatePullRequestReview|updatePullRequestReviewComment|submitPullRequestReview|createDiscussion|updateDiscussion|addDiscussionComment|updateDiscussionComment)[\s,\x{FEFF}]*\(/ ? 1 : 0);
+  '
+}
+
 _github_writing_api() { # literal-argv(0|1), api argv
   local literal="$1" token value key method="" endpoint="" query="" input=0 has_fields=0
   local bodies=() body_count=0
@@ -79,8 +94,7 @@ _github_writing_api() { # literal-argv(0|1), api argv
     # GraphQL can bury published text in a query or arbitrary variable names.
     # Only text-publishing mutations need the REST/CLI form; resolving a review
     # thread, for example, does not publish prose and stays outside this policy.
-    local text_mutation='(addComment|updateIssueComment|createIssue|updateIssue|updatePullRequest|addPullRequestReview|addPullRequestReviewComment|addPullRequestReviewThread|updatePullRequestReview|updatePullRequestReviewComment|submitPullRequestReview|createDiscussion|updateDiscussion|addDiscussionComment|updateDiscussionComment)[[:space:]]*\('
-    if (( input )) || [[ "$query" =~ $text_mutation ]]; then
+    if (( input )) || ! _github_writing_graphql_nonwriting "$query"; then
       _github_writing_opaque; return 1
     fi
     return 0
@@ -121,7 +135,8 @@ github_writing_check() { # literal-argv(0|1), gh arguments after global options
       required=1 ;;
     pr:edit|pr:ready) return 0 ;;
     issue:create|discussion:create|release:create|pr:comment|issue:comment|discussion:comment) required=1 ;;
-    issue:edit|discussion:edit|release:edit|pr:review|pr:close|issue:close|pr:reopen|issue:reopen) ;;
+    issue:edit|discussion:edit|release:edit|pr:review) ;;
+    pr:close|issue:close|pr:reopen|issue:reopen) has_option=1 ;;
     api:*)
       shift
       _github_writing_api "$literal" "$@"

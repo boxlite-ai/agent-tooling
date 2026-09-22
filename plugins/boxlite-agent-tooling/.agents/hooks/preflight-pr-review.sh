@@ -41,6 +41,7 @@ command="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 writing_error=""
 writing_loaded=0
+writing_inspected_count=0
 
 load_writing_policy() {
   (( writing_loaded == 0 )) || return 0
@@ -66,9 +67,10 @@ load_writing_policy() {
   writing_loaded=1
 }
 
-inspect_github_writing() { # first gh argument index
-  local start="$1" cursor="$1" literal=1 reason
+inspect_github_writing() { # first gh argument index, literal context (default 1)
+  local start="$1" cursor="$1" literal="${2:-1}" reason
   load_writing_policy
+  writing_inspected_count=$((writing_inspected_count + 1))
   while (( cursor < ${#shell_words[@]} )); do
     if (( shell_word_dynamics[$cursor] || shell_word_unquoted_globs[$cursor] \
        || shell_word_redirections[$cursor] )); then
@@ -1099,6 +1101,9 @@ detect_visible_protected_sequence() {
         done
         break
       fi
+      # An unsupported launcher may transform even literal-looking arguments.
+      # Apply the same writing policy, but never authorize its published bytes.
+      inspect_github_writing "$noun_index" 0
       [[ "$token" == pr ]] || break
 
       verb_index=$((noun_index + 1))
@@ -1127,10 +1132,12 @@ detect_visible_protected_sequence() {
 
 finish_simple_command() {
   local protected_before="$protected_count" opaque_before="$opaque_protected_count"
+  local writing_before="$writing_inspected_count"
   finish_shell_word
   inspect_simple_command
   if (( protected_count == protected_before \
-     && opaque_protected_count == opaque_before )); then
+     && opaque_protected_count == opaque_before \
+     && writing_inspected_count == writing_before )); then
     detect_visible_protected_sequence
   fi
   shell_words=()
@@ -1413,7 +1420,28 @@ scan_command_fragment() {
         ;;
       ' '|$'\t'|$'\r') finish_shell_word ;;
       $'\n') finish_simple_command; skip_pending_heredoc ;;
-      ';'|'('|')'|'{'|'}')
+      '{'|'}')
+        # Braces are reserved words, not shell metacharacters. Keep launcher
+        # operands such as xargs -I{} in the same argv. A comma or sequence
+        # inside braces may expand and cannot establish literal arguments.
+        if [[ "$scan_char" == '{' && "$scan_next" == '}' ]]; then
+          shell_word+='{}'
+          shell_word_started=1
+          scan_index=$((scan_index + 1))
+        elif (( shell_word_started == 0 )) \
+          && [[ -z "$scan_next" || "$scan_next" =~ [[:space:]\;\&\|\(\)\<\>] ]]; then
+          ambiguous_execution_context=1
+          finish_simple_command
+        else
+          shell_word+="$scan_char"
+          shell_word_started=1
+          if [[ "$scan_char" == '{' && "${command_fragment:$scan_index}" =~ ^\{[^{}]*(,|\.\.) ]]; then
+            shell_word_dynamic=1
+            shell_word_unquoted_dynamic=1
+          fi
+        fi
+        ;;
+      ';'|'('|')')
         ambiguous_execution_context=1
         finish_simple_command
         ;;

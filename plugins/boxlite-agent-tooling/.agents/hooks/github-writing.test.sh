@@ -55,6 +55,13 @@ check 'short release notes' 'gh release create v1 --notes Fixed.' allow
 check 'generated notes are opaque' 'gh release create v1 --generate-notes' deny
 check 'close comment' "gh issue close 7 --comment '$dense'" deny
 check 'reopen comment' "gh pr reopen 7 -c '$dense'" deny
+for operation in 'pr close' 'issue close' 'pr reopen' 'issue reopen'; do
+  check "$operation without a comment" "gh $operation 7" allow
+  check "$operation short comment" "gh $operation 7 --comment Fixed." allow
+  check "$operation dense comment" "gh $operation 7 -c '$dense'" deny
+  check "$operation empty comment" "gh $operation 7 --comment ''" deny
+  check "$operation expanded comment" "gh $operation 7 --comment \"\$BODY\"" deny
+done
 check 'REST raw body' "gh api repos/o/r/issues/7/comments -f body='$dense'" deny
 check 'REST typed body' "gh api repos/o/r/issues/7/comments -Fbody='$dense'" deny
 check 'REST concise body' 'gh api repos/o/r/issues/7/comments -f body=Fixed.' allow
@@ -67,12 +74,41 @@ check 'read-only API' 'gh api repos/o/r/issues/7/comments' allow
 check 'read-only API with dynamic endpoint' 'gh api "$ENDPOINT"' allow
 check 'GraphQL query' 'gh api graphql -f query="query { viewer { login } }"' allow
 check 'GraphQL non-writing mutation' 'gh api graphql -f query="mutation { resolveReviewThread(input: {threadId: \"x\"}) { clientMutationId } }"' allow
+for separator in $' # note\n' $'# note\r' $', # first\r\n # second\n,' $'\357\273\277' ','; do
+  check 'GraphQL ignored tokens before arguments' \
+    "gh api graphql -f 'query=mutation { createIssue${separator}(input: {repositoryId: \"x\", title: \"Bug\", body: \"Hi\"}) { clientMutationId } }'" deny
+done
+check 'GraphQL comment mentioning a mutation' \
+  "gh api graphql -f 'query=query { # addComment(input: ...)
+viewer { login } }'" allow
+check 'GraphQL quoted mutation mention' \
+  'gh api graphql -f '\''query=query { repository(owner: "o", name: "addComment(input: x)") { id } }'\''' allow
+check 'GraphQL hash in a string does not hide a later mutation' \
+  'gh api graphql -f '\''query=mutation { resolveReviewThread(input: {threadId: "#"}) { clientMutationId } addComment # note
+(input: {subjectId: "x", body: "Hi"}) { clientMutationId } }'\''' deny
+check 'GraphQL block string mutation mention' \
+  'gh api graphql -f '\''query=query { repository(owner: "o", name: """addComment(input: x)""") { id } }'\''' allow
+check 'GraphQL escaped quotes do not hide a later mutation' \
+  'gh api graphql -f '\''query=mutation { resolveReviewThread(input: {threadId: "\"#"}) { clientMutationId } addComment # note
+(input: {subjectId: "x", body: "Hi"}) { clientMutationId } }'\''' deny
 check 'metadata edit' 'gh issue edit 7 --add-label bug' allow
 check 'bodyless approval' 'gh pr review 7 --approve' allow
 check 'comment deletion' 'gh pr comment 7 --delete-last --yes' allow
 check 'literal mention' "echo 'gh issue comment 7 --body $dense'" allow
 check 'absolute gh path' "/usr/local/bin/gh issue comment 7 --body '$dense'" deny
 check 'command wrapper' "command gh issue comment 7 --body '$dense'" deny
+for wrapper in command exec env; do
+  check "$wrapper permits inspectable writing" "$wrapper gh issue comment 7 --body Fixed." allow
+done
+for wrapper in nohup sudo doas 'nice -n 5' 'stdbuf -oL' setsid 'timeout 30' 'xargs -I{}' 'xargs -I{item}' 'xargs -I {item}' /usr/bin/env 'sudo nohup'; do
+  check "$wrapper cannot bypass writing checks" "$wrapper gh issue comment 7 --body '$dense'" deny
+  check "$wrapper leaves execution opaque" "$wrapper gh issue comment 7 --body Fixed." deny
+  check "$wrapper read-only command" "$wrapper gh issue list" allow
+done
+check 'launcher with global flags' "nohup gh -R o/r issue comment 7 --body '$dense'" deny
+check 'launcher with REST writing' "sudo gh api repos/o/r/issues/7/comments -f body='$dense'" deny
+check 'launcher with release notes' "timeout 30 gh release create v1 --notes '$dense'" deny
+check 'nested shell with launcher' "bash -c \"nohup gh issue comment 7 --body '$dense'\"" deny
 check 'repo flag between noun and verb' "gh issue -R o/r comment 7 --body '$dense'" deny
 check 'PR repo flag between noun and verb' "gh pr -R o/r comment 7 --body '$dense'" deny
 check 'compound command catches later write' "true && gh issue comment 7 --body '$dense'" deny

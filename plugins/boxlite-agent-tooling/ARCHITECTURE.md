@@ -38,7 +38,10 @@ Denials reuse `.agents/prompts/concise-writing.md`; clarity remains a reviewer j
 The existing shell scanner supplies literal argv without executing it. Inline bodies
 are inspectable; body files, stdin, editors, generated text and GraphQL text mutations are
 rejected because their final published text is outside this check. Read-only commands
-and body-preserving operations pass through. This is a hook on recognized `gh`
+and body-preserving operations, including close/reopen without comments, pass through.
+Visible writes behind unsupported launchers fail closed. GraphQL detection skips
+comments and quoted strings and recognizes all ignored token separators.
+This is a hook on recognized `gh`
 commands, not a GitHub server policy: other clients, script files, browser edits and
 later bot additions are outside it. Writing denials never consume an acknowledgment.
 `guidance/workflow.md` carries the same writing rules into consumer instructions.
