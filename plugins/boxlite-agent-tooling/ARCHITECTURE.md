@@ -28,6 +28,15 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 
 The PR description contract in `CONTRIBUTING.md` requires every PR to explain how
 the change produces its intended result, using the form best suited to the PR.
+Before code is written, a 1–3 page design doc must exist; every PR must link it,
+preferably in a GitHub issue, then Notion, then a Linear issue.
+`scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
+provider read; its check command rechecks existence, nonempty content, and writing density.
+Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` and
+match its canonical root and branch (or detached HEAD). State reads and replacement
+reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
+Notion child blocks fail closed; list items and code retain their density semantics.
+Page count and design quality remain review criteria.
 The same hook checks PR bodies (including drafts), issue/discussion bodies, comments,
 reviews, close/reopen comments, release notes, and REST body/description fields.
 `.agents/lib/github-writing.sh` applies `.agents/lib/reply-summary.sh`'s shared

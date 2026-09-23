@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=e5431278f763-dirty sha256=36cc7f000f26 -->
+<!-- agent-tooling:guidance:begin rev=3dc65dc9bc72-dirty sha256=eb19d38bc4ea -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -30,6 +30,7 @@ Every change goes: understand → research → design → implement → test →
 
 **Design**
 
+- Before writing any code, create a 1–3 page design doc. Host it in this preference order: GitHub issue > Notion > Linear issue. Cover the problem, proposed approach, alternatives and trade-offs, and validation plan. Walls of text are forbidden; use short paragraphs, bullets, tables, or diagrams. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
 - Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
 - Search before implement — `grep` for existing code first.
 - Single responsibility — one function, one reason to change.

@@ -18,6 +18,7 @@ Every change goes: understand → research → design → implement → test →
 
 **Design**
 
+- Before writing any code, create a 1–3 page design doc. Host it in this preference order: GitHub issue > Notion > Linear issue. Cover the problem, proposed approach, alternatives and trade-offs, and validation plan. Walls of text are forbidden; use short paragraphs, bullets, tables, or diagrams. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
 - Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
 - Search before implement — `grep` for existing code first.
 - Single responsibility — one function, one reason to change.
