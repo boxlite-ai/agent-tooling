@@ -1,0 +1,32 @@
+{"body": "A concise change.", "html": "<p>A concise change.</p>"}
+{"body": "https://github.com/example/repo/issues/12", "html": "<p><a href=\"https://github.com/example/repo/issues/12\">https://github.com/example/repo/issues/12</a></p>"}
+{"body": "Design doc: https://github.com/example/repo/issues/1", "html": "<p>Design doc: <a href=\"https://github.com/example/repo/issues/1\">https://github.com/example/repo/issues/1</a></p>"}
+{"body": "[Design](https://github.com/example/repo/issues/1)", "html": "<p><a href=\"https://github.com/example/repo/issues/1\">Design</a></p>"}
+{"body": "[Design](https://github.com/example/repo/issues/1 \"Title\")", "html": "<p><a href=\"https://github.com/example/repo/issues/1\" title=\"Title\">Design</a></p>"}
+{"body": "[Design](<https://github.com/example/repo/issues/1> \"Title\")", "html": "<p><a href=\"https://github.com/example/repo/issues/1\" title=\"Title\">Design</a></p>"}
+{"body": "[unused]: https://github.com/example/repo/issues/1", "html": ""}
+{"body": "[//]: # (https://github.com/example/repo/issues/1)", "html": ""}
+{"body": "<a href=\"https://example.invalid\" title=\" https://github.com/example/repo/issues/1 \">text</a>", "html": "<p><a href=\"https://example.invalid\" title=\" https://github.com/example/repo/issues/1 \" rel=\"nofollow\">text</a></p>"}
+{"body": "<a href=\"https://example.invalid\"> https://github.com/example/repo/issues/1 </a>", "html": "<p><a href=\"https://example.invalid\" rel=\"nofollow\"> </a><a href=\"https://github.com/example/repo/issues/1\">https://github.com/example/repo/issues/1</a> </p>"}
+{"body": "<div> https://github.com/example/repo/issues/1 </div>", "html": "<div> https://github.com/example/repo/issues/1 </div>"}
+{"body": "<?xml value=\" https://github.com/example/repo/issues/1 \"?>", "html": ""}
+{"body": "<pre> https://github.com/example/repo/issues/1 </pre>", "html": "<pre class=\"notranslate\"> https://github.com/example/repo/issues/1 </pre>"}
+{"body": "<code> https://github.com/example/repo/issues/1 </code>", "html": "<p><code class=\"notranslate\"> <a href=\"https://github.com/example/repo/issues/1\">https://github.com/example/repo/issues/1</a> </code></p>"}
+{"body": "[unused]:\nhttps://github.com/example/repo/issues/1", "html": ""}
+{"body": "[unused]: https://example.invalid\n\" https://github.com/example/repo/issues/1 \"", "html": ""}
+{"body": "[unused]: https://example.invalid\n\"first line\nhttps://github.com/example/repo/issues/1\nlast line\"", "html": ""}
+{"body": "<https://github.com/example/repo/issues/1>", "html": "<p><a href=\"https://github.com/example/repo/issues/1\">https://github.com/example/repo/issues/1</a></p>"}
+{"body": "[Design][doc]\n\n[doc]: https://github.com/example/repo/issues/1", "html": "<p><a href=\"https://github.com/example/repo/issues/1\">Design</a></p>"}
+{"body": "`https://github.com/example/repo/issues/1`", "html": "<p><code class=\"notranslate\">https://github.com/example/repo/issues/1</code></p>"}
+{"body": "```text\nhttps://github.com/example/repo/issues/1", "html": "<pre lang=\"text\" class=\"notranslate\"><code class=\"notranslate\">https://github.com/example/repo/issues/1\n</code></pre>"}
+{"body": "> ```\n> https://github.com/example/repo/issues/1\n> ```", "html": "<blockquote>\n<pre class=\"notranslate\"><code class=\"notranslate\">https://github.com/example/repo/issues/1\n</code></pre>\n</blockquote>"}
+{"body": "- ```\n  https://github.com/example/repo/issues/1\n  ```", "html": "<ul>\n<li>\n<pre class=\"notranslate\"><code class=\"notranslate\">https://github.com/example/repo/issues/1\n</code></pre>\n</li>\n</ul>"}
+{"body": "``example` https://github.com/example/repo/issues/1 `example``", "html": "<p><code class=\"notranslate\">example` https://github.com/example/repo/issues/1 `example</code></p>"}
+{"body": "https://example.invalid/(https://github.com/example/repo/issues/1)", "html": "<p><a href=\"https://example.invalid/(https://github.com/example/repo/issues/1)\" rel=\"nofollow\">https://example.invalid/(https://github.com/example/repo/issues/1)</a></p>"}
+{"body": "[https://github.com/example/repo/issues/1](https://example.invalid)", "html": "<p><a href=\"https://example.invalid\" rel=\"nofollow\">https://github.com/example/repo/issues/1</a></p>"}
+{"body": "Summary", "html": "<p>Summary</p>"}
+{"body": "Missing design link.", "html": "<p>Missing design link.</p>"}
+{"body": "<pre><pre>example</pre><a href=\"https://github.com/example/repo/issues/1\">Design</a></pre>", "html": "<pre class=\"notranslate\"><pre class=\"notranslate\">example</pre><a href=\"https://github.com/example/repo/issues/1\">Design</a></pre>"}
+{"body": "<code><code>example</code><a href=\"https://github.com/example/repo/issues/1\">Design</a></code>", "html": "<p><code class=\"notranslate\"><code class=\"notranslate\">example</code><a href=\"https://github.com/example/repo/issues/1\">Design</a></code></p>"}
+{"body": "<code><code>example</code>[Design](https://github.com/example/repo/issues/1)</code>", "html": "<p><code class=\"notranslate\"><code class=\"notranslate\">example</code><a href=\"https://github.com/example/repo/issues/1\">Design</a></code></p>"}
+{"body": "<pre><pre>example</pre></pre>\n\n[Design](https://github.com/example/repo/issues/1)", "html": "<pre class=\"notranslate\"><pre class=\"notranslate\">example</pre></pre>\n<p><a href=\"https://github.com/example/repo/issues/1\">Design</a></p>"}

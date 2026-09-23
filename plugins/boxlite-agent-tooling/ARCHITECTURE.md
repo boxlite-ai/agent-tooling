@@ -39,6 +39,13 @@ reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed r
 Notion child blocks fail closed; list items and code retain their density semantics.
 Page count and design quality remain review criteria. Hooks cover native shell,
 editor, notebook, and patch tools, not other clients or arbitrary MCP writers.
+`.agents/lib/pr-design-doc.sh` checks `gh pr create`, `edit`, and `ready` before
+review acknowledgment handling. Literal bodies must link the registered canonical
+URL, including drafts; body-preserving operations fetch the published body and
+match its branch and HEAD. GitHub renders the body; an exact anchor target outside
+code must match the document. The render call is bounded to 20 seconds and 64 KiB;
+failures block publication. Hidden source URLs do not count as links. Direct API
+and browser PR writes remain outside this CLI check.
 The same hook checks PR bodies (including drafts), issue/discussion bodies, comments,
 reviews, close/reopen comments, release notes, and REST body/description fields.
 `.agents/lib/github-writing.sh` applies `.agents/lib/reply-summary.sh`'s shared

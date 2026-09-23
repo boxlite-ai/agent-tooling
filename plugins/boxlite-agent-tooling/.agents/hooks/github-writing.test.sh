@@ -13,6 +13,8 @@ mkdir -p "$scratch/bin"
 cat > "$scratch/bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
+  'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<a href="https://github.com/example/repo/issues/123">Design</a>' ;;
+  'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"Design and validation."}' ;;
   'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
   'api repos/example/repo/compare/'*)
@@ -23,6 +25,7 @@ GH
 chmod +x "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH" CLAUDE_PROJECT_DIR="$scratch/repo"
 cd "$scratch/repo" || exit 2
+bash "$PLUGIN/scripts/design-doc.sh" bind https://github.com/example/repo/issues/123 >/dev/null
 
 check() {
   local name="$1" command="$2" expected="$3" output status=0 actual
@@ -43,7 +46,7 @@ bullet="- $(printf 'word %.0s' {1..41})"
 for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
   'issue create --title Bug' 'issue edit 7' 'issue comment 7' 'discussion create --title Topic'; do
   check "$operation rejects dense prose" "gh $operation --body '$dense'" deny
-  check "$operation accepts a summary" "gh $operation --body 'Retry only failed requests. Verified with the timeout test.'" allow
+  check "$operation accepts a summary" "gh $operation --body 'Retry only failed requests. Verified with the timeout test. https://github.com/example/repo/issues/123'" allow
 done
 check 'draft requires inspectable body' 'gh pr create --draft --title WIP' deny
 check 'issue requires inspectable body' 'gh issue create --title Bug' deny
