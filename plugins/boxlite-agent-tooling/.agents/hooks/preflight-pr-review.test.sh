@@ -39,16 +39,21 @@ mkdir "$TMP/gh-bin"
 cat > "$TMP/gh-bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
+  'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<a href="https://github.com/example/repo/issues/123">Design</a>' ;;
+  'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"Design and validation."}' ;;
   'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
   'api repos/example/repo/compare/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[]}' ;;
   'pr view '*) jq -nc --arg sha "$(git rev-parse HEAD)" --arg branch "$(git branch --show-current)" \
-    '{baseRefOid:$sha,headRefOid:$sha,headRefName:$branch,additions:0,deletions:0}' ;;
+    '{baseRefOid:$sha,headRefOid:$sha,headRefName:$branch,additions:0,deletions:0,body:"https://github.com/example/repo/issues/123"}' ;;
   *) exit 2 ;;
 esac
 GH
 chmod +x "$TMP/gh-bin/gh"
 export PATH="$TMP/gh-bin:$PATH"
+DESIGN_FIXTURE_URL=https://github.com/example/repo/issues/123
+DOC_LINK=$'\n\n'"$DESIGN_FIXTURE_URL"
+bash "$REPO_ROOT/scripts/design-doc.sh" bind "$DESIGN_FIXTURE_URL" >/dev/null
 
 pass=0
 fail=0
@@ -140,11 +145,11 @@ run "multiline w/ backtick trigger"     $'git commit -m "fix bug"\n# `gh pr crea
 
 echo
 echo "## Matcher: draft exclusion (only on create)"
-run "gh pr create --draft"              "gh pr create --draft -t wip -b Short"       "passthrough"
-run "gh pr create -d short flag"        "gh pr create -d -t wip -b Short"            "passthrough"
-run "draft may carry an explicit body"  "gh pr create --draft --body prose" "passthrough"
-run "draft body may start with a dash"   "gh pr create --draft --body -draft" "passthrough"
-run "draft may use --dry-run"           "gh pr create --draft --body Short --dry-run"    "passthrough"
+run "gh pr create --draft"              "gh pr create --draft -t wip -b $DESIGN_FIXTURE_URL"       "passthrough"
+run "gh pr create -d short flag"        "gh pr create -d -t wip -b $DESIGN_FIXTURE_URL"            "passthrough"
+run "draft may carry an explicit body"  "gh pr create --draft --body $DESIGN_FIXTURE_URL" "passthrough"
+run "draft body may start with a dash"   "gh pr create --draft --body \"-draft $DESIGN_FIXTURE_URL\"" "passthrough"
+run "draft may use --dry-run"           "gh pr create --draft --body $DESIGN_FIXTURE_URL --dry-run"    "passthrough"
 run "noncanonical late draft stays gated" "gh pr create -t wip --draft"     "deny"
 run "label value --draft is not a draft flag" "gh pr create --label --draft" "deny"
 run "short label value -d is not a draft flag" "gh pr create -l -d"          "deny"
@@ -160,8 +165,8 @@ run "command substitution cannot inject a draft=false override" \
   'gh pr create --draft "$(printf -- --draft=false)" --title "not conventional" --body prose' "deny"
 run "compound all-draft source remains execution-ambiguous" \
   'gh pr create --draft && true' "deny"
-run "gh pr create --draft=true"         "gh pr create --draft=true -t wip -b Short"  "passthrough"
-run "gh pr create -d=true"              "gh pr create -d=true -t wip -b Short"       "passthrough"
+run "gh pr create --draft=true"         "gh pr create --draft=true -t wip -b $DESIGN_FIXTURE_URL"  "passthrough"
+run "gh pr create -d=true"              "gh pr create -d=true -t wip -b $DESIGN_FIXTURE_URL"       "passthrough"
 run "-- stops draft option parsing"     "gh pr create -- --draft"           "deny"
 run "-d inside a title is not a draft flag" \
   'gh pr create --title "feat(cli): document the -d option"'               "deny"
@@ -583,7 +588,7 @@ rm -f "$TMP/.agents/state/pr-reviewed.json" "$TMP/replacement-pr-reviewed.json"
 
 echo
 echo "## Title check: every supplied title spelling must be a Conventional-Commit subject <=72"
-TITLE_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\n\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
+TITLE_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\n\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'"$DOC_LINK"
 run_title() {
   write_marker "reviewed: title case"
   run "$@"
@@ -648,12 +653,15 @@ TABLE_BODY=$'| Trigger | Matrix |\n| --- | --- |\n| PR | Focused |\n| Weekly | F
 LEGACY_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
 LONG_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
 LONG_UNSPACED_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
-LIMIT_WORDS_BODY="$(printf 'x %.0s' {1..60})"$'\n\n'"$(printf 'x %.0s' {1..60})"
+LIMIT_WORDS_BODY="$(printf 'x %.0s' {1..60})"$'\n\n'"$(printf 'x %.0s' {1..59})"
 LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<80; i++) printf "字"}')"
 OVER_WORDS_BODY="$LIMIT_WORDS_BODY x"
 OVER_CHARS_BODY="${LIMIT_CHARS_BODY}字"
 EMOJI_BODY="$(awk 'BEGIN {for (i=0; i<2000; i++) printf "😀"}')"
 HUGE_BODY="$(awk 'BEGIN {for (i=0; i<8001; i++) printf "x"}')"
+for body_fixture in GRAPH GRAPH_CRLF FIX_GRAPH GRAPH_WITH_TRAILING_SECTION BULLET_BODY EXAMPLE_BODY SEQUENCE_BODY TABLE_BODY LIMIT_WORDS_BODY OVER_WORDS_BODY LIMIT_CHARS_BODY OVER_CHARS_BODY EMOJI_BODY; do
+  printf -v "$body_fixture" '%s%s' "${!body_fixture}" "$DOC_LINK"
+done
 # Read the example rather than duplicating its text in the test.
 CONTRIB_BODY="$(awk '/^````markdown$/ {inside=1; next} inside && /^````$/ {exit} inside {print}' "$REPO_ROOT/CONTRIBUTING.md")"
 FEAT='--title "feat(api): add a cool thing"'
@@ -669,13 +677,13 @@ run_body() {
   run "$@"
 }
 
-run_body "short prose without a graph → allow" "gh pr create $FEAT --body 'Reduce duplicate CI jobs. Workflow tests passed.'" "passthrough"
+run_body "short prose without a graph → allow" "gh pr create $FEAT --body 'Reduce duplicate CI jobs. Workflow tests passed.$DOC_LINK'" "passthrough"
 run_body "bullets without a graph → allow" "gh pr create $FEAT --body '$BULLET_BODY'" "passthrough"
 run_body "real example without a graph → allow" "gh pr create $FEAT --body '$EXAMPLE_BODY'" "passthrough"
 run_body "sequence diagram without a call graph → allow" "gh pr create $FEAT --body '$SEQUENCE_BODY'" "passthrough"
 run_body "comparison table without a graph → allow" "gh pr create $FEAT --body '$TABLE_BODY'" "passthrough"
 run_body "fix description needs no graph or BUG marker → allow" "gh pr create $FIX --body '$FIX_GRAPH'" "passthrough"
-run_body "fix without an associated issue → allow" "gh pr create $FIX --body 'Wait for console setup before attaching.'" "passthrough"
+run_body "fix without a separate bug issue → allow" "gh pr create $FIX --body 'Wait for console setup before attaching.$DOC_LINK'" "passthrough"
 run_body "empty body → deny" "gh pr create $FEAT --body ''" "deny"
 WHITESPACE_BODY=$' \n\t'
 run_body "whitespace body → deny" "gh pr create $FEAT --body '$WHITESPACE_BODY'" "deny"
@@ -851,6 +859,7 @@ git init -q -b "$long_branch" "$LONG_REPO"
 git -C "$LONG_REPO" -c user.email=t@t -c user.name=t \
   commit -q --allow-empty -m init
 mkdir -p "$LONG_STATE/.agents/state"
+(cd "$LONG_REPO" && bash "$REPO_ROOT/scripts/design-doc.sh" bind "$DESIGN_FIXTURE_URL") >/dev/null
 long_reason="$(reason_for_repo "$LONG_REPO" "$LONG_STATE" 'gh pr ready 42')"
 assert_reason_budget "long-ref fallback stays bounded" "$long_reason"
 for contract in "request_user_input_async" "reviewed:" \
@@ -901,7 +910,7 @@ echo "## Review prompts are loaded at the public hook boundary"
 fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
-cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-size}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-size,design-doc,pr-design-doc}.sh "$fixture_plugin/.agents/lib/"
 cp "$REPO_ROOT/.agents/prompts/concise-writing.md" "$fixture_plugin/.agents/prompts/"
 cp "$REPO_ROOT/.agents/prompts/timed-user-prompt.md" "$fixture_plugin/.agents/prompts/"
 HOOK="$fixture_plugin/.agents/hooks/preflight-pr-review.sh"

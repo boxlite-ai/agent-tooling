@@ -59,6 +59,11 @@ command, optionally followed by `--repo owner/repo`; both text values must be li
 single-quoted strings. Editors, body files, and chained commands remain gated.
 Re-register after changing branches. Page count and design quality require review.
 Notion designs must keep their text in top-level blocks; unread child blocks are rejected.
+Use the full registered URL in the PR body as plain text or a Markdown link.
+The hook renders the body through GitHub and checks the resulting link target;
+hidden references, comments, and code examples do not count. Rendering failures block publication.
+The PR hook rechecks the document and link before consuming any review acknowledgment;
+ready and metadata-only operations inspect the current published body.
 
 Every PR description must explain how the change produces its intended result. Use a
 call graph, sequence diagram, real example, bullets, table, or short prose—whichever
@@ -109,7 +114,7 @@ one. Description quality is a human review criterion. Maintainer approval remain
 Illustrative example; the behavior and test results are hypothetical:
 
 ````markdown
-Design doc: #123
+Design doc: https://github.com/example/repo/issues/123
 
 Reduce routine SDK CI work while keeping the full compatibility matrix weekly.
 
