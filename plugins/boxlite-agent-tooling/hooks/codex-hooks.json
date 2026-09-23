@@ -34,6 +34,17 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "^(Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/preflight-design-doc.sh\"",
+            "statusMessage": "Checking design document before code edits",
+            "timeout": 45
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
