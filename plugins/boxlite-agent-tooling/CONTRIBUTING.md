@@ -35,6 +35,25 @@ with the repository, base/head, and measured size in the PR and parent issue.
 
 ### Pull request descriptions
 
+Before writing any code, create a **1–3 page design doc**. Every PR, including drafts
+and small changes, must link it. Prefer **GitHub issue > Notion > Linear issue**.
+Cover the problem, approach, alternatives and trade-offs, and validation plan.
+Walls of text are forbidden; use short paragraphs, bullets, tables, or diagrams.
+Keep the doc aligned with the final PR scope; summarize the implementation in the PR.
+
+Register the canonical URL before implementation:
+
+```sh
+bash <plugin-root>/scripts/design-doc.sh bind <URL>
+```
+
+The command verifies readable, nonempty content and rejects walls of text.
+GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
+`LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.
+Run `design-doc.sh check` to recheck the binding and document. Re-register after
+changing branches. Page count and design quality require review.
+Notion designs must keep their text in top-level blocks; unread child blocks are rejected.
+
 Every PR description must explain how the change produces its intended result. Use a
 call graph, sequence diagram, real example, bullets, table, or short prose—whichever
 best explains that PR.
@@ -52,9 +71,9 @@ No diagram, Before/After layout, source annotation, or section order is mandator
 - Include decisive verification as `command → observed result`. For a fix, briefly
   report the failure with all production changes reverted and the pass with the
   complete fix restored. Do not present old results as newly verified.
-- Link the relevant issue when one exists, using `Fixes #<n>` when the PR closes it.
-  Large work requires the parent and child issues described above; small standalone
-  changes need no issue solely for formatting. No inline bug marker is required.
+- Link the design doc in every PR. Use `Fixes #<n>` only when the PR closes that
+  GitHub issue. Large work also requires the parent and child issues described
+  above. No inline bug marker is required.
 
 For issues, comments, reviews, discussions and release notes, use the same
 [reply-summary prompt](.agents/prompts/concise-writing.md).
@@ -84,6 +103,8 @@ one. Description quality is a human review criterion. Maintainer approval remain
 Illustrative example; the behavior and test results are hypothetical:
 
 ````markdown
+Design doc: #123
+
 Reduce routine SDK CI work while keeping the full compatibility matrix weekly.
 
 - The workflow selects a reduced SDK matrix for PRs and the full matrix for weekly
