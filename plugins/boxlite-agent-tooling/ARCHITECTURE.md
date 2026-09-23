@@ -18,6 +18,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. An audit still running for the abandoned turn is revoked. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | One compact reply-shape reminder. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. |
+| Edits code or runs a shell command | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch; narrow research and registration commands remain available. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | A request to shorten unpublishable text. PRs over 400 changed lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely typed answer; idle expiry and selected options never authorize a PR. |
@@ -31,12 +32,13 @@ the change produces its intended result, using the form best suited to the PR.
 Before code is written, a 1–3 page design doc must exist; every PR must link it,
 preferably in a GitHub issue, then Notion, then a Linear issue.
 `scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
-provider read; its check command rechecks existence, nonempty content, and writing density.
+provider read; the gate rechecks existence, nonempty content, and writing density.
 Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` and
 match its canonical root and branch (or detached HEAD). State reads and replacement
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
 Notion child blocks fail closed; list items and code retain their density semantics.
-Page count and design quality remain review criteria.
+Page count and design quality remain review criteria. Hooks cover native shell,
+editor, notebook, and patch tools, not other clients or arbitrary MCP writers.
 The same hook checks PR bodies (including drafts), issue/discussion bodies, comments,
 reviews, close/reopen comments, release notes, and REST body/description fields.
 `.agents/lib/github-writing.sh` applies `.agents/lib/reply-summary.sh`'s shared
