@@ -114,6 +114,22 @@ non-blocking question. It never waits or opens a host dialog inside the state lo
 Size exceptions bind to repository, base/head, measured size, and session. A reason
 needs at least 12 words; the agent must judge whether it names a concrete constraint.
 
+After an explicit human instruction, `renew STATE REQUEST_ID USER_REQUEST` creates a
+new pending PR-size attempt with an empty response, new ID/deadline, and no native
+question ID. The agent first remeasures through the guarded PR operation and shows
+the current diff and split. Ordinary `request` calls cannot renew expired attempts;
+review requests cannot be renewed. Like `respond`, the CLI trusts the agent to relay
+verbatim human text; it does not authenticate human identity.
+
+Renewal exclusively writes an archive containing the expired record, human instruction,
+successor ID, and renewal time before atomically replacing the active state, all under
+the existing request lock. Archive collisions and unsafe paths fail closed. If publication
+fails after archival, the archive remains for inspection; no approval was granted.
+Active-state replacement is the commit point. A failure before it leaves the old
+attempt authoritative and blocks another renewal at the existing archive. A lost
+result after it leaves the new pending ID/deadline intact; use normal `request` or
+`status` to inspect it. Old IDs and late native replies cannot affect the successor.
+
 The local PR gate uses this lifecycle for `reviewed:` acknowledgments, bound to
 checkout, branch/head, session, and request ID. A retry cannot restart the deadline;
 expiry leaves the PR draft or uncreated, and a successful operation consumes the reply.
@@ -124,7 +140,8 @@ The deadline starts when the gate records the request. Before normal Stop checks
 `scripts/continue-timed-prompts.sh` resumes pending requests or delivers their timeout
 fallback once: split oversized work, or leave an unreviewed PR draft/uncreated.
 The agent performs the wait, issue creation, and splitting; these are not background
-jobs. `.agents/prompts/pr-size-exception.md` carries the size-specific wording.
+jobs. `.agents/prompts/pr-size-exception.md` carries the size-specific wording;
+`.agents/prompts/pr-size-expired.md` describes splitting and human-requested renewal.
 
 Local interactive sessions launched through `scripts/claude-with-timed-prompts.sh`
 load this plugin with `--plugin-dir`, enable 180-second native idle dismissal, and
@@ -255,7 +272,7 @@ than one session can share a checkout.
 - `commit-audit-receipt.json`: the receipt commit-msg publishes and pre-push spends.
 - `pr-reviewed.json`: the typed PR-review acknowledgment, bound to branch, HEAD, and request ID.
 - `pr-review-request.json`: the review deadline and response lifecycle.
-- `pr-size-request.json`: the size exception deadline, diff binding, and exact reason.
+- `pr-size-request.json`: the size exception deadline, diff binding, and exact reason; renewal archives live at `<state>.expired-<request-id>.json`.
 - `auditor-control`: a directory of escalation, completion, grant and event records for running auditors and overrides.
 - `last-api-failure.json`: the kind of API error that ended a turn.
 - `api-resume`: the recent resumes and the unspent wake hashes of the API-failure resume.

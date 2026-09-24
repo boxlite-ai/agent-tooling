@@ -31,6 +31,12 @@ instead. Setting `CLAUDE_AFK_TIMEOUT_MS` alone does not enable managed native qu
 Activity can keep a native dialog open beyond the fixed deadline, but late replies
 remain invalid. See [enforcement scope](ARCHITECTURE.md#entry-points).
 
+An explicit human instruction to ask again permits renewal of an expired size request.
+Remeasure through the guarded PR operation and show the current diff and split first;
+then run `scripts/timed-user-prompt.sh renew STATE REQUEST_ID USER_REQUEST` with the
+verbatim instruction. The fresh attempt still needs a typed exception; ordinary
+retries cannot renew it. Like `respond`, this CLI relies on the agent to relay human text.
+
 Illustrative typed exception:
 
 > pr-size-exception: The dependency update regenerates 612 lockfile lines; splitting the proposed manifest and lockfile changes would leave the dependency graph inconsistent.
