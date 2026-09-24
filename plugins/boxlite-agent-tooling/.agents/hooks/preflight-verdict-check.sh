@@ -46,7 +46,8 @@
 #           (announced to the human via systemMessage, invisible to the model).
 #           Turns over 12 KB skip this duplicate model input and block for the
 #           file-backed auditor instead.
-#      No transcript (absent / unreadable / zero bytes) -> allow; nothing to judge.
+#      Initially absent or empty transcript -> allow; nothing to judge. A failed
+#      bounded snapshot remains incomplete evidence through refresh and audit re-entry.
 #      A transcript WITH content but no assistant text is NOT that case — the hook
 #      could not SEE the turn (unflushed final message, or a torn write jq could not
 #      parse). It waits up to 2s for the text, then fails open under a `blind-allow`
@@ -1552,6 +1553,21 @@ prepare_audit_transcript() {
     AUDIT_TRANSCRIPT_SOURCE_PATH=""
     AUDIT_TRANSCRIPT_REFRESHABLE=false
     AUDIT_TRANSCRIPT_SOURCE_KIND="transcript"
+    # An audit of incomplete evidence must validate that same snapshot. Re-reading
+    # a vanished original would turn a known failure into an empty, unjudged allow.
+    if [[ -n "$reentry_prompt_epoch" \
+       && "${VERDICT_STOP_REENTRY_INCOMPLETE:-false}" == true ]]; then
+      snapshot_state="$(verdict_audit_read_regular_state \
+        "$payload_transcript_file" "$transcript_turn_max_bytes" json)" || return 1
+      [[ "$snapshot_state" == *$'\n'* ]] || return 1
+      snapshot_body="$(printf '%s' "${snapshot_state#*$'\n'}" \
+        | verdict_audit_normalize_turn_snapshot "$transcript_turn_max_bytes")" || return 1
+      [[ "$(printf '%s' "$snapshot_body" | jq -r '.truncated')" == true ]] || return 1
+      transcript_snapshot_truncated=true
+      transcript_path="$payload_transcript_file"
+      AUDIT_TRANSCRIPT_SOURCE_KIND="failed"
+      return 0
+    fi
   fi
   # A refresh keeps what it cannot replace. Several exits below return without
   # publishing a snapshot — the source vanished, or the record could not be
@@ -1560,6 +1576,7 @@ prepare_audit_transcript() {
   # UNJUDGED. Only a published snapshot may say what the evidence now is.
   if [[ -z "$source_path" || "$source_path" == /dev/null \
      || ( ! -e "$source_path" && ! -L "$source_path" ) ]]; then
+    [[ "$refresh_mode" == refresh && "$transcript_snapshot_truncated" == true ]] && return 0
     if [[ -n "$last_assistant_message" ]]; then
       write_payload_transcript || return 1
       transcript_path="$payload_transcript_file"
@@ -1570,11 +1587,13 @@ prepare_audit_transcript() {
     fi
     return 0
   fi
-  if [[ -f "$source_path" && ! -s "$source_path" \
-     && -z "$last_assistant_message" ]]; then
-    transcript_path=""
-    AUDIT_TRANSCRIPT_SOURCE_KIND="none"
-    return 0
+  if [[ -f "$source_path" && ! -s "$source_path" ]]; then
+    [[ "$refresh_mode" == refresh && "$transcript_snapshot_truncated" == true ]] && return 0
+    if [[ -z "$last_assistant_message" ]]; then
+      transcript_path=""
+      AUDIT_TRANSCRIPT_SOURCE_KIND="none"
+      return 0
+    fi
   fi
   staged="${payload_transcript_file}.stage-$$-${RANDOM:-0}"
   mkdir -p "$(dirname "$payload_transcript_file")" 2>/dev/null || return 1
@@ -1700,6 +1719,7 @@ Verdict audit could not complete: ${runner_failure}. Retry after restoring the a
   printf '%s' "$raw_payload" \
     | ( cd "$repo_root" \
         && CLAUDE_PROJECT_DIR="$project_dir" \
+          VERDICT_STOP_REENTRY_INCOMPLETE="$transcript_snapshot_truncated" \
           VERDICT_STOP_REENTRY_EPOCH="$entry_prompt_epoch" bash "${BASH_SOURCE[0]}" )
   exit $?
 }

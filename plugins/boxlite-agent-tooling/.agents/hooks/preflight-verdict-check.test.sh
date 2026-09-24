@@ -4249,13 +4249,69 @@ check_still_blocks() {  # desc repo
   fi
 }
 
-R="$(setup)"
-truncate -s 65M "$R/transcript.jsonl"
-( await_hollow_snapshot "$R" && rm -f "$R/transcript.jsonl" ) &
-vanish_pid=$!
-check_still_blocks "a transcript that vanishes mid-retry still blocks as unreadable" "$R"
-wait "$vanish_pid" 2>/dev/null || true
-rm -rf "$R"
+# Publication precedes retry setup: polling for the hollow snapshot can delete the
+# source on either side of that check. Force both orderings and require the FAIL
+# dossier, so an auditor-startup error cannot masquerade as the expected block.
+for retry_boundary in before-arm refresh-delete refresh-empty; do
+  for retry_mode in legacy session legacy-payload session-payload; do
+    retry_session=""; retry_payload_text=""
+    [[ "$retry_mode" == session* ]] && retry_session=retry-session
+    [[ "$retry_mode" == *-payload ]] && retry_payload_text="Just chatting."
+    R="$(setup)"
+    mkdir -p "$R/.agents/state"
+    truncate -s 65M "$R/transcript.jsonl"
+    retry_env="$R/.agents/state/retry-env.sh"
+    cat > "$retry_env" <<'RETRY_ENV'
+if [[ -z "${VERDICT_RETRY_ENV_LOADED:-}" ]]; then
+  export VERDICT_RETRY_ENV_LOADED=1
+  verdict_retry_debug() {
+    case "$VERDICT_RETRY_BOUNDARY" in
+      before-arm)
+        [[ "$BASH_COMMAND" == 'AUDIT_TRANSCRIPT_SOURCE_KIND="failed"' ]] || return 0 ;;
+      refresh-*)
+        [[ "$BASH_COMMAND" == 'prepare_audit_transcript "$AUDIT_TRANSCRIPT_SOURCE_PATH" refresh'* ]] || return 0 ;;
+    esac
+    trap - DEBUG
+    if [[ "$VERDICT_RETRY_BOUNDARY" == refresh-empty ]]; then
+      : > "$CLAUDE_PROJECT_DIR/transcript.jsonl"
+    else
+      rm -f "$CLAUDE_PROJECT_DIR/transcript.jsonl"
+    fi
+    : > "$CLAUDE_PROJECT_DIR/.agents/state/retry-boundary-hit"
+  }
+  set -T
+  trap verdict_retry_debug DEBUG
+fi
+RETRY_ENV
+    retry_payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s "$retry_session" \
+      --arg t "$retry_payload_text" \
+      '{transcript_path:$p,hook_event_name:"Stop",last_assistant_message:$t}
+       + (if $s == "" then {} else {session_id:$s} end)')"
+    retry_out="$(BASH_ENV="$retry_env" VERDICT_RETRY_BOUNDARY="$retry_boundary" \
+      run_payload_hook "$R" "$retry_payload")"
+    retry_decision="$(decision_from_output "$retry_out")"
+    retry_state="decision=$retry_decision boundary=missed evidence=missing dossier=missing"
+    [[ -e "$R/.agents/state/retry-boundary-hit" ]] \
+      && retry_state="${retry_state/boundary=missed/boundary=hit}"
+    if jq -e '.truncated == true and .source_bytes == 0' \
+        "$R/.agents/state/SYNC_AUDIT_TRANSCRIPT" >/dev/null 2>&1; then
+      retry_state="${retry_state/evidence=missing/evidence=incomplete}"
+    fi
+    if [[ "$retry_out" == *"independent audit finding"* ]] \
+       && grep -q ' extract truncated-block$' "$R"/.agents/state/verdict-decisions.log* \
+       && grep -q ' dossier FAIL-block$' "$R"/.agents/state/verdict-decisions.log*; then
+      retry_state="${retry_state/dossier=missing/dossier=FAIL}"
+    fi
+    if [[ "$retry_state" == "decision=block boundary=hit evidence=incomplete dossier=FAIL" ]]; then
+      pass=$((pass + 1)); printf '  PASS  unreadable transcript %s (%s) consumes FAIL\n' \
+        "$retry_boundary" "$retry_mode"
+    else
+      fail=$((fail + 1)); printf '  FAIL  unreadable transcript %s (%s) consumes FAIL (%s)\n' \
+        "$retry_boundary" "$retry_mode" "$retry_state"
+    fi
+    rm -rf "$R"
+  done
+done
 
 R="$(setup)"
 truncate -s 65M "$R/transcript.jsonl"
