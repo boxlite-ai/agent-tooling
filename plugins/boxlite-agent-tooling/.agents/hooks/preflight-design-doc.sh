@@ -31,7 +31,7 @@ source "$plugin_root/.agents/lib/concise-writing.sh" || deny 'summary check unav
 # shellcheck source=../lib/design-doc.sh
 source "$plugin_root/.agents/lib/design-doc.sh" || deny 'document verifier unavailable'
 if ! design_doc_binding check "$cwd" >/dev/null; then
-  deny "Before writing code, create a concise 1–3 page design doc, then run:
+  deny "Before writing code, create a 1–3 page design doc with concise presentation, then run:
 bash \"$plugin_root/scripts/design-doc.sh\" bind <GitHub-issue/Notion/Linear-URL>
 Shell investigation and document registration remain available."
 fi

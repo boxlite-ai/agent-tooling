@@ -13,3 +13,8 @@ For replies, put TL;DR at the beginning and keep the entire section under 40 wor
 Walls of text are forbidden. Prefer: visuals > tables > bullets > prose (under {{max_words}} words; 120 for complex topics).
 
 Always include a brief real example when it helps the user understand.
+
+Public artifacts require public evidence or explicitly authorized material. Never
+include private messages, memory citations, internal context, or paraphrases without
+disclosure permission for that exact content and destination. A check passing is not
+disclosure approval.

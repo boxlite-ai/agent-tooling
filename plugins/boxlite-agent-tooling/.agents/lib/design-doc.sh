@@ -86,7 +86,7 @@ design_doc_verify() { # URL -> URL, only after a live provider read
   [[ "$density" == 1 ]] || {
     _design_doc_error 'walls of text are forbidden: shorten paragraphs and list items'; return 1;
   }
-  concise_writing_check_summary "$body" >&2 || return 1
+  concise_writing_check_summary "$body" first 39 >&2 || return 1
   printf '%s\n' "$url"
 }
 

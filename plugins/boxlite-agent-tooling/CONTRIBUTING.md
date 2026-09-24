@@ -43,7 +43,10 @@ Use native GitHub stacks for dependent slices; follow the
 Before writing any code, create a **1–3 page design doc**. Every PR, including drafts
 and small changes, must link it. Prefer **GitHub issue > Notion > Linear issue**.
 Cover the problem, approach, alternatives and trade-offs, and validation plan.
-Walls of text are forbidden; use short paragraphs, bullets, tables, or diagrams.
+Use reply-summary presentation: start with TL;DR under 40 words.
+Walls of text are forbidden; use short bullets, tables, or diagrams.
+Include a brief real example when helpful;
+link supporting detail. Design docs have no fixed total-word limit.
 Keep the doc aligned with the final PR scope; summarize the implementation in the PR.
 
 Register the canonical URL before implementation:
@@ -53,7 +56,8 @@ bash <plugin-root>/scripts/design-doc.sh bind <URL>
 ```
 
 The pre-edit hook verifies the document before native editor, patch, and notebook
-operations. Missing, empty, unreadable, or overly dense documents block edits.
+operations. Missing, unreadable, oversized, or overly dense documents block edits;
+a missing, buried, or oversized TL;DR also blocks them.
 GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
 `LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.
 Shell commands are outside this design gate, so investigation and document
@@ -61,7 +65,7 @@ registration need no command-specific exemptions. Host permissions and the separ
 commit/push and GitHub publication hooks still apply. The requirement to create a
 design before writing code includes shell-created code as workflow guidance;
 this pre-edit hook does not enforce shell writes or arbitrary MCP writers.
-Re-register after changing branches. Page count and design quality require review.
+Re-register after changing branches. Design quality still requires review.
 Notion designs must keep their text in top-level blocks; unread child blocks are rejected.
 Use the full registered URL in the PR body as plain text or a Markdown link.
 The hook renders the body through GitHub and checks the resulting link target;
@@ -92,6 +96,13 @@ TL;DR is mandatory; diagrams, Before/After layouts, source annotations, and sect
 
 For issues, comments, reviews, discussions and release notes, use the same
 [reply-summary prompt](.agents/prompts/concise-writing.md).
+Design documents follow the 1–3-page guidance above.
+
+Public artifacts must not include private chats, memory citations, internal sources,
+or local session details, including paraphrases. Use public evidence or explicit
+disclosure authorization for the exact content and destination. The publication
+hook rejects recognizable privacy indicators in titles and bodies; passing it does
+not establish that arbitrary content is public. See the scope in ARCHITECTURE.md.
 
 The preflight hook checks explicit nonempty text, including draft PRs and REST body
 fields. It shares reply-summary's word and density checks; see

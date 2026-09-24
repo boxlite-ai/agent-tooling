@@ -30,7 +30,7 @@ run_hook() { # host, event, script basename; stdin is the native hook payload
   env -u PLUGIN_ROOT -u CLAUDE_PLUGIN_ROOT -u CLAUDE_PROJECT_DIR \
     "$root=$plugin" bash -c "$command"
 }
-check() { # label, text, expected allow|deny, optional reply expectation
+check() { # label, text, expected allow|deny, optional reply/design expectation
   local label="$1" body="$2" expected="$3" reply_expected="${4:-$3}" output actual gate active wanted host
   for gate in github-claude github-codex github-codex-native design stop-claude stop-codex stop-transcript-claude stop-transcript-codex; do
     host=claude
@@ -46,6 +46,7 @@ check() { # label, text, expected allow|deny, optional reply expectation
             | run_hook "$host" PreToolUse preflight-pr-review.sh)"
           [[ "$(jq -r '.hookSpecificOutput.permissionDecision // "allow"' <<<"$output")" != deny ]] || actual=deny ;;
         design)
+          wanted="$reply_expected"
           jq -nc --arg body "$body" '{html_url:"https://github.com/example/repo/issues/1",body:$body}' > "$DOC_FIXTURE"
           output="$(bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 2>&1)" || actual=deny ;;
         stop-*)

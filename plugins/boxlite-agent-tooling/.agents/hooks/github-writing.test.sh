@@ -28,16 +28,17 @@ cd "$scratch/repo" || exit 2
 bash "$PLUGIN/scripts/design-doc.sh" bind https://github.com/example/repo/issues/123 >/dev/null
 
 check() {
-  local name="$1" command="$2" expected="$3" output status=0 actual
+  local name="$1" command="$2" expected="$3" reason="${4:-}" output status=0 actual
   output="$(jq -nc --arg command "$command" '{tool_input:{command:$command}}' | bash "$HOOK")" || status=$?
   actual="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.permissionDecision // empty')"
   [[ -n "$actual" ]] || actual=allow
-  if [[ "$actual" == "$expected" && "$status" == 0 ]]; then
+  if [[ "$actual" == "$expected" && "$status" == 0 && "$output" == *"$reason"* ]]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
     printf 'FAIL %s: expected %s, got %s (exit %s)\n%s\n' "$name" "$expected" "$actual" "$status" "$output"
   fi
+  last_check_output="$output"
 }
 
 dense="$(printf 'word %.0s' {1..81})"
@@ -152,6 +153,105 @@ check 'repo flag between noun and verb' "gh issue -R o/r comment 7 --body '$dens
 check 'PR repo flag between noun and verb' "gh pr -R o/r comment 7 --body '$dense'" deny
 check 'compound command catches later write' "true && gh issue comment 7 --body '$dense'" deny
 check 'nested shell catches write' "bash -c \"gh issue comment 7 --body '$dense'\"" deny
+
+private_text='Per our private conversation, PRIVATE_CANARY must stay unpublished.'
+private_body="## TL;DR
+
+Fix request validation.
+
+## Context
+
+$private_text
+
+https://github.com/example/repo/issues/123"
+for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
+  'issue create --title Bug' 'issue edit 7' 'issue comment 7' \
+  'discussion create --title Topic' 'pr close 7'; do
+  flag=--body
+  [[ "$operation" != 'pr close 7' ]] || flag=--comment
+  check "$operation blocks private attribution" "gh $operation $flag '$private_body'" deny 'private context'
+done
+for text in '<oai-mem-citation>PRIVATE_CANARY</oai-mem-citation>' \
+  '<hook_prompt>PRIVATE_CANARY</hook_prompt>' '<environment_context>PRIVATE_CANARY</environment_context>' \
+  'As you told me, PRIVATE_CANARY.' 'The user asked me to add PRIVATE_CANARY.' \
+  'From the internal chat: PRIVATE_CANARY.' '根据私聊记录，PRIVATE_CANARY。' \
+  '/Users/PRIVATE_CANARY/work/file.txt' '/home/PRIVATE_CANARY/file.txt' \
+  'C:\Users\PRIVATE_CANARY\file.txt' '.codex/sessions/PRIVATE_CANARY.jsonl' \
+  'See `.codex/sessions/PRIVATE_CANARY.jsonl` for the transcript.'; do
+  check 'private context cannot be quoted or hidden' "gh issue comment 7 --body '## TL;DR
+
+Fix validation.
+
+~~~
+$text
+~~~'" deny 'private context'
+done
+for option in "--title '$private_text'" "--title='$private_text'" "-t'$private_text'"; do
+  check 'issue title privacy' "gh issue edit 7 $option" deny 'private context'
+done
+check 'opaque REST title file cannot bypass privacy' 'gh api repos/o/r/issues/7 -F title=@private.txt' deny
+check 'PR title privacy' "gh pr edit --title 'fix: as you told me, PRIVATE_CANARY' --body '## TL;DR
+
+Fix validation. https://github.com/example/repo/issues/123'" deny 'private context'
+check 'release title privacy' "gh release edit v1 --title '$private_text'" deny 'private context'
+check 'release notes privacy' "gh release edit v1 --notes '$private_body'" deny 'private context'
+for field in body title description notes 'comments[][body]'; do
+  check 'REST field privacy' "gh api repos/o/r/issues/7 -f '$field=$private_body'" deny 'private context'
+done
+check 'REST typed title privacy' "gh api repos/o/r/issues/7 -F 'title=$private_text'" deny 'private context'
+if [[ "$last_check_output" != *PRIVATE_CANARY* ]]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); printf 'FAIL privacy denial echoed rejected text\n'
+fi
+for text in 'Private messages require authorization before disclosure.' \
+  'A public issue requests better retry handling: https://github.com/example/repo/issues/123' \
+  'The parser handles user input and the private field.'; do
+  check 'public technical writing remains allowed' "gh issue comment 7 --body '## TL;DR
+
+$text'" allow
+done
+check 'ordinary title needs no summary heading' "gh issue edit 7 --title 'Fix validation'" allow
+check 'read-only REST does not publish private parameters' \
+  "gh api repos/o/r/issues -X GET -f 'title=$private_text'" allow
+mkdir -p .agents/state
+spec="$(jq -nc --arg repo "$(git rev-parse --show-toplevel)" --arg head "$(git rev-parse HEAD)" \
+  '{binding:{repo:$repo,branch:"feature",head:$head,session:""},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}')"
+request_id="$(bash "$PLUGIN/scripts/timed-user-prompt.sh" request \
+  .agents/state/pr-review-request.json "$spec" | jq -r .id)"
+marker="$(jq -nc --arg head "$(git rev-parse HEAD)" --arg request "$request_id" \
+  '{branch:"feature",head:$head,message:"reviewed: fixture validation",request:$request}')"
+printf '%s\n' "$marker" > .agents/state/pr-reviewed.json
+check 'privacy denial precedes acknowledgment consumption' \
+  "gh pr create --title 'fix: validation' --body '$private_body'" deny 'private context'
+if [[ -f .agents/state/pr-reviewed.json && "$(cat .agents/state/pr-reviewed.json)" == "$marker" ]]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); printf 'FAIL privacy denial changed acknowledgment\n'
+fi
+check 'safe rewrite can still consume the preserved acknowledgment' \
+  "gh pr create --title 'fix: validation' --body '## TL;DR
+
+Fix validation. https://github.com/example/repo/issues/123'" allow
+if [[ ! -e .agents/state/pr-reviewed.json ]]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); printf 'FAIL safe rewrite did not consume acknowledgment\n'
+fi
+
+PRIVACY_TEST_PERL="$(command -v perl)"
+export PRIVACY_TEST_PERL
+cat > "$scratch/bin/perl" <<'PERL'
+#!/usr/bin/env bash
+for argument in "$@"; do
+  [[ "$argument" != *'my $private = qr{'* ]] || exit 2
+done
+exec "$PRIVACY_TEST_PERL" "$@"
+PERL
+chmod +x "$scratch/bin/perl"
+check 'scanner failure blocks publication' "gh issue comment 7 --body '## TL;DR
+
+Fix validation.'" deny 'private context check failed'
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 (( fail == 0 ))

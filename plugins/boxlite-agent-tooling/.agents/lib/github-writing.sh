@@ -7,6 +7,40 @@
 # https://github.com/cli/cli/blob/trunk/pkg/cmd/pr/comment/comment.go#L107-L114
 # shellcheck disable=SC2154 # Policy constants are owned by sourced reply-summary.sh.
 
+github_writing_check_privacy() { # literal published text; no transcript access
+  local status=0
+  if (( ${#1} > 8000 )); then
+    printf 'GitHub private context check cannot inspect oversized text.'
+    return 1
+  fi
+  # Scan the raw text, including quotes, fences and comments: GitHub stores all of
+  # them. These indicators catch accidental context copies, not arbitrary secrets
+  # or paraphrases. Never include a match or the input in the diagnostic.
+  printf '%s' "$1" | perl -CSD -0777 -e '
+    use utf8;
+    my $text = <STDIN> // "";
+    my $private = qr{
+      (?:<|&lt;)\s*/?\s*(?:oai-mem-citation|hook_prompt|environment_context|user_instructions)\b
+      | \b(?:as\s+you\s+(?:told|asked|said)|(?:the\s+)?user\s+(?:asked|told)\s+me)\b
+      | \b(?:per|from|in|according\s+to|as\s+discussed\s+in)\s+
+        (?:(?:our|your|the|a)\s+)?(?:private|internal|confidential)\s+
+        (?:chat|conversation|message|email|DM|discussion)s?\b
+      | \b(?:private|internal|confidential)\s+(?:chat|conversation|message|email|DM)s?\s*:
+      | \b(?:user|customer|client)\s+(?:privately|confidentially)\s+(?:asked|told|said|requested)\b
+      | (?:根据|按照|来自)(?:我们(?:的)?|你(?:的)?)?(?:私聊|私人(?:聊天|消息|对话)|内部(?:聊天|消息|对话))
+      | (?:/Users/|/home/|[A-Z]:[\\/]Users[\\/])[^/\\\s]+[\\/]
+      | \.(?:codex|claude)[\\/](?:memories|sessions|projects)[\\/]
+    }ix;
+    exit($text =~ $private ? 10 : 0);
+  ' 2>/dev/null || status=$?
+  case "$status" in
+    0) return 0 ;;
+    10) printf 'GitHub text contains private context indicators. Remove conversation attribution, memory citations, and local context paths; rewrite from public evidence.' ;;
+    *) printf 'GitHub private context check failed; nothing was authorized.' ;;
+  esac
+  return 1
+}
+
 github_writing_check_body() { # body
   local body="$1" density=0
   if [[ "$body" != *[![:space:]]* ]]; then
@@ -18,6 +52,7 @@ github_writing_check_body() { # body
     printf 'GitHub text is too long.'
     return 1
   fi
+  github_writing_check_privacy "$body" || return 1
   if ! reply_summary_fits_restatement "$body"; then
     printf 'GitHub text exceeds the reply-summary limit of %s words or could not be counted.' \
       "$reply_summary_restatement_max_words"
@@ -55,7 +90,7 @@ _github_writing_graphql_nonwriting() { # literal query
 
 _github_writing_api() { # literal-argv(0|1), api argv
   local literal="$1" token value key method="" endpoint="" query="" input=0 has_fields=0
-  local bodies=() body_count=0
+  local bodies=() titles=() body_count=0 title_count=0
   shift
   while (( $# )); do
     token="$1"; shift
@@ -77,6 +112,12 @@ _github_writing_api() { # literal-argv(0|1), api argv
         key="${value%%=*}"; value="${value#*=}"
         case "$key" in
           query) query="$value" ;;
+          title|*'[title]')
+            if [[ ( "$token" == --field || "$token" == -F ) && "$value" == @* ]]; then
+              input=1
+            else
+              titles[title_count]="$value"; title_count=$((title_count + 1))
+            fi ;;
           body|bodyText|description|notes|*'[body]'|*'[bodyText]'|*'[description]')
             if [[ ( "$token" == --field || "$token" == -F ) && "$value" == @* ]]; then
               input=1
@@ -107,6 +148,9 @@ _github_writing_api() { # literal-argv(0|1), api argv
   (( has_fields )) || return 0
   for value in ${bodies[@]+"${bodies[@]}"}; do
     github_writing_check_body "$value" || return 1
+  done
+  for value in ${titles[@]+"${titles[@]}"}; do
+    github_writing_check_privacy "$value" || return 1
   done
 }
 
@@ -148,6 +192,14 @@ github_writing_check() { # literal-argv(0|1), gh arguments after global options
   while (( $# )); do
     token="$1"; shift
     case "$token" in
+      --title|-t)
+        (( $# )) || { _github_writing_opaque; return 1; }
+        github_writing_check_privacy "$1" || return 1
+        shift; has_option=1; continue ;;
+      --title=*|-t?*)
+        value="${token#--title=}"; [[ "$token" == --title=* ]] || value="${token:2}"
+        github_writing_check_privacy "${value#=}" || return 1
+        has_option=1; continue ;;
       --body|-b|--notes|-n|--comment|-c)
         # --comment/-c on pr review is a boolean, on close/reopen it is text.
         if [[ "$group:$operation" == pr:review && ( "$token" == --comment || "$token" == -c ) ]]; then
@@ -169,10 +221,10 @@ github_writing_check() { # literal-argv(0|1), gh arguments after global options
           shift
         fi
         has_option=1; continue ;;
-      --title|-t|--repo|-R|--hostname|--label|-l|--assignee|--milestone|-m|--project|--reviewer|--base|-B|--head|-H|--target|--notes-start-tag|--discussion-category|--category|--reason|--add-label|--remove-label|--add-assignee|--remove-assignee|--add-project|--remove-project)
+      --repo|-R|--hostname|--label|-l|--assignee|--milestone|-m|--project|--reviewer|--base|-B|--head|-H|--target|--notes-start-tag|--discussion-category|--category|--reason|--add-label|--remove-label|--add-assignee|--remove-assignee|--add-project|--remove-project)
         (( $# )) || { _github_writing_opaque; return 1; }
         shift; has_option=1; continue ;;
-      --title=*|--repo=*|--hostname=*|--label=*|--assignee=*|--milestone=*|--project=*|--reviewer=*|--base=*|--head=*|--target=*|--notes-start-tag=*|--discussion-category=*|--category=*|--reason=*|--add-*=*|--remove-*=*|-t?*|-R?*|-l?*|-m?*|-B?*|-H?*)
+      --repo=*|--hostname=*|--label=*|--assignee=*|--milestone=*|--project=*|--reviewer=*|--base=*|--head=*|--target=*|--notes-start-tag=*|--discussion-category=*|--category=*|--reason=*|--add-*=*|--remove-*=*|-R?*|-l?*|-m?*|-B?*|-H?*)
         has_option=1; continue ;;
       -*) _github_writing_opaque; return 1 ;;
       *) continue ;;

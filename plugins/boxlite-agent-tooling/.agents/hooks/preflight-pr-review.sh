@@ -1721,6 +1721,9 @@ title_index=0
 while (( title_index < protected_title_count )); do
   pr_title="${protected_titles[$title_index]}"
   title_dynamic="${protected_title_dynamics[$title_index]}"
+  if ! privacy_error="$(github_writing_check_privacy "$pr_title")"; then
+    deny "$privacy_error"
+  fi
   if (( title_dynamic )) \
      || [[ -z "$pr_title" || ! "$pr_title" =~ $title_re ]] \
      || (( ${#pr_title} > 72 )); then
