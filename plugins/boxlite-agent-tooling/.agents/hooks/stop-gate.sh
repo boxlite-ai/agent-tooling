@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stop hook: confirmations and final-response checks run in sequence, so they
 # never race as separate Stop hooks would:
+#   Every nonempty agent reply must have a TL;DR, including repeated continuations.
 #   0. A pending timed confirmation resumes the agent; expiry selects its fallback.
 #   1. A small reply answering the previous Stop's ask ends the turn when no tool ran
 #      since the ask: it restates a turn the verdict check already judged.
@@ -13,8 +14,7 @@
 #
 # stdin is the host's Stop payload, handed unchanged to the verdict check. stdout,
 # stderr and the exit status are the verdict check's, except that step 1 ends silently
-# and step 3 replaces an allow with the ask. When a library or command this needs is
-# missing, only the verdict check runs, so its own failure handling stays in charge.
+# and step 3 replaces an allow with the ask. Missing dependencies fail closed.
 #
 # Tests: bash .agents/hooks/stop-gate.test.sh
 set -uo pipefail
@@ -30,10 +30,10 @@ run_verdict_check_alone() {
 }
 
 for required_command in jq perl git; do
-  command -v "$required_command" >/dev/null 2>&1 || run_verdict_check_alone
+  command -v "$required_command" >/dev/null 2>&1 || { printf 'stop-gate: missing %s\n' "$required_command" >&2; exit 2; }
 done
 for library in verdict-audit-state.sh reply-summary.sh concise-writing.sh subagent.sh hook-host.sh; do
-  [[ -r "$tooling_root/.agents/lib/$library" ]] || run_verdict_check_alone
+  [[ -r "$tooling_root/.agents/lib/$library" ]] || { printf 'stop-gate: missing %s\n' "$library" >&2; exit 2; }
 done
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$tooling_root/.agents/lib/verdict-audit-state.sh"
@@ -51,6 +51,19 @@ payload="$(printf '%s' "$raw_payload" | jq -ecs '
 ' 2>/dev/null)" || run_verdict_check_alone
 payload_string() { printf '%s' "$payload" | jq -r "if (.$1 | type) == \"string\" then .$1 else \"\" end"; }
 session_id="$(payload_string session_id)"
+last_assistant_message="$(payload_string last_assistant_message)"
+transcript_path="$(payload_string transcript_path)"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/stop-gate.XXXXXX")" || exit 2
+trap 'rm -f "$scratch/payload" "$scratch/verdict-output" "$scratch/decisions" "$scratch/final-turn.json"; rmdir "$scratch" 2>/dev/null' EXIT
+if [[ -z "$last_assistant_message" && -n "$transcript_path" ]]; then
+  last_assistant_message="$(reply_summary_last_text "$transcript_path" "$scratch")" || {
+    printf 'stop-gate: cannot read the final reply for the TL;DR check\n' >&2; exit 2;
+  }
+fi
+if [[ -n "$last_assistant_message" ]] && ! summary_error="$(concise_writing_check_summary "$last_assistant_message" first 39)"; then
+  jq -nc --arg reason "$summary_error" '{decision:"block",reason:$reason}'
+  exit 0
+fi
 timed_continuation="$tooling_root/scripts/continue-timed-prompts.sh"
 [[ -r "$timed_continuation" ]] || { printf "stop-gate: timed continuation missing\n" >&2; exit 2; }
 continuation="$(printf '%s' "$raw_payload" | bash "$timed_continuation")" || exit 2
@@ -59,8 +72,6 @@ if [[ -n "$continuation" ]]; then
   exit 0
 fi
 
-transcript_path="$(payload_string transcript_path)"
-last_assistant_message="$(payload_string last_assistant_message)"
 stop_hook_active="$(printf '%s' "$payload" | jq -r 'if .stop_hook_active == true then "true" else "false" end')"
 
 project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
@@ -81,8 +92,6 @@ ask_file="$(verdict_audit_state_path "$state_dir/reply-summary-ask" "$session_sc
 prompt_epoch_file="$(verdict_audit_state_path "$state_dir/verdict-prompt-epoch" "$session_scope")"
 decision_log="$(verdict_audit_state_path "$state_dir/verdict-decisions.log" "$session_scope")"
 message_id="cksum-$(printf '%s' "$last_assistant_message" | cksum | tr ' \t' '--')"
-scratch="$(mktemp -d "${TMPDIR:-/tmp}/stop-gate.XXXXXX")" || run_verdict_check_alone
-trap 'rm -f "$scratch/payload" "$scratch/verdict-output" "$scratch/decisions" "$scratch/final-turn.json"; rmdir "$scratch" 2>/dev/null' EXIT
 
 # The prompt epoch is an opaque token that UserPromptSubmit advances; a missing marker
 # is the initial epoch. An ask binds to it, so a new prompt retires the ask.

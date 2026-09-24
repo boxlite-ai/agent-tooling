@@ -5,6 +5,10 @@ placeholders: result, author, sha, review_question
 description: GitHub author-review comment for the current PR head.
 ---
 
+## TL;DR
+
+The PR author must acknowledge the current diff and description before requesting review.
+
 ### Author review acknowledgment
 
 {{result}}

@@ -5,6 +5,7 @@ placeholders:
 description: Writing guidance returned with empty or oversized PR-body denials.
 ---
 
+Include `## TL;DR` with one simple sentence, as short as possible.
 Walls of text are forbidden. Prefer: visuals > tables > bullets > prose.
 Choose the form that explains the PR best. No diagram is required.
 

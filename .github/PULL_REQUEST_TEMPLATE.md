@@ -1,3 +1,7 @@
+## TL;DR
+
+<!-- Required: one simple sentence, as short as possible. -->
+
 Design doc: <!-- Required before writing code and for every PR, including drafts.
 Link the 1–3 page doc: GitHub issue > Notion > Linear issue, in preference order.
 Cover the problem, approach, alternatives and trade-offs, and validation plan.
@@ -10,7 +14,7 @@ example, a table, call graph, sequence diagram, or short prose—whichever best
 explains this PR to the reviewer.
 Show the key steps or decisions that produce the result; listing files is not an explanation.
 Check drafts and description edits too: does this explanation match the diff?
-These headings are optional. No diagram or source annotation is required.
+Headings other than TL;DR are optional. No diagram or source annotation is required.
 No walls of text. -->
 
 ## Verification
