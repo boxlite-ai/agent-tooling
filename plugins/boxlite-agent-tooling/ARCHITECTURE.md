@@ -230,6 +230,11 @@ than one session can share a checkout.
 
 ## Boundaries
 
+- Watcher to commands: `.agents/watch/pr-watch.sh` owns the external command group
+  and its timeout/output monitors. Monitor cancellation uses KILL and wait because
+  those observers have no shutdown work; command groups retain TERM then KILL.
+  The launch-cleanup test has an independent deadline and reports owned processes
+  before forced teardown, preserving the original cleanup assertion.
 - Host to hook: the host injects its own plugin-root name, `PLUGIN_ROOT` on Codex and `CLAUDE_PLUGIN_ROOT` on Claude Code, and every wired command resolves `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `.agents/lib/hook-host.sh` answers which host is calling from that name alone. Session variables such as `CLAUDECODE` name whatever launched the process tree and are never used for routing.
 - Hook to agent: a hook is a bash process and cannot spawn a subagent. It emits text naming the route the calling host has, and the agent takes it. `.agents/lib/subagent.sh:8`
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.

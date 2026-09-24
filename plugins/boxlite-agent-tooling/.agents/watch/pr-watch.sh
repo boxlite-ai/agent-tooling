@@ -579,6 +579,8 @@ external_launch_in_progress=0
 pending_external_signal_status=0
 pending_external_signal_name=""
 external_output=""
+# Bookkeeping monitors have no shutdown work. Kill them unconditionally before
+# waiting: TERM alone can leave a monitor alive and block cleanup.
 terminate_external() {
   local pid="$active_external_pid" pgid="$active_external_pgid"
   local timeout_pid="$active_external_timeout_pid"
@@ -588,11 +590,11 @@ terminate_external() {
   active_external_timeout_pid=0
   active_external_limit_pid=0
   if [[ "$timeout_pid" =~ ^[1-9][0-9]*$ ]]; then
-    kill -TERM "$timeout_pid" 2>/dev/null || true
+    kill -KILL "$timeout_pid" 2>/dev/null || true
     wait "$timeout_pid" 2>/dev/null || true
   fi
   if [[ "$limit_pid" =~ ^[1-9][0-9]*$ ]]; then
-    kill -TERM "$limit_pid" 2>/dev/null || true
+    kill -KILL "$limit_pid" 2>/dev/null || true
     wait "$limit_pid" 2>/dev/null || true
   fi
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
@@ -724,7 +726,7 @@ stop_external_timeout() {
   local timeout_pid="$active_external_timeout_pid"
   active_external_timeout_pid=0
   if [[ "$timeout_pid" =~ ^[1-9][0-9]*$ ]]; then
-    kill -TERM "$timeout_pid" 2>/dev/null || true
+    kill -KILL "$timeout_pid" 2>/dev/null || true
     wait "$timeout_pid" 2>/dev/null || true
   fi
 }
@@ -733,7 +735,7 @@ stop_external_limit() {
   local limit_pid="$active_external_limit_pid"
   active_external_limit_pid=0
   if [[ "$limit_pid" =~ ^[1-9][0-9]*$ ]]; then
-    kill -TERM "$limit_pid" 2>/dev/null || true
+    kill -KILL "$limit_pid" 2>/dev/null || true
     wait "$limit_pid" 2>/dev/null || true
   fi
 }
