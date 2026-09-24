@@ -79,6 +79,11 @@ Base-changing edits, fork creation, and opaque invocations are unsupported.
 Git pushes, direct API calls, and browser writes are outside this size check;
 it is not a repository-wide enforcement boundary.
 
+Dependent slices use native GitHub stacks as described in `guidance/workflow.md`.
+Stack commands are not recognized by the per-PR publication checks: agents publish
+each layer through the guarded commands, then use `gh stack link` with verified
+existing PR URLs and matching bases. This is workflow guidance, not a new hook boundary.
+
 `.agents/lib/timed-user-prompt.sh` provides the reusable three-minute confirmation
 lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-supplied
 context and a random ID; retries preserve the deadline, late replies are rejected,
