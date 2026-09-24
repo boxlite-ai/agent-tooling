@@ -93,6 +93,11 @@ Base-changing edits, fork creation, and opaque invocations are unsupported.
 Git pushes, direct API calls, and browser writes are outside this size check;
 it is not a repository-wide enforcement boundary.
 
+Split work defaults to one tracking issue with a PR checklist, reusing an existing
+issue for the outcome. `.agents/prompts/split-pr-tracking-issue.md` supplies its body
+template: design, steps, open questions, and implementation history. Separate issues
+are reserved for work needing independent tracking; splitting alone requires no
+milestone or Project. This is agent workflow guidance, not an issue-creation gate.
 Dependent slices use native GitHub stacks as described in `guidance/workflow.md`.
 Stack commands are not recognized by the per-PR publication checks: agents publish
 each layer through the guarded commands, then use `gh stack link` with verified

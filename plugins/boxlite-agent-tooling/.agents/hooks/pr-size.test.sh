@@ -47,6 +47,8 @@ Fixture change. https://github.com/example/repo/issues/123"')"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision // empty' <<<"$out")" == deny ]] \
   || { printf 'FAIL: 401-line draft creation was allowed\n' >&2; exit 1; }
 [[ "$out" == *401* ]] || { printf 'FAIL: denial did not report measured size\n' >&2; exit 1; }
+[[ "$out" == *'one tracking issue'* && "$out" == *'checklist'* ]] \
+  || { printf 'FAIL: size exception prompt must default to one tracking issue with a checklist\n' >&2; exit 1; }
 export SIZE_TEST_LINES=400
 [[ -z "$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
@@ -80,6 +82,8 @@ out="$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
 Fixture change. https://github.com/example/repo/issues/123"')"
 [[ "$out" == *'deadline expired'* && "$out" == *'split'* ]]
+[[ "$out" == *'one tracking issue'* && "$out" == *'checklist'* ]] \
+  || { printf 'FAIL: expired size denial must default to one tracking issue with a checklist\n' >&2; exit 1; }
 if bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" 2>/dev/null; then
   printf 'FAIL: a late exception was accepted\n' >&2; exit 1
 fi

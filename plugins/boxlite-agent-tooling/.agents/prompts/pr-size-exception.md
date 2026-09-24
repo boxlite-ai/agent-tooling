@@ -13,5 +13,6 @@ does not make it concrete. Never invent or pre-fill a reason.
 Claude's native question hook records valid replies automatically. Otherwise run
 {{tooling}}/scripts/timed-user-prompt.sh respond for a valid human reply
 with arguments {{state}}, {{request_id}}, and the verbatim reply, safely quoted.
-Record the reason and diff context in the PR and parent issue; then retry.
-On timeout create parent/child issues, a milestone, and small tested PRs.
+Record the reason and diff context in the PR and tracking issue; then retry.
+On timeout reuse or create one tracking issue with a PR checklist and split into small tested PRs.
+Create separate issues only for work needing independent tracking.

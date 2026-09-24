@@ -24,6 +24,8 @@ jq '.created_at -= 181 | .deadline -= 181' "$state" > "$scratch/expired"
 mv "$scratch/expired" "$state"
 out="$(stop)"
 jq -e '.decision=="block" and (.reason|contains("split") or contains("small"))' <<<"$out" >/dev/null
+jq -e '.reason | contains("one tracking issue") and contains("checklist")' <<<"$out" >/dev/null \
+  || { printf 'FAIL: size timeout continuation must default to one tracking issue with a checklist\n' >&2; exit 1; }
 [[ -z "$(stop)" ]]
 spec="$(jq '.prefix="reviewed:"|.fallback="keep-draft"|.minimum_words=1' <<<"$spec")"
 state="$scratch/repo/.agents/state/pr-review-request.json"
