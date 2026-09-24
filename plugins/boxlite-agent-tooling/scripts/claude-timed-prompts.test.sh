@@ -83,10 +83,10 @@ elif [[ "$*" == 'api --hostname github.com markdown -f mode=gfm -f text='* ]]; t
   [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2
   printf '<a href="https://github.com/example/repo/issues/123">Design</a>'
 elif [[ "$1" == api ]]; then
-  printf '{"html_url":"https://github.com/example/repo/issues/123","body":"Design and validation."}'
+  printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}'
 else
   jq -nc --arg head "$(git rev-parse HEAD)" \
-    '{baseRefOid:$head,headRefOid:$head,headRefName:"feature",additions:1,deletions:0,body:"https://github.com/example/repo/issues/123"}'
+    '{baseRefOid:$head,headRefOid:$head,headRefName:"feature",additions:1,deletions:0,body:"## TL;DR\n\nFixture summary.\n\nhttps://github.com/example/repo/issues/123"}'
 fi
 GH
 chmod +x "$scratch/bin/gh"

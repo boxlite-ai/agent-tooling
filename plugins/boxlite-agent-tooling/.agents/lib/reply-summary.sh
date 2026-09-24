@@ -41,7 +41,7 @@ reply_summary_snapshot_max_bytes=262144
 # continuations stay together across blank lines. Soft wraps do not split blocks.
 # Fenced blocks, headings and tables with a delimiter row are excluded from the
 # block maxima only.
-_reply_summary_word_counts() {  # text -> total largest-paragraph largest-item
+reply_summary_word_counts() {  # text -> total largest-paragraph largest-item
   local counts
   counts="$(printf '%s\n' "${1-}" | perl -CSD -0777 -ne '
     use strict;
@@ -136,7 +136,7 @@ _reply_summary_word_counts() {  # text -> total largest-paragraph largest-item
 # the text could not be counted.
 reply_summary_is_dense() {  # text
   local counts _total paragraph_words item_words
-  counts="$(_reply_summary_word_counts "${1-}")" || return 2
+  counts="$(reply_summary_word_counts "${1-}")" || return 2
   read -r _total paragraph_words item_words <<< "$counts"
   (( paragraph_words > reply_summary_paragraph_max_words \
      || item_words > reply_summary_item_max_words )) && return 0
@@ -146,15 +146,15 @@ reply_summary_is_dense() {  # text
 # 0 only for a counted answer with few enough words to restate a judged turn.
 reply_summary_fits_restatement() {  # text
   local counts words
-  counts="$(_reply_summary_word_counts "${1-}")" || return 1
+  counts="$(reply_summary_word_counts "${1-}")" || return 1
   words="${counts%% *}"
   (( words <= reply_summary_restatement_max_words ))
 }
 
 # Tool calls in the transcript's final turn, read by the verdict check's own bounded
 # snapshot reader. The snapshot goes to a fresh path in the caller's scratch directory.
-reply_summary_tool_count() {  # transcript-path scratch-dir
-  local snapshot="$2/final-turn.json" identity state count
+_reply_summary_snapshot() {  # transcript-path scratch-dir -> bounded JSON
+  local snapshot="$2/final-turn.json" identity state
   [[ -n "${1-}" && -f "$1" && ! -L "$1" && -d "${2-}" ]] || return 1
   identity="$(verdict_audit_snapshot_final_turn_identity "$1" "$snapshot" \
     "$reply_summary_transcript_max_bytes" "$reply_summary_snapshot_max_bytes" \
@@ -163,7 +163,17 @@ reply_summary_tool_count() {  # transcript-path scratch-dir
     "$reply_summary_snapshot_max_bytes" json "$identity" 2>/dev/null)" || return 1
   verdict_audit_unlink_if_identity "$snapshot" "$identity" 2>/dev/null || true
   [[ "$state" == *$'\n'* ]] || return 1
-  count="$(printf '%s' "${state#*$'\n'}" \
+  printf '%s' "${state#*$'\n'}"
+}
+
+reply_summary_last_text() { # transcript-path scratch-dir -> last assistant text
+  _reply_summary_snapshot "$1" "$2" | jq -er 'select(.truncated == false) |
+    [.records[] | select(.kind == "assistant") | .texts | join("\n")] | last // ""'
+}
+
+reply_summary_tool_count() {  # transcript-path scratch-dir
+  local count
+  count="$(_reply_summary_snapshot "$1" "$2" \
     | jq -r '.evidence_summary.seen // empty' 2>/dev/null)" || return 1
   [[ "$count" =~ ^[0-9]+$ ]] || return 1
   printf '%s' "$count"

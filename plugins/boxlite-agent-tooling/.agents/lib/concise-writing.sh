@@ -1,6 +1,55 @@
 #!/usr/bin/env bash
-# Shared prompt renderer for Stop and GitHub writing checks. Requires subagent.sh.
+# Shared summary check and prompt renderer. Requires reply-summary.sh and perl;
+# rendering also needs subagent.sh.
 # Source only; callers own dependency checks, host delivery and failure policy.
+
+concise_writing_check_summary() { # Markdown, anywhere|first, optional word limit
+  local location="${2:-anywhere}" max_words="${3:-0}" summary counts
+  # Accept an ATX heading and prose, never an example or a hidden comment.
+  if (( ${#1} <= 262144 )) && summary="$(printf '%s' "$1" | perl -CSD -0777 -e '
+    my $text = <STDIN> // "";
+    $text =~ s/<!--.*?(?:-->|\z)//sg;
+    my ($fence, $level, $seen) = ("", 0, 0);
+    my @summary;
+    for my $line (split /\n/, $text) {
+      $line =~ s/\r$//;
+      if (length $fence) {
+        push @summary, $line if $level;
+        my $marker = substr $fence, 0, 1;
+        $fence = "" if $line =~ /^ {0,3}\Q$fence\E\Q$marker\E*[ \t]*$/;
+        next;
+      }
+      if ($line =~ /^ {0,3}(`{3,}|~{3,})/) {
+        $fence = $1; $seen = 1; push @summary, $line if $level; next;
+      }
+      if ($line =~ /^ {0,3}(\#{1,6})[ \t]+(.*)$/) {
+        my ($depth, $heading) = (length($1), $2);
+        last if $level && $depth <= $level;
+        $heading =~ s/[ \t]+\#*[ \t]*$//;
+        if (!$level && $heading =~ /^TL;DR$/i) {
+          exit 1 if $ARGV[0] eq "first" && $seen;
+          $level = $depth; next;
+        }
+      }
+      push @summary, $line if $level;
+      next if $line =~ /^[ \t]*$/;
+      $seen = 1;
+    }
+    my $summary = join "\n", @summary;
+    $summary =~ s/\A(?:[ \t]*\n)+//;
+    exit 1 unless $summary =~ /\A {0,3}\\?[\p{L}\p{N}*_\[]/ && $summary =~ /[\p{L}\p{N}]/;
+    print $summary;
+  ' "$location")"; then
+    counts="$(reply_summary_word_counts "$summary")" || counts=""
+    [[ -n "$counts" ]] && (( max_words == 0 || ${counts%% *} <= max_words )) && return 0
+  fi
+  if [[ "$location" == first ]]; then
+    printf '## TL;DR\n\nBegin the reply with a TL;DR section containing one short sentence of fewer than %s words.\n' "$((max_words+1))"
+  else
+    printf '## TL;DR\n\nAdd a visible TL;DR heading followed by one short sentence.\n'
+  fi
+  return 1
+}
 
 concise_writing_prompt() { # tooling-root
   local prompt

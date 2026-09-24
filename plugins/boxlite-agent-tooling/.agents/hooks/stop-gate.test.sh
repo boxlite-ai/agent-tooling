@@ -52,7 +52,7 @@ append_user() {
   jq -nc --arg t "$2" '{type:"user", message:{content:[{type:"text",text:$t}]}}' >> "$1/transcript.jsonl"
 }
 append_assistant() {
-  jq -nc --arg t "$2" '{type:"assistant", message:{content:[{type:"text",text:$t}]}}' >> "$1/transcript.jsonl"
+  jq -nc --arg t "$summary_prefix$2" '{type:"assistant", message:{content:[{type:"text",text:$t}]}}' >> "$1/transcript.jsonl"
 }
 append_tool_call() {
   jq -nc '{type:"assistant", message:{content:[{type:"tool_use", id:"tu1", name:"Bash", input:{command:"ls"}}]}}' \
@@ -105,14 +105,15 @@ new_repo() {  # session -> repo at prompt epoch 1 with a user turn
   printf '%s' "$repo"
 }
 
+summary_prefix=$'## TL;DR\n\nFixture summary.\n\n## Details\n\n'
 HARD_BLOCK=1
 stop_payload() {  # repo session stop-hook-active last-message
   if [[ -n "$2" ]]; then
-    jq -nc --arg p "$1/transcript.jsonl" --arg s "$2" --argjson a "$3" --arg m "$4" \
+    jq -nc --arg p "$1/transcript.jsonl" --arg s "$2" --argjson a "$3" --arg m "$summary_prefix$4" \
       '{transcript_path:$p, hook_event_name:"Stop", session_id:$s,
         stop_hook_active:$a, last_assistant_message:$m}'
   else
-    jq -nc --arg p "$1/transcript.jsonl" --argjson a "$3" --arg m "$4" \
+    jq -nc --arg p "$1/transcript.jsonl" --argjson a "$3" --arg m "$summary_prefix$4" \
       '{transcript_path:$p, hook_event_name:"Stop", stop_hook_active:$a,
         last_assistant_message:$m}'
   fi
@@ -474,10 +475,12 @@ rm -rf "$R"
 # Harness text is allowed without a judgment, so it is no turn to summarize.
 S="harness"; R="$(new_repo "$S")"
 api_error="API Error: 529 $long_reply"
+saved_summary_prefix="$summary_prefix"; summary_prefix=""
 append_assistant "$R" "$api_error"
 out="$(gate_stop "$R" "$S" false "$api_error" YES claude)"
-[[ "$(classifier_ran "$R")" == no && "$(decision_of "$out")" == allow ]] && not_asked "$out"
-expect "an allow without a judgment, such as harness text, never asks" \
+[[ "$(classifier_ran "$R")" == no && "$(decision_of "$out")" == block && "$out" == *"TL;DR"* ]]
+summary_prefix="$saved_summary_prefix"
+expect "nonempty harness text without TL;DR is blocked before judgment" \
   "$?" "out=$out classifier=$(classifier_ran "$R")"
 rm -rf "$R"
 

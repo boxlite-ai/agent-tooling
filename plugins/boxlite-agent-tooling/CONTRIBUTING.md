@@ -1,7 +1,9 @@
 # Contributing
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) first: entry points, invariants, the Stop gate's decision table, and the vocabulary used below.
-- Choose the form that makes the point easiest to understand: a diagram, real example, bullets, table, or short prose. No form is mandatory; walls of text are forbidden.
+- Every human-facing output requires `## TL;DR` with one simple sentence, as short as possible, including replies, progress updates, design docs, PR descriptions, and GitHub comments.
+- Replies must begin with TL;DR; keep the entire section under 40 words.
+- Beyond TL;DR, choose the clearest form: a diagram, real example, bullets, table, or short prose; walls of text are forbidden.
 
 ## Commit & PR messages
 
@@ -67,7 +69,7 @@ ready and metadata-only operations inspect the current published body.
 Every PR description must explain how the change produces its intended result. Use a
 call graph, sequence diagram, real example, bullets, table, or short prose—whichever
 best explains that PR.
-No diagram, Before/After layout, source annotation, or section order is mandatory.
+TL;DR is mandatory; diagrams, Before/After layouts, source annotations, and section order are optional.
 
 - Lead with the problem and resulting behavior, then explain the key steps or
   decisions that produce that result. Listing modified files is not an explanation.
@@ -113,9 +115,11 @@ one. Description quality is a human review criterion. Maintainer approval remain
 Illustrative example; the behavior and test results are hypothetical:
 
 ````markdown
-Design doc: https://github.com/example/repo/issues/123
+## TL;DR
 
 Reduce routine SDK CI work while keeping the full compatibility matrix weekly.
+
+Design doc: https://github.com/example/repo/issues/123
 
 - The workflow selects a reduced SDK matrix for PRs and the full matrix for weekly
   and manual runs.
