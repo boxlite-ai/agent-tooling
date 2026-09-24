@@ -32,10 +32,11 @@ Every change goes: understand → research → design → implement → test →
 
 **PR size and decomposition (hard requirement)**
 
-- Target 100–200 changed lines; maximum 400 additions + deletions across the entire PR against its intended base. Count tests, docs, and generated text. Drafts have the same limit; splitting commits does not reduce PR size.
+- Target 100–200 changed lines; maximum 400 additions + deletions across the entire PR against its intended base (the immediately preceding branch for a stacked PR). Count tests, docs, and generated text. Drafts have the same limit; splitting commits does not reduce PR size.
 - Estimate before implementing; measure before creating a PR and before each update. If the base or size cannot be determined, resolve that uncertainty before publishing. Never omit tests, compress code, or hide changes to meet the limit.
 - For work exceeding the limit, prepare a concrete split plan. Create a parent GitHub issue and child issues with scope, dependencies, acceptance criteria, and estimated size; group them in a milestone, using a Project for multiple workstreams.
 - Each child becomes a coherent, working PR within the limit, including its relevant tests. Link the child and parent issues. Implement and validate one slice at a time; re-plan if a slice grows beyond the limit.
+- **Mandatory:** dependent slices must use native [GitHub PR stacks](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-stacked-pull-requests) (`trunk ← PR1 ← PR2`). Preserve per-PR gates; link verified existing PR URLs with `gh stack link` and confirm GitHub stack membership. Rebase and revalidate affected layers after changes.
 - A human developer may authorize an oversized PR only after seeing its measured size, exact base/head, and proposed split. Ask once, without a preselected approval, for a typed response: `pr-size-exception: <specific reason this change must remain one PR>`.
 - The reason must identify the affected change, the concrete constraint, and why the proposed split is unsafe or impractical. Bare approvals, “urgent,” “too much work,” and generic convenience claims do not qualify. Never invent, paraphrase, or pre-fill the developer's reason.
 - Wait up to **3 minutes** from that question using a non-blocking prompt and an actual deadline. Continue reversible split preparation while waiting. Invalid replies do not restart the timer; an explicit cancellation or revised user instruction takes precedence.

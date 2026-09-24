@@ -35,6 +35,9 @@ The agent must show the actual diff and proposed split first. It must never supp
 that example as a pre-filled developer response. Record an accepted reason verbatim
 with the repository, base/head, and measured size in the PR and parent issue.
 
+Use native GitHub stacks for dependent slices; follow the
+[shared workflow](guidance/workflow.md#workflow) for per-layer checks and publication.
+
 ### Pull request descriptions
 
 Before writing any code, create a **1–3 page design doc**. Every PR, including drafts
