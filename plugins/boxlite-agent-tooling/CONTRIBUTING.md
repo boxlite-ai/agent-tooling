@@ -37,7 +37,12 @@ Illustrative typed exception:
 
 The agent must show the actual diff and proposed split first. It must never supply
 that example as a pre-filled developer response. Record an accepted reason verbatim
-with the repository, base/head, and measured size in the PR and parent issue.
+with the repository, base/head, and measured size in the PR and tracking issue.
+
+Default to one tracking issue with a PR checklist for the outcome; reuse an existing
+issue. Use the body of the [tracking-issue template](.agents/prompts/split-pr-tracking-issue.md),
+omitting its metadata and replacing its instructions with the plan. Create separate
+issues only for work needing independent tracking. Splitting alone requires no milestone or Project.
 
 Use native GitHub stacks for dependent slices; follow the
 [shared workflow](guidance/workflow.md#workflow) for per-layer checks and publication.
@@ -95,8 +100,8 @@ TL;DR is mandatory; diagrams, Before/After layouts, source annotations, and sect
   report the failure with all production changes reverted and the pass with the
   complete fix restored. Do not present old results as newly verified.
 - Link the design doc in every PR. Use `Fixes #<n>` only when the PR closes that
-  GitHub issue. Large work also requires the parent and child issues described
-  above. No inline bug marker is required.
+  GitHub issue. Intermediate slices reference the tracking issue without closing it;
+  close it only when its agreed acceptance criteria are met. No inline bug marker is required.
 
 For issues, comments, reviews, discussions and release notes, use the same
 [reply-summary prompt](.agents/prompts/concise-writing.md).

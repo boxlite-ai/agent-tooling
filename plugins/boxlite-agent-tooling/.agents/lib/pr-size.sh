@@ -87,7 +87,7 @@ pr_size_check() { # context JSON {root,project,session,tooling}, subcommand argv
     return 0
   fi
   if [[ "$status" == expired ]]; then
-    printf 'PR size %s exceeds 400 lines. The exception deadline expired. Create parent/child issues and split into coherent PRs of at most 400 lines; do not request the same exception again.\n' "$lines"
+    printf 'PR size %s exceeds 400 lines. The exception deadline expired. Reuse or create one tracking issue with a PR checklist and split into coherent tested PRs of at most 400 lines. Create separate issues only for work needing independent tracking; do not request the same exception again.\n' "$lines"
     return 1
   fi
   message="$(subagent_prompt pr-size-exception "$tooling" "lines=$lines" \
