@@ -2540,17 +2540,21 @@ term_at_external_launch_publication() {
   kill_watchers
   reset_state
   local marker="$TMP/external-launch-race" bash_env="$TMP/external-launch-race.env"
-  local watcher_pid child_pid="" deadline rc=0 child_state
-  rm -f "${marker}.once" "${marker}.child"
+  local watcher_pid child_pid="" deadline rc=0 child_state monitor_pid monitor_state
+  rm -rf "${marker}.once"
+  rm -f "${marker}.child" "${marker}.monitor" "${marker}.timeout"
+  rm -f "${marker}.monitor-ready"
+  mkfifo "${marker}.monitor-ready" || return 1
   apply_test_external_launch_env "$bash_env"
   (
     cd "$REPO" || exit 1
     exec env BASH_ENV="$bash_env" PR_WATCH_LAUNCH_RACE_MARKER="$marker" \
+      PR_WATCH_LAUNCH_RACE_POINT="${1:-publication}" \
       GH_STUCK_MARKER="${marker}.gh" bash "$SCRATCH_WATCHER" \
       --branch launch-race --pr 42 --once \
       --watch-id watch-777777777777777777777777
   ) >"${marker}.out" 2>"${marker}.err" & watcher_pid=$!
-  wait "$watcher_pid" 2>/dev/null || rc=$?
+  wait_for_launch_cleanup "$watcher_pid" "$marker" || rc=$?
   deadline=$(( SECONDS + 3 ))
   while (( SECONDS < deadline )); do
     child_pid="$(cat "${marker}.child" 2>/dev/null || true)"
@@ -2574,26 +2578,120 @@ term_at_external_launch_publication() {
     kill -KILL -- "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null || true
   fi
   printf 'rc=%s child=%s' "$rc" "$child_state"
+  if [[ -s "${marker}.monitor" ]]; then
+    monitor_pid="$(cat "${marker}.monitor")"
+    monitor_state=dead
+    kill -0 "$monitor_pid" 2>/dev/null && monitor_state=alive
+    kill -KILL "$monitor_pid" 2>/dev/null || true
+    printf ' monitor=%s' "$monitor_state"
+  fi
+}
+
+# Keep this independent of the watcher's own timers and TERM cleanup. A stuck
+# cleanup must fail the assertion, even when the watchdog subsequently reaps it.
+wait_for_launch_cleanup() {  # watcher-pid marker
+  local watcher_pid="$1" marker="$2" watchdog_pid rc=0
+  perl -e '
+    my ($watcher, $marker) = @ARGV;
+    select undef, undef, undef, 8;
+    my $child = 0;
+    if (open(my $record, "<", "$marker.child")) {
+      my $value = <$record> // "";
+      $child = $1 if $value =~ /\A([1-9][0-9]*)\s*\z/;
+      close($record);
+    }
+    open(my $report, ">", "$marker.timeout") or die $!;
+    print $report "launch cleanup timeout=8s watcher=$watcher child=$child\n";
+    print $report "PID PPID PGID STAT COMMAND\n";
+    my @rows;
+    if (open(my $ps, "-|", "ps", "-axo", "pid=,ppid=,pgid=,stat=,comm=")) {
+      while (<$ps>) {
+        push @rows, [$1, $2, $3, $_] if /^\s*(\d+)\s+(\d+)\s+(\d+)\s/;
+      }
+      close($ps);
+    } else {
+      print $report "ps failed: $!\n";
+    }
+    my %owned = ($watcher => 1);
+    $owned{$child} = 1 if $child;
+    my $changed = 1;
+    while ($changed) {
+      $changed = 0;
+      for my $row (@rows) {
+        next if $owned{$row->[0]};
+        if ($owned{$row->[1]} || ($child && $row->[2] == $child)) {
+          $owned{$row->[0]} = 1;
+          $changed = 1;
+        }
+      }
+    }
+    print $report $_->[3] for grep { $owned{$_->[0]} } @rows;
+    close($report);
+    kill "KILL", -$child if $child;
+    kill "KILL", grep { $_ != $watcher } keys %owned;
+    kill "KILL", $watcher;
+  ' "$watcher_pid" "$marker" </dev/null >/dev/null 2>&1 & watchdog_pid=$!
+  wait "$watcher_pid" 2>/dev/null || rc=$?
+  kill -KILL "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+  if [[ -f "${marker}.timeout" ]]; then
+    cat "${marker}.timeout" >&2
+    return 124
+  fi
+  return "$rc"
 }
 
 apply_test_external_launch_env() {  # destination
-  apply_patch_placeholder="$1"
-  printf '%s\n' \
-    'set -T' \
-    'if [[ -n "${PR_WATCH_LAUNCH_RACE_MARKER:-}" && -z "${PR_WATCH_LAUNCH_RACE_OWNER_PID:-}" ]]; then' \
-    '  export PR_WATCH_LAUNCH_RACE_OWNER_PID="$$"' \
-    'fi' \
-    '_pr_watch_launch_debug() {' \
-    '  local pending_command="$1"' \
-    '  [[ "$pending_command" == '\''active_external_pid=$!'\'' ]] || return 0' \
-    '  [[ -n "${PR_WATCH_LAUNCH_RACE_MARKER:-}" ]] || return 0' \
-    '  mkdir "${PR_WATCH_LAUNCH_RACE_MARKER}.once" 2>/dev/null || return 0' \
-    '  trap - DEBUG' \
-    '  printf '\''%s\n'\'' "$!" > "${PR_WATCH_LAUNCH_RACE_MARKER}.child"' \
-    '  kill -TERM "$PR_WATCH_LAUNCH_RACE_OWNER_PID"' \
-    '}' \
-    'trap '\''_pr_watch_launch_debug "$BASH_COMMAND"'\'' DEBUG' \
-    > "$apply_patch_placeholder"
+  cat > "$1" <<'LAUNCH_ENV'
+set -T
+if [[ -n "${PR_WATCH_LAUNCH_RACE_MARKER:-}" && -z "${PR_WATCH_LAUNCH_RACE_OWNER_PID:-}" ]]; then
+  export PR_WATCH_LAUNCH_RACE_OWNER_PID="$$"
+fi
+# Substitute only the selected bookkeeping monitor, keeping the real watcher
+# responsible for its launch, cancellation, and wait. The FIFO proves TERM is
+# ignored before the parent enters cleanup.
+if [[ "$PR_WATCH_LAUNCH_RACE_POINT" == ignoring-* ]]; then
+perl() {
+  if [[ "$1" == -e ]] && {
+    [[ "$PR_WATCH_LAUNCH_RACE_POINT" == ignoring-monitor && "$2" == *'my ($max_bytes, $pid, $parent, $expected)'* ]] \
+      || [[ "$PR_WATCH_LAUNCH_RACE_POINT" == ignoring-timeout && "$2" == *'my ($seconds, $pid, $parent, $expected)'* ]];
+  }; then
+    exec perl -e '
+      $SIG{TERM} = "IGNORE";
+      open(my $ready, ">", "$ARGV[0].monitor-ready") or die $!;
+      print $ready "ready\n";
+      close($ready);
+      while (1) { select undef, undef, undef, 60; }
+    ' "$PR_WATCH_LAUNCH_RACE_MARKER"
+  else
+    command perl "$@"
+  fi
+}
+fi
+_pr_watch_launch_debug() {
+  local pending_command="$1" ready
+  case "$PR_WATCH_LAUNCH_RACE_POINT" in
+    ignoring-monitor) [[ "$pending_command" == 'active_external_limit_pid=$!' ]] || return 0 ;;
+    ignoring-timeout) [[ "$pending_command" == 'active_external_timeout_pid=$!' ]] || return 0 ;;
+    *) [[ "$pending_command" == 'active_external_pid=$!' ]] || return 0 ;;
+  esac
+  [[ -n "${PR_WATCH_LAUNCH_RACE_MARKER:-}" ]] || return 0
+  mkdir "${PR_WATCH_LAUNCH_RACE_MARKER}.once" 2>/dev/null || return 0
+  trap - DEBUG
+  if [[ "$PR_WATCH_LAUNCH_RACE_POINT" == ignoring-* ]]; then
+    printf '%s\n' "$active_external_pid" > "${PR_WATCH_LAUNCH_RACE_MARKER}.child"
+    printf '%s\n' "$!" > "${PR_WATCH_LAUNCH_RACE_MARKER}.monitor"
+    IFS= read -r ready < "${PR_WATCH_LAUNCH_RACE_MARKER}.monitor-ready"
+  else
+    printf '%s\n' "$!" > "${PR_WATCH_LAUNCH_RACE_MARKER}.child"
+  fi
+  if [[ "$PR_WATCH_LAUNCH_RACE_POINT" == stopped-watcher ]]; then
+    kill -STOP "$PR_WATCH_LAUNCH_RACE_OWNER_PID"
+  fi
+  kill -TERM "$PR_WATCH_LAUNCH_RACE_OWNER_PID"
+}
+trap '_pr_watch_launch_debug "$BASH_COMMAND"' DEBUG
+LAUNCH_ENV
 }
 
 # Make the timeout observer see a different generation for the recorded target
@@ -2950,6 +3048,26 @@ check "TERM tears down a stuck TERM-ignoring gh process group" \
 
 check "TERM at external-command PID publication reaps the owned group" \
   "$(term_at_external_launch_publication)" "rc=143 child=dead"
+
+check "TERM cleanup reaps a TERM-ignoring output monitor" \
+  "$(term_at_external_launch_publication ignoring-monitor)" "rc=143 child=dead monitor=dead"
+
+check "TERM cleanup reaps a TERM-ignoring timeout monitor" \
+  "$(term_at_external_launch_publication ignoring-timeout)" "rc=143 child=dead monitor=dead"
+
+LAUNCH_TIMEOUT_RESULT="$(term_at_external_launch_publication stopped-watcher \
+  2>"$TMP/launch-timeout-diagnostic")"
+check "launch cleanup watchdog fails a stalled watcher" \
+  "$LAUNCH_TIMEOUT_RESULT" "rc=124 child=dead"
+if grep -Eq 'timeout=8s watcher=[1-9][0-9]* child=[1-9][0-9]*' \
+     "$TMP/launch-timeout-diagnostic" \
+   && grep -Eq '^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+T' \
+     "$TMP/launch-timeout-diagnostic"; then
+  ok "launch timeout reports owned process identities and stopped state"
+else
+  no "launch timeout reports owned process identities and stopped state" \
+    "$(cat "$TMP/launch-timeout-diagnostic")"
+fi
 
 check "command deadline tears down a stuck TERM-ignoring gh process group" \
   "$(timeout_kills_stuck_gh)" "watcher=dead gh=dead descendant=dead"
