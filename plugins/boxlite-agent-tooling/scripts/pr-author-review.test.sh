@@ -482,12 +482,16 @@ done
 fixture_plugin="$TEST_DIR/prompt-plugin"
 mkdir -p "$fixture_plugin/scripts" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$SCRIPT" "$fixture_plugin/scripts/"
-cp "$PLUGIN_ROOT/.agents/lib/"{pr-author-review,subagent,hook-host}.sh "$fixture_plugin/.agents/lib/"
+cp "$PLUGIN_ROOT/.agents/lib/"{pr-author-review,subagent,hook-host,reply-summary,concise-writing}.sh "$fixture_plugin/.agents/lib/"
 SCRIPT="$fixture_plugin/scripts/pr-author-review.sh"
 cat > "$fixture_plugin/.agents/prompts/pr-author-review.md" <<'PROMPT'
 ---
 name: fixture
 ---
+## TL;DR
+
+Review the current diff.
+
 Fixture author @{{author}} at {{sha}}: {{result}}
 {{review_question}}
 PROMPT
@@ -526,6 +530,16 @@ for prompt_name in pr-author-review pr-review-question; do
   done
   cp "$TEST_DIR/prompt-backup" "$prompt_file"
 done
+
+printf 'Review the current diff.\n' > "$fixture_plugin/.agents/prompts/pr-author-review.md"
+reset_case
+acknowledge
+run_gate
+no_invalid_prompt() {
+  failed_closed && jq -se 'all(.[]; .method == "GET" or
+    (.endpoint | contains("/comments") | not))' "$TEST_DIR/calls" >/dev/null
+}
+report "a generated comment without TL;DR cannot be published" no_invalid_prompt
 
 printf '\nRESULT: %s passed, %s failed\n' "$pass" "$fail"
 (( fail == 0 ))

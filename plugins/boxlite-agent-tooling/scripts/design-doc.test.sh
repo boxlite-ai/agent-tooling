@@ -47,7 +47,7 @@ github_doc() {
   jq -nc --arg url "$url" --arg body "$1" '{html_url:$url,body:$body}' > "$DOC_FIXTURE"
 }
 expect 'missing binding blocks' 1 check
-github_doc 'Problem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
+github_doc $'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
 expect 'GitHub doc can be registered' 0 bind "$url"
 expect 'matching branch verifies again' 0 check
 [[ "$(cat "$scratch/out")" == "$url" ]] || fail=$((fail+1))
@@ -66,7 +66,7 @@ printf '{"html_url":"%s","body":"Design","pull_request":{}}' "$url" > "$DOC_FIXT
 expect 'a PR is not a GitHub design issue' 1 check
 github_doc "$(printf 'word %.0s' {1..81})"
 expect 'wall of text blocks' 1 check
-github_doc $'- Problem: undocumented changes.\n- Approach: gate edits.\n- Validation: tests.'
+github_doc $'## TL;DR\n\nVerify designs before edits.\n\n- Problem: undocumented changes.\n- Approach: gate edits.\n- Validation: tests.'
 expect 'compact bullet design passes' 0 check
 expect 'untrusted hosts are rejected' 1 bind https://github.com.attacker.invalid/example/project/issues/1
 for unsafe_url in 'https://user:sensitive-fixture@github.com/example/project/issues/1' $'https://invalid.example/\nsensitive-fixture'; do
@@ -92,18 +92,18 @@ cp "$scratch/saved" "$state"
 linear=https://linear.app/example/issue/EX-1/design
 expect 'Linear needs credentials' 1 bind "$linear"
 export LINEAR_API_KEY=fixture-only
-jq -nc --arg url "$linear" '{data:{issue:{url:$url,description:"Design and validation.",archivedAt:null}}}' > "$DOC_FIXTURE"
+jq -nc --arg url "$linear" '{data:{issue:{url:$url,description:"## TL;DR\n\nDesign and validation.",archivedAt:null}}}' > "$DOC_FIXTURE"
 expect 'Linear document verifies' 0 bind "$linear"
 jq '. + {errors:[{message:"denied"}]}' "$DOC_FIXTURE" > "$scratch/errors"
 mv "$scratch/errors" "$DOC_FIXTURE"
 expect 'GraphQL partial errors block' 1 check
-jq -nc --arg url "$linear" '{data:{issue:{url:$url,description:"Design and validation.",archivedAt:null}},padding:("x" * 70000)}' > "$DOC_FIXTURE"
+jq -nc --arg url "$linear" '{data:{issue:{url:$url,description:"## TL;DR\n\nDesign and validation.",archivedAt:null}},padding:("x" * 70000)}' > "$DOC_FIXTURE"
 expect 'HTTP response bound is independent of curl version' 1 check
 notion=https://www.notion.so/Design-0123456789abcdef0123456789abcdef
 expect 'Notion needs credentials' 1 bind "$notion"
 export NOTION_TOKEN=fixture-only DOC_PAGE="$scratch/page.json"
 printf '{"object":"page","id":"01234567-89ab-cdef-0123-456789abcdef","archived":false}' > "$DOC_PAGE"
-printf '{"object":"list","has_more":false,"results":[{"type":"paragraph","paragraph":{"rich_text":[{"plain_text":"Design and validation."}]}}]}' > "$DOC_FIXTURE"
+jq -nc '{object:"list",has_more:false,results:[{type:"heading_2",heading_2:{rich_text:[{plain_text:"TL;DR"}]}},{type:"paragraph",paragraph:{rich_text:[{plain_text:"Design and validation."}]}}]}' > "$DOC_FIXTURE"
 expect 'Notion page and content both verify' 0 bind "$notion"
 notion_block() {
   jq -nc --arg type "$1" --arg text "$2" --argjson children "${3:-false}" \
@@ -123,6 +123,11 @@ expect 'Notion numbered items keep the item density limit' 1 check
 notion_block to_do "$(printf 'word %.0s' {1..41})"
 expect 'Notion checkboxes keep the item density limit' 1 check
 notion_block code "$(printf 'word %.0s' {1..81})"
+jq '.results = [{type:"heading_2",heading_2:{rich_text:[{plain_text:"TL;DR"}]}},
+  {type:"paragraph",paragraph:{rich_text:[{plain_text:"A concise design."}]}},
+  {type:"heading_2",heading_2:{rich_text:[{plain_text:"Examples"}]}}] + .results' \
+  "$DOC_FIXTURE" > "$scratch/with-summary"
+mv "$scratch/with-summary" "$DOC_FIXTURE"
 expect 'Notion code examples are not prose walls' 0 check
 notion_block code $'```\nexample'
 jq --arg text "$(printf 'word %.0s' {1..81})" \

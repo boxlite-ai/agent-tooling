@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author review acknowledgment. Source-only; pr_author_review_run is the facade.
-# Requires jq, subagent_prompt and authenticated gh (GH_BIN is the API test double).
+# Requires jq, concise_writing_check_summary, subagent_prompt and authenticated gh.
 # Comments are the record; commit statuses enforce the record on the base repository.
 
 _pr_review_gh() { "${GH_BIN:-gh}" "$@"; }
@@ -142,6 +142,7 @@ _pr_review_prompt() { # repository, PR number, SHA, author login, existing promp
   [[ "$body" == *[![:space:]]* ]] || {
     _pr_review_error "empty prompt: $7/.agents/prompts/pr-author-review.md"; return 2;
   }
+  concise_writing_check_summary "$body" >&2 || return 2
   # The comment identity is protocol metadata, independent of editable wording.
   body="$(printf '%s\n%s' '<!-- boxlite-agent-tooling:author-review -->' "$body")"
   previous="$(jq -r '.body // ""' <<<"$5")" || return 2

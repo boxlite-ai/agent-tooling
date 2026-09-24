@@ -68,11 +68,11 @@ for manifest in hooks.json codex-hooks.json; do
   done
 done
 # A missing document must still block PR publication through its own Bash hook.
-check Bash 'gh pr create --draft --title "fix: example" --body "A concise description."' deny
+check Bash $'gh pr create --draft --title "fix: example" --body "## TL;DR\n\nA concise description."' deny
 check Bash "bash \"$plugin/scripts/design-doc.sh\" bind https://github.com/example/project/issues/1" allow
 check Bash "bash \"$plugin/scripts/design-doc.sh\" check" allow
 url=https://github.com/example/project/issues/1
-jq -nc --arg url "$url" '{html_url:$url,body:"Problem: undocumented edits. Approach: verify a design doc. Validation: gate tests."}' > "$DOC_RESPONSE"
+jq -nc --arg url "$url" '{html_url:$url,body:"## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests."}' > "$DOC_RESPONSE"
 (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" bind "$url") >/dev/null || exit 1
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' allow

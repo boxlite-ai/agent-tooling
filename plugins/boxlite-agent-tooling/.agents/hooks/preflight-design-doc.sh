@@ -26,6 +26,8 @@ cwd="$(jq -er --arg fallback "${CLAUDE_PROJECT_DIR:-$PWD}" \
 source "$plugin_root/.agents/lib/verdict-audit-state.sh" || deny 'state library unavailable'
 # shellcheck source=../lib/reply-summary.sh
 source "$plugin_root/.agents/lib/reply-summary.sh" || deny 'writing checks unavailable'
+# shellcheck source=../lib/concise-writing.sh
+source "$plugin_root/.agents/lib/concise-writing.sh" || deny 'summary check unavailable'
 # shellcheck source=../lib/design-doc.sh
 source "$plugin_root/.agents/lib/design-doc.sh" || deny 'document verifier unavailable'
 if ! design_doc_binding check "$cwd" >/dev/null; then

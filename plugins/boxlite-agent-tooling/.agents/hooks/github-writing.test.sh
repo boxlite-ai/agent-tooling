@@ -14,7 +14,7 @@ cat > "$scratch/bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
   'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<a href="https://github.com/example/repo/issues/123">Design</a>' ;;
-  'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"Design and validation."}' ;;
+  'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
   'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
   'api repos/example/repo/compare/'*)
@@ -46,7 +46,9 @@ bullet="- $(printf 'word %.0s' {1..41})"
 for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
   'issue create --title Bug' 'issue edit 7' 'issue comment 7' 'discussion create --title Topic'; do
   check "$operation rejects dense prose" "gh $operation --body '$dense'" deny
-  check "$operation accepts a summary" "gh $operation --body 'Retry only failed requests. Verified with the timeout test. https://github.com/example/repo/issues/123'" allow
+  check "$operation accepts a summary" "gh $operation --body '## TL;DR
+
+Retry only failed requests. Verified with the timeout test. https://github.com/example/repo/issues/123'" allow
 done
 check 'draft requires inspectable body' 'gh pr create --draft --title WIP' deny
 check 'issue requires inspectable body' 'gh issue create --title Bug' deny
@@ -57,7 +59,9 @@ check 'expanded body is opaque' 'gh issue comment 7 --body "$BODY"' deny
 check 'globbed body is opaque' 'gh issue comment 7 --body *' deny
 check 'editor can overwrite body' "gh issue comment 7 --body Short --editor" deny
 check 'metadata operand is not a body' 'gh issue create --label --body --title Bug' deny
-check 'attached short body' 'gh issue comment 7 -bFixed.' allow
+check 'attached short body' "gh issue comment 7 -b'## TL;DR
+
+Fixed.'" allow
 check 'attached long body' "gh issue comment 7 --body='$dense'" deny
 check 'paragraph limit' "gh issue comment 7 --body '$dense'" deny
 check 'bullet limit' "gh issue comment 7 --body '$bullet'" deny
@@ -65,27 +69,37 @@ check 'fences do not evade total' "gh issue comment 7 --body '~~~
 $long
 ~~~'" deny
 check 'Chinese counts per character' "gh issue comment 7 --body '$(printf '字%.0s' {1..81})'" deny
-check '120 words in short blocks' "gh issue comment 7 --body '$(printf 'word %.0s' {1..60})
+check '120 words in short blocks' "gh issue comment 7 --body '## TL;DR
+
+$(printf 'word %.0s' {1..59})
 
 $(printf 'word %.0s' {1..60})'" allow
-check '121 words in short blocks' "gh issue comment 7 --body '$(printf 'word %.0s' {1..60})
+check '121 words in short blocks' "gh issue comment 7 --body '## TL;DR
+
+$(printf 'word %.0s' {1..59})
 
 $(printf 'word %.0s' {1..61})'" deny
 check 'release notes' "gh release create v1 --notes '$dense'" deny
-check 'short release notes' 'gh release create v1 --notes Fixed.' allow
+check 'short release notes' "gh release create v1 --notes '## TL;DR
+
+Fixed.'" allow
 check 'generated notes are opaque' 'gh release create v1 --generate-notes' deny
 check 'close comment' "gh issue close 7 --comment '$dense'" deny
 check 'reopen comment' "gh pr reopen 7 -c '$dense'" deny
 for operation in 'pr close' 'issue close' 'pr reopen' 'issue reopen'; do
   check "$operation without a comment" "gh $operation 7" allow
-  check "$operation short comment" "gh $operation 7 --comment Fixed." allow
+  check "$operation short comment" "gh $operation 7 --comment '## TL;DR
+
+Fixed.'" allow
   check "$operation dense comment" "gh $operation 7 -c '$dense'" deny
   check "$operation empty comment" "gh $operation 7 --comment ''" deny
   check "$operation expanded comment" "gh $operation 7 --comment \"\$BODY\"" deny
 done
 check 'REST raw body' "gh api repos/o/r/issues/7/comments -f body='$dense'" deny
 check 'REST typed body' "gh api repos/o/r/issues/7/comments -Fbody='$dense'" deny
-check 'REST concise body' 'gh api repos/o/r/issues/7/comments -f body=Fixed.' allow
+check 'REST concise body' "gh api repos/o/r/issues/7/comments -f 'body=## TL;DR
+
+Fixed.'" allow
 check 'REST nested review body' "gh api repos/o/r/pulls/7/reviews -f 'comments[][body]=$dense'" deny
 check 'REST input is opaque' 'gh api repos/o/r/issues/7/comments --input /tmp/body.json' deny
 check 'REST explicit GET has no published body' "gh api repos/o/r/issues -X GET -f body='$dense'" allow
@@ -119,11 +133,15 @@ check 'literal mention' "echo 'gh issue comment 7 --body $dense'" allow
 check 'absolute gh path' "/usr/local/bin/gh issue comment 7 --body '$dense'" deny
 check 'command wrapper' "command gh issue comment 7 --body '$dense'" deny
 for wrapper in command exec env; do
-  check "$wrapper permits inspectable writing" "$wrapper gh issue comment 7 --body Fixed." allow
+  check "$wrapper permits inspectable writing" "$wrapper gh issue comment 7 --body '## TL;DR
+
+Fixed.'" allow
 done
 for wrapper in nohup sudo doas 'nice -n 5' 'stdbuf -oL' setsid 'timeout 30' 'xargs -I{}' 'xargs -I{item}' 'xargs -I {item}' /usr/bin/env 'sudo nohup'; do
   check "$wrapper cannot bypass writing checks" "$wrapper gh issue comment 7 --body '$dense'" deny
-  check "$wrapper leaves execution opaque" "$wrapper gh issue comment 7 --body Fixed." deny
+  check "$wrapper leaves execution opaque" "$wrapper gh issue comment 7 --body '## TL;DR
+
+Fixed.'" deny
   check "$wrapper read-only command" "$wrapper gh issue list" allow
 done
 check 'launcher with global flags' "nohup gh -R o/r issue comment 7 --body '$dense'" deny

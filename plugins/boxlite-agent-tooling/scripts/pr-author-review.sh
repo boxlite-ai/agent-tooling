@@ -5,14 +5,14 @@
 # The caller serializes runs per PR and bounds runtime (the workflow allows 5 minutes).
 set -uo pipefail
 
-for dependency in jq "${GH_BIN:-gh}"; do
+for dependency in jq perl "${GH_BIN:-gh}"; do
   command -v "$dependency" >/dev/null 2>&1 || {
     printf 'pr-author-review: %s is required\n' "$dependency" >&2
     exit 2
   }
 done
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" || exit 2
-for library in subagent pr-author-review; do
+for library in subagent pr-author-review reply-summary concise-writing; do
   [[ -r "$plugin_root/.agents/lib/$library.sh" ]] || {
     printf 'pr-author-review: missing library: %s/.agents/lib/%s.sh\n' "$plugin_root" "$library" >&2
     exit 2
@@ -21,6 +21,10 @@ done
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../.agents/lib/subagent.sh
 source "$plugin_root/.agents/lib/subagent.sh"
+# shellcheck source=../.agents/lib/reply-summary.sh
+source "$plugin_root/.agents/lib/reply-summary.sh" || exit 2
+# shellcheck source=../.agents/lib/concise-writing.sh
+source "$plugin_root/.agents/lib/concise-writing.sh" || exit 2
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../.agents/lib/pr-author-review.sh
 source "$plugin_root/.agents/lib/pr-author-review.sh"

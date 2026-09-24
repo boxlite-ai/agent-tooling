@@ -11,6 +11,8 @@ done
 source "$plugin_root/.agents/lib/verdict-audit-state.sh" || exit 2
 # shellcheck source=../.agents/lib/reply-summary.sh
 source "$plugin_root/.agents/lib/reply-summary.sh" || exit 2
+# shellcheck source=../.agents/lib/concise-writing.sh
+source "$plugin_root/.agents/lib/concise-writing.sh" || exit 2
 # shellcheck source=../.agents/lib/design-doc.sh
 source "$plugin_root/.agents/lib/design-doc.sh" || exit 2
 case "${1:-}:$#" in
