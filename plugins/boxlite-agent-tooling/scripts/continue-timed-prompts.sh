@@ -35,7 +35,7 @@ for name in pr-size-request pr-review-request; do
     expired)
       [[ "$(jq -r .fallback_delivered <<<"$request")" == false ]] || continue
       if [[ "$(jq -r .spec.fallback <<<"$request")" == split ]]; then
-        reason='The three-minute PR size exception deadline expired. Continue now: reuse or create one tracking issue with a PR checklist and split the work into coherent tested PRs of at most 400 changed lines. Create separate issues only for work needing independent tracking. Do not ask again or publish the oversized diff.'
+        reason='The three-minute PR size exception deadline expired. Continue now: reuse or create one tracking issue with a PR checklist and split the work into coherent tested PRs of at most 400 changed lines. Create separate issues only for work needing independent tracking. Only a new explicit human request permits renewal: remeasure through the guarded PR operation and follow its renewal instructions. Never renew autonomously or publish without a fresh exception.'
       else
         reason='The three-minute reviewed acknowledgment deadline expired. Leave the PR draft or uncreated and report that review is still required. No review acknowledgment was granted; continue other authorized work.'
       fi

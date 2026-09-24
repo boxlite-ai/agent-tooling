@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck source-path=SCRIPTDIR
-# Shared confirmation CLI; respond requires the human response verbatim.
+# Shared confirmation CLI; respond/renew require the human response/instruction verbatim.
 set -euo pipefail
 [[ $# -ge 3 && $# -le 4 ]] || {
-  printf 'usage: timed-user-prompt.sh request|status|respond|consume|fallback STATE SPEC_OR_ID [RESPONSE]\n' >&2
+  printf 'usage: timed-user-prompt.sh request|status|respond|renew|consume|fallback STATE SPEC_OR_ID [HUMAN_TEXT]\n' >&2
   exit 2
 }
 for dependency in jq perl date; do

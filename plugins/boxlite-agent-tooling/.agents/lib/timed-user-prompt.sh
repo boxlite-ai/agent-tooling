@@ -40,7 +40,7 @@ timed_user_prompt() { # operation state-path spec-or-request-id [verbatim-respon
 }
 
 _timed_user_prompt_transition() { # same arguments as the facade; lock already held
-  local operation="$1" path="$2" argument="$3" response="${4:-}" record=null snapshot now nonce next
+  local operation="$1" path="$2" argument="$3" response="${4:-}" record=null snapshot now nonce next archive
   now="$(date -u +%s)" || return 2
   [[ "$now" =~ ^[0-9]{1,12}$ ]] || return 2
   if [[ -e "$path" || -L "$path" ]]; then
@@ -92,6 +92,13 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
          status:"pending",response:"",fallback_delivered:false,question_tool_id:""}
       else . end
     elif . == null or .id != $arg then error("unknown or superseded confirmation")
+    elif $op == "renew" then
+      if .status != "expired" or .spec.prefix != "pr-size-exception:"
+        or ($reply | line and test("\\S") | not)
+      then error("renewal requires an expired PR-size request and the explicit human instruction")
+      else .id = $id | .created_at = $now | .deadline = ($now+180)
+        | .status = "pending" | .response = "" | .fallback_delivered = false
+        | .question_tool_id = "" end
     elif $op == "present" then
       if .status != "pending" or ($reply | test("^[A-Za-z0-9_-]{1,200}$") | not)
         or (.question_tool_id != "" and .question_tool_id != $reply)
@@ -120,6 +127,18 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
     elif $op == "status" or $op == "question" then .
     else error("unknown confirmation operation") end
   ' <<<"$record")" || return 2
+  if [[ "$operation" == renew ]]; then
+    # Preserve the old attempt before publishing its successor, under the same lock.
+    archive="$path.expired-$argument.json"
+    jq -nc --argjson request "$record" --arg user_request "$response" \
+      --arg successor_id "$nonce" --argjson renewed_at "$now" \
+      '{request:($request | .status="expired"),user_request:$user_request,
+        successor_id:$successor_id,renewed_at:$renewed_at}' \
+      | verdict_audit_write_exclusive_regular "$archive" || {
+        printf 'timed-user-prompt: cannot archive expired request: %s; renewal not published; inspect any existing archive before retrying\n' "$archive" >&2
+        return 2
+      }
+  fi
   printf '%s\n' "$next" | verdict_audit_write_atomic "$path" || return 2
   if [[ "$operation" == question ]]; then _timed_user_prompt_question "$next"
   else printf '%s\n' "$next"; fi

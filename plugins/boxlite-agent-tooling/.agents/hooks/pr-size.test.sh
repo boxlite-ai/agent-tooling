@@ -88,6 +88,27 @@ if bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" 
   printf 'FAIL: a late exception was accepted\n' >&2; exit 1
 fi
 [[ "$(jq -r .id "$state")" == "$id" ]]
+[[ "$out" == *'Only a new explicit human instruction'* && "$out" == *'timed-user-prompt.sh renew'* ]]
+renewed="$(bash "$plugin/scripts/timed-user-prompt.sh" renew "$state" "$id" 'Please request the size exception again.')"
+next_id="$(jq -r .id <<<"$renewed")"
+out="$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
+
+Fixture change. https://github.com/example/repo/issues/123"')"
+[[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]]
+[[ "$out" == *"$next_id"* && "$next_id" != "$id" ]]
+if bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" 2>/dev/null; then
+  printf 'FAIL: superseded exception was accepted after renewal\n' >&2; exit 1
+fi
+bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$next_id" "$reason" >/dev/null
+[[ -z "$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
+
+Fixture change. https://github.com/example/repo/issues/123"')" ]]
+export SIZE_TEST_LINES=402
+out="$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
+
+Fixture change. https://github.com/example/repo/issues/123"')"
+[[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]]
+[[ "$(jq -r .id "$state")" != "$next_id" ]]
 export SIZE_TEST_LINES=400
 out="$(GH_REPO=other/repo call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
