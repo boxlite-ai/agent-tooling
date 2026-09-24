@@ -37,53 +37,55 @@ check() { # tool, command, wanted allow|deny
     if [[ "$want:$denied" == deny:true || "$want:$denied" == allow:false ]]; then
       printf 'PASS %s %s %s\n' "$manifest" "$tool" "$want"; pass=$((pass+1))
     else
-      printf 'FAIL %s %s: expected %s, denied=%s\n' "$manifest" "$tool" "$want" "$denied"; fail=$((fail+1))
+      printf 'FAIL %s %s: expected %s, denied=%s: %s\n' "$manifest" "$tool" "$want" "$denied" "$command"; fail=$((fail+1))
     fi
   done
 }
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' deny
 done
-check Bash 'python3 -c "open(\"code.py\",\"w\").write(\"code\")"' deny
-check Bash 'printf code > source.py' deny
+check Read README.md allow
+check Bash "gcloud logging read 'severity>=ERROR' --limit=20" allow
+check Bash 'kubectl logs deployment/example --tail=20 | tail -n 10' allow
+check Bash 'git status --short && rg -n "error|warn" src' allow
+check Bash './scripts/investigate-state.sh' allow
+# Shell writes are deliberately outside the pre-edit design gate, too.
+check Bash 'python3 -c "open(\"code.py\",\"w\").write(\"code\")"' allow
+check Bash 'printf code > source.py' allow
 if [[ "${1:-}" == --reproducer ]]; then
   printf '%d passed, %d failed\n' "$pass" "$fail"
   [[ "$fail" == 0 ]]; exit $?
 fi
-check Bash 'git status --short' allow
-check Bash 'rg --files' allow
-check Bash 'rg -n design README.md' allow
-check Bash "rg -n 'des.*gn' README.md" allow
-for glob in '*' '*/*' '?' '[ab]' '^safe' 'safe#' 'safe~ignored'; do
-  check Bash "rg -n example $glob ." deny
+for manifest in hooks.json codex-hooks.json; do
+  for script in preflight-commit-push.sh preflight-pr-review.sh; do
+    if jq -e --arg script "$script" '[.hooks.PreToolUse[] |
+        select(.matcher as $matcher | "Bash" | test($matcher)) | .hooks[].command |
+        select(contains($script))] | length == 1' "$plugin/hooks/$manifest" >/dev/null; then
+      printf 'PASS %s retains Bash %s\n' "$manifest" "$script"; pass=$((pass+1))
+    else
+      printf 'FAIL %s missing Bash %s\n' "$manifest" "$script"; fail=$((fail+1))
+    fi
+  done
 done
-check Bash 'ls' allow
-check Bash 'git --no-pager log --oneline -n 10' allow
-check Bash 'cat README.md' allow
-check Bash "gh issue create --title 'design: gate edits' --body 'Problem: missing design. Approach: verify before edits. Validation: hook tests.'" allow
-check Bash "gh issue create --title 'design: gate edits' --body 'Design' --editor" deny
-check Bash "gh issue create --title 'design: gate edits' --body 'Design'; touch source.py" deny
-check Bash 'gh issue view 84 --repo boxlite-ai/agent-tooling' allow
-check Bash 'cat README.md; touch source.py' deny
-check Bash 'rg --pre=./writer.py pattern' deny
-check Bash 'git diff --ext-diff' deny
-# shellcheck disable=SC2016 # The tool receives literal shell substitution to reject.
-check Bash 'cat $(touch source.py)' deny
-check Bash $'cat README.md\ntouch source.py' deny
-check Bash 'bash /tmp/design-doc.sh bind https://github.com/example/project/issues/1' deny
+# A missing document must still block PR publication through its own Bash hook.
+check Bash 'gh pr create --draft --title "fix: example" --body "A concise description."' deny
 check Bash "bash \"$plugin/scripts/design-doc.sh\" bind https://github.com/example/project/issues/1" allow
 check Bash "bash \"$plugin/scripts/design-doc.sh\" check" allow
 url=https://github.com/example/project/issues/1
 jq -nc --arg url "$url" '{html_url:$url,body:"Problem: undocumented edits. Approach: verify a design doc. Validation: gate tests."}' > "$DOC_RESPONSE"
 (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" bind "$url") >/dev/null || exit 1
-check Write 'edit source' allow
-check apply_patch 'edit source' allow
-check Bash 'python3 -c "print(1)"' allow
+for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
+  check "$tool" 'edit source' allow
+done
 export DOC_ERROR=1
-check Edit 'edit source' deny
-check Bash 'git status --short' allow
+for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
+  check "$tool" 'edit source' deny
+done
+check Bash './scripts/investigate-state.sh' allow
 export DOC_ERROR=0
 git -C "$scratch/repo" checkout -qb different
-check apply_patch 'edit source' deny
+for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
+  check "$tool" 'edit source' deny
+done
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" == 0 ]]

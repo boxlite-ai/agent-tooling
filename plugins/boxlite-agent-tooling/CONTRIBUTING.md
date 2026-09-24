@@ -47,16 +47,15 @@ Register the canonical URL before implementation:
 bash <plugin-root>/scripts/design-doc.sh bind <URL>
 ```
 
-The pre-edit hook verifies the document before native editor, patch, notebook, and
-shell operations. Missing, empty, unreadable, or overly dense documents block edits.
+The pre-edit hook verifies the document before native editor, patch, and notebook
+operations. Missing, empty, unreadable, or overly dense documents block edits.
 GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
 `LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.
-Research tools and simple shell reads remain available before registration; use
-the plugin script's absolute path when registering through the gated shell.
-Quote search patterns; shell wildcard expansion stays gated.
-GitHub doc creation is allowed as one direct `gh issue create --title '...' --body '...'`
-command, optionally followed by `--repo owner/repo`; both text values must be literal
-single-quoted strings. Editors, body files, and chained commands remain gated.
+Shell commands are outside this design gate, so investigation and document
+registration need no command-specific exemptions. Host permissions and the separate
+commit/push and GitHub publication hooks still apply. The requirement to create a
+design before writing code includes shell-created code as workflow guidance;
+this pre-edit hook does not enforce shell writes or arbitrary MCP writers.
 Re-register after changing branches. Page count and design quality require review.
 Notion designs must keep their text in top-level blocks; unread child blocks are rejected.
 Use the full registered URL in the PR body as plain text or a Markdown link.
