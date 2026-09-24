@@ -58,6 +58,9 @@ Use native GitHub stacks for dependent slices; follow the
 Before writing any code, create a **1–3 page design doc**. Every PR, including drafts
 and small changes, must link it. Prefer **GitHub issue > Notion > Linear issue**.
 Cover the problem, approach, alternatives and trade-offs, and validation plan.
+Include **Related work and lessons** as required by
+[the shared workflow](guidance/workflow.md#workflow): connect precise sources and
+relevant constraints to the design decisions; scale depth to the change.
 Use reply-summary presentation: start with TL;DR under 40 words.
 Walls of text are forbidden; use short bullets, tables, or diagrams.
 Include a brief real example when helpful;

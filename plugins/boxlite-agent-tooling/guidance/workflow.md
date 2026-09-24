@@ -14,11 +14,13 @@ Every change goes: understand → research → design → implement → test →
 
 **Research**
 
-- Cite real `file:line` refs from similar projects. The user routinely asks "research other projects" if this step is skipped.
+- Before choosing an approach, examine relevant existing code and comparable projects. Cite precise source references: `file:line` for code, preferably with commit-pinned links; exact sections for documentation.
+- Every design document must include **Related work and lessons**: sources, observed approaches, relevant differences in constraints, and what the proposal adopts, adapts, or rejects—and why. Review whether the evidence supports the design decisions.
+- Scale research depth to the change's uncertainty and impact; do not impose citation quotas. If no useful comparison exists, record what was searched and why it was unsuitable. Shared research may be linked and reused with its applicability explained.
 
 **Design**
 
-- Before writing any code, create a 1–3 page design doc covering the problem, approach, alternatives and trade-offs, and validation. Host it in this preference order: GitHub issue > Notion > Linear issue. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
+- Before writing any code, create a 1–3 page design doc covering the problem, related work and lessons, approach, alternatives and trade-offs, and validation. Host it in this preference order: GitHub issue > Notion > Linear issue. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
 - Use reply-summary presentation: leading TL;DR under 40 words, with visuals, tables, or short bullets where useful. Walls of text are forbidden. Include a brief real example when helpful and link supporting detail. Design docs have no fixed total-word limit.
 - Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
 - Search before implement — `grep` for existing code first.
