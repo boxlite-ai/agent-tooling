@@ -31,9 +31,8 @@ jq -e --argjson question "$question" '
 tool_id="$(jq -er '.tool_use_id | select(type=="string")' <<<"$payload")" || fail 'missing tool call id'
 case "$(jq -r .hook_event_name <<<"$payload")" in
   PreToolUse)
-    if [[ ! "${CLAUDE_AFK_TIMEOUT_MS:-}" =~ ^[1-9][0-9]{0,5}$ ]] || (( CLAUDE_AFK_TIMEOUT_MS > 180000 )); then
-      fail 'native timeout unavailable; launch with scripts/claude-with-timed-prompts.sh'
-    fi
+    timed_user_prompt_native_available \
+      || fail 'native timed questions unavailable; ask in plain text without a modal and keep the original deadline'
     timed_user_prompt present "$state" "$id" "$tool_id" >/dev/null || fail 'question expired or already asked' ;;
   PostToolUse)
     answer="$(jq -cer --arg key "$(jq -r '.questions[0].question' <<<"$question")" --arg id "$tool_id" '

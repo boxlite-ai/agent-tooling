@@ -9,6 +9,7 @@ git -C "$scratch/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty 
 cd "$scratch/repo"
 repo="$(pwd -P)"
 export CLAUDE_PROJECT_DIR="$repo" CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_AFK_TIMEOUT_MS=180000
+export BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1
 unset PLUGIN_ROOT
 mkdir -p .agents/state "$scratch/bin"
 cli="$plugin/scripts/timed-user-prompt.sh"
@@ -44,6 +45,10 @@ saved_question="$question"
 question="$(jq '.answers={}' <<<"$question")"
 reject call_hook PreToolUse
 question="$saved_question"
+reject env -u BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS bash -c 'printf "%s" "$1" | bash "$2"' _ \
+  "$(jq -nc --argjson input "$question" '{hook_event_name:"PreToolUse",tool_name:"AskUserQuestion",session_id:"native",tool_use_id:"remote-session",tool_input:$input}')" "$hook"
+jq -e --argjson deadline "$deadline" '.question_tool_id=="" and .status=="pending" and .deadline==$deadline' "$state" >/dev/null
+[[ ! -e .agents/state/pr-reviewed.json ]]
 reject env -u CLAUDE_AFK_TIMEOUT_MS bash -c 'printf "%s" "$1" | bash "$2"' _ \
   "$(jq -nc --argjson input "$question" '{hook_event_name:"PreToolUse",tool_name:"AskUserQuestion",session_id:"native",tool_use_id:"missing-timeout",tool_input:$input}')" "$hook"
 call_hook PreToolUse
@@ -125,6 +130,6 @@ printf '%s\n' "$CLAUDE_AFK_TIMEOUT_MS" "$@"
 CLAUDE
 chmod +x "$scratch/bin/claude"
 out="$(PATH="$scratch/bin:$PATH" bash "$plugin/scripts/claude-with-timed-prompts.sh" --resume 'session with spaces')"
-[[ "$out" == $'180000\n--resume\nsession with spaces\n--plugin-dir\n'"$plugin" ]]
+[[ "$out" == $'180000\n--settings\n{"remoteControlAtStartup":false,"disableRemoteControl":true}\n--resume\nsession with spaces\n--plugin-dir\n'"$plugin" ]]
 reject env PATH="$scratch/bin:$PATH" CLAUDE_TEST_VERSION=2.1.197 bash "$plugin/scripts/claude-with-timed-prompts.sh"
 printf 'Claude timed prompts: host route, native reply, timeout, replay, review marker, and launcher passed\n'
