@@ -5,6 +5,8 @@
 Design doc: <!-- Required before writing code and for every PR, including drafts.
 Link the 1–3 page doc: GitHub issue > Notion > Linear issue, in preference order.
 Cover the problem, approach, alternatives and trade-offs, and validation plan.
+Include Related work and lessons: precise sources, relevant constraints, and
+what the design adopts, adapts, or rejects—and why.
 Use reply-summary presentation: leading TL;DR under 40 words.
 Walls of text are forbidden; prefer visuals, tables, or short bullets.
 Include a brief real example when helpful;

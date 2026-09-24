@@ -31,6 +31,8 @@ The PR description contract in `CONTRIBUTING.md` requires every PR to explain ho
 the change produces its intended result, using the form best suited to the PR.
 Before code is written, a 1–3 page design doc must exist; every PR must link it,
 preferably in a GitHub issue, then Notion, then a Linear issue.
+The shared workflow requires **Related work and lessons** in every design document,
+connecting precise sources and relevant constraints to design decisions.
 `scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
 provider read; the gate rechecks existence, nonempty content, and the shared
 paragraph/list limits, with a leading TL;DR under 40 words. No total-word cap applies.
@@ -38,8 +40,9 @@ Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` a
 match its canonical root and branch (or detached HEAD). State reads and replacement
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
 Notion child blocks fail closed; list items and code retain their density semantics.
-Page length and design quality remain review criteria. The pre-edit gate covers
-native editor, notebook, and patch tools on both hosts. Shell commands, other clients,
+Page length, related-work completeness, and design quality remain review criteria.
+The pre-edit gate covers native editor, notebook, and patch tools on both hosts.
+Shell commands, other clients,
 and arbitrary MCP writers are outside it; shell-created code still requires a design
 under the workflow guidance. Shell commands retain host permissions and the separate
 commit/push and PR gates, without a research-command allowlist.
@@ -95,8 +98,8 @@ it is not a repository-wide enforcement boundary.
 
 Split work defaults to one tracking issue with a PR checklist, reusing an existing
 issue for the outcome. `.agents/prompts/split-pr-tracking-issue.md` supplies its body
-template: design, steps, open questions, and implementation history. Separate issues
-are reserved for work needing independent tracking; splitting alone requires no
+template: related work and lessons, design, steps, open questions, and implementation
+history. Separate issues are reserved for work needing independent tracking; splitting alone requires no
 milestone or Project. This is agent workflow guidance, not an issue-creation gate.
 Dependent slices use native GitHub stacks as described in `guidance/workflow.md`.
 Stack commands are not recognized by the per-PR publication checks: agents publish
