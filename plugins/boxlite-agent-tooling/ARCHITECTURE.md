@@ -229,6 +229,7 @@ than one session can share a checkout.
 - Hook to agent: a hook is a bash process and cannot spawn a subagent. It emits text naming the route the calling host has, and the agent takes it. `.agents/lib/subagent.sh:8`
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Reply-summary ask: prompt epoch, how the request went out, and the judged turn's tool count (`.agents/lib/reply-summary.sh`).
+- Incomplete evidence: a missing or empty source during refresh retains the published failed snapshot. Audit re-entry reads and validates that bounded snapshot before consuming the dossier; loss of the original source cannot become `empty-allow`. An initially absent or empty transcript still has nothing to judge.
 - Stop gate to verdict check: after checking TL;DR, `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/preflight-verdict-check.sh`. It learns which rung decided from `VERDICT_DECISION_OUT`. Missing dependencies fail closed.
 - Mandatory summary: `.agents/lib/concise-writing.sh` checks for an ATX TL;DR heading and summary prose outside fences, quotes, and comments. Replies must start there; the entire section has at most 39 words using the shared Unicode-aware counter. Repeated continuations cannot bypass it. Missing Stop text falls back to a bounded transcript snapshot; unreadable or truncated snapshots fail closed. Sentence simplicity remains a writing instruction.
 - Enforcement scope: Stop checks the final reply after generation; it cannot retract streamed commentary. GitHub checks cover recognized CLI calls, not browser or connector writes. Design checks cover fetched GitHub, Linear, and Notion content; native Notion headings retain their structure. Shared guidance applies to every human-facing output across these surfaces.
@@ -250,9 +251,9 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A gate never produces the verdict it checks. `.agents/hooks/preflight-commit-push.sh:6`
 - A PASS never reaches the model: nothing of a consumed PASS or its advisories is shown to the model, and advisories go to the human only. After a dense reply the model sees only the request for the result in few words. `.agents/hooks/preflight-verdict-check.sh:17`
 - A stale or mismatched turn dossier is discarded, never blocked on. `.agents/hooks/preflight-verdict-check.sh:28`
-- A turn the gate cannot read ends unjudged under `blind-allow`, never blocked. `.agents/hooks/preflight-verdict-check.sh:52`
-- A message is never judged twice. `.agents/hooks/preflight-verdict-check.sh:61`
-- A parked FAIL serves only the next audit of the same round. `.agents/hooks/preflight-verdict-check.sh:212`
+- A readable snapshot with no assistant text ends unjudged under `blind-allow`; a failed or truncated snapshot requires an audit. `.agents/hooks/preflight-verdict-check.sh:53`
+- A message is never judged twice. `.agents/hooks/preflight-verdict-check.sh:62`
+- A parked FAIL serves only the next audit of the same round. `.agents/hooks/preflight-verdict-check.sh:213`
 - The Stop gate asks for the result only after the verdict check judged and allowed the turn, or a user's override let it end, and never twice in a row. `.agents/hooks/stop-gate.sh:187`
 - An answer to that ask ends unjudged only at 120 words or fewer, code included, with no tool call since the ask. `.agents/hooks/stop-gate.sh:124`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
@@ -279,26 +280,26 @@ first.
 | Rung | Outcome | When | Line |
 | --- | --- | --- | --- |
 | summary | restatement-allow | The previous Stop asked for the result, this answer is 120 words or fewer counting code, and no tool ran since the ask; it ends the turn and the verdict check does not run. | 137 |
-| override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 715 |
-| extract | truncated-block | The bounded final-turn snapshot exceeded its byte limit; an independent FAIL dossier is required. | 1782 |
-| extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1789 |
-| extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1792 |
-| cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1806 |
-| dossier | discard-generation | The dossier's generation is not the requested one. | 1884 |
-| dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1890 |
-| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 1923 |
-| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1933 |
-| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 1941 |
-| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 1954 |
-| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2081 |
-| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2094 |
-| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2126 |
-| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2135 |
-| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2142 |
-| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2151 |
-| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2155 |
-| regex | none-allow | No model reachable and no fallback pattern matched. | 2163 |
-| regex | match-block | No model reachable and a fallback pattern matched. | 2167 |
+| override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 716 |
+| extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1802 |
+| extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1809 |
+| extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1812 |
+| cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1826 |
+| dossier | discard-generation | The dossier's generation is not the requested one. | 1904 |
+| dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1910 |
+| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 1943 |
+| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1953 |
+| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 1961 |
+| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 1974 |
+| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2101 |
+| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2114 |
+| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2146 |
+| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2155 |
+| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2162 |
+| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2171 |
+| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2175 |
+| regex | none-allow | No model reachable and no fallback pattern matched. | 2183 |
+| regex | match-block | No model reachable and a fallback pattern matched. | 2187 |
 | summary | ask-continue | The verdict check ended on overridden, PASS, IN_PROGRESS, NO or none, the last reply has a paragraph over 80 words or a list item over 40, and the previous Stop did not ask. The turn continues once: `additionalContext` on Claude Code, `decision: block` elsewhere. | 214 |
 
 Dossier shape, from `.claude/agents/verdict-auditor.md`: `branch`, `head`, `tree_hash`,
