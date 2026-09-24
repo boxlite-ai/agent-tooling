@@ -29,16 +29,16 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 
 The PR description contract in `CONTRIBUTING.md` requires every PR to explain how
 the change produces its intended result, using the form best suited to the PR.
-Before code is written, a design doc in reply-summary style must exist; every PR must link it,
+Before code is written, a 1–3 page design doc must exist; every PR must link it,
 preferably in a GitHub issue, then Notion, then a Linear issue.
 `scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
 provider read; the gate rechecks existence, nonempty content, and the shared
-120-word total and paragraph/list limits, with a leading TL;DR under 40 words.
+paragraph/list limits, with a leading TL;DR under 40 words. No total-word cap applies.
 Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` and
 match its canonical root and branch (or detached HEAD). State reads and replacement
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
 Notion child blocks fail closed; list items and code retain their density semantics.
-There is no page quota; design quality remains a review criterion. The pre-edit gate covers
+Page length and design quality remain review criteria. The pre-edit gate covers
 native editor, notebook, and patch tools on both hosts. Shell commands, other clients,
 and arbitrary MCP writers are outside it; shell-created code still requires a design
 under the workflow guidance. Shell commands retain host permissions and the separate

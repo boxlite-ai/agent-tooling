@@ -97,10 +97,10 @@ $(printf 'word %.0s' {1..59})
 
 $(printf 'word %.0s' {1..58})"
 github_doc "$design"
-expect '120 total words pass' 0 check
+expect 'compact multi-paragraph design passes' 0 check
 github_doc "$design word"
-expect '121 words in short paragraphs block registration' 1 bind "$url"
-expect 'a bound document cannot grow beyond the shared budget' 1 check
+expect 'a design over 120 words can be registered' 0 bind "$url"
+expect 'a bound design can exceed the reply word budget' 0 check
 github_doc $'## TL;DR\n\nA concise design.'
 expect 'untrusted hosts are rejected' 1 bind https://github.com.attacker.invalid/example/project/issues/1
 for unsafe_url in 'https://user:sensitive-fixture@github.com/example/project/issues/1' $'https://invalid.example/\nsensitive-fixture'; do
@@ -131,7 +131,7 @@ expect 'Linear document verifies' 0 bind "$linear"
 cp "$DOC_FIXTURE" "$scratch/linear-valid"
 jq -nc --arg url "$linear" --arg body "$design word" \
   '{data:{issue:{url:$url,description:$body,archivedAt:null}}}' > "$DOC_FIXTURE"
-expect 'Linear uses the same total word limit' 1 check
+expect 'Linear designs can exceed the reply word budget' 0 check
 cp "$scratch/linear-valid" "$DOC_FIXTURE"
 jq '. + {errors:[{message:"denied"}]}' "$DOC_FIXTURE" > "$scratch/errors"
 mv "$scratch/errors" "$DOC_FIXTURE"
@@ -171,7 +171,7 @@ expect 'Notion code examples are not prose walls' 0 check
 jq --arg text "$(printf 'word %.0s' {1..121})" \
   '.results[-1].code.rich_text[0].plain_text = $text' "$DOC_FIXTURE" > "$scratch/long-code"
 mv "$scratch/long-code" "$DOC_FIXTURE"
-expect 'Notion code counts toward the total budget' 1 check
+expect 'Notion examples can exceed the reply word budget' 0 check
 notion_block code $'```\nexample'
 jq --arg text "$(printf 'word %.0s' {1..81})" \
   '.results += [{type:"paragraph",paragraph:{rich_text:[{plain_text:$text}]}}]' \

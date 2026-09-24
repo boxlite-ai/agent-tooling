@@ -40,13 +40,13 @@ Use native GitHub stacks for dependent slices; follow the
 
 ### Pull request descriptions
 
-Before writing any code, create a **design doc in reply-summary style**. Every PR, including drafts
+Before writing any code, create a **1–3 page design doc**. Every PR, including drafts
 and small changes, must link it. Prefer **GitHub issue > Notion > Linear issue**.
 Cover the problem, approach, alternatives and trade-offs, and validation plan.
-Start with TL;DR under 40 words; keep the whole doc within the shared 120-word limit.
+Use reply-summary presentation: start with TL;DR under 40 words.
 Walls of text are forbidden; use short bullets, tables, or diagrams.
 Include a brief real example when helpful;
-link supporting detail. There is no page quota.
+link supporting detail. Design docs have no fixed total-word limit.
 Keep the doc aligned with the final PR scope; summarize the implementation in the PR.
 
 Register the canonical URL before implementation:
@@ -94,8 +94,9 @@ TL;DR is mandatory; diagrams, Before/After layouts, source annotations, and sect
   GitHub issue. Large work also requires the parent and child issues described
   above. No inline bug marker is required.
 
-For design docs, issues, comments, reviews, discussions and release notes, use the same
+For issues, comments, reviews, discussions and release notes, use the same
 [reply-summary prompt](.agents/prompts/concise-writing.md).
+Design documents follow the 1–3-page guidance above.
 
 Public artifacts must not include private chats, memory citations, internal sources,
 or local session details, including paraphrases. Use public evidence or explicit

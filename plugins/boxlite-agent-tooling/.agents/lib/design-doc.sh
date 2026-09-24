@@ -82,10 +82,6 @@ design_doc_verify() { # URL -> URL, only after a live provider read
   }
   [[ "$body" == *[![:space:]]* ]] || { _design_doc_error 'document is empty'; return 1; }
   (( ${#body} <= 32000 )) || { _design_doc_error 'document exceeds the bounded content check'; return 1; }
-  reply_summary_fits_restatement "$body" || {
-    # shellcheck disable=SC2154 # Shared budget comes from sourced reply-summary.sh.
-    _design_doc_error "document exceeds the reply-summary limit of $reply_summary_restatement_max_words words; shorten it and link supporting detail"; return 1;
-  }
   reply_summary_is_dense "$body" || density=$?
   [[ "$density" == 1 ]] || {
     _design_doc_error 'walls of text are forbidden: shorten paragraphs and list items'; return 1;

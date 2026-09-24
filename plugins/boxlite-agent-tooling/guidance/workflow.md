@@ -18,7 +18,8 @@ Every change goes: understand → research → design → implement → test →
 
 **Design**
 
-- Before writing any code, create a design doc in the same reply-summary style: leading TL;DR under 40 words, at most 120 words total, and visuals, tables, or short bullets where useful. Walls of text are forbidden. Include a brief real example when helpful. Cover the problem, approach, alternatives and trade-offs, and validation; link supporting detail instead of meeting a page quota. Host it in this preference order: GitHub issue > Notion > Linear issue. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
+- Before writing any code, create a 1–3 page design doc covering the problem, approach, alternatives and trade-offs, and validation. Host it in this preference order: GitHub issue > Notion > Linear issue. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
+- Use reply-summary presentation: leading TL;DR under 40 words, with visuals, tables, or short bullets where useful. Walls of text are forbidden. Include a brief real example when helpful and link supporting detail. Design docs have no fixed total-word limit.
 - Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
 - Search before implement — `grep` for existing code first.
 - Single responsibility — one function, one reason to change.
@@ -93,7 +94,7 @@ Every change goes: understand → research → design → implement → test →
 - Every human-facing output must include a `## TL;DR` section containing one simple sentence, as short as possible. This includes replies, progress updates, design docs, PR descriptions, GitHub comments, reviews, issues, and release notes, even when already concise.
 - Replies must begin with TL;DR; the entire section must contain fewer than 40 words.
 - Help the human understand quickly. Beyond the required TL;DR, choose a call graph, sequence diagram, real example, bullets, table, or short prose—whichever explains the point best. Do not force other sections, diagrams, or source annotations.
-- Walls of text are always forbidden. Keep paragraphs and items short, remove repetition, and link detailed evidence. Design docs, GitHub PRs (including drafts), issues, comments, reviews, discussions, and release notes use the same reply-summary prompt. Requests for depth allow more focused sections, not dense text. Keep material risks, failures, and uncertainty visible.
+- Walls of text are always forbidden. Keep paragraphs and items short, remove repetition, and link detailed evidence. Design docs follow the 1–3-page guidance above. GitHub PRs (including drafts), issues, comments, reviews, discussions, and release notes use the same reply-summary prompt. Requests for depth allow more focused sections, not dense text. Keep material risks, failures, and uncertainty visible.
 - Every PR description must explain how the change produces its intended result through the key steps or decisions, using the form best suited to that PR. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Review the explanation against the diff, including for drafts and after description edits. Link detailed evidence; omit work logs and exhaustive test counts. Repository templates are starting points.
 
 Adapted from Clean Code (Robert C. Martin) via the polygala-inc AGENTS.md distillation.
