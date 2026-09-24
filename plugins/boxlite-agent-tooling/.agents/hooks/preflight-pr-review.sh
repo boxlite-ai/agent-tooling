@@ -37,7 +37,7 @@
 set -euo pipefail
 
 payload="$(cat)"
-command="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')"
+command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // ""')"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 writing_error=""
 writing_loaded=0

@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Exercise the reply gate through both host manifests and transcript formats.
+# Exercise the three public gates with the same untrusted Markdown.
 set -euo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
-mkdir "$scratch/repo"
+mkdir "$scratch/repo" "$scratch/bin"
 git -C "$scratch/repo" init -q
 git -C "$scratch/repo" -c core.hooksPath=/dev/null -c user.name=test \
   -c user.email=test@example.invalid commit -qm fixture --allow-empty
-export VERDICT_CLASSIFIER_CMD=false
+export DOC_FIXTURE="$scratch/doc.json" CLAUDE_PROJECT_DIR="$scratch/repo"
+cat > "$scratch/bin/gh" <<'SH'
+#!/usr/bin/env bash
+cat "$DOC_FIXTURE"
+SH
+chmod +x "$scratch/bin/gh"
+export PATH="$scratch/bin:$PATH" VERDICT_CLASSIFIER_CMD=false
 cd "$scratch/repo"
 pass=0 fail=0
 run_hook() { # host, event, script basename; stdin is the native hook payload
@@ -26,13 +32,22 @@ run_hook() { # host, event, script basename; stdin is the native hook payload
 }
 check() { # label, text, expected allow|deny, optional reply expectation
   local label="$1" body="$2" expected="$3" reply_expected="${4:-$3}" output actual gate active wanted host
-  for gate in stop-claude stop-codex stop-transcript-claude stop-transcript-codex; do
+  for gate in github-claude github-codex github-codex-native design stop-claude stop-codex stop-transcript-claude stop-transcript-codex; do
     host=claude
     [[ "$gate" != *codex* ]] || host=codex
     for active in false true; do
       actual=allow
       wanted="$expected"
       case "$gate" in
+        github-*)
+          output="$(jq -nc --arg command "gh issue comment 1 --body '$body'" \
+            --arg gate "$gate" '{hook_event_name:"PreToolUse",tool_name:"Bash",
+              tool_input:{(if $gate == "github-codex-native" then "cmd" else "command" end):$command}}' \
+            | run_hook "$host" PreToolUse preflight-pr-review.sh)"
+          [[ "$(jq -r '.hookSpecificOutput.permissionDecision // "allow"' <<<"$output")" != deny ]] || actual=deny ;;
+        design)
+          jq -nc --arg body "$body" '{html_url:"https://github.com/example/repo/issues/1",body:$body}' > "$DOC_FIXTURE"
+          output="$(bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 2>&1)" || actual=deny ;;
         stop-*)
           wanted="$reply_expected"
           jq -nc --arg body "$body" --arg host "$host" '
@@ -52,6 +67,7 @@ check() { # label, text, expected allow|deny, optional reply expectation
         printf 'FAIL %s %s active=%s: wanted %s, got %s: %s\n' "$label" "$gate" "$active" "$wanted" "$actual" "$output"
         fail=$((fail+1))
       fi
+      [[ "$gate" == stop* ]] || break
     done
   done
 }

@@ -40,6 +40,7 @@ pr_design_doc_check() { # root, create|edit|ready, validated gh PR arguments
       <<<"$response")" || {
       printf 'Cannot bind the published design doc link to this branch and HEAD.'; return 1;
     }
+    concise_writing_check_summary "$body" || return 1
   fi
   # GitHub owns Markdown semantics; inspect its sanitized HTML, not source tokens.
   # API contract: https://docs.github.com/en/rest/markdown/markdown#render-a-markdown-document

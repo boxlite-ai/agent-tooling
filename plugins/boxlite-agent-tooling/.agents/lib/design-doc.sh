@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Design-doc verification and worktree binding. Requires jq, perl, git, curl,
-# verdict-audit-state.sh and reply-summary.sh. Source only; callers own delivery.
+# verdict-audit-state.sh, reply-summary.sh and concise-writing.sh. Source only.
 
 _design_doc_error() {
   printf 'design-doc: %s\n' "$1" >&2
@@ -66,6 +66,8 @@ _design_doc_content() { # canonical provider URL -> Markdown/text
         then "- \\" + gsub("[\r\n]+"; " ") elif $type == "code" then
           ("`" * (([2] + [scan("`+") | length] | max) + 1)) as $fence |
           $fence + "\n" + . + "\n" + $fence
+        elif ($type | test("^heading_[123]$")) then
+          ("#" * ($type[-1:] | tonumber)) + " " + gsub("[\r\n]+"; " ")
         else "\\" + gsub("[\r\n]+"; " ") end] | join("\n\n")' <<<"$response"
   else
     _design_doc_error 'use a canonical GitHub issue, notion.so page, or Linear issue URL'
@@ -84,6 +86,7 @@ design_doc_verify() { # URL -> URL, only after a live provider read
   [[ "$density" == 1 ]] || {
     _design_doc_error 'walls of text are forbidden: shorten paragraphs and list items'; return 1;
   }
+  concise_writing_check_summary "$body" >&2 || return 1
   printf '%s\n' "$url"
 }
 

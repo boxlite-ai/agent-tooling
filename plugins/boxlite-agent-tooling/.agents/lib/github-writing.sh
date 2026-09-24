@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GitHub text policy over literal argv supplied by the hook's shell scanner.
-# Requires reply-summary.sh, perl and jq. No execution, file reads or writes.
+# Requires reply-summary.sh, concise-writing.sh, perl and jq. No file reads or writes.
 # Public checks print a bounded diagnostic on rejection and return 1; success is
 # silent. The caller renders the shared reply-summary prompt and host response.
 # CLI flag reference: cli/cli pkg/cmd/pr/comment/comment.go:107-114.
@@ -25,7 +25,7 @@ github_writing_check_body() { # body
   fi
   reply_summary_is_dense "$body" || density=$?
   case "$density" in
-    1) return 0 ;;
+    1) concise_writing_check_summary "$body"; return $? ;;
     0) printf 'GitHub text has a paragraph over %s words or a list item over %s words.' \
          "$reply_summary_paragraph_max_words" "$reply_summary_item_max_words" ;;
     *) printf 'GitHub text could not be counted.' ;;

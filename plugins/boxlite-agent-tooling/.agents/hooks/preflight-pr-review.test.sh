@@ -40,19 +40,19 @@ cat > "$TMP/gh-bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
   'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<a href="https://github.com/example/repo/issues/123">Design</a>' ;;
-  'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"Design and validation."}' ;;
+  'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
   'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
   'api repos/example/repo/compare/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[]}' ;;
   'pr view '*) jq -nc --arg sha "$(git rev-parse HEAD)" --arg branch "$(git branch --show-current)" \
-    '{baseRefOid:$sha,headRefOid:$sha,headRefName:$branch,additions:0,deletions:0,body:"https://github.com/example/repo/issues/123"}' ;;
+    '{baseRefOid:$sha,headRefOid:$sha,headRefName:$branch,additions:0,deletions:0,body:"## TL;DR\n\nFixture summary.\n\nhttps://github.com/example/repo/issues/123"}' ;;
   *) exit 2 ;;
 esac
 GH
 chmod +x "$TMP/gh-bin/gh"
 export PATH="$TMP/gh-bin:$PATH"
 DESIGN_FIXTURE_URL=https://github.com/example/repo/issues/123
-DOC_LINK=$'\n\n'"$DESIGN_FIXTURE_URL"
+DOC_LINK=$'\n\n## TL;DR\n\nSummary.\n\n'"$DESIGN_FIXTURE_URL"
 bash "$REPO_ROOT/scripts/design-doc.sh" bind "$DESIGN_FIXTURE_URL" >/dev/null
 
 pass=0
@@ -123,9 +123,13 @@ rm -f "$TMP/.agents/state/pr-reviewed.json"
 run "ls"                                "ls"                                "passthrough"
 run "gh pr list (different subcmd)"     "gh pr list"                        "passthrough"
 run "gh pr view (different subcmd)"     "gh pr view 123"                    "passthrough"
-run "gh issue create (different verb)"  "gh issue create -t foo -b Short"            "passthrough"
+run "gh issue create (different verb)"  "gh issue create -t foo -b '## TL;DR
+
+Short.'"            "passthrough"
 run "gh issue operands named pr and ready" \
-  "gh issue create --title pr --body ready"                                 "passthrough"
+  "gh issue create --title pr --body '## TL;DR
+
+Ready.'"                                 "passthrough"
 run "echo literal mention"              "echo 'gh pr create'"               "passthrough"
 run "unrelated echo expansion"          'echo $HOME'                        "passthrough"
 run "unrelated pathname expansion"      'ls *.md'                           "passthrough"
@@ -145,11 +149,11 @@ run "multiline w/ backtick trigger"     $'git commit -m "fix bug"\n# `gh pr crea
 
 echo
 echo "## Matcher: draft exclusion (only on create)"
-run "gh pr create --draft"              "gh pr create --draft -t wip -b $DESIGN_FIXTURE_URL"       "passthrough"
-run "gh pr create -d short flag"        "gh pr create -d -t wip -b $DESIGN_FIXTURE_URL"            "passthrough"
-run "draft may carry an explicit body"  "gh pr create --draft --body $DESIGN_FIXTURE_URL" "passthrough"
-run "draft body may start with a dash"   "gh pr create --draft --body \"-draft $DESIGN_FIXTURE_URL\"" "passthrough"
-run "draft may use --dry-run"           "gh pr create --draft --body $DESIGN_FIXTURE_URL --dry-run"    "passthrough"
+run "gh pr create --draft"              "gh pr create --draft -t wip -b '$DOC_LINK'"       "passthrough"
+run "gh pr create -d short flag"        "gh pr create -d -t wip -b '$DOC_LINK'"            "passthrough"
+run "draft may carry an explicit body"  "gh pr create --draft --body '$DOC_LINK'" "passthrough"
+run "draft body may start with a dash"   "gh pr create --draft --body \"-draft $DOC_LINK\"" "passthrough"
+run "draft may use --dry-run"           "gh pr create --draft --body '$DOC_LINK' --dry-run"    "passthrough"
 run "noncanonical late draft stays gated" "gh pr create -t wip --draft"     "deny"
 run "label value --draft is not a draft flag" "gh pr create --label --draft" "deny"
 run "short label value -d is not a draft flag" "gh pr create -l -d"          "deny"
@@ -165,8 +169,8 @@ run "command substitution cannot inject a draft=false override" \
   'gh pr create --draft "$(printf -- --draft=false)" --title "not conventional" --body prose' "deny"
 run "compound all-draft source remains execution-ambiguous" \
   'gh pr create --draft && true' "deny"
-run "gh pr create --draft=true"         "gh pr create --draft=true -t wip -b $DESIGN_FIXTURE_URL"  "passthrough"
-run "gh pr create -d=true"              "gh pr create -d=true -t wip -b $DESIGN_FIXTURE_URL"       "passthrough"
+run "gh pr create --draft=true"         "gh pr create --draft=true -t wip -b '$DOC_LINK'"  "passthrough"
+run "gh pr create -d=true"              "gh pr create -d=true -t wip -b '$DOC_LINK'"       "passthrough"
 run "-- stops draft option parsing"     "gh pr create -- --draft"           "deny"
 run "-d inside a title is not a draft flag" \
   'gh pr create --title "feat(cli): document the -d option"'               "deny"
@@ -653,7 +657,7 @@ TABLE_BODY=$'| Trigger | Matrix |\n| --- | --- |\n| PR | Focused |\n| Weekly | F
 LEGACY_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
 LONG_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
 LONG_UNSPACED_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
-LIMIT_WORDS_BODY="$(printf 'x %.0s' {1..60})"$'\n\n'"$(printf 'x %.0s' {1..59})"
+LIMIT_WORDS_BODY="$(printf 'x %.0s' {1..60})"$'\n\n'"$(printf 'x %.0s' {1..57})"
 LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<80; i++) printf "字"}')"
 OVER_WORDS_BODY="$LIMIT_WORDS_BODY x"
 OVER_CHARS_BODY="${LIMIT_CHARS_BODY}字"
@@ -693,7 +697,7 @@ run_body "120 words in short paragraphs at the boundary → allow" "gh pr create
 run_body "121 words → deny" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "deny"
 run_body "80 Chinese characters at the paragraph boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
 run_body "81 Chinese characters → deny" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "deny"
-run_body "2000 four-byte characters → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
+run_body "2000 four-byte characters plus summary → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
 run_body "oversized argument → deny" "gh pr create $FEAT --body '$HUGE_BODY'" "deny"
 run_body "long body edit → deny" "gh pr edit 42 $FEAT --body '$LONG_BODY'" "deny"
 write_marker "reviewed: shorten description"
