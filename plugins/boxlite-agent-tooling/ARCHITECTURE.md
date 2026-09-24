@@ -121,15 +121,28 @@ fallback once: split oversized work, or leave an unreviewed PR draft/uncreated.
 The agent performs the wait, issue creation, and splitting; these are not background
 jobs. `.agents/prompts/pr-size-exception.md` carries the size-specific wording.
 
-Claude sessions launched through `scripts/claude-with-timed-prompts.sh` load this
-plugin with `--plugin-dir` and enable 180-second native idle dismissal, without
-editing settings. The agent invokes the exact `AskUserQuestion` payload generated
+Local interactive sessions launched through `scripts/claude-with-timed-prompts.sh`
+load this plugin with `--plugin-dir`, enable 180-second native idle dismissal, and
+disable Remote Control for that session through `--settings` (`remoteControlAtStartup:false`
+and `disableRemoteControl:true`). No settings files are edited. The launcher exports
+`BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1`; routing and PreToolUse require that marker plus
+a bounded timeout through `timed_user_prompt_native_available`. The marker describes
+launcher configuration, not runtime host attestation or authority to approve.
+The agent invokes the exact `AskUserQuestion` payload generated
 by the shared library. The Claude-only hook binds presentation and response to its
 tool call ID and original deadline, rejects prefilled answers and `afkTimeoutMs`
-auto-responses, and writes a valid `reviewed:` marker itself. Missing native timeout
-setup uses a plain-text, non-blocking question instead. Codex retains async input.
+auto-responses, and writes a valid `reviewed:` marker itself. Explicit Remote Control,
+custom `--settings`, print, background, and cloud invocations retain their arguments,
+clear any inherited native marker, and use plain-text, non-blocking questions.
+Missing marker or timeout setup also uses that fallback. Codex retains async input.
 Existing requests gain an empty native question ID without changing their deadline.
 
+Remote Control kept native questions open despite the idle timeout in Claude 2.1.278
+([issue #83](https://github.com/boxlite-ai/agent-tooling/issues/83)). Startup disabling
+alone allows later reconnection, so the native launcher also disables the in-session
+toggle. Custom settings conservatively use the fallback rather than being merged or
+replaced. Environments whose managed policy overrides the session configuration must
+use the fallback, for example by supplying `--settings '{}'` to the launcher.
 Claude's idle timer resets on interaction; the shared deadline never does.
 An active dialog may remain visible past that deadline, but cannot grant a late
 exception. Splitting resumes when the dialog returns; this is not a hard deadline

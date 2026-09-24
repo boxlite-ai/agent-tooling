@@ -133,6 +133,12 @@ _timed_user_prompt_question() {
                {label:"Show diff",description:"Inspect changes."}]}]}' <<<"$1"
 }
 
+timed_user_prompt_native_available() {
+  [[ "${BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS:-}" == 1 \
+    && "${CLAUDE_AFK_TIMEOUT_MS:-}" =~ ^[1-9][0-9]{0,5}$ ]] \
+    && (( CLAUDE_AFK_TIMEOUT_MS <= 180000 ))
+}
+
 timed_user_prompt_instruction() { # tooling-root request-json
   local deadline fallback instruction route host
   # shellcheck source=hook-host.sh
@@ -142,10 +148,10 @@ timed_user_prompt_instruction() { # tooling-root request-json
   if [[ "$host" == claude ]]; then
     if [[ "$(jq -r '.question_tool_id // ""' <<<"$2")" != "" ]]; then
       route='The native question was already shown. Do not reopen it or extend its deadline. Follow any explicit user instruction; never infer approval.'
-    elif [[ "${CLAUDE_AFK_TIMEOUT_MS:-}" =~ ^[1-9][0-9]{0,5}$ ]] && (( CLAUDE_AFK_TIMEOUT_MS <= 180000 )); then
+    elif timed_user_prompt_native_available; then
       route="Call AskUserQuestion once: $(_timed_user_prompt_question "$2"). The hook records typed replies."
     else
-      route='Ask once in plain text and continue waiting without a modal. Native timed questions require scripts/claude-with-timed-prompts.sh at session startup.'
+      route='Ask once in plain text and continue waiting without a modal. Native timed questions require a local session from scripts/claude-with-timed-prompts.sh; Remote Control or custom settings use this fallback.'
     fi
   fi
   deadline="$(jq -er .deadline <<<"$2")" || return 2

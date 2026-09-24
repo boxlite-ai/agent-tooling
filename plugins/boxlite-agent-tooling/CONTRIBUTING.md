@@ -24,8 +24,12 @@ splitting if no valid reply arrives. The size exception is separate from `review
 The agent opens the question and performs the split. The hook enforces expiry;
 it does not open or dismiss a native dialog. For Claude, launch with
 `bash plugins/boxlite-agent-tooling/scripts/claude-with-timed-prompts.sh` to load
-this plugin and enable native idle dismissal for that session. Activity can keep
-the dialog open beyond the fixed deadline, but late replies remain invalid. See [enforcement scope](ARCHITECTURE.md#entry-points).
+this plugin and enable native idle dismissal in a local session. The launcher disables
+Remote Control only for that session; global settings remain unchanged. Remote Control,
+custom `--settings`, print, background, and cloud invocations use non-blocking questions
+instead. Setting `CLAUDE_AFK_TIMEOUT_MS` alone does not enable managed native questions.
+Activity can keep a native dialog open beyond the fixed deadline, but late replies
+remain invalid. See [enforcement scope](ARCHITECTURE.md#entry-points).
 
 Illustrative typed exception:
 
