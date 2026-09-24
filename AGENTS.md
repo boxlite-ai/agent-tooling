@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=d8ac7a84f996-dirty sha256=50f95ef47e85 -->
+<!-- agent-tooling:guidance:begin rev=ce39370010e7-dirty sha256=a93b5825494e -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -30,7 +30,7 @@ Every change goes: understand → research → design → implement → test →
 
 **Design**
 
-- Before writing any code, create a 1–3 page design doc. Host it in this preference order: GitHub issue > Notion > Linear issue. Cover the problem, proposed approach, alternatives and trade-offs, and validation plan. Walls of text are forbidden; use short paragraphs, bullets, tables, or diagrams. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
+- Before writing any code, create a design doc in the same reply-summary style: leading TL;DR under 40 words, at most 120 words total, and visuals, tables, or short bullets where useful. Walls of text are forbidden. Include a brief real example when helpful. Cover the problem, approach, alternatives and trade-offs, and validation; link supporting detail instead of meeting a page quota. Host it in this preference order: GitHub issue > Notion > Linear issue. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
 - Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
 - Search before implement — `grep` for existing code first.
 - Single responsibility — one function, one reason to change.
@@ -99,10 +99,13 @@ Every change goes: understand → research → design → implement → test →
 
 **Communication**
 
+- Keep private messages out of public artifacts, including titles, descriptions, comments, commits, files, attachments, and release notes. Chats, DMs, memory, internal documents, and local session details are private by default; paraphrasing or removing names does not make them public.
+- Draft public text from public evidence or material explicitly authorized for disclosure. A request to implement or publish work does not authorize publishing its private conversation, rationale, or sources. Give any public-writing delegate only the material authorized for that audience, not the private transcript.
+- Before publication, inspect the exact destination and outgoing content. If provenance or permission is uncertain, omit the material or obtain explicit approval for that content and destination; any change invalidates that approval. Never append memory citations, conversation excerpts, or local context paths to public output. Hook checks catch recognizable indicators only; they do not prove provenance or authorize exceptions.
 - Every human-facing output must include a `## TL;DR` section containing one simple sentence, as short as possible. This includes replies, progress updates, design docs, PR descriptions, GitHub comments, reviews, issues, and release notes, even when already concise.
 - Replies must begin with TL;DR; the entire section must contain fewer than 40 words.
 - Help the human understand quickly. Beyond the required TL;DR, choose a call graph, sequence diagram, real example, bullets, table, or short prose—whichever explains the point best. Do not force other sections, diagrams, or source annotations.
-- Walls of text are always forbidden. Keep paragraphs and items short, remove repetition, and link detailed evidence. GitHub PRs (including drafts), issues, comments, reviews, discussions, and release notes use the same reply-summary prompt. Requests for depth allow more focused sections, not dense text. Keep material risks, failures, and uncertainty visible.
+- Walls of text are always forbidden. Keep paragraphs and items short, remove repetition, and link detailed evidence. Design docs, GitHub PRs (including drafts), issues, comments, reviews, discussions, and release notes use the same reply-summary prompt. Requests for depth allow more focused sections, not dense text. Keep material risks, failures, and uncertainty visible.
 - Every PR description must explain how the change produces its intended result through the key steps or decisions, using the form best suited to that PR. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Review the explanation against the diff, including for drafts and after description edits. Link detailed evidence; omit work logs and exhaustive test counts. Repository templates are starting points.
 
 Adapted from Clean Code (Robert C. Martin) via the polygala-inc AGENTS.md distillation.

@@ -20,7 +20,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
-| Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | A request to shorten unpublishable text. PRs over 400 changed lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
+| Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. PRs over 400 changed lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely typed answer; idle expiry and selected options never authorize a PR. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
 | Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | Requires a leading TL;DR under 40 words, then resumes pending timed confirmations or checks the verdict. A dense reply gets one shortening request. See the decision table below. |
@@ -29,15 +29,16 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 
 The PR description contract in `CONTRIBUTING.md` requires every PR to explain how
 the change produces its intended result, using the form best suited to the PR.
-Before code is written, a 1–3 page design doc must exist; every PR must link it,
+Before code is written, a design doc in reply-summary style must exist; every PR must link it,
 preferably in a GitHub issue, then Notion, then a Linear issue.
 `scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
-provider read; the gate rechecks existence, nonempty content, and writing density.
+provider read; the gate rechecks existence, nonempty content, and the shared
+120-word total and paragraph/list limits, with a leading TL;DR under 40 words.
 Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` and
 match its canonical root and branch (or detached HEAD). State reads and replacement
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
 Notion child blocks fail closed; list items and code retain their density semantics.
-Page count and design quality remain review criteria. The pre-edit gate covers
+There is no page quota; design quality remains a review criterion. The pre-edit gate covers
 native editor, notebook, and patch tools on both hosts. Shell commands, other clients,
 and arbitrary MCP writers are outside it; shell-created code still requires a design
 under the workflow guidance. Shell commands retain host permissions and the separate
@@ -58,7 +59,20 @@ count individually. Empty text and inputs over 8000 shell characters fail closed
 Denials reuse `.agents/prompts/concise-writing.md`; clarity remains a reviewer judgment.
 Every inspected body also needs a TL;DR heading and summary prose, including short
 comments, design documents, and published PR bodies checked on ready/metadata edits.
-The author-review publisher checks its rendered bot comment before POST or PATCH.
+The author-review publisher checks its rendered bot comment for privacy indicators
+and a summary before POST or PATCH.
+
+`github_writing_check_privacy` in `.agents/lib/github-writing.sh` also inspects literal
+CLI titles and REST title fields. It rejects conversation/memory markup, explicit
+private-message attribution, personal home paths, and local agent context paths.
+It scans raw text even inside comments or fences, bounds input to 8000 characters,
+fails closed on scanner errors, and never echoes rejected content. Denials occur
+before consuming PR acknowledgments. There is no automatic disclosure exception.
+This is a heuristic against accidental copies, not a provenance verifier or secret
+scanner: paraphrases, unrecognized languages, arbitrary private facts, attachments,
+and external publishing routes require separate controls. Credentials and host
+permissions are unchanged. Shared guidance requires public evidence or explicit
+authorization for the exact outgoing content and destination.
 
 The existing shell scanner supplies literal argv without executing it. Inline bodies
 are inspectable; body files, stdin, editors, generated text and GraphQL text mutations are

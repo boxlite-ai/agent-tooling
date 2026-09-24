@@ -3,9 +3,12 @@
 <!-- Required: one simple sentence, as short as possible. -->
 
 Design doc: <!-- Required before writing code and for every PR, including drafts.
-Link the 1–3 page doc: GitHub issue > Notion > Linear issue, in preference order.
+Link the concise doc: GitHub issue > Notion > Linear issue, in preference order.
 Cover the problem, approach, alternatives and trade-offs, and validation plan.
-Walls of text are forbidden; use short paragraphs, bullets, tables, or diagrams. -->
+Use reply-summary style: leading TL;DR under 40 words, at most 120 words total.
+Walls of text are forbidden; prefer visuals, tables, or short bullets.
+Include a brief real example when helpful;
+link supporting detail. -->
 
 ## Summary
 

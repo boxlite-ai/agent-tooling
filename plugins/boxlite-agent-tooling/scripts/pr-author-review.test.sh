@@ -482,7 +482,7 @@ done
 fixture_plugin="$TEST_DIR/prompt-plugin"
 mkdir -p "$fixture_plugin/scripts" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$SCRIPT" "$fixture_plugin/scripts/"
-cp "$PLUGIN_ROOT/.agents/lib/"{pr-author-review,subagent,hook-host,reply-summary,concise-writing}.sh "$fixture_plugin/.agents/lib/"
+cp "$PLUGIN_ROOT/.agents/lib/"{pr-author-review,subagent,hook-host,reply-summary,concise-writing,github-writing}.sh "$fixture_plugin/.agents/lib/"
 SCRIPT="$fixture_plugin/scripts/pr-author-review.sh"
 cat > "$fixture_plugin/.agents/prompts/pr-author-review.md" <<'PROMPT'
 ---
@@ -540,6 +540,23 @@ no_invalid_prompt() {
     (.endpoint | contains("/comments") | not))' "$TEST_DIR/calls" >/dev/null
 }
 report "a generated comment without TL;DR cannot be published" no_invalid_prompt
+
+printf '## TL;DR\n\nPer our private conversation, PRIVATE_CANARY.\n' > "$fixture_plugin/.agents/prompts/pr-author-review.md"
+reset_case
+acknowledge
+run_gate
+private_prompt_rejected() {
+  no_invalid_prompt && grep -q 'private context' "$TEST_DIR/stderr" &&
+    ! grep -q PRIVATE_CANARY "$TEST_DIR/stderr"
+}
+report "generated private context is rejected without echoing it" private_prompt_rejected
+reset_case
+acknowledge
+edit_json "$TEST_DIR/comments-1.json" '. += [{id:90,
+  user:{id:41898282,login:"github-actions[bot]",type:"Bot"},
+  body:"<!-- boxlite-agent-tooling:author-review -->\nPrevious prompt"}]'
+run_gate
+report "private context cannot replace an existing bot comment" private_prompt_rejected
 
 printf '\nRESULT: %s passed, %s failed\n' "$pass" "$fail"
 (( fail == 0 ))

@@ -68,6 +68,40 @@ github_doc "$(printf 'word %.0s' {1..81})"
 expect 'wall of text blocks' 1 check
 github_doc $'## TL;DR\n\nVerify designs before edits.\n\n- Problem: undocumented changes.\n- Approach: gate edits.\n- Validation: tests.'
 expect 'compact bullet design passes' 0 check
+github_doc $'Preface.\n\n## TL;DR\n\nA concise design.'
+expect 'summary must lead the design' 1 check
+summary="$(printf 'word %.0s' {1..39})"
+github_doc "## TL;DR
+
+$summary
+
+## Design
+
+Validate provider responses."
+expect '39-word summary passes' 0 check
+github_doc "## TL;DR
+
+${summary}word
+
+## Design
+
+Validate provider responses."
+expect '40-word summary blocks' 1 check
+design="## TL;DR
+
+Design.
+
+## Detail
+
+$(printf 'word %.0s' {1..59})
+
+$(printf 'word %.0s' {1..58})"
+github_doc "$design"
+expect '120 total words pass' 0 check
+github_doc "$design word"
+expect '121 words in short paragraphs block registration' 1 bind "$url"
+expect 'a bound document cannot grow beyond the shared budget' 1 check
+github_doc $'## TL;DR\n\nA concise design.'
 expect 'untrusted hosts are rejected' 1 bind https://github.com.attacker.invalid/example/project/issues/1
 for unsafe_url in 'https://user:sensitive-fixture@github.com/example/project/issues/1' $'https://invalid.example/\nsensitive-fixture'; do
   expect 'unsafe URL blocks' 1 bind "$unsafe_url"
@@ -94,6 +128,11 @@ expect 'Linear needs credentials' 1 bind "$linear"
 export LINEAR_API_KEY=fixture-only
 jq -nc --arg url "$linear" '{data:{issue:{url:$url,description:"## TL;DR\n\nDesign and validation.",archivedAt:null}}}' > "$DOC_FIXTURE"
 expect 'Linear document verifies' 0 bind "$linear"
+cp "$DOC_FIXTURE" "$scratch/linear-valid"
+jq -nc --arg url "$linear" --arg body "$design word" \
+  '{data:{issue:{url:$url,description:$body,archivedAt:null}}}' > "$DOC_FIXTURE"
+expect 'Linear uses the same total word limit' 1 check
+cp "$scratch/linear-valid" "$DOC_FIXTURE"
 jq '. + {errors:[{message:"denied"}]}' "$DOC_FIXTURE" > "$scratch/errors"
 mv "$scratch/errors" "$DOC_FIXTURE"
 expect 'GraphQL partial errors block' 1 check
@@ -129,6 +168,10 @@ jq '.results = [{type:"heading_2",heading_2:{rich_text:[{plain_text:"TL;DR"}]}},
   "$DOC_FIXTURE" > "$scratch/with-summary"
 mv "$scratch/with-summary" "$DOC_FIXTURE"
 expect 'Notion code examples are not prose walls' 0 check
+jq --arg text "$(printf 'word %.0s' {1..121})" \
+  '.results[-1].code.rich_text[0].plain_text = $text' "$DOC_FIXTURE" > "$scratch/long-code"
+mv "$scratch/long-code" "$DOC_FIXTURE"
+expect 'Notion code counts toward the total budget' 1 check
 notion_block code $'```\nexample'
 jq --arg text "$(printf 'word %.0s' {1..81})" \
   '.results += [{type:"paragraph",paragraph:{rich_text:[{plain_text:$text}]}}]' \
