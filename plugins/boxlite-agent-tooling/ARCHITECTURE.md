@@ -18,7 +18,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. An audit still running for the abandoned turn is revoked. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | One compact reply-shape reminder. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. |
-| Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch; shell commands are outside this gate. |
+| Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. PRs over 400 changed lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely typed answer; idle expiry and selected options never authorize a PR. |
@@ -42,6 +42,11 @@ reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed r
 Notion child blocks fail closed; list items and code retain their density semantics.
 Page length, related-work completeness, and design quality remain review criteria.
 The pre-edit gate covers native editor, notebook, and patch tools on both hosts.
+`.agents/lib/edit-scope.sh` passes edits whose targets all lie outside every work
+tree and Git directory, both where they are named and where their links lead, such
+as host scratch, memory, and plan files; a work tree without a `.git` entry counts
+as outside. Relative working directories, `~` paths, dot segments, dangling
+intermediate links, and missing or unparseable targets keep the gate.
 Shell commands, other clients,
 and arbitrary MCP writers are outside it; shell-created code still requires a design
 under the workflow guidance. Shell commands retain host permissions and the separate

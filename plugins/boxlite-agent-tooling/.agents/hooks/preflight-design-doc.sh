@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse: verify the current design before explicit editing operations.
+# PreToolUse: verify the current design before explicit edits inside a repository.
 # Native tool names/denials: openai/codex codex-rs/hooks/src/events/pre_tool_use.rs:30-44.
 set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -21,6 +21,25 @@ cwd="$(jq -er --arg fallback "${CLAUDE_PROJECT_DIR:-$PWD}" \
   '.tool_input.workdir // .tool_input.cwd // .cwd // $fallback | strings | select(length > 0)' \
   <<<"$payload")" || deny 'invalid working directory'
 [[ -d "$cwd" ]] || deny 'working directory is unavailable'
+
+# shellcheck source=../lib/edit-scope.sh
+source "$plugin_root/.agents/lib/edit-scope.sh" || deny 'edit scope library unavailable'
+# Editor paths or apply_patch file headers (openai/codex codex-rs/apply-patch/src/parser.rs:39-42);
+# Codex passes the patch as tool_input.command (codex-rs/core/src/hook_runtime.rs:233-234).
+# A path holding a newline or NUL cannot be listed, so it keeps the gate; \A and \z
+# anchor the whole path, where jq's $ would also match before a final newline.
+targets="$(jq -r --arg tool "$tool" '
+  (if $tool == "apply_patch" then
+     [.tool_input.command | strings | splits("\n")
+      | capture("^\\s*\\*\\*\\* (?:(?:Add|Delete|Update) File|Move to): (?<path>.*\\S)").path]
+   elif $tool == "NotebookEdit" then [.tool_input.notebook_path]
+   else [.tool_input.file_path] end)
+  | select(length > 0 and all(.[]; type == "string" and test("\\A[^\n\u0000]+\\z"))) | .[]' \
+  <<<"$payload")" || targets=''
+# Scratch, memory and plan files are not repository code, so they need no design doc.
+if edit_scope_outside_repositories "$cwd" "$targets"; then
+  exit 0
+fi
 
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$plugin_root/.agents/lib/verdict-audit-state.sh" || deny 'state library unavailable'

@@ -74,8 +74,9 @@ bash <plugin-root>/scripts/design-doc.sh bind <URL>
 ```
 
 The pre-edit hook verifies the document before native editor, patch, and notebook
-operations. Missing, unreadable, oversized, or overly dense documents block edits;
-a missing, buried, or oversized TL;DR also blocks them.
+operations inside a repository; host scratch, memory, and plan files outside every
+repository need no document. Missing, unreadable, oversized, or overly dense
+documents block edits; a missing, buried, or oversized TL;DR also blocks them.
 GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
 `LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.
 Shell commands are outside this design gate, so investigation and document
