@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Exercise the three public gates with the same untrusted Markdown.
+# shellcheck disable=SC2016 # Markdown backticks in expected feedback are literal.
 set -euo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scratch="$(mktemp -d)"
@@ -30,16 +31,15 @@ run_hook() { # host, event, script basename; stdin is the native hook payload
   env -u PLUGIN_ROOT -u CLAUDE_PLUGIN_ROOT -u CLAUDE_PROJECT_DIR \
     "$root=$plugin" bash -c "$command"
 }
-check() { # label, text, expected allow|deny, optional reply/design expectation, optional denial text, optional reply/design denial text
+check() { # label, text, expected allow|deny, optional reply/design expectation, denial text
   local label="$1" body="$2" expected="$3" reply_expected="${4:-$3}" reason="${5:-TL;DR}"
-  local reply_reason="${6:-${5:-TL;DR}}" output actual gate active wanted wanted_reason host
+  local output actual gate active wanted host
   for gate in github-claude github-codex github-codex-native design stop-claude stop-codex stop-transcript-claude stop-transcript-codex; do
     host=claude
     [[ "$gate" != *codex* ]] || host=codex
     for active in false true; do
       actual=allow
       wanted="$expected"
-      wanted_reason="$reason"
       case "$gate" in
         github-*)
           output="$(jq -nc --arg command "gh issue comment 1 --body '$body'" \
@@ -48,11 +48,11 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
             | run_hook "$host" PreToolUse preflight-pr-review.sh)"
           [[ "$(jq -r '.hookSpecificOutput.permissionDecision // "allow"' <<<"$output")" != deny ]] || actual=deny ;;
         design)
-          wanted="$reply_expected" wanted_reason="$reply_reason"
+          wanted="$reply_expected"
           jq -nc --arg body "$body" '{html_url:"https://github.com/example/repo/issues/1",body:$body}' > "$DOC_FIXTURE"
           output="$(bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 2>&1)" || actual=deny ;;
         stop-*)
-          wanted="$reply_expected" wanted_reason="$reply_reason"
+          wanted="$reply_expected"
           jq -nc --arg body "$body" --arg host "$host" '
             if $host == "claude" then {type:"assistant",message:{content:[{type:"text",text:$body}]}}
             else {type:"response_item",payload:{type:"message",role:"assistant",phase:"final_answer",
@@ -65,7 +65,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
           [[ "$(jq -r '.decision // "allow"' <<<"$output")" != block ]] || actual=deny ;;
       esac
       if [[ "$actual" == "$wanted" && ( "$wanted" == allow ||
-            ( "$output" == *"TL;DR"* && "$output" == *"$wanted_reason"* ) ) ]]; then
+            ( "$output" == *"TL;DR"* && "$output" == *"$reason"* ) ) ]]; then
         pass=$((pass+1))
       else
         printf 'FAIL %s %s active=%s: wanted %s, got %s: %s\n' "$label" "$gate" "$active" "$wanted" "$actual" "$output"
@@ -75,44 +75,53 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
     done
   done
 }
-# Each denial names the failed condition, so the agent can fix the right thing.
-heading_missing='Add a visible TL;DR heading followed by one short sentence'
-heading_first='Begin with a TL;DR heading followed by one short sentence'
-check missing 'A concise answer.' deny deny "$heading_missing" "$heading_first"
-check empty $'## TL;DR\n\n## Details\nA concise answer.' deny deny 'Follow the TL;DR heading with one short sentence'
-check symbol_start $'## TL;DR\n\n#120 is ready for review.' deny deny 'opens with a word, not a symbol'
-check fenced $'```markdown\n## TL;DR\nA concise answer.\n```' deny deny "$heading_missing" "$heading_first"
-check quoted $'> ## TL;DR\n> A concise answer.' deny deny "$heading_missing" "$heading_first"
-check commented $'<!--\n## TL;DR\nA concise answer.\n-->' deny deny "$heading_missing" "$heading_first"
-check indented $'    ## TL;DR\n    A concise answer.' deny deny "$heading_missing" "$heading_first"
-check mention 'Include a TL;DR section.' deny deny "$heading_missing" "$heading_first"
+check missing 'A concise answer.' deny deny 'Missing a Markdown TL;DR heading'
+check bold_label '**TL;DR:** A concise answer.' deny deny 'literal line `## TL;DR`'
+check empty $'## TL;DR\n\n## Details\nA concise answer.' deny deny 'summary prose is missing or malformed'
+check symbol_start $'## TL;DR\n\n#120 is ready.' deny deny 'summary prose is missing or malformed'
+check fenced $'```markdown\n## TL;DR\nA concise answer.\n```' deny deny 'Missing a Markdown TL;DR heading'
+check quoted $'> ## TL;DR\n> A concise answer.' deny deny 'Missing a Markdown TL;DR heading'
+check commented $'<!--\n## TL;DR\nA concise answer.\n-->' deny deny 'Missing a Markdown TL;DR heading'
+check indented $'    ## TL;DR\n    A concise answer.' deny deny 'Missing a Markdown TL;DR heading'
+check mention 'Include a TL;DR section.' deny deny 'Missing a Markdown TL;DR heading'
 check valid $'## TL;DR\n\nA concise answer.' allow
 check details $'## TL;DR\n\nA concise answer.\n\n## Details\nSupporting evidence.' allow
 check closing_hashes $'### TL;DR ###\n\nA concise answer.' allow
-check trailing $'Details first.\n\n## TL;DR\n\nA concise answer.' allow deny 'Move the TL;DR section to the start'
+check trailing $'Details first.\n\n## TL;DR\n\nA concise answer.' allow deny 'Move the TL;DR heading'
 check words_39 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..39})" allow
-check words_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..40})" allow deny 'has 40 words'
-check paragraphs_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..20})"$'\n\n'"$(printf 'word %.0s' {1..20})" allow deny 'has 40 words'
-check chinese_40 $'## TL;DR\n\n'"$(printf '字%.0s' {1..40})" allow deny 'has 40 words'
-# A short sentence followed directly by a table: the table belongs to the section.
+check words_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..40})" allow deny '40 words; limit 39'
+check paragraphs_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..20})"$'\n\n'"$(printf 'word %.0s' {1..20})" allow deny '40 words; limit 39'
+check chinese_40 $'## TL;DR\n\n'"$(printf '字%.0s' {1..40})" allow deny '40 words; limit 39'
+# Follow the denial literally: keep the summary, move supporting text under a peer heading.
+details="$(printf 'word %.0s' {1..40})"
+check explanation_counted $'## TL;DR\n\nRetry failed requests once.\n\n'"$details" allow deny '44 words; limit 39'
+check corrected_explanation $'## TL;DR\n\nRetry failed requests once.\n\n## Details\n\n'"$details" allow
+check nested_heading $'## TL;DR\n\nRetry failed requests once.\n\n### Details\n\n'"$details" \
+  allow deny 'same or higher level'
 check table_after $'## TL;DR\n\nA concise answer.\n\n| Gate | Result |\n|---|---|\n'"$(printf '| stop gate | denied the reply |\n%.0s' {1..10})" \
-  allow deny 'runs until the next heading'
-# At the library facade, oversized text and an uncountable section still deny.
-facade() { # label, expected denial text, Markdown, optional broken-counter
-  local label="$1" wanted="$2" text="$3" mode="${4:-}" output status=0
+  allow deny 'start a new section'
+
+facade_failure() { # label, expected diagnostic, Markdown, optional counter behavior
+  local label="$1" reason="$2" body="$3" counter="${4:-}" output status=0
   output="$(
+    # shellcheck source=../lib/reply-summary.sh
     source "$plugin/.agents/lib/reply-summary.sh"
+    # shellcheck source=../lib/concise-writing.sh
     source "$plugin/.agents/lib/concise-writing.sh"
-    if [[ "$mode" == broken-counter ]]; then reply_summary_word_counts() { return 1; }; fi
-    concise_writing_check_summary "$text" first 39
+    # shellcheck disable=SC2329 # Inject counter failures into the sourced validator.
+    if [[ "$counter" == empty ]]; then reply_summary_word_counts() { return 0; }
+    elif [[ "$counter" == failed ]]; then reply_summary_word_counts() { return 1; }; fi
+    concise_writing_check_summary "$body" first 39
   )" || status=$?
-  if [[ "$status" != 0 && "$output" == *"$wanted"* ]]; then
+  if [[ "$status" == 1 && "$output" == *"$reason"* ]]; then
     pass=$((pass+1))
   else
-    printf 'FAIL %s: status=%s: %s\n' "$label" "$status" "$output"; fail=$((fail+1))
+    printf 'FAIL %s: exit=%s: %.300s\n' "$label" "$status" "$output"; fail=$((fail+1))
   fi
 }
-facade oversized 'too long to check' $'## TL;DR\n\n'"$(printf '%262145s' '' | tr ' ' a)"
-facade broken_counter 'could not be checked' $'## TL;DR\n\nA concise answer.' broken-counter
+facade_failure oversized '262144-character inspection limit' "$(printf '%262145s' '')"
+facade_failure oversized_correction 'Shorten the text below the inspection limit' "$(printf '%262145s' '')"
+facade_failure empty_counter 'could not be counted' $'## TL;DR\n\nA concise answer.' empty
+facade_failure failed_counter 'could not be counted' $'## TL;DR\n\nA concise answer.' failed
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" == 0 ]]
