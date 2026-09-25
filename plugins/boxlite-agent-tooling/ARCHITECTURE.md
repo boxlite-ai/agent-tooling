@@ -289,6 +289,11 @@ Exhausted Stop audits terminate with `continue:false` and an INCOMPLETE reason.
 The shared `.agents/prompts/audit-reflection.md` defines reconciliation and reflection;
 the commit/push output schema accepts nullable assessments for scoped producers.
 Legacy unscoped callers omit those fields or use null.
+Prompt-scoped commit/push auditors prepare history before their independent review.
+Headless runs preserve sanitized diff evidence; native runs preserve immutable Git
+trees. Both record through the same adapter, and the Git gate reconciles the result
+before consumption. Failed runner execution records ERROR; cancellation is separate.
+Native Git auditors load `.agents/prompts/git-audit-history.md` only for scoped work.
 
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
 than one session can share a checkout.

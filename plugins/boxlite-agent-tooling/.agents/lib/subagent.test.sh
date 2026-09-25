@@ -428,7 +428,7 @@ static_precedes_dynamic "commit runner keeps reusable policy before run data" \
 commit_task_rendered="$(subagent_prompt commit-push-task "$PLUGIN_ROOT" \
   'task_input_json={"marker":"DYNAMIC_COMMIT_TASK"}')"
 static_precedes_dynamic "commit task keeps reusable policy before run data" \
-  "$commit_task_rendered" 'parent history is intentionally unavailable' DYNAMIC_COMMIT_TASK
+  "$commit_task_rendered" 'Follow the auditor spec' DYNAMIC_COMMIT_TASK
 # verdict-runner is the only verdict prompt. The Stop gate runs its auditor
 # synchronously rather than emitting a spawn instruction, so the task-prompt twin it
 # used to pair with is gone; the byte-identical-body check that compared the two went

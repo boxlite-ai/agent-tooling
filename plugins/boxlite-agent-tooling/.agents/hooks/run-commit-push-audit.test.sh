@@ -73,6 +73,7 @@ setup() {  # [object format] -> repo path
     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
     "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
   cp "$REPO_ROOT/.agents/prompts/"*.md "$d/.agents/prompts/"
+  cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$d/.agents/lib/"
   printf 'base\n' > "$d/f"
   git -C "$d" add -A
   git -C "$d" commit -qm base
@@ -163,6 +164,10 @@ if [[ -n "${CODEX_FAKE_SCRATCH_KIB:-}" ]]; then
   rm -f "$FAKE_DIR/cli-scratch.bin"
 fi
 printf '%s' "${CODEX_FAKE_OUTPUT:-}" > "$out"
+history="$(sed -n 's/^History input JSON: //p' "$FAKE_DIR/prompt.txt")"
+if [[ -n "$history" && -n "${TEST_HISTORY_RESULT_HELPER:-}" ]]; then
+  bash "$TEST_HISTORY_RESULT_HELPER" "$history" "$out"
+fi
 if [[ -n "${CODEX_FAKE_FIFO_SWAP:-}" ]]; then
   # Swap the result for a FIFO on the way out. Timing this against the live monitor is
   # deliberately not attempted: the case built on it asserts only that the gate reports
@@ -403,6 +408,7 @@ lifecycle_output="$(bound_output "$R_LIFECYCLE" PASS '[]')"
     CODEX_BIN="$R_LIFECYCLE/bin/codex" CODEX_FAKE_OUTPUT="$lifecycle_output" \
     CODEX_FAKE_DELAY=0.2 CODEX_COMMIT_PUSH_AUDIT_MODE=agentic \
     AUDITOR_SESSION_SCOPE="$lifecycle_scope" AUDITOR_PROMPT_EPOCH="$lifecycle_epoch" \
+    TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/scripts/fixtures/audit-history-result.sh" \
     AUDITOR_PROMPT_AFTER_SECONDS=0 \
     bash "$R_LIFECYCLE/.agents/hooks/run-commit-push-audit.sh" commit "$CMD" \
 ) >/dev/null 2>&1

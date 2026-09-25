@@ -551,6 +551,20 @@ task_input_json="$(jq -nc \
   '{operation_kind:$operation_kind, repo_root:$repo_root,
     expected_branch:$expected_branch, expected_head:$expected_head,
     dossier_path:$dossier_path, target_command:$target_command}')"
+reflection_context=""
+if [[ -n "$hook_session_scope" && -n "$hook_prompt_epoch" ]]; then
+  # shellcheck source=../lib/audit-reflection.sh
+  source "$tooling_root/.agents/lib/audit-reflection.sh"
+  # shellcheck source=../lib/audit-reflection-gate.sh
+  source "$tooling_root/.agents/lib/audit-reflection-gate.sh"
+  reflection_context="$(jq -nc --arg root "$(cd "$repo_root" && pwd -P)" \
+    --arg session "$hook_session_scope" --arg epoch "$hook_prompt_epoch" \
+    --arg branch "${branch:-HEAD}" --arg kind "$kind" \
+    '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:$kind}')"
+  task_input_json="$(jq -c --arg context "$reflection_context" \
+    --arg cli "$tooling_root/scripts/audit-reflection-gate.sh" \
+    '. + {history_context:$context,history_cli:$cli}' <<<"$task_input_json")"
+fi
 printf -v headless_command \
   'AUDITOR_SESSION_SCOPE=%q AUDITOR_PROMPT_EPOCH=%q CODEX_COMMIT_PUSH_AUDIT_MODE=agentic bash %q %q %q' \
   "$hook_session_scope" "$hook_prompt_epoch" \
@@ -693,6 +707,15 @@ Retry the push through the git-level pre-push gate so it can produce the exact r
 Re-audit is required.
 ${invoke_instruction}"
   fi
+  if [[ -n "$reflection_context" ]]; then
+    local history_id
+    history_id="$(jq -r '.history_review.attempt_id // empty' <<<"$audit_document")"
+    if ! audit_reflection_gate "$reflection_context" record "$history_id" "$audit_document" >/dev/null; then
+      rm -f "$audit_selection"
+      deny "The audit did not reconcile current history; verification remains incomplete.
+${invoke_instruction}"
+    fi
+  fi
 
   # `findings` blocks, `advisories` never does. Two arrays rather than a per-finding
   # severity so the split FAILS CLOSED: a producer that omits advisories blocks on
@@ -800,6 +823,17 @@ fi
 # context (not permissionDecision:"allow"), so host approval policy is unchanged.
 if [[ "$override_active" == true ]]; then
   allow_override
+fi
+if [[ -n "$reflection_context" ]]; then
+  history="$(audit_reflection_gate "$reflection_context" inspect)" \
+    || deny "Audit history is unreadable; verification remains incomplete."
+  if [[ "$(jq '.state.attempts[-1].outcome.verdict != "PASS" and ((.state.attempts | length) >= 16 or
+    ([.state.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 8)' <<<"$history")" == true ]]; then
+    deny "Audit retry budget exhausted. Verification is incomplete; report unresolved findings from $(jq -r .state_path <<<"$history") and await human direction."
+  fi
+  if [[ "$(jq -r .reflection_due <<<"$history")" == true ]]; then
+    deny "Repeated audits require reflection before retrying. Read $(jq -r .state_path <<<"$history") and ${tooling_root}/.agents/prompts/audit-reflection.md. Compare all failed runs, explain failed fixes and earlier audit misses, run a discriminating check, and submit the current reflection with scripts/audit-reflection.sh."
+  fi
 fi
 
 # A push audit can only be produced HERE. validate_audit refuses any push dossier not

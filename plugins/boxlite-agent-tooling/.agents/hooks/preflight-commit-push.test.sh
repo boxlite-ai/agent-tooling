@@ -50,6 +50,7 @@ stage_lib() {  # $1 = fake repo root
   # The prompts travel with the library: they are the text it loads, and the hook
   # treats a missing prompt document as an error rather than improvising one.
   cp "$REPO_ROOT/.agents/prompts/"*.md "$1/.agents/prompts/"
+  cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$1/.agents/lib/"
 }
 
 pass=0
