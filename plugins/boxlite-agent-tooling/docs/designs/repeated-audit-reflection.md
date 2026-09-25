@@ -4,7 +4,7 @@ Every audit rerun must reconcile prior findings and explain earlier misses; two 
 
 ## Proposal and example
 
-Status: design draft; runtime behavior is unchanged. Applies to verdict and commit/push audits. **History reconciliation starts on the first rerun; deeper reflection starts after two distinct unsuccessful attempts.**
+Status: implemented locally; release and consumer adoption remain separate. Applies to verdict and commit/push audits. **History reconciliation starts on the first rerun; deeper reflection starts after two distinct unsuccessful attempts.**
 
 Illustrative example:
 
@@ -24,7 +24,7 @@ The current verdict path carries one prior dossier and asks for another correcti
 
 ## Related work and lessons
 
-References below are pinned to inspected source revision `15819052960ad81013bd0a524cef054c79af8576`.
+Repository comparisons use inspected revision `15819052960ad81013bd0a524cef054c79af8576`.
 
 | Source | Observed approach and proposed use |
 | --- | --- |
@@ -34,6 +34,7 @@ References below are pinned to inspected source revision `15819052960ad81013bd0a
 | [Reviewer adapter, lines 112–124](https://github.com/boxlite-ai/agent-tooling/blob/15819052960ad81013bd0a524cef054c79af8576/plugins/boxlite-agent-tooling/.agents/skills/adversarial-iteration/references/reviewer-receipt-adapter.md#L112-L124); [ledger, lines 17–26](https://github.com/boxlite-ai/agent-tooling/blob/15819052960ad81013bd0a524cef054c79af8576/plugins/boxlite-agent-tooling/.agents/skills/adversarial-iteration/references/iteration-ledger.md#L17-L26) | Reuses finding IDs, records introduction evidence, and retains original scope plus fix deltas. Adopt these contracts without importing the full adversarial workflow. |
 | [Reflexion, abstract](https://arxiv.org/abs/2303.11366v4) | Carries textual feedback into subsequent trials. Adopt persistent feedback; its benchmark results do not establish this gate's reliability. |
 | [Google SRE, Concrete action items and Repeating incidents](https://sre.google/workbook/postmortem-culture/) | Requires measurable prevention and revisits ineffective prior actions. Adapt this into executable checks and explicit explanations of failed fixes. |
+| [Claude Stop control](https://code.claude.com/docs/en/hooks#stop-decision-control); [Codex Stop handler and precedence test](https://github.com/openai/codex/blob/c7c824dce4da186e5142af5d9a1587ae553efe46/codex-rs/hooks/src/events/stop.rs#L295-L305) | `continue:false` terminates the turn with a visible reason. Use this for exhausted Stop audits; another blocking continuation would itself create a loop. Git operations remain denied. |
 
 ## Trigger and lifecycle
 
@@ -119,7 +120,8 @@ Before launch, require complete history inputs and any due reflection submission
 - Revalidate epoch, attempt, input hashes, and selected file identity before accepting results. Concurrent duplicate delivery records one outcome; revoked or replaced attempts cannot release a gate.
 - Budget: eight unsuccessful attempts and sixteen total attempts, 64 KiB per dossier, 8 KiB per reflection, 1 MiB total cycle evidence including scoped snapshots. Missing comparison evidence blocks the affected judgment; never trim history to obtain PASS.
 - At the budget limit or with missing/corrupt evidence, stop automatic retries and report incomplete verification with the exact recovery need. Successful state repair may resume; exhaustion requires human direction. No automatic PASS or newly invented override.
-- Keep at most four closed cycles per session; clean up older closed artifacts by checked identity. Active history is never evicted.
+- Exhausted Stop audits return `continue:false` with an explicit INCOMPLETE reason; they cannot trigger another summary or audit continuation. Exhausted Git audits keep the operation denied. Neither path records PASS.
+- Keep four closed cycles per context within its byte bound and four retired context files per session. Remove superseded auditor inputs and retired artifacts by checked identity. A real prompt change revokes old contexts; current-epoch history is never evicted.
 - Reflection-only failures count toward the budget. Existing explicit override remains visible and does not record success. Runtime history stays local; no automatic memory, issue, or public publication.
 
 ## Alternatives and trade-offs
@@ -143,14 +145,18 @@ Use scripted producers for state transitions and curated good/bad reflection cas
 
 For implementation, observe reproducer failures against fully reverted production code, then passes with each fix restored. Run focused suites, shell syntax/lint, architecture and host parity, then broader plugin checks as required by shell-engineering guidance.
 
-Proposed dependent slices; estimates include tests and docs and must be remeasured against each preceding branch:
+Delivery uses sequential native PR dependencies; sizes include tests and docs against the immediately preceding branch:
 
-| Slice | Acceptance | Estimated changed lines |
+| Slice | Acceptance | Changed lines |
 | --- | --- | --- |
-| 1. Cycle history and snapshots | Deduplicate outcomes and preserve comparison evidence. | 200–350 |
-| 2. Finding registry and reconciliation | Stable identities, dispositions, provenance, and conflicts validated. | 200–350 |
-| 3. Reflection contract | Missing/stale submissions rejected; auditor omissions covered. | 180–300 |
-| 4. Verdict integration | History, reflection, shortcuts, cancellation, and assessment covered. | 250–390 |
-| 5. Commit/push integration | Native/headless identities, handoff, receipts, and push binding covered. | 250–390 |
+| 1. Design | Publish the specification and research. | 156 |
+| 2. Cycle history | Deduplicate outcomes and preserve snapshots. | 220 |
+| 3. Finding registry | Validate stable identities, dispositions, provenance, and conflicts. | 181 |
+| 4. Reflection contract | Reject missing/stale submissions; assess auditor omissions. | 169 |
+| 5. Gate adapter | Bind immutable inputs and repeated result delivery. | 160 |
+| 6. Shared contracts | Expose the native CLI and bounded auditor instructions. | 172 |
+| 7. Verdict integration | Enforce reflection and terminate exhausted Stop loops. | 301 |
+| 8. Commit/push integration | Reconcile native/headless reviews and exact push bindings. | 275 |
+| 9. Lifecycle safety | Bound retention, reject revoked epochs, protect receipt shortcuts. | 200–230 |
 
-Use one tracking issue and native GitHub PR stacks when implementation is authorized; attach slice PRs and update architecture with each behavior change. Split any slice exceeding 400 changed lines. Publish and bind the canonical design before implementation.
+Track acceptance and PR links in [issue #123](https://github.com/boxlite-ai/agent-tooling/issues/123). All slices stay below 400 changed lines. Local validation does not establish release, consumer adoption, or live model behavior.

@@ -4,7 +4,8 @@
 
 audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON payload]
   local context="$1" operation="$2" id="${3:-}" payload="${4:-}"
-  local root key directory path request state history_path snapshot binding current_id
+  local root key scope_key input_key directory path request state history_path snapshot binding current_id
+  local session epoch actual_epoch
   local LC_ALL=C
   [[ -n "$payload" ]] || payload='{}'
   (( ${#context} <= 8192 && ${#payload} <= 1048576 )) || return 2
@@ -13,14 +14,28 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   mkdir -p "$root/.agents/state" || return 2
   key="$(printf '%s' "$context" | jq -cS . | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" || return 2
   directory="$root/.agents/state"
-  path="$directory/audit-history-$key.json"
+  session="$(jq -r .session <<<"$context")"
+  epoch="$(jq -r .epoch <<<"$context")"
+  if [[ "$operation" == prepare || "$operation" == record ]] \
+     && [[ "$session" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+    actual_epoch=0
+    if [[ -e "$directory/verdict-prompt-epoch.$session" || -L "$directory/verdict-prompt-epoch.$session" ]]; then
+      actual_epoch="$(verdict_audit_read_single_record "$directory/verdict-prompt-epoch.$session")" || return 2
+    fi
+    [[ "$epoch" == "$actual_epoch" ]] || { printf 'audit-reflection: prompt epoch changed\n' >&2; return 2; }
+  fi
+  scope_key="$(printf '%s\n%s' "$root" "$session" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')"
+  path="$directory/audit-history-$scope_key-$key.json"
   request="$(jq -nc --argjson context "$context" '{context:$context}')" || return 2
   state="$(printf '%s' "$request" | audit_reflection status "$path")" || return 2
   if [[ "$operation" == inspect ]]; then
-    jq -nc --arg path "$path" --argjson state "$state" \
-      '{state_path:$path,state:$state,pending:($state.attempts | any(.outcome == null)),
+    jq -c --arg path "$path" \
+      '. as $state | {state_path:$path,state:$state,pending:($state.attempts | any(.outcome == null)),
+        unresolved:(($state.attempts[-1].outcome.verdict | IN("PASS","IN_PROGRESS") | not) and
+          (any($state.attempts[]; .outcome.verdict | IN("FAIL","ERROR")) or
+            any($state.registry[]; .status | IN("open","not_assessed")))),
         reflection_due:(([$state.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 2
-          and $state.reflection.body.history_hash != $state.history_hash)}'
+          and $state.reflection.body.history_hash != $state.history_hash)}' <<<"$state"
     return $?
   fi
   if [[ "$operation" == prepare ]]; then
@@ -36,8 +51,9 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
       printf 'audit-reflection: inspect %s; submit reflection through scripts/audit-reflection.sh before retrying\n' "$path" >&2
       return 2
     }
-    key="$(printf '%s' "$key:$id" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" || return 2
-    history_path="$directory/audit-input-$key.json"
+    [[ "$(jq -r '.attempts[-1].id' <<<"$state")" == "$id" ]] || return 2
+    input_key="$(printf '%s' "$key:$id" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" || return 2
+    history_path="$directory/audit-input-$scope_key-$key-$input_key.json"
     snapshot="$(jq -cS '.closed=[]' <<<"$state")" || return 2
     if [[ -e "$history_path" || -L "$history_path" ]]; then
       request="$(jq -nc --argjson context "$context" '{context:$context}')" || return 2
@@ -50,6 +66,7 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
     else
       printf '%s\n' "$snapshot" | verdict_audit_write_exclusive_regular "$history_path" || return 2
     fi
+    _audit_reflection_prune "$directory" "$scope_key" "$key" "$epoch" "$history_path" || return 2
     jq -nc --arg path "$path" --arg input "$history_path" --arg id "$id" \
       '{state_path:$path,history_path:$input,attempt_id:$id}'
     return $?
@@ -77,4 +94,46 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
         verdict:(if $operation == "cancel" then "CANCELED" else "ERROR" end),evidence:$evidence}}')" || return 2
   else return 2; fi
   printf '%s' "$request" | audit_reflection record "$path"
+}
+
+_audit_reflection_remove() {
+  local identity
+  [[ -e "$1" || -L "$1" ]] || return 0
+  identity="$(verdict_audit_path_identity "$1")" || return 2
+  verdict_audit_unlink_if_identity "$1" "$identity"
+}
+
+_audit_reflection_prune() { # directory, session key, context key, epoch, active input
+  local directory="$1" scope="$2" key="$3" epoch="$4" active="$5"
+  local file snapshot identity retired="" record old_key
+  # Only the current immutable input is needed: it embeds all prior cycle evidence.
+  for file in "$directory/audit-input-$scope-$key-"*.json; do
+    [[ "$file" != "$active" && -e "$file" ]] || continue
+    _audit_reflection_remove "$file" || return 2
+    _audit_reflection_remove "$file.mutex" || return 2
+  done
+  for file in "$directory/audit-history-$scope-"*.json; do
+    [[ -e "$file" ]] || continue
+    identity="$(verdict_audit_path_identity "$file")" || return 2
+    snapshot="$(verdict_audit_read_regular_state "$file" 1048576 json)" || return 2
+    if [[ "$(jq -r .context.epoch <<<"${snapshot#*$'\n'}")" == "$epoch" ]]; then continue; fi
+    record="$(jq -nc --arg path "$file" --arg identity "$identity" \
+      --argjson time "${snapshot%%$'\n'*}" '{path:$path,identity:$identity,time:$time}')" || return 2
+    retired+="$record"$'\n'
+  done
+  while IFS= read -r record; do
+    [[ -n "$record" ]] || continue
+    file="$(jq -r .path <<<"$record")"; identity="$(jq -r .identity <<<"$record")"
+    # A prompt change revoked this context; an overlapping diagnostic writer may
+    # retain its replaced inode until the next sweep, never affect live authority.
+    verdict_audit_selected_identity_matches "$file" "$identity" || continue
+    old_key="${file##*audit-history-$scope-}"; old_key="${old_key%.json}"
+    for snapshot in "$directory/audit-input-$scope-$old_key-"*.json; do
+      [[ -e "$snapshot" ]] || continue
+      _audit_reflection_remove "$snapshot" || return 2
+      _audit_reflection_remove "$snapshot.mutex" || return 2
+    done
+    verdict_audit_unlink_if_identity "$file" "$identity" || continue
+    _audit_reflection_remove "$file.mutex" || return 2
+  done < <(printf '%s' "$retired" | jq -sc 'sort_by(.time,.path) | reverse | .[4:][]')
 }
