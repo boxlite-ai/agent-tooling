@@ -59,7 +59,7 @@ wait
 expect "$(cat "$state")" '.attempts | length == 1'
 for index in 1 2 3 4; do expect "$(cat "$scratch/$index.json")" '.attempts[0].id == "concurrent"'; done
 record concurrent PASS >/dev/null
-reject prepare "$(request after-pass)"
+expect "$(request after-pass | run prepare)" '.attempts[0].id == "after-pass" and (.closed | length) == 1'
 state="$scratch/bounded.json"
 reject prepare "$(request large | jq '.attempt.snapshot.text=("x" * 65537)')"
 if { request nul; printf '\0'; } | run prepare >"$scratch/out" 2>"$scratch/err"; then

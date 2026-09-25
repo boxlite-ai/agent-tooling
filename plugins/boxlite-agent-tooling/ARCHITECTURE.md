@@ -277,6 +277,10 @@ until `submit` supplies reflection covering their IDs and current history hash.
 Preparation freezes its digest; a later PASS needs an independent sufficient
 assessment of that reflection and its executed checks. Another failure invalidates
 the submission. Reflection cannot be replaced while an audit is active.
+`.agents/lib/audit-reflection-gate.sh` adapts scoped gates to this facade, snapshots
+active history for the auditor, and binds judgments to the attempt and operation.
+Cancellation is recorded separately from failure. A fresh operation after PASS
+starts a cycle; up to four closed diagnostic cycles remain within the byte limit.
 
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
 than one session can share a checkout.

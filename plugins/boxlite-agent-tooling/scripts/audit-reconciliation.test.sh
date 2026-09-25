@@ -19,7 +19,7 @@ result() {
     --arg hash "$(jq -r .history_hash "$state")" --argjson dispositions "$3" --argjson findings "$4" \
     --argjson reflection "$(audit_test_assessment "$state")" \
     '{context:$context,id:$id,outcome:{verdict:$verdict,evidence:"audit dossier",history_review:{
-      history_hash:$hash,dispositions:$dispositions,findings:$findings,coverage:{reviewed:["diff"],unread:[]}},
+      attempt_id:$id,history_hash:$hash,dispositions:$dispositions,findings:$findings,coverage:{reviewed:["diff"],unread:[]}},
       reflection_review:$reflection}}'
 }
 record() { printf '%s' "$1" | bash "$cli" record "$state"; }

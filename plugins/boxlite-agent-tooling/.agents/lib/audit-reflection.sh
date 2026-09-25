@@ -71,10 +71,18 @@ _audit_reflection_transition() { # library operation state-path; lease already h
     | jq -ceSs -L "$library" --arg operation "$operation" -f "$library/audit-reflection.jq")" || return 2
   history_hash="$(_audit_reflection_history_hash "$next")" || return 2
   next="$(jq -cS --arg hash "$history_hash" '.history_hash=$hash' <<<"$next")" || return 2
+  if [[ "$operation" == prepare ]]; then
+    next="$(jq -cS --arg hash "$history_hash" '
+      .attempts |= map(if .history_hash == "" then .history_hash=$hash else . end)' <<<"$next")" || return 2
+  fi
   if [[ "$operation" == submit ]]; then
     reflection_hash="$(_audit_reflection_body_hash "$next")" || return 2
     next="$(jq -cS --arg hash "$reflection_hash" '.reflection.hash=$hash' <<<"$next")" || return 2
   fi
+  # Only closed diagnostic cycles may be evicted; active evidence is never trimmed.
+  while (( ${#next} > 1048576 )) && [[ "$(jq '.closed | length' <<<"$next")" != 0 ]]; do
+    next="$(jq -cS '.closed |= .[1:]' <<<"$next")" || return 2
+  done
   (( ${#next} <= 1048576 )) || return 2
   if [[ "$operation" != status ]]; then
     printf '%s\n' "$next" | verdict_audit_write_atomic "$path" || return 2

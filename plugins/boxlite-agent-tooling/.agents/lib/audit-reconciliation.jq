@@ -29,7 +29,8 @@ def ar_registry:
 
 def audit_reconcile($review; $attempt; $verdict):
   .registry as $registry |
-  if ($review | ar_keys(["history_hash","dispositions","findings","coverage"]) | not)
+  if ($review | ar_keys(["attempt_id","history_hash","dispositions","findings","coverage"]) | not)
+    or $review.attempt_id != $attempt.id
     or $review.history_hash != .history_hash
     or ($review.dispositions | type != "array" or length > 128 or any(.[]; ar_disposition | not))
     or ($review.findings | type != "array" or length > 32 or any(.[]; ar_finding | not))

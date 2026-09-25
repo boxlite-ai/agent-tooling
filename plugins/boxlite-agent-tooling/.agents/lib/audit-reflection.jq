@@ -15,16 +15,18 @@ def input_ok:
   and (.snapshot | type == "object" and length > 0 and (tojson | utf8bytelength <= 65536));
 def outcome_ok:
   (del(.history_review,.reflection_review) | keys_are(["verdict","evidence"]))
-  and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS"))
+  and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS","CANCELED"))
   and (.evidence | type == "string" or type == "object") and (tojson | utf8bytelength <= 65536);
 def attempt_ok:
-  keys_are(["id","input","outcome","reflection_hash"]) and (.input | input_ok) and .id == .input.id
+  keys_are(["id","input","outcome","reflection_hash","history_hash"]) and (.input | input_ok) and .id == .input.id
+  and (.history_hash | type == "string" and test("^[0-9a-f]{64}$"))
   and (.reflection_hash | type == "string" and test("^([0-9a-f]{64})?$"))
   and (.outcome == null or (.outcome | outcome_ok));
 def state_ok:
-  keys_are(["version","context","attempts","registry","history_hash","reflection"])
+  keys_are(["version","context","attempts","registry","history_hash","reflection","closed"])
   and .version == 1 and (.context | context_ok) and (.registry | ar_registry)
   and (.reflection | audit_reflection_stored)
+  and (.closed | type == "array" and length <= 4 and all(.[]; type == "object"))
   and (.history_hash | type == "string" and test("^[0-9a-f]{64}$"))
   and (.attempts | type == "array" and length <= 16 and all(.[]; attempt_ok))
   and (([.attempts[].id] | unique | length) == (.attempts | length))
@@ -36,20 +38,23 @@ if length != 2 then error("expected one request") else . end |
 if ($request.context | context_ok | not) then error("invalid cycle context")
 elif $old != null and ($old | state_ok | not) then error("invalid history")
 elif $old != null and $old.context != $request.context then error("wrong cycle context")
-else $old // {version:1,context:$request.context,attempts:[],registry:[],history_hash:"",reflection:null} end |
+else $old // {version:1,context:$request.context,attempts:[],registry:[],history_hash:"",reflection:null,closed:[]} end |
 if $operation == "prepare" then
   if ($request | keys_are(["context","attempt"]) | not) or ($request.attempt | input_ok | not)
   then error("invalid attempt input") else . end |
   [.attempts[] | select(.id == $request.attempt.id)] as $existing |
   if ($existing | length) > 0 then
     if $existing[0].input == $request.attempt then . else error("attempt input changed") end
-  elif .attempts[-1].outcome.verdict == "PASS" then error("cycle is closed")
+  elif .attempts[-1].outcome.verdict == "PASS" then
+    .closed = ((.closed + [del(.closed)]) | .[-4:]) |
+    .attempts = [{id:$request.attempt.id,input:$request.attempt,outcome:null,reflection_hash:"",history_hash:""}] |
+    .registry=[] | .reflection=null
   elif any(.attempts[]; .outcome == null) then error("another attempt is active")
   elif (.attempts | length) >= 16
     or ([.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 8
   then error("audit history exhausted; report incomplete verification")
   elif (audit_reflection_ready | not) then error("reflection required before another audit; submit a current evidence-backed reflection")
-  else .attempts += [{id:$request.attempt.id,input:$request.attempt,outcome:null,
+  else .attempts += [{id:$request.attempt.id,input:$request.attempt,outcome:null,history_hash:"",
     reflection_hash:(if (audit_failure_ids | length) >= 2 then .reflection.hash else "" end)}] end
 elif $operation == "record" then
   if ($request | keys_are(["context","id","outcome"]) | not) or ($request.outcome | outcome_ok | not)
@@ -63,7 +68,7 @@ elif $operation == "record" then
     audit_reflection_assess($request.outcome; .attempts[$index]) |
     if $request.outcome.history_review != null then
       audit_reconcile($request.outcome.history_review; .attempts[$index]; $request.outcome.verdict)
-    elif (.registry | length) > 0 and $request.outcome.verdict != "ERROR"
+    elif (.registry | length) > 0 and ($request.outcome.verdict | IN("ERROR","CANCELED") | not)
     then error("history review is required for existing findings") else . end |
     .attempts[$index].outcome = $request.outcome
   end

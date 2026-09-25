@@ -27,7 +27,7 @@ def audit_reflection_submit($body):
   elif any(.attempts[]; .outcome == null) then error("cannot replace reflection during an audit")
   else .reflection={body:$body,hash:""} end;
 def audit_reflection_assess($outcome; $attempt):
-  if $attempt.reflection_hash == "" or $outcome.verdict == "ERROR" then .
+  if $attempt.reflection_hash == "" or ($outcome.verdict | IN("ERROR","CANCELED")) then .
   elif ($outcome.reflection_review | ar_keys(["reflection_hash","assessment","evidence","auditor_assessment"]) | not)
     or $outcome.reflection_review.reflection_hash != $attempt.reflection_hash
     or ($outcome.reflection_review.assessment | IN("sufficient","insufficient") | not)
