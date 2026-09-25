@@ -2,11 +2,13 @@
 set -euo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cli="$plugin/scripts/audit-reflection.sh"
+# shellcheck source=fixtures/audit-reflection-fixture.sh
+source "$plugin/scripts/fixtures/audit-reflection-fixture.sh"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 state="$scratch/cycle.json"
 context='{"repo_root":"/fixture","session":"s","epoch":"1","branch":"main","gate":"verdict"}'
-prepare() { jq -nc --argjson context "$context" --arg id "$1" \
+prepare() { audit_test_submit_due "$cli" "$state"; jq -nc --argjson context "$context" --arg id "$1" \
   '{context:$context,attempt:{id:$id,binding:{head:$id},snapshot:{diff:"reviewed bytes"}}}' \
   | bash "$cli" prepare "$state" >/dev/null; }
 finding='{"id":"NEW","invariant":"publication is serialized","behavior":"late writer","criterion":"both event orderings pass","evidence":"test:publication", "origin":"existing","origin_evidence":"baseline:publication","review_gap":"","review_change":"","reopening":null,"conflict":null,"criterion_change":null}'
@@ -15,8 +17,10 @@ disposition() { jq -nc --arg id "$1" --arg status "$2" \
 result() {
   jq -nc --argjson context "$context" --arg id "$1" --arg verdict "$2" \
     --arg hash "$(jq -r .history_hash "$state")" --argjson dispositions "$3" --argjson findings "$4" \
+    --argjson reflection "$(audit_test_assessment "$state")" \
     '{context:$context,id:$id,outcome:{verdict:$verdict,evidence:"audit dossier",history_review:{
-      history_hash:$hash,dispositions:$dispositions,findings:$findings,coverage:{reviewed:["diff"],unread:[]}}}}'
+      history_hash:$hash,dispositions:$dispositions,findings:$findings,coverage:{reviewed:["diff"],unread:[]}},
+      reflection_review:$reflection}}'
 }
 record() { printf '%s' "$1" | bash "$cli" record "$state"; }
 reject() {

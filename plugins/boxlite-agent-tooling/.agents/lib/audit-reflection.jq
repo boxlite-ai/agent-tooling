@@ -1,5 +1,6 @@
 # Pure transition: [persisted cycle or null, request] -> validated next cycle.
 include "audit-reconciliation";
+include "audit-reflection-contract";
 def keys_are($expected_keys): type == "object" and keys == ($expected_keys | sort);
 def text: type == "string" and length > 0 and utf8bytelength <= 4096
   and (explode | all(. >= 32 and . != 127));
@@ -13,15 +14,17 @@ def input_ok:
   and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 4096))
   and (.snapshot | type == "object" and length > 0 and (tojson | utf8bytelength <= 65536));
 def outcome_ok:
-  (keys_are(["verdict","evidence"]) or keys_are(["verdict","evidence","history_review"]))
+  (del(.history_review,.reflection_review) | keys_are(["verdict","evidence"]))
   and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS"))
   and (.evidence | type == "string" or type == "object") and (tojson | utf8bytelength <= 65536);
 def attempt_ok:
-  keys_are(["id","input","outcome"]) and (.input | input_ok) and .id == .input.id
+  keys_are(["id","input","outcome","reflection_hash"]) and (.input | input_ok) and .id == .input.id
+  and (.reflection_hash | type == "string" and test("^([0-9a-f]{64})?$"))
   and (.outcome == null or (.outcome | outcome_ok));
 def state_ok:
-  keys_are(["version","context","attempts","registry","history_hash"])
+  keys_are(["version","context","attempts","registry","history_hash","reflection"])
   and .version == 1 and (.context | context_ok) and (.registry | ar_registry)
+  and (.reflection | audit_reflection_stored)
   and (.history_hash | type == "string" and test("^[0-9a-f]{64}$"))
   and (.attempts | type == "array" and length <= 16 and all(.[]; attempt_ok))
   and (([.attempts[].id] | unique | length) == (.attempts | length))
@@ -33,7 +36,7 @@ if length != 2 then error("expected one request") else . end |
 if ($request.context | context_ok | not) then error("invalid cycle context")
 elif $old != null and ($old | state_ok | not) then error("invalid history")
 elif $old != null and $old.context != $request.context then error("wrong cycle context")
-else $old // {version:1,context:$request.context,attempts:[],registry:[],history_hash:""} end |
+else $old // {version:1,context:$request.context,attempts:[],registry:[],history_hash:"",reflection:null} end |
 if $operation == "prepare" then
   if ($request | keys_are(["context","attempt"]) | not) or ($request.attempt | input_ok | not)
   then error("invalid attempt input") else . end |
@@ -45,7 +48,9 @@ if $operation == "prepare" then
   elif (.attempts | length) >= 16
     or ([.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 8
   then error("audit history exhausted; report incomplete verification")
-  else .attempts += [{id:$request.attempt.id,input:$request.attempt,outcome:null}] end
+  elif (audit_reflection_ready | not) then error("reflection required before another audit; submit a current evidence-backed reflection")
+  else .attempts += [{id:$request.attempt.id,input:$request.attempt,outcome:null,
+    reflection_hash:(if (audit_failure_ids | length) >= 2 then .reflection.hash else "" end)}] end
 elif $operation == "record" then
   if ($request | keys_are(["context","id","outcome"]) | not) or ($request.outcome | outcome_ok | not)
   then error("invalid audit outcome") else . end |
@@ -55,11 +60,14 @@ elif $operation == "record" then
   then error("attempt outcome changed")
   elif .attempts[$index].outcome == $request.outcome then .
   else
+    audit_reflection_assess($request.outcome; .attempts[$index]) |
     if $request.outcome.history_review != null then
       audit_reconcile($request.outcome.history_review; .attempts[$index]; $request.outcome.verdict)
     elif (.registry | length) > 0 and $request.outcome.verdict != "ERROR"
     then error("history review is required for existing findings") else . end |
     .attempts[$index].outcome = $request.outcome
   end
+elif $operation == "submit" and ($request | keys_are(["context","reflection"])) then
+  audit_reflection_submit($request.reflection)
 elif $operation == "status" and ($request | keys_are(["context"])) then .
 else error("unknown audit operation") end

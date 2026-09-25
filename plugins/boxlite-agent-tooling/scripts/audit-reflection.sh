@@ -8,7 +8,7 @@ for dependency in jq perl; do
     printf 'audit-reflection: missing dependency: %s\n' "$dependency" >&2; exit 2;
   }
 done
-[[ $# == 2 ]] || { printf 'usage: audit-reflection.sh prepare|record|status STATE < REQUEST\n' >&2; exit 2; }
+[[ $# == 2 ]] || { printf 'usage: audit-reflection.sh prepare|record|status|submit STATE < REQUEST\n' >&2; exit 2; }
 # shellcheck source=../.agents/lib/audit-reflection.sh
 source "$plugin/.agents/lib/audit-reflection.sh" || exit 2
 audit_reflection "$@"

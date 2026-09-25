@@ -272,6 +272,11 @@ attempts, and 1 MiB; PASS closes it, and another context cannot reuse its state.
 `.agents/lib/audit-reconciliation.jq` validates history-bound finding dispositions,
 coverage, and introduction evidence. It allocates stable finding IDs, requires
 evidence when a resolved finding reopens, and rejects PASS with unresolved history.
+`.agents/lib/audit-reflection-contract.jq` stops preparation after two failed runs
+until `submit` supplies reflection covering their IDs and current history hash.
+Preparation freezes its digest; a later PASS needs an independent sufficient
+assessment of that reflection and its executed checks. Another failure invalidates
+the submission. Reflection cannot be replaced while an audit is active.
 
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
 than one session can share a checkout.

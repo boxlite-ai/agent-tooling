@@ -3,6 +3,8 @@
 set -euo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cli="$plugin/scripts/audit-reflection.sh"
+# shellcheck source=fixtures/audit-reflection-fixture.sh
+source "$plugin/scripts/fixtures/audit-reflection-fixture.sh"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 state="$scratch/history.json"
@@ -64,6 +66,7 @@ if { request nul; printf '\0'; } | run prepare >"$scratch/out" 2>"$scratch/err";
   printf 'FAIL: raw NUL accepted\n' >&2; exit 1
 fi
 for index in 1 2 3 4 5 6 7 8; do
+  audit_test_submit_due "$cli" "$state"
   request "limit-$index" | run prepare >/dev/null
   record "limit-$index" ERROR >/dev/null
 done
