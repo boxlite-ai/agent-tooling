@@ -29,6 +29,7 @@ audit_reflection() { # operation state-path; request on stdin
     if (!$child) {
       setpgrp(0, 0) or exit 2;
       exec "/bin/bash", "-c", q{
+        set -uo pipefail
         source "$1/verdict-audit-state.sh" && source "$1/audit-reflection.sh" || exit 2
         _audit_reflection_transition "$@"
       }, "audit-reflection", $library, $operation, $path;
@@ -43,7 +44,7 @@ audit_reflection() { # operation state-path; request on stdin
 }
 
 _audit_reflection_transition() { # library operation state-path; lease already held
-  local library="$1" operation="$2" path="$3" request state=null snapshot next
+  local library="$1" operation="$2" path="$3" request state=null snapshot next history_hash
   local LC_ALL=C
   request="$(perl -e '
     my $body = "";
@@ -57,12 +58,23 @@ _audit_reflection_transition() { # library operation state-path; lease already h
   if [[ -e "$path" || -L "$path" ]]; then
     snapshot="$(verdict_audit_read_regular_state "$path" 1048576 json)" || return 2
     state="${snapshot#*$'\n'}"
+    history_hash="$(_audit_reflection_history_hash "$state")" || return 2
+    [[ "$(jq -r '.history_hash' <<<"$state")" == "$history_hash" ]] || {
+      printf 'audit-reflection: history checksum changed\n' >&2; return 2;
+    }
   fi
   next="$(printf '%s\n%s\n' "$state" "$request" \
-    | jq -ceSs --arg operation "$operation" -f "$library/audit-reflection.jq")" || return 2
+    | jq -ceSs -L "$library" --arg operation "$operation" -f "$library/audit-reflection.jq")" || return 2
+  history_hash="$(_audit_reflection_history_hash "$next")" || return 2
+  next="$(jq -cS --arg hash "$history_hash" '.history_hash=$hash' <<<"$next")" || return 2
   (( ${#next} <= 1048576 )) || return 2
   if [[ "$operation" != status ]]; then
     printf '%s\n' "$next" | verdict_audit_write_atomic "$path" || return 2
   fi
   printf '%s\n' "$next"
+}
+
+_audit_reflection_history_hash() {
+  printf '%s' "$1" | jq -cS '{context,registry,attempts:[.attempts[] | select(.outcome != null)]}' \
+    | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'
 }

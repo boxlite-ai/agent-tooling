@@ -269,6 +269,9 @@ input snapshots retain comparison evidence. The CLI serializes transitions and
 uses the existing regular-file/atomic-write helpers. This foundation is not yet
 wired into audit gates. Each cycle holds at most eight failures, sixteen total
 attempts, and 1 MiB; PASS closes it, and another context cannot reuse its state.
+`.agents/lib/audit-reconciliation.jq` validates history-bound finding dispositions,
+coverage, and introduction evidence. It allocates stable finding IDs, requires
+evidence when a resolved finding reopens, and rejects PASS with unresolved history.
 
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
 than one session can share a checkout.

@@ -1,4 +1,5 @@
 # Pure transition: [persisted cycle or null, request] -> validated next cycle.
+include "audit-reconciliation";
 def keys_are($expected_keys): type == "object" and keys == ($expected_keys | sort);
 def text: type == "string" and length > 0 and utf8bytelength <= 4096
   and (explode | all(. >= 32 and . != 127));
@@ -12,13 +13,16 @@ def input_ok:
   and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 4096))
   and (.snapshot | type == "object" and length > 0 and (tojson | utf8bytelength <= 65536));
 def outcome_ok:
-  keys_are(["verdict","evidence"]) and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS"))
+  (keys_are(["verdict","evidence"]) or keys_are(["verdict","evidence","history_review"]))
+  and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS"))
   and (.evidence | type == "string" or type == "object") and (tojson | utf8bytelength <= 65536);
 def attempt_ok:
   keys_are(["id","input","outcome"]) and (.input | input_ok) and .id == .input.id
   and (.outcome == null or (.outcome | outcome_ok));
 def state_ok:
-  keys_are(["version","context","attempts"]) and .version == 1 and (.context | context_ok)
+  keys_are(["version","context","attempts","registry","history_hash"])
+  and .version == 1 and (.context | context_ok) and (.registry | ar_registry)
+  and (.history_hash | type == "string" and test("^[0-9a-f]{64}$"))
   and (.attempts | type == "array" and length <= 16 and all(.[]; attempt_ok))
   and (([.attempts[].id] | unique | length) == (.attempts | length))
   and ([.attempts[] | select(.outcome == null)] | length <= 1)
@@ -29,7 +33,7 @@ if length != 2 then error("expected one request") else . end |
 if ($request.context | context_ok | not) then error("invalid cycle context")
 elif $old != null and ($old | state_ok | not) then error("invalid history")
 elif $old != null and $old.context != $request.context then error("wrong cycle context")
-else $old // {version:1,context:$request.context,attempts:[]} end |
+else $old // {version:1,context:$request.context,attempts:[],registry:[],history_hash:""} end |
 if $operation == "prepare" then
   if ($request | keys_are(["context","attempt"]) | not) or ($request.attempt | input_ok | not)
   then error("invalid attempt input") else . end |
@@ -49,6 +53,13 @@ elif $operation == "record" then
   if $index == null then error("unknown attempt")
   elif .attempts[$index].outcome != null and .attempts[$index].outcome != $request.outcome
   then error("attempt outcome changed")
-  else .attempts[$index].outcome = $request.outcome end
+  elif .attempts[$index].outcome == $request.outcome then .
+  else
+    if $request.outcome.history_review != null then
+      audit_reconcile($request.outcome.history_review; .attempts[$index]; $request.outcome.verdict)
+    elif (.registry | length) > 0 and $request.outcome.verdict != "ERROR"
+    then error("history review is required for existing findings") else . end |
+    .attempts[$index].outcome = $request.outcome
+  end
 elif $operation == "status" and ($request | keys_are(["context"])) then .
 else error("unknown audit operation") end
