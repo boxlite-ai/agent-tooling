@@ -261,6 +261,15 @@ commit adds no new author acknowledgment. See the equivalent queue carry-forward
 
 ## State files
 
+`scripts/audit-reflection.sh` exposes bounded cycle history through the source-only
+`.agents/lib/audit-reflection.sh` facade and pure `.agents/lib/audit-reflection.jq`
+transition. A cycle binds repository, session, prompt epoch, branch, and audit kind.
+Attempt IDs deduplicate delivery and reject changed inputs or results; immutable
+input snapshots retain comparison evidence. The CLI serializes transitions and
+uses the existing regular-file/atomic-write helpers. This foundation is not yet
+wired into audit gates. Each cycle holds at most eight failures, sixteen total
+attempts, and 1 MiB; PASS closes it, and another context cannot reuse its state.
+
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
 than one session can share a checkout.
 

@@ -96,7 +96,7 @@ The next auditor verifies reconciliation, causal support, changed review coverag
 
 Keep reusable code under `plugins/boxlite-agent-tooling/`:
 
-- `.agents/lib/audit-reflection.sh`: two public operations, `prepare` and `record`; owns cycle state, attempt identity, validation, snapshots, and transitions.
+- `.agents/lib/audit-reflection.sh`: one facade for preparation, recording, status, and reflection submission; owns cycle state, attempt identity, validation, snapshots, and transitions.
 - `scripts/audit-reflection.sh`: thin CLI for submitting a reflection and inspecting required work through that facade.
 - `.agents/prompts/audit-reflection.md`: runtime-loaded instructions; both auditor specifications consume the same contract.
 - Existing verdict and commit/push gates and producers: adapters preserving their current JSON, stderr, and exit conventions.
@@ -117,7 +117,7 @@ Before launch, require complete history inputs and any due reflection submission
 
 - Reuse bounded regular-file reads and atomic publication from `verdict-audit-state.sh`. One cycle lock owns transitions; acquire after existing gate locks, never in reverse order, and release before model execution.
 - Revalidate epoch, attempt, input hashes, and selected file identity before accepting results. Concurrent duplicate delivery records one outcome; revoked or replaced attempts cannot release a gate.
-- Proposed budget: eight unsuccessful attempts, 64 KiB per dossier, 8 KiB per reflection, 1 MiB total cycle evidence including scoped snapshots. Missing comparison evidence blocks the affected judgment; never trim history to obtain PASS.
+- Budget: eight unsuccessful attempts and sixteen total attempts, 64 KiB per dossier, 8 KiB per reflection, 1 MiB total cycle evidence including scoped snapshots. Missing comparison evidence blocks the affected judgment; never trim history to obtain PASS.
 - At the budget limit or with missing/corrupt evidence, stop automatic retries and report incomplete verification with the exact recovery need. Successful state repair may resume; exhaustion requires human direction. No automatic PASS or newly invented override.
 - Keep at most four closed cycles per session; clean up older closed artifacts by checked identity. Active history is never evicted.
 - Reflection-only failures count toward the budget. Existing explicit override remains visible and does not record success. Runtime history stays local; no automatic memory, issue, or public publication.
