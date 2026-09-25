@@ -220,7 +220,9 @@ jq -nc \
   '\''{branch:$branch,head:$head,tree_hash:$tree,generation:$generation,
      verdict:$verdict,proof:[],findings:$findings}
    + (if $advisories == "" then {} else {advisories:($advisories | fromjson)} end)'\'' \
-  > "$VERDICT_AUDITOR_OUTPUT_FILE"'
+  > "$VERDICT_AUDITOR_OUTPUT_FILE"
+bash "$TEST_HISTORY_RESULT_HELPER" "$task_input_json" "$VERDICT_AUDITOR_OUTPUT_FILE"'
+export TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/scripts/fixtures/audit-history-result.sh"
 export VERDICT_AUDITOR_CMD="$AUDITOR_STUB"
 export TEST_AUDIT_VERDICT=FAIL
 
@@ -594,7 +596,7 @@ no_runner_retry_out="$(printf '%s' "$payload" \
       VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD=false bash "$HOOK" ) 2>/dev/null)"
 if [[ "$(decision_from_output "$no_runner_out")" == block \
    && "$(decision_from_output "$no_runner_retry_out")" == block \
-   && "$no_runner_reason" == *"no independent auditor runner is available"* \
+   && "$no_runner_reason" == *"auditor could not launch"* \
    && "$no_runner_reason" != *"collaboration.spawn_agent"* \
    && "$no_runner_reason" != *"Task("* \
    && ! -e "$(session_state_path "$R" verdict-last-uuid session-a)" ]]; then

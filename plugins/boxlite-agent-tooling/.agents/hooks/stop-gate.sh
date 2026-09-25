@@ -145,6 +145,21 @@ is_restatement() {
   esac
 }
 if is_restatement; then
+  # A summary request cannot close an unresolved audit cycle.
+  # shellcheck source=../lib/audit-reflection.sh
+  source "$tooling_root/.agents/lib/audit-reflection.sh"
+  # shellcheck source=../lib/audit-reflection-gate.sh
+  source "$tooling_root/.agents/lib/audit-reflection-gate.sh"
+  reflection_epoch="$entry_prompt_epoch"
+  [[ "$reflection_epoch" != "-" ]] || reflection_epoch=0
+  reflection_context="$(jq -nc --arg root "$repo_root" --arg session "$session_scope" \
+    --arg epoch "$reflection_epoch" --arg branch "$(git -C "$repo_root" branch --show-current)" \
+    '{repo_root:$root,session:$session,epoch:$epoch,branch:(if $branch == "" then "HEAD" else $branch end),gate:"verdict"}')"
+  history="$(audit_reflection_gate "$reflection_context" inspect)" || run_verdict_check_alone
+  if [[ "$(jq -r .unresolved <<<"$history")" == true ]] \
+     || [[ "$(jq -r .pending <<<"$history")" == true ]]; then
+    run_verdict_check_alone
+  fi
   log_decision summary restatement-allow
   exit 0
 fi

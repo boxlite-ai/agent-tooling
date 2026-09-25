@@ -23,6 +23,7 @@ PREFLIGHT="$REPO_ROOT/.agents/hooks/preflight-verdict-check.sh"
 STATE_LIB="$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$STATE_LIB"
+export TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/scripts/fixtures/audit-history-result.sh"
 
 pass=0
 fail=0
@@ -756,7 +757,9 @@ SESSION_DOSSIER_STUB='prompt="$(cat)"
   target="$VERDICT_AUDITOR_OUTPUT_FILE"
   mkdir -p "$(dirname "$target")"
   printf "{\"branch\":\"main\",\"head\":\"h\",\"tree_hash\":\"t\",\"generation\":\"%s\",\"verdict\":\"PASS\",\"proof\":[],\"findings\":[]}" \
-    "$VERDICT_AUDITOR_GENERATION" > "$target"'
+    "$VERDICT_AUDITOR_GENERATION" > "$target"
+  task="$(printf "%s\n" "$prompt" | sed -n "/^UNTRUSTED_TASK_INPUT_JSON:$/ { n; p; q; }")"
+  bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$target" bind'
 R="$(setup)"; generation="301-302-4"; write_session_request "$R" session-a "$generation"
 stable_dossier="$(session_state_path "$R" last-verdict.json session-a)"
 previous_dossier_base="$(session_state_path "$R" last-verdict.prev.json session-a)"
@@ -794,7 +797,8 @@ if [[ -f "$prior" && "$bytes" -le 65536 ]] \
 fi
 target="$VERDICT_AUDITOR_OUTPUT_FILE"
 printf "{\"branch\":\"main\",\"head\":\"h\",\"tree_hash\":\"t\",\"generation\":\"%s\",\"verdict\":\"PASS\",\"proof\":[],\"findings\":[]}" \
-  "$VERDICT_AUDITOR_GENERATION" > "$target"'
+  "$VERDICT_AUDITOR_GENERATION" > "$target"
+bash "$TEST_HISTORY_RESULT_HELPER" "$record" "$target" bind'
 ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_AUDITOR_CMD="$PRIOR_BOUND_STUB" \
     bash "$RUNNER" "$R/transcript.jsonl" session-a "$generation" >/dev/null 2>&1 )
 prior_bound_rc=$?
@@ -1156,7 +1160,7 @@ for malformed_schema_kind in \
 done
 
 R="$(setup)"; generation="317-318-8"; write_session_request "$R" session-a "$generation"
-VALID_PROOF_STUB='cat >/dev/null
+VALID_PROOF_STUB='prompt="$(cat)"
   jq -nc --arg g "$VERDICT_AUDITOR_GENERATION" '\''
     {branch:"main",head:"h",tree_hash:"t",generation:$g,verdict:"PASS",
      proof:[
@@ -1165,7 +1169,9 @@ VALID_PROOF_STUB='cat >/dev/null
        {claim:"live host delivery",kind:"other",evidence:"host path unavailable here",
         method:"structural",status:"blocked",blocker:"native host E2E not available"}
      ],findings:[]}
-  '\'' > "$VERDICT_AUDITOR_OUTPUT_FILE"'
+  '\'' > "$VERDICT_AUDITOR_OUTPUT_FILE"
+  task="$(printf "%s\n" "$prompt" | sed -n "/^UNTRUSTED_TASK_INPUT_JSON:$/ { n; p; q; }")"
+  bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$VERDICT_AUDITOR_OUTPUT_FILE" bind'
 ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_AUDITOR_CMD="$VALID_PROOF_STUB" \
     bash "$RUNNER" "$R/transcript.jsonl" session-a "$generation" >/dev/null 2>&1 )
 valid_proof_rc=$?
@@ -2444,12 +2450,14 @@ if git -C "$R" init -q --object-format=sha256 2>/dev/null; then
   generation="571-572-8"
   printf '%s %s cksum-1-1\n' "$generation" "$(( $(date +%s) + 600 ))" \
     > "$(session_state_path "$R" verdict-request session-a)"
-  OUTSIDE_DOSSIER_STUB='cat >/dev/null
+  OUTSIDE_DOSSIER_STUB='prompt="$(cat)"
     pwd -P > "$CLAUDE_PROJECT_DIR/auditor-pwd"
     git rev-parse --show-toplevel > "$CLAUDE_PROJECT_DIR/audited-root"
     target="$VERDICT_AUDITOR_OUTPUT_FILE"
     printf "{\"branch\":\"main\",\"head\":\"h\",\"tree_hash\":\"t\",\"generation\":\"%s\",\"verdict\":\"PASS\",\"proof\":[],\"findings\":[]}" \
-      "$VERDICT_AUDITOR_GENERATION" > "$target"'
+      "$VERDICT_AUDITOR_GENERATION" > "$target"
+    task="$(printf "%s\n" "$prompt" | sed -n "/^UNTRUSTED_TASK_INPUT_JSON:$/ { n; p; q; }")"
+    bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$target" bind'
   ( cd "$outside_repo" && CLAUDE_PROJECT_DIR="$R" VERDICT_AUDITOR_CMD="$OUTSIDE_DOSSIER_STUB" \
       bash "$RUNNER" "$R/transcript.jsonl" session-a "$generation" >/dev/null 2>&1 )
   sha256_rc=$?

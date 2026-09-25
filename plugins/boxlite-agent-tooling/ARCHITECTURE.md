@@ -266,8 +266,8 @@ commit adds no new author acknowledgment. See the equivalent queue carry-forward
 transition. A cycle binds repository, session, prompt epoch, branch, and audit kind.
 Attempt IDs deduplicate delivery and reject changed inputs or results; immutable
 input snapshots retain comparison evidence. The CLI serializes transitions and
-uses the existing regular-file/atomic-write helpers. This foundation is not yet
-wired into audit gates. Each cycle holds at most eight failures, sixteen total
+uses the existing regular-file/atomic-write helpers. Session-scoped verdict runs
+prepare and record through this facade. Each cycle holds at most eight failures, sixteen total
 attempts, and 1 MiB; PASS closes it, and another context cannot reuse its state.
 `.agents/lib/audit-reconciliation.jq` validates history-bound finding dispositions,
 coverage, and introduction evidence. It allocates stable finding IDs, requires
@@ -281,6 +281,10 @@ the submission. Reflection cannot be replaced while an audit is active.
 active history for the auditor, and binds judgments to the attempt and operation.
 Cancellation is recorded separately from failure. A fresh operation after PASS
 starts a cycle; up to four closed diagnostic cycles remain within the byte limit.
+The auditor follows `.agents/prompts/audit-reflection.md`; Stop preserves unresolved
+history through triage and summary shortcuts. Unscoped standalone callers retain the
+legacy dossier contract. Immutable snapshots include the bounded transcript and Git tree.
+Exhausted Stop audits terminate with `continue:false` and an INCOMPLETE reason.
 `scripts/audit-reflection-gate.sh` exposes the same bounded adapter to native auditors.
 The shared `.agents/prompts/audit-reflection.md` defines reconciliation and reflection;
 the commit/push output schema accepts nullable assessments for scoped producers.
@@ -368,6 +372,7 @@ first.
 | --- | --- | --- | --- |
 | summary | restatement-allow | The previous Stop asked for the result, this answer is 120 words or fewer counting code, and no tool ran since the ask; it ends the turn and the verdict check does not run. | 137 |
 | override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 716 |
+| history | exhausted-stop | Eight failed runs or sixteen attempts terminate Stop with an INCOMPLETE reason; no further audit or summary continuation runs. | 742 |
 | extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1802 |
 | extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1809 |
 | extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1812 |

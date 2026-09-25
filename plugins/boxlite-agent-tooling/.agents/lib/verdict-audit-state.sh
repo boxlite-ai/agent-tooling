@@ -820,7 +820,7 @@ verdict_audit_normalize_dossier() {  # JSON on stdin
            end);
     if length == 1
        and (.[0] | type) == "object"
-       and (.[0] | del(.generation, .advisories)
+       and (.[0] | del(.generation, .advisories, .history_review, .reflection_review)
             | exact_keys(["branch", "head", "tree_hash", "verdict", "proof", "findings"]))
        and (.[0].branch | type) == "string"
        and (.[0].head | type) == "string"

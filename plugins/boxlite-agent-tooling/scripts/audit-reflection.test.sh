@@ -61,7 +61,7 @@ for index in 1 2 3 4; do expect "$(cat "$scratch/$index.json")" '.attempts[0].id
 record concurrent PASS >/dev/null
 expect "$(request after-pass | run prepare)" '.attempts[0].id == "after-pass" and (.closed | length) == 1'
 state="$scratch/bounded.json"
-reject prepare "$(request large | jq '.attempt.snapshot.text=("x" * 65537)')"
+reject prepare "$(request large | jq '.attempt.snapshot.text=("x" * 327681)')"
 if { request nul; printf '\0'; } | run prepare >"$scratch/out" 2>"$scratch/err"; then
   printf 'FAIL: raw NUL accepted\n' >&2; exit 1
 fi

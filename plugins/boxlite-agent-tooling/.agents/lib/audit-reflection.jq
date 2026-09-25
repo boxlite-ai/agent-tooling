@@ -12,7 +12,7 @@ def context_ok:
 def input_ok:
   keys_are(["id","binding","snapshot"]) and (.id | identifier)
   and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 4096))
-  and (.snapshot | type == "object" and length > 0 and (tojson | utf8bytelength <= 65536));
+  and (.snapshot | type == "object" and length > 0 and (tojson | utf8bytelength <= 327680));
 def outcome_ok:
   (del(.history_review,.reflection_review) | keys_are(["verdict","evidence"]))
   and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS","CANCELED"))
