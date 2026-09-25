@@ -33,6 +33,13 @@ Every change goes: understand → research → design → implement → test →
 - Only what's used (Occam's razor) — design the simplest API that meets current requirements; no future-proofing. Delete dead code immediately.
 - No premature optimization — measure first.
 
+**Documentation (every PR)**
+
+- Every PR, including drafts, must add meaningful project documentation or update existing documentation in the same PR. Prefer the existing canonical document; create a new one only when no suitable home exists.
+- Document the behavior, contract, usage, or maintenance knowledge affected by the change. Explain what readers need to understand or do, with examples when useful; for an internal refactor, document the relevant invariant or design rationale.
+- Token edits, formatting-only changes, file lists, and copied PR summaries do not satisfy this requirement. A linked design doc or PR description alone does not replace maintained project documentation. A documentation-only PR satisfies the rule through its substantive documentation changes.
+- Link the changed documentation section in the PR description. Before publication and after scope changes, review it against the final diff for accuracy, usefulness, and stale instructions; documentation quality is a review criterion, not a filename check.
+
 **PR size and decomposition (hard requirement)**
 
 - Target 100–200 changed lines; maximum 400 additions + deletions across the entire PR against its intended base (the immediately preceding branch for a stacked PR). Count tests, docs, and generated text. Drafts have the same limit; splitting commits does not reduce PR size.

@@ -67,6 +67,11 @@ Include a brief real example when helpful;
 link supporting detail. Design docs have no fixed total-word limit.
 Keep the doc aligned with the final PR scope; summarize the implementation in the PR.
 
+Every PR must also add meaningful project documentation or update an existing doc
+in the same PR, then link the changed section in its description. Follow
+[the shared workflow's documentation requirement](guidance/workflow.md#workflow);
+prefer the existing canonical doc and review its substance against the final diff.
+
 Register the canonical URL before implementation:
 
 ```sh
@@ -153,6 +158,8 @@ Illustrative example; the behavior and test results are hypothetical:
 Reduce routine SDK CI work while keeping the full compatibility matrix weekly.
 
 Design doc: https://github.com/example/repo/issues/123
+
+Documentation: [SDK CI matrix](docs/ci.md#sdk-matrix) explains PR and weekly coverage.
 
 - The workflow selects a reduced SDK matrix for PRs and the full matrix for weekly
   and manual runs.

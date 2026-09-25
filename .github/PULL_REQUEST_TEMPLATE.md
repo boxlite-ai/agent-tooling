@@ -12,6 +12,11 @@ Walls of text are forbidden; prefer visuals, tables, or short bullets.
 Include a brief real example when helpful;
 link supporting detail. -->
 
+Documentation: <!-- Required for every PR, including drafts: link the meaningful
+project documentation added or updated in this PR. Prefer updating an existing doc.
+Explain the affected behavior, usage, contract, or maintenance knowledge.
+Token edits and the design doc alone do not satisfy this requirement. -->
+
 ## Summary
 
 <!-- Explain the problem, how the change works, and the result. Use bullets, a real

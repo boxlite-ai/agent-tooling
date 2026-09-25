@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=acfb0bc8b32e-dirty sha256=6a40fe07953b -->
+<!-- agent-tooling:guidance:begin rev=134fc2def961-dirty sha256=b6d38ce43936 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -44,6 +44,13 @@ Every change goes: understand → research → design → implement → test →
 - Composition over inheritance / framework magic.
 - Only what's used (Occam's razor) — design the simplest API that meets current requirements; no future-proofing. Delete dead code immediately.
 - No premature optimization — measure first.
+
+**Documentation (every PR)**
+
+- Every PR, including drafts, must add meaningful project documentation or update existing documentation in the same PR. Prefer the existing canonical document; create a new one only when no suitable home exists.
+- Document the behavior, contract, usage, or maintenance knowledge affected by the change. Explain what readers need to understand or do, with examples when useful; for an internal refactor, document the relevant invariant or design rationale.
+- Token edits, formatting-only changes, file lists, and copied PR summaries do not satisfy this requirement. A linked design doc or PR description alone does not replace maintained project documentation. A documentation-only PR satisfies the rule through its substantive documentation changes.
+- Link the changed documentation section in the PR description. Before publication and after scope changes, review it against the final diff for accuracy, usefulness, and stale instructions; documentation quality is a review criterion, not a filename check.
 
 **PR size and decomposition (hard requirement)**
 
