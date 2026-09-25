@@ -43,4 +43,16 @@ reject prepare a5 "$input"
 jq -e '[.attempts[].outcome.verdict] == ["CANCELED","ERROR","ERROR"]' "$state" >/dev/null
 context="$(jq '.epoch="2"' <<<"$context")"
 gate inspect | jq -e '(.state.attempts | length) == 0 and (.reflection_due | not)' >/dev/null
+native_cli="$plugin/scripts/audit-reflection-gate.sh"
+native="$(printf '%s' "$input" | bash "$native_cli" "$context" prepare)"
+native_id="$(jq -r .attempt_id <<<"$native")"
+[[ "$native_id" =~ ^[0-9a-f]{32}$ ]]
+if printf '%s' "$input" | bash "$native_cli" "$context" prepare >"$scratch/out" 2>"$scratch/err"; then
+  printf 'FAIL: native retry replaced an unfinished audit\n' >&2; exit 1
+fi
+printf '"native attempt failed"' | bash "$native_cli" "$context" error "$native_id" >/dev/null
+printf '{}' | bash "$native_cli" "$context" inspect | jq -e '.state.attempts[-1].outcome.verdict == "ERROR"' >/dev/null
+if printf '{}\0' | bash "$native_cli" "$context" inspect >"$scratch/out" 2>"$scratch/err"; then
+  printf 'FAIL: native CLI accepted raw NUL\n' >&2; exit 1
+fi
 printf 'PASS: gate binding, immutable audit inputs, replay, cancellation, and prompt isolation\n'

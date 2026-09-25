@@ -810,7 +810,7 @@ normalize_agentic_output() {
       type == "string" and length > 0 and utf8bytelength <= $bytes
       and (explode | all(. != 0 and . != 10 and . != 13));
     if length == 1 and (.[0] | type) == "object"
-       and (.[0] | (exact_keys(["branch", "head", "command_kind", "diff_hash",
+       and (.[0] | del(.history_review,.reflection_review) | (exact_keys(["branch", "head", "command_kind", "diff_hash",
               "command_hash", "commit_subject_hash", "verdict", "findings"])
               or exact_keys(["branch", "head", "command_kind", "diff_hash",
               "command_hash", "commit_subject_hash", "verdict", "findings", "advisories"])))
@@ -833,7 +833,8 @@ normalize_agentic_output() {
             or ((.[0].advisories | type) == "array"
                 and (.[0].advisories | length) <= 32
                 and all(.[0].advisories[]; bounded_line(1024))))
-    then .[0] | .advisories = (.advisories // []) else empty end
+    then .[0] | .advisories = (.advisories // [])
+      | with_entries(select(.value != null)) else empty end
   ' 2>/dev/null || true)"
   if [[ -z "$normalized_output" ]]; then
     write_fail "Internal: Codex audit returned malformed JSON"
@@ -868,12 +869,10 @@ normalize_agentic_output() {
 
   auditor_control_terminal="$audit_verdict"
 
-  # Whitelist: a field omitted here is dropped silently, which for `advisories` would
-  # look like the model never reported any.
+  # Exact schema validation above preserves optional history assessments for the gate.
   local identity
   identity="$(printf '%s' "$normalized_output" \
-    | jq -c '{branch, head, command_kind, diff_hash, command_hash,
-              commit_subject_hash, verdict, findings, advisories}' \
+    | jq -c . \
     | verdict_audit_write_atomic_identity "$audit_file")" \
     || write_fail "Internal: could not publish Codex audit state safely"
   published_audit_identity="$identity"

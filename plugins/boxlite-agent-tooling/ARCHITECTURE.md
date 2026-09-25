@@ -281,6 +281,10 @@ the submission. Reflection cannot be replaced while an audit is active.
 active history for the auditor, and binds judgments to the attempt and operation.
 Cancellation is recorded separately from failure. A fresh operation after PASS
 starts a cycle; up to four closed diagnostic cycles remain within the byte limit.
+`scripts/audit-reflection-gate.sh` exposes the same bounded adapter to native auditors.
+The shared `.agents/prompts/audit-reflection.md` defines reconciliation and reflection;
+the commit/push output schema accepts nullable assessments for scoped producers.
+Legacy unscoped callers omit those fields or use null.
 
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
 than one session can share a checkout.

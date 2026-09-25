@@ -11,9 +11,13 @@
     "commit_subject_hash",
     "verdict",
     "findings",
-    "advisories"
+    "advisories",
+    "history_review",
+    "reflection_review"
   ],
   "properties": {
+    "history_review": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/history"}]},
+    "reflection_review": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/reflection"}]},
     "branch": {
       "type": "string",
       "maxLength": 256
@@ -64,6 +68,77 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 1024
+      }
+    }
+  },
+  "$defs": {
+    "text": {"type": "string", "maxLength": 2048},
+    "reason": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reason", "evidence"],
+      "properties": {"reason": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"}}
+    },
+    "criterion_change": {
+      "type": "object", "additionalProperties": false,
+      "required": ["previous", "reason", "evidence"],
+      "properties": {"previous": {"$ref": "#/$defs/text"}, "reason": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"}}
+    },
+    "conflict": {
+      "type": "object", "additionalProperties": false,
+      "required": ["previous_id", "evidence", "check", "decision"],
+      "properties": {
+        "previous_id": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"},
+        "check": {"$ref": "#/$defs/text"}, "decision": {"$ref": "#/$defs/text"}
+      }
+    },
+    "finding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "invariant", "behavior", "criterion", "evidence", "origin", "origin_evidence", "review_gap", "review_change", "reopening", "conflict", "criterion_change"],
+      "properties": {
+        "id": {"$ref": "#/$defs/text"}, "invariant": {"$ref": "#/$defs/text"},
+        "behavior": {"$ref": "#/$defs/text"}, "criterion": {"$ref": "#/$defs/text"},
+        "evidence": {"$ref": "#/$defs/text"}, "origin_evidence": {"$ref": "#/$defs/text"},
+        "review_gap": {"$ref": "#/$defs/text"}, "review_change": {"$ref": "#/$defs/text"},
+        "origin": {"type": "string", "enum": ["existing", "introduced", "missed_earlier", "unknown"]},
+        "reopening": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/reason"}]},
+        "conflict": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/conflict"}]},
+        "criterion_change": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/criterion_change"}]}
+      }
+    },
+    "history": {
+      "type": "object", "additionalProperties": false,
+      "required": ["attempt_id", "history_hash", "dispositions", "findings", "coverage"],
+      "properties": {
+        "attempt_id": {"$ref": "#/$defs/text"}, "history_hash": {"$ref": "#/$defs/text"},
+        "dispositions": {
+          "type": "array", "maxItems": 128,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "status", "evidence"],
+            "properties": {
+              "id": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"},
+              "status": {"type": "string", "enum": ["open", "resolved", "retracted", "not_assessed"]}
+            }
+          }
+        },
+        "findings": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/finding"}},
+        "coverage": {
+          "type": "object", "additionalProperties": false,
+          "required": ["reviewed", "unread"],
+          "properties": {
+            "reviewed": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+            "unread": {"type": "array", "items": {"$ref": "#/$defs/text"}}
+          }
+        }
+      }
+    },
+    "reflection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reflection_hash", "assessment", "evidence", "auditor_assessment"],
+      "properties": {
+        "reflection_hash": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"},
+        "auditor_assessment": {"$ref": "#/$defs/text"},
+        "assessment": {"type": "string", "enum": ["sufficient", "insufficient"]}
       }
     }
   }

@@ -603,8 +603,8 @@ ${invoke_instruction}"
     def base_keys: ["branch", "head", "command_kind", "diff_hash",
       "command_hash", "commit_subject_hash", "verdict", "findings"];
     if length == 1 and (.[0] | type) == "object"
-       and ((.[0] | exact_keys(base_keys))
-            or (.[0] | exact_keys(base_keys + ["advisories"])))
+       and ((.[0] | del(.history_review,.reflection_review) | exact_keys(base_keys))
+            or (.[0] | del(.history_review,.reflection_review) | exact_keys(base_keys + ["advisories"])))
        and (.[0].branch | type) == "string"
        and (.[0].branch | utf8bytelength) <= 256
        and (.[0].branch | explode | all(. != 0 and . != 10 and . != 13))
