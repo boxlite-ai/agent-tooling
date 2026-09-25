@@ -4,13 +4,13 @@
 # Source only; callers own dependency checks, host delivery and failure policy.
 
 concise_writing_check_summary() { # Markdown, anywhere|first, optional word limit
-  local location="${2:-anywhere}" max_words="${3:-0}" summary counts status=0 problem
+  local location="${2:-anywhere}" max_words="${3:-0}" summary counts status=0 problem correction
   if (( ${#1} > 262144 )); then
-    printf '## TL;DR\n\nThe text is too long to check for a TL;DR section.\n'
+    printf '## TL;DR\n\nThe text exceeds the 262144-character inspection limit.\n\n## Correction\n\nShorten the text below the inspection limit before retrying.\n'
     return 1
   fi
   # Accept an ATX heading and prose, never an example or a hidden comment.
-  # Exit 3: no TL;DR heading; 4: text before it; 5: no summary prose under it.
+  # Parser exits distinguish missing heading (3), misplaced heading (4), and missing prose (5).
   summary="$(printf '%s' "$1" | perl -CSD -0777 -e '
     my $text = <STDIN> // "";
     $text =~ s/<!--.*?(?:-->|\z)//sg;
@@ -47,19 +47,28 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
     print $summary;
   ' "$location")" || status=$?
   if (( status == 0 )); then
-    counts="$(reply_summary_word_counts "$summary")" || status=1
+    counts="$(reply_summary_word_counts "$summary")" || status=6
+    [[ -n "$counts" ]] || status=6
   fi
-  # Name the failed condition: a generic reminder leads agents to reword a valid sentence.
+  # Give a complete correction: rewording the summary cannot fix a section boundary.
+  # shellcheck disable=SC2016 # Render literal Markdown headings, never shell expansion.
   case "$status" in
     0) (( max_words == 0 || ${counts%% *} <= max_words )) && return 0
-       problem="The TL;DR section has ${counts%% *} words, over the $max_words-word limit. It runs until the next heading: keep one short sentence there and start a new heading after it." ;;
-    3) problem='Add a visible TL;DR heading followed by one short sentence.'
-       [[ "$location" != first ]] || problem='Begin with a TL;DR heading followed by one short sentence.' ;;
-    4) problem='Move the TL;DR section to the start; nothing may come before its heading.' ;;
-    5) problem='Follow the TL;DR heading with one short sentence that opens with a word, not a symbol, list, table, quote, or code.' ;;
-    *) problem='The TL;DR section could not be checked.' ;;
+       problem="The TL;DR section has ${counts%% *} words; limit $max_words."
+       correction='Keep one short sentence and start a new section (for example, `## Details` after `## TL;DR`); only a heading of the same or higher level ends the summary.' ;;
+    3) problem='Missing a Markdown TL;DR heading.'
+       correction='Use the literal line `## TL;DR`, then one short sentence and a peer heading such as `## Details` before supporting text; a bold label is not a heading.'
+       [[ "$location" != first ]] || correction="Begin the reply with it. $correction" ;;
+    4) problem='The TL;DR heading appears after other content.'
+       correction='Move the TL;DR heading and its summary to the beginning, before any other visible text.' ;;
+    5) problem='TL;DR summary prose is missing or malformed.'
+       correction='Put one short sentence beginning with a word directly below the heading, outside lists, tables, quotes, and code.' ;;
+    6) problem='The TL;DR section could not be counted.'
+       correction='Check the word-counter dependency before retrying; rewording the reply will not repair the checker.' ;;
+    *) problem='The TL;DR section could not be inspected.'
+       correction='Check the Markdown-parser dependency before retrying; rewording the reply will not repair the checker.' ;;
   esac
-  printf '## TL;DR\n\n%s\n' "$problem"
+  printf '## TL;DR\n\n%s\n\n## Correction\n\n%s\n' "$problem" "$correction"
   return 1
 }
 
