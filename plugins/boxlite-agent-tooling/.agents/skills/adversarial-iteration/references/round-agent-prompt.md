@@ -8,6 +8,9 @@ receipt for the same review round. Each spawn also receives a single-use
 `fix_dispatch_id`; a retry requires a bound prior dispatch rejection and unchanged
 authorization, snapshot, authoritative fingerprint, and projection.
 
+Fill the REFLECT placeholder from [the skill's shared analysis procedure](../SKILL.md#reflect-before-fixing)
+with its complete section text, not a link; the fresh fixer has no inherited skill context.
+
 Before spawning, inspect the private ledger's sensitivity metadata. If any cumulative
 review item is opaque or likely-secret, route the entire prompt and workspace to an
 explicitly authorized local-only fixer, or return `INPUT_ERROR`. Never withhold the
@@ -87,27 +90,16 @@ FINDINGS receipt ID.]
 
 ## Fix protocol
 
+[Insert the complete “REFLECT before fixing” section from ../SKILL.md here.]
+
 For each finding:
 
-1. **REFLECT**
-   - Which artifact decision violated the invariant?
-   - Which assumption went unverified and why?
-   - Which repository rule was violated?
-   - What cheap check would have caught it?
-   - What original hunk or `fix_attempt_id` introduced it? Use `unknown` without direct evidence.
-   - What is this finding's per-finding failure class?
-   - Record an optional cross-finding pattern only when evidence supports it.
-2. **Divergence guard:** do not reconstruct omitted history or emit `DIVERGED`. Confirm the bound false
+1. **Divergence guard:** do not reconstruct omitted history or emit `DIVERGED`. Confirm the bound false
    evaluation covers both a class that recurs after its installed preflight and two
    consecutive reviewer receipts attributing material defects to preceding attempts.
    If new contradictory evidence appears, return it as a proposal for orchestrator
    validation and re-evaluation.
-3. **Cheap checks:** draw the concurrency timeline; read the upstream producer;
-   trace the full lifecycle; enumerate every covered variant.
-4. **Recurring class:** at two or more occurrences, install the cheapest
-   repository-specific executable preflight before the production fix and keep the
-   obligation active until installed. Otherwise record revision-bound evidence.
-5. **Reproducer:** write a system-level test first and capture its test-only patch and
+2. **Reproducer:** write a system-level test first and capture its test-only patch and
    digest before changing production. Bind the red proof to the finding's immutable
    defect snapshot, named by `red_snapshot_attempt_id` and digest. On A1 this is usually
    the pre-attempt snapshot. On a corrective A2+, do not mislabel the already-fixed
@@ -121,24 +113,24 @@ For each finding:
    original loop-start implementation to the comparison base. A compile/setup-only
    failure is `INVALID` unless it is the defect.
    Remove the adapter before the fixed pass and discard the copy afterward.
-6. **Plan and fix:** reference REFLECT, the assertion, decisive cheap check, smallest
+3. **Plan and fix:** reference REFLECT, the assertion, decisive cheap check, smallest
    satisfying primitive, and adjacent contracts; then implement the smallest fix.
-7. **Mutation preparation:** propose a semantic mutant for every new
+4. **Mutation preparation:** propose a semantic mutant for every new
    finding. Capture each as a protected immutable patch with digest and expected touched
    entries. Do not call it representative or claim it was killed. A fresh read-only
    potency adjudicator must bind the finding invariant and mutant digest before the
    orchestrator may use it. The orchestrator validates/applies the candidate, appends a
    `fixed_snapshots` entry, and reruns fixed/mutant evidence in isolated copies.
-8. **Verification candidates:** prepare one structured recipe per reverted, fixed,
+5. **Verification candidates:** prepare one structured recipe per reverted, fixed,
    mutant, adjacent-contract, or executable-preflight phase with repository runner ID,
    argv tokens, artifact digests, and expected outcome. The orchestrator supplies
    snapshot/fingerprint, runs it, and records exit and decisive signal; counts or
    provisional fixer runs are not proof. Report any suspected failure only as a
    provisional blocker candidate; the orchestrator re-runs it and alone emits
    `BLOCKED` with a phase-bound receipt and smallest correction.
-9. **Audit:** search the validated changed-file argv for round narrative, `TODO.*round`,
+6. **Audit:** search the validated changed-file argv for round narrative, `TODO.*round`,
    `HACK`, `FIXME`, `debugging`, and `TEMP`, using end-of-options and no shell-built path list.
-10. **Evidence proposal:** return proposed finding state, provenance, attempt delta,
+7. **Evidence proposal:** return proposed finding state, provenance, attempt delta,
    preflights, reproducers, mutants, and verification candidates. The orchestrator
    validates them and alone updates review coverage and verification receipts.
 

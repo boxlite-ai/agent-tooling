@@ -570,13 +570,19 @@ printf -v headless_command \
   "$hook_session_scope" "$hook_prompt_epoch" \
   "$tooling_root/.agents/hooks/run-commit-push-audit.sh" "$kind" '<target command>'
 headless_command+=$'\n    (set CODEX_BIN if the default codex command is not usable)'
+if ! audit_criteria="$(subagent_prompt commit-push-criteria "$tooling_root")" \
+   || [[ "$audit_criteria" != *[![:space:]]* ]]; then
+  printf 'preflight-commit-push: cannot load nonempty commit-push-criteria prompt\n' >&2
+  exit 2
+fi
+audit_task="$(subagent_prompt commit-push-task "$tooling_root" \
+  "audit_criteria=${audit_criteria}" "task_input_json=${task_input_json}")" || exit 2
 invoke_instruction="$(subagent_instruction \
   --agent commit-push-auditor \
   --root "$tooling_root" \
   --description 'CLAUDE.md audit' \
   --artifact "$audit_file" \
-  --task "$(subagent_prompt commit-push-task "$tooling_root" \
-    "task_input_json=${task_input_json}")" \
+  --task "$audit_task" \
   --headless "$headless_command")
 
 Retry the same git command after the verdict reports PASS.${target_command_note}"

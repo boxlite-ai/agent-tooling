@@ -8,6 +8,10 @@
   },
   "checks": [
     {
+      "name": "writing-ownership",
+      "command": "bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh ."
+    },
+    {
       "name": "host-parity",
       "command": "bash plugins/boxlite-agent-tooling/host-parity.test.sh"
     },

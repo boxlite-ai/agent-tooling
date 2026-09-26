@@ -104,7 +104,8 @@ altitude or split the topic — never shrink labels or drop real boundaries.
   order.
 - Short labels — a second line only for domain, port, protocol, implementation, scale,
   or constraint. Rounded actors, rectangle services, cylinder state, distinct microVMs.
-- Leaf topic 12–20 nodes, index ≤12; boundaries that replace ownership arrows are free.
+- Apply the [topic node limits](../SKILL.md#split-a-big-topic);
+  boundaries that replace ownership arrows are free.
 - No logos, icons, or legends. The render — not `direction` or indentation — is the
   truth.
 

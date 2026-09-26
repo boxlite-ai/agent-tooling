@@ -1214,6 +1214,35 @@ R3="$(setup)"; install_stub "$R3"; rm -f "$R3/.agents/prompts/commit-push-runner
 expect_fail "missing prompt document → FAIL naming it" \
   "$(audit "$R3" "$(bound_output "$R3" PASS '[]')")" "commit-push-runner.md"
 
+R_CRITERIA="$(setup)"; install_stub "$R_CRITERIA"
+criteria_file="$R_CRITERIA/.agents/prompts/commit-push-criteria.md"
+for criteria_version in FIRST SECOND; do
+  printf 'Shared criteria %s\n' "$criteria_version" > "$criteria_file"
+  criteria_out="$(audit "$R_CRITERIA" "$(bound_output "$R_CRITERIA" PASS '[]')")"
+  if [[ "$(verdict_of "$criteria_out")" == PASS ]] \
+     && grep -qF "Shared criteria $criteria_version" "$R_CRITERIA/prompt.txt"; then
+    ok "headless audit reloads shared criteria $criteria_version"
+  else
+    bad "headless audit omitted shared criteria $criteria_version"
+  fi
+done
+for criteria_state in empty missing unresolved; do
+  case "$criteria_state" in
+    empty) : > "$criteria_file" ;;
+    missing) rm -f "$criteria_file" ;;
+    unresolved) printf '{{unsupplied}}\n' > "$criteria_file" ;;
+  esac
+  rm -f "$R_CRITERIA/prompt.txt"
+  expect_fail "headless audit blocks $criteria_state criteria" \
+    "$(audit "$R_CRITERIA" "$(bound_output "$R_CRITERIA" PASS '[]')")" 'prompt'
+  if [[ ! -e "$R_CRITERIA/prompt.txt" ]]; then
+    ok "$criteria_state criteria never reach the model"
+  else
+    bad "$criteria_state criteria reached the model"
+  fi
+done
+rm -rf "$R_CRITERIA"
+
 echo
 echo "## Mode selection"
 R4="$(setup)"; install_stub "$R4"

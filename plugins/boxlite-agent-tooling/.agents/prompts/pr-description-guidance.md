@@ -1,16 +1,12 @@
 ---
 name: pr-description-guidance
 used-by: .agents/hooks/preflight-pr-review.sh
-placeholders:
+placeholders: concise_writing
 description: Writing guidance returned with empty or oversized PR-body denials.
 ---
 
-Include `## TL;DR` with one simple sentence, as short as possible.
-Walls of text are forbidden. Prefer: visuals > tables > bullets > prose.
-Choose the form that explains the PR best. No diagram is required.
+{{concise_writing}}
 
 Explain how the key steps or decisions produce the intended result.
-Always include a brief real example when it helps the reviewer understand.
-
-Include decisive verification and material risks; link detailed evidence.
+Include decisive verification.
 See CONTRIBUTING.md #commit--pr-messages.

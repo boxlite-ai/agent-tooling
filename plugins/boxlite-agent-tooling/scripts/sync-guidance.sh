@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Splice the canonical engineering-workflow guidance (guidance/workflow.md) into a
+# Compose workflow.md with concise-writing.md, then splice the guidance into a
 # consumer's committed agent-instructions files, between HTML-comment markers, and
 # verify the splice stays intact.
 #
-#   sync-guidance.sh [--check|--force] [repo-root]
+#   sync-guidance.sh [--check|--check-current|--force] [repo-root]
 #
 # Default mode SPLICES: every existing AGENTS.md / CLAUDE.md (symlinks resolved,
 # duplicates collapsed to one physical file) gets the block replaced in place or
@@ -17,6 +17,7 @@
 # stale installation); a block merely behind this plugin's canonical text only
 # warns (consumers float same-ref, not same-revision). Layout advice is sync-only
 # so gates never nag on every commit.
+# --check-current also rejects stale content for the tooling repository's CI gate.
 #
 # The begin marker records rev (the tooling commit that last changed the block —
 # informational) and sha256 (first 12 hex of the block body's hash — load-bearing:
@@ -41,11 +42,13 @@ BEGIN_RE='^<!-- agent-tooling:guidance:begin rev=[^ ]+ sha256=[0-9a-f]{12} -->$'
 END_MARKER='<!-- agent-tooling:guidance:end -->'
 
 mode=sync
+require_current=0
 force=0
 repo_root=""
 for arg in "$@"; do
   case "$arg" in
     --check) mode=check ;;
+    --check-current) mode=check; require_current=1 ;;
     --force) force=1 ;;
     -*) printf 'agent-tooling: unknown option: %s\n' "$arg" >&2; exit 2 ;;
     *)
@@ -64,9 +67,9 @@ done
 repo_root="$(cd "$repo_root" && pwd -P)"
 
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-canonical="$plugin_root/guidance/workflow.md"
-[[ -r "$canonical" ]] || {
-  printf 'agent-tooling: canonical guidance is missing: %s\n' "$canonical" >&2
+workflow_template="$plugin_root/guidance/workflow.md"
+[[ -r "$workflow_template" ]] || {
+  printf 'agent-tooling: canonical guidance is missing: %s\n' "$workflow_template" >&2
   exit 1
 }
 
@@ -75,11 +78,31 @@ if [[ "$mode" == sync && "${AGENT_TOOLING_SYNC_ACTIVE:-}" == "1" ]]; then
   exit 0
 fi
 
+tmp_files=()
+cleanup() {
+  [[ ${#tmp_files[@]} -eq 0 ]] || rm -f -- ${tmp_files[@]+"${tmp_files[@]}"}
+}
+trap cleanup EXIT INT TERM
+
+# Compose before touching consumer files; links alone do not deliver prompt rules.
+# shellcheck source=../.agents/lib/subagent.sh
+source "$plugin_root/.agents/lib/subagent.sh"
+# shellcheck source=../.agents/lib/concise-writing.sh
+source "$plugin_root/.agents/lib/concise-writing.sh"
+writing_prompt="$(concise_writing_prompt "$plugin_root")" || exit 1
+[[ "$(grep -cxF '{{concise_writing}}' "$workflow_template")" == 1 ]] || {
+  printf 'agent-tooling: workflow must contain exactly one concise-writing placeholder\n' >&2
+  exit 1
+}
+canonical_text="$(cat "$workflow_template")"
+canonical="$(mktemp "${TMPDIR:-/tmp}/agent-tooling-guidance.XXXXXX")"
+tmp_files+=("$canonical")
+printf '%s\n' "${canonical_text//\{\{concise_writing\}\}/$writing_prompt}" > "$canonical"
 canonical_sha="$(shasum -a 256 "$canonical" | awk '{print $1}')"
 canonical_sha12="${canonical_sha:0:12}"
 tooling_rev="$(git -C "$plugin_root" rev-parse --short=12 HEAD 2>/dev/null || echo unversioned)"
-# The stamp's whole value to a reviewer is that `git show <rev>:guidance/workflow.md`
-# reproduces the block. That holds for every production splice, which runs from an
+# The stamp names the revision whose workflow and writing prompt render the block.
+# That holds for every production splice, which runs from an
 # immutable fetched checkout — but not when someone splices from a working tree whose
 # canonical is modified, where the stamp would name a revision that never held this
 # text. Say so in the stamp rather than letting it quietly lie; the next clean splice
@@ -89,17 +112,11 @@ tooling_rev="$(git -C "$plugin_root" rev-parse --short=12 HEAD 2>/dev/null || ec
 # one. Running it in --check too would put this warning in front of every commit
 # made in the tooling repository, where a modified canonical is the normal state.
 if [[ "$mode" == sync && "$tooling_rev" != unversioned ]] \
-   && [[ -n "$(git -C "$plugin_root" status --porcelain -- guidance/workflow.md 2>/dev/null)" ]]; then
+   && [[ -n "$(git -C "$plugin_root" status --porcelain -- guidance/workflow.md .agents/prompts/concise-writing.md 2>/dev/null)" ]]; then
   tooling_rev="$tooling_rev-dirty"
   printf 'agent-tooling: canonical guidance is modified in %s; stamping %s\n' \
     "$plugin_root" "$tooling_rev" >&2
 fi
-
-tmp_files=()
-cleanup() {
-  [[ ${#tmp_files[@]} -eq 0 ]] || rm -f -- ${tmp_files[@]+"${tmp_files[@]}"}
-}
-trap cleanup EXIT INT TERM
 
 # mktemp creates 0600, and mv carries that mode to the destination — so every splice
 # would silently turn a committed, group/world-readable instructions file into an
@@ -139,8 +156,7 @@ set_target_mode() {  # $1 = temp file, $2 = destination (need not exist yet)
 # butted against the following block as a mistake, and being formatter-clean is
 # what keeps the block out of a consumer's CI failures. Integrity ignores these
 # separators — classify_target trims the body's blank edges before hashing — so
-# the recorded sha256 stays the hash of the canonical itself, and `git show
-# <rev>:guidance/workflow.md` still reproduces what a reader sees.
+# the recorded sha256 stays the hash of the rendered guidance itself.
 render_block() {  # $1 = revision to stamp; emits the full marker-wrapped block
   printf '%srev=%s sha256=%s -->\n\n' "$BEGIN_PREFIX" "$1" "$canonical_sha12"
   cat "$canonical"
@@ -331,7 +347,11 @@ for f in "${targets[@]}"; do
   case "$mode:$block_state" in
     check:current) ;;
     check:stale)
-      warn "guidance block in $rel is behind the adopted tooling revision; run ./.agent-tooling/install.sh"
+      if [[ "$require_current" == 1 ]]; then
+        fail "guidance block in $rel is behind the adopted tooling revision; run ./.agent-tooling/install.sh"
+      else
+        warn "guidance block in $rel is behind the adopted tooling revision; run ./.agent-tooling/install.sh"
+      fi
       ;;
     check:missing)
       fail "guidance block is missing from $rel; run ./.agent-tooling/install.sh"

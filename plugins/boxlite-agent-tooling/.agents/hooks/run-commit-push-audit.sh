@@ -745,7 +745,7 @@ audit_source_is_current() {
 # `$(...)` in prose becomes a command substitution.
 build_prompt() {  # evidence file, evidence sha256
   local evidence_file="$1" evidence_hash="$2"
-  local command_json audit_context redacted_command command_bytes
+  local command_json audit_context audit_criteria redacted_command command_bytes
   local target_command_truncated=false
   command_bytes="$(LC_ALL=C printf '%s' "$command" | wc -c | tr -d ' ')"
   redacted_command="$(printf '%s' "$command" | redact_text)"
@@ -767,8 +767,7 @@ build_prompt() {  # evidence file, evidence sha256
       expected_branch:$expected_branch}')"
   audit_context="$(build_audit_summary "$evidence_file" "$evidence_hash")"
 
-  # The document is the only copy. This prompt carries the finding/advisory split, and
-  # a second copy of that rule drifting out of date would silently reclassify blocking
+  # Shared Markdown owns the finding/advisory split. A copy drifting would reclassify blocking
   # findings as advisories — a FAIL that becomes a PASS with nothing to notice it. A
   # missing document is therefore a hard failure, not something to improvise around.
   # Reports and RETURNS rather than calling write_fail: this runs inside a command
@@ -782,7 +781,13 @@ build_prompt() {  # evidence file, evidence sha256
   fi
   # shellcheck source=../lib/subagent.sh
   source "$subagent_lib"
+  if ! audit_criteria="$(subagent_prompt commit-push-criteria "$tooling_root")" \
+     || [[ "$audit_criteria" != *[![:space:]]* ]]; then
+    printf 'Internal: cannot load nonempty commit-push-criteria prompt\n' >&2
+    return 1
+  fi
   if ! subagent_prompt commit-push-runner "$tooling_root" \
+         "audit_criteria=${audit_criteria}" \
          "command_json=${command_json}" \
          "head=${head}" \
          "diff_hash=${diff_hash}" \

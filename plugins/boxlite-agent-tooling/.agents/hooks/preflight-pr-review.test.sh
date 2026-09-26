@@ -943,7 +943,14 @@ assert_reason_contains "long-ref fixture reaches the recovery path" \
 assert_reason_contains "body guidance is loaded from its document" \
   "$(reason_for "gh pr create $FEAT --body ''")" 'Fixture description guidance'
 
-for prompt_name in pr-review-ack pr-review-question pr-description-guidance; do
+printf 'Fixture description guidance\n{{concise_writing}}\n' > "$fixture_plugin/.agents/prompts/pr-description-guidance.md"
+for version in FIRST SECOND; do
+  printf '%s shared writing rule\n' "$version" > "$fixture_plugin/.agents/prompts/concise-writing.md"
+  assert_reason_contains "$version shared rules reach PR description guidance" \
+    "$(reason_for "gh pr create $FEAT --body ''")" "$version shared writing rule"
+done
+
+for prompt_name in pr-review-ack pr-review-question pr-description-guidance concise-writing; do
   prompt_file="$fixture_plugin/.agents/prompts/$prompt_name.md"
   cp "$prompt_file" "$TMP/prompt-backup"
   for invalid in missing empty unresolved; do

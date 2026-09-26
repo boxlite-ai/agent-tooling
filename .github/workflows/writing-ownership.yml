@@ -1,0 +1,33 @@
+name: Writing ownership
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: writing-ownership-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ownership:
+    name: Writing ownership
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify gate rejection cases
+        run: bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.test.sh
+      - name: Check repository writing ownership
+        run: bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .
+      - name: Verify shared-rule delivery
+        run: |
+          bash plugins/boxlite-agent-tooling/scripts/sync-guidance.test.sh
+          bash plugins/boxlite-agent-tooling/.agents/hooks/preflight-pr-review.test.sh
+          bash plugins/boxlite-agent-tooling/.agents/hooks/stop-gate.test.sh
