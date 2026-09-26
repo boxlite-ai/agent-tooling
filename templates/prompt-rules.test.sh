@@ -6,9 +6,8 @@
 #   templates/claude-settings.json -> $consumer/.claude/settings.json    (merge "hooks")
 #
 # Neither reads the pinned checkout. The consumer commits its own copy of
-# rule-recency.sh, so the rules are a snapshot that ages instead of following the pin.
-# That trade is the point of the design, and it rests on one assumption worth testing
-# rather than believing: that the hook still works once it is no longer inside the
+# rule-recency.sh, which names a skill the host must discover separately. The hook
+# must still emit that reference once it is no longer inside the
 # plugin tree. If it ever grows a sibling dependency, a ${PLUGIN_ROOT}, or a relative
 # source, every consumer copy breaks at once and nothing upstream notices — the copies
 # are invisible from here.
@@ -52,8 +51,8 @@ cp "$CANONICAL" "$TMP/lonely/rule-recency.sh"
 out="$( cd "$TMP/elsewhere" && printf '{"session_id":"iso","prompt":"explain the pull path"}' \
           | TMPDIR="$TMP" bash "$TMP/lonely/rule-recency.sh" 2>"$TMP/err" )"
 case "$out" in
-  *"REPLY SHAPE:"*) ok "emits REPLY SHAPE with nothing else installed" ;;
-  *)                bad "emits REPLY SHAPE with nothing else installed (got: ${out:0:60})" ;;
+  *"boxlite-writing"*) ok "emits the skill name without reading its files" ;;
+  *)                bad "emits the skill name without reading its files (got: ${out:0:60})" ;;
 esac
 [ -s "$TMP/err" ] && bad "runs silently on stderr (got: $(head -c 80 "$TMP/err"))" \
                   || ok "runs silently on stderr"

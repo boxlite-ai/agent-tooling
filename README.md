@@ -143,6 +143,7 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 
 | Task | Entry point |
 | --- | --- |
+| Shorten a reply, document, or PR description | [boxlite-writing](plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md) |
 | Explain a subsystem with a concrete example | “Use `boxlite-examples` to explain how this subsystem works.” |
 | Draw a diagram grounded in source | [boxlite-visualize](plugins/boxlite-agent-tooling/.agents/skills/boxlite-visualize/SKILL.md) |
 | Implement a Bash hook or gate | [shell-engineering](plugins/boxlite-agent-tooling/.agents/skills/shell-engineering/SKILL.md) |
@@ -150,9 +151,44 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 | Register a design before implementation | [Design registration](plugins/boxlite-agent-tooling/CONTRIBUTING.md#pull-request-descriptions) |
 | Prepare a PR for human review | [Author acknowledgment](plugins/boxlite-agent-tooling/CONTRIBUTING.md#author-review-acknowledgment) |
 
+Workflow and writing reminders reference `boxlite-writing` by name; the host loads
+its instructions. Try: "Use boxlite-writing to shorten this PR description."
+
 After a push, the Git hook starts the PR watcher; the agent attaches to its event stream. Idle delivery needs host support: a Codex heartbeat or Claude Monitor. See the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
 
 For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh) retries recorded transient failures within bounded budgets. It requires `claude`, `jq`, `curl`, the failure-recording hook, and a matching `CLAUDE_PROJECT_DIR`.
+
+### Optional prompt reminders
+
+For prompt-only reminders, copy [rule-recency.sh](plugins/boxlite-agent-tooling/.agents/hooks/rule-recency.sh)
+to the consumer's `.agent-tooling/` directory and use the [Codex](templates/codex-hooks.json)
+or [Claude](templates/claude-settings.json) template. The host must discover
+`boxlite-writing`; the copied hook references its name without embedding its rules.
+Set `consumer` to the destination repository before running the recipe below.
+
+Claude Code needs a **merge**, not a copy — `.claude/settings.json` also carries keys
+such as `env`, and overwriting it would drop them:
+
+```sh
+mkdir -p "$consumer/.claude"
+if [ -f "$consumer/.claude/settings.json" ]; then
+  jq -s '
+    .[0] as $current | .[1] as $rules |
+    ($current * $rules) |
+    .hooks.UserPromptSubmit = (
+      reduce (
+        (($current.hooks.UserPromptSubmit // []) +
+         ($rules.hooks.UserPromptSubmit // []))[]
+      ) as $entry
+        ([]; if index($entry) == null then . + [$entry] else . end)
+    )
+  ' "$consumer/.claude/settings.json" templates/claude-settings.json \
+    > "$consumer/.claude/settings.json.new" &&
+    mv "$consumer/.claude/settings.json.new" "$consumer/.claude/settings.json"
+else
+  cp templates/claude-settings.json "$consumer/.claude/settings.json"
+fi
+```
 
 ## Updates and troubleshooting
 

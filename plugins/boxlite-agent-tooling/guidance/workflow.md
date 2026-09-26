@@ -102,7 +102,7 @@ Public artifacts/delegates: public evidence or disclosure approval for exact con
 
 **Communication**
 
-{{concise_writing}}
+Apply the `boxlite-writing` skill.
 
 - Review each PR's required explanation against the diff, including drafts and description edits. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Omit work logs and exhaustive test counts. Repository templates are starting points.
 

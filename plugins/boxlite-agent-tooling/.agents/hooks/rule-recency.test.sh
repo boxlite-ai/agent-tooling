@@ -68,7 +68,7 @@ fi
 for prompt in "ok explain it" "yes because it failed" "stop the server" \
               "next invoice" "thanks, explain invoices"; do
   assert_contains "do not suppress substantive near-match '$prompt'" \
-    "$(emit "near-match" "$prompt")" "REPLY SHAPE:"
+    "$(emit "near-match" "$prompt")" "boxlite-writing"
 done
 
 # Every substantive prompt pays for this reminder. Keep it small enough that
@@ -80,20 +80,9 @@ else
   bad "reminder stays within 800 bytes ($bytes)"
 fi
 
-assert_contains "keeps reply-shape marker" "$first" "REPLY SHAPE:"
-assert_contains "keeps prose budget" "$first" "<=80"
-assert_contains "forbids walls of text" "$first" "no walls of text"
-assert_contains "preserves material evidence" "$first" "Keep uncertainty, risks, failures visible"
-assert_contains "offers forms by clarity" "$first" \
-  "call graph, sequence diagram, real example, bullets, table, or short prose by clarity"
-assert_contains "no form is compulsory" "$first" "no form is mandatory"
-assert_not_contains "does not force relationship diagrams" "$first" "Visualize relationships"
-assert_not_contains "does not force typed source hops" "$first" 'fn (Type, file:LOC)'
-assert_contains "examples explain changing state" "$first" \
-  "walk one real example step by step, showing what changes"
-assert_contains "hypothetical examples are labeled" "$first" "Label hypothetical values"
-assert_contains "answer leads" "$first" "Answer first"
-assert_contains "explicit depth still avoids dense text" "$first" "never dense text"
+assert_contains "names the writing skill" "$first" "boxlite-writing"
+assert_not_contains "does not embed the prose budget" "$first" "<=80"
+assert_not_contains "does not embed writing rules" "$first" "no walls of text"
 assert_contains "keeps host-neutral workflow pointer" "$first" "repository Workflow"
 assert_contains "keeps research-before-design" "$first" "research prior art before design"
 

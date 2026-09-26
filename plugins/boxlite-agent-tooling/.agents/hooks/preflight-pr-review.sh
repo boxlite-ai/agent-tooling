@@ -1505,9 +1505,7 @@ scan_command_fragment "$command"
 
 # Writing denials never request or consume a human review acknowledgment.
 if [[ -n "$writing_error" ]]; then
-  # shellcheck source=../lib/subagent.sh
-  source "$tooling_root/.agents/lib/subagent.sh"
-  writing_guidance="$(concise_writing_prompt "$tooling_root")" || exit 2
+  writing_guidance="$(concise_writing_reminder)" || exit 2
   deny_writing "$writing_error
 
 $writing_guidance"
@@ -1583,9 +1581,7 @@ load_review_prompt() { # prompt name, tooling root, optional key=value pairs
 # normal denials and long-ref recovery, so the review question cannot drift out of one.
 review_question="$(load_review_prompt pr-review-question "$tooling_root")" || exit 2
 load_writing_policy
-writing_guidance="$(concise_writing_prompt "$tooling_root")" || exit 2
-description_guidance="$(load_review_prompt pr-description-guidance "$tooling_root" \
-  "concise_writing=$writing_guidance")" || exit 2
+description_guidance="$(load_review_prompt pr-description-guidance "$tooling_root")" || exit 2
 ack_instruction="$(load_review_prompt pr-review-ack "$tooling_root" \
   "review_question=$review_question" "context= for gh pr $subcmd; bind $branch@$head")" || exit 2
 bounded_ack_recovery="$(load_review_prompt pr-review-ack "$tooling_root" \
@@ -1752,7 +1748,7 @@ while (( body_index < protected_body_count )); do
       deny_writing "$body_error
 ${description_guidance}"
     fi
-    writing_guidance="$(concise_writing_prompt "$tooling_root")" || exit 2
+    writing_guidance="$(concise_writing_reminder)" || exit 2
     deny_writing "$body_error
 
 $writing_guidance"
