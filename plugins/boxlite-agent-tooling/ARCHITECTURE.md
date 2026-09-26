@@ -498,8 +498,8 @@ paths; for example, "Use boxlite-visualize to show the cloud deployment architec
 The skill produces `diagram.md` and `evidence.json`, then validates rendering, fit,
 and source traceability into `validation.json` before visual inspection.
 
-The `boxlite-clean-code` skill has a short entry point with optional references for
-coding decisions and refactoring cases grounded in the first edition of Clean Code. The
-existing `skills/` symlink exposes it to plugin hosts; standalone sharing copies
-the complete directory, including references, without plugin scripts. It preserves
-the receiving repository's workflow and permission boundaries.
+The `boxlite-clean-code` skill keeps essential coding decisions, a reversible
+refactoring loop, and verification guidance in one self-contained `SKILL.md`.
+The existing `skills/` symlink exposes it to plugin hosts; its directory can also
+be copied independently. It preserves the receiving repository's workflow and
+permission boundaries and requires no supporting files or plugin scripts.

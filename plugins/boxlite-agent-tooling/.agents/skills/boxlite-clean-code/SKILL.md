@@ -5,71 +5,79 @@ description: Apply Clean Code principles when implementing, refactoring, or revi
 
 # BoxLite Clean Code
 
-Make intent, contracts, and ownership easier to understand and change. Use
-evidence from the requested code to choose a proportionate improvement; a smell
-is a reason to investigate, not a verdict. Follow the receiving repository's
-conventions, workflow, and permissions.
+Make intent, contracts, and ownership easier to understand and change. Treat
+principles as decision tools: identify a concrete problem before applying a rule.
+Follow the receiving repository's conventions, workflow, and permissions.
 
 ## How it works
 
-Establish the observable contract, make one useful structural change, verify the
+Understand the existing contract, choose one useful improvement, verify the
 affected behavior, then keep or reverse the change according to the result.
-The references supply decision criteria and examples, not mandatory patterns.
+A smaller function or additional abstraction is valuable only when it helps readers.
 
-## Establish the task and contract
+## Establish the contract
 
-- **Review:** remain read-only unless edits are requested. Report a source
-  location, concrete consequence, and small remedy; skip unsupported style claims.
-- **Refactor:** inspect callers, implementation, tests, and docs before moving
-  code. Preserve relevant outputs, defaults, errors, input consumption, mutation,
+- Inspect callers, implementation, tests, and docs. Separate intentional behavior
+  changes from refactoring; resolve material ambiguity before changing public APIs.
+- Preserve relevant outputs, defaults, errors, input consumption, mutations,
   effect counts, ordering, atomicity, resource lifetime, and compatibility.
-- **Implement or fix:** distinguish intended behavior changes from structural
-  cleanup. Resolve material contract ambiguity before changing a public boundary.
-  For a defect, demonstrate the original failure before verifying the fix.
+- Keep reviews read-only unless edits are requested. Ground findings in a source
+  location, consequence, and proportionate remedy.
+- Check real consumers before deleting or renaming APIs. Local usage search alone
+  cannot establish that a published API has no external callers.
 
-Check real consumers before deleting or renaming an API. Local usage search alone
-does not establish that a published API has no external callers. Do not promote
-successful local checks into evidence about untested integrations or deployments.
+## Apply the essential principles
 
-## Choose the relevant guidance
-
-| Task concern | Read when needed |
+| Concern | Decision |
 | --- | --- |
-| Naming, responsibility, representation, errors, tests, dependencies, concurrency | [Decision guide](references/decision-guide.md); use the relevant section |
-| A refactor changes several collaborating parts or its benefit is unclear | [Refactoring cases](references/refactoring-cases.md) |
+| Names | Reveal purpose, domain, units, and effects. Use consistent vocabulary and enough context for the scope; avoid meaningless suffixes and encodings. |
+| Functions | Keep one coherent responsibility and abstraction level. Extract a meaningful concept, not a wrapper that restates a condition. Prefer clear control flow over nesting. |
+| Parameters | Separate genuinely different workflows; group values with shared meaning. Do not impose argument quotas or hide inputs in mutable fields to shorten signatures. |
+| Cohesion | Group behavior that changes for the same reason; separate independent responsibilities. Let one operation own required sequencing instead of teaching every caller the helper order. |
+| State | Keep temporary state local and ownership explicit. An extraction must not introduce shared state, longer lifetimes, or lost reentrancy merely to look smaller. |
+| Duplication | Share the same rule or transformation, not coincidentally similar syntax. Avoid abstractions justified only by hypothetical callers or tests written to preserve them. |
+| Representation | Choose for the real change: data plus procedures can simplify new operations; objects can localize new variants. Use language-native records, composition, or exhaustive matching where appropriate. |
+| Errors | Preserve causes and useful context; classify failures by caller recovery. Keep absence, empty success, invalid input, and failure distinct. Use idiomatic errors or results; never silently turn failure into success. |
+| Boundaries | An adapter should own useful translation, capability limits, or error policy. Avoid wrappers that mirror whole APIs. Separate major dependency assembly from runtime use without requiring a framework. |
+| Comments and layout | Explain constraints, intent, and non-obvious reasoning; preserve legal notices. Remove misleading commentary and dead code. Keep related behavior near its use and follow repository formatting. |
+| Tests | Make setup, operation, and expected outcome readable. Multiple assertions can describe one contract. Use independent fixtures; a fake passing does not verify a real integration, and coverage does not prove correctness. |
 
-## Work in reversible steps
+Preserve the design priorities: verified behavior, removal of duplicated rules,
+expressed intent, then fewer components. Tiny-class proliferation can undermine
+the earlier goals. Measure before optimizing.
 
-1. Name the concrete difficulty: hidden effects, ambiguous units, duplicated
-   policy, scattered change, leaked call order, or an unprotected invariant.
-2. Choose the smallest useful move. Extraction should introduce a meaningful
-   concept or owner. Similar syntax alone does not establish a shared rule.
-3. Run checks at the changed boundary, including relevant failures and callers.
-   Tests must exercise project behavior, not values constructed by the assertion.
-4. Re-read the result. Inline, regroup, or revert an extraction that adds navigation,
-   arbitrary parameters, or hidden mutable state without improving comprehension.
-5. Remove obsolete paths and migration scaffolding once callers have moved;
-   update explanations that describe the old behavior.
+## Make effects and concurrency explicit
 
-Use language-native error and data models. Do not impose numeric size quotas,
-mandatory object hierarchies, or an interface for every class. Preserve legal
-notices and comments explaining domain constraints, protocols, or non-obvious
-reasoning. Keep atomic operations intact even when they both mutate and return.
+- Name mutations, network calls, file writes, and other effects honestly. Identify
+  who owns cleanup, including partial failure, cancellation, and shutdown.
+- Preserve whole-operation invariants. Individually thread-safe methods do not
+  make check-then-act atomic. Reserving and returning an item may need one operation.
+- Bound queues, concurrency, waiting, and retries. Establish idempotency before
+  repeating effects. Check lock order, starvation, and termination as well as races.
+- Control known conflicting boundaries in regression tests; propagate worker
+  failures and assert completion. Bounded stress adds evidence, not proof.
+- Validate external inputs and keep secrets out of errors, logs, and fixtures.
+
+## Refactor in small, reversible steps
+
+1. Name the confusion or risk and the contract that must survive.
+2. Make one move, then check the affected production boundary and real callers,
+   including defaults, failure paths, ordering, and observable effects.
+3. Re-read the result. Inline, regroup, or revert an extraction that adds navigation,
+   arbitrary parameters, or hidden state without improving comprehension.
+4. Remove migration scaffolding after callers move; update superseded explanations.
+
+For example, replacing several parser maps with one representation can preserve
+successful parsing while breaking missing-value or wrong-type lookup defaults.
+Check the caller's complete contract before declaring the refactor equivalent.
 
 ## Verify and report
 
-Use the narrow relevant checks and the repository's required validation. For a
-regression test, remove every production change and observe the original defect,
-then restore the complete fix and observe the pass. Keep test adaptation limited
-to exercising the old contract; never implement the fix in the test.
+For a defect, demonstrate the original failure with every production change
+reverted, then restore the complete fix and observe the pass. Tests must exercise
+project behavior, not test-built values or a substitute implementation.
 
-For changes, explain what became easier to understand, the preserved or explicitly
-changed contract, actual verification, and remaining uncertainty. For reviews,
-separate demonstrated defects from optional improvements. A no-change conclusion
-is valid when an additional abstraction would not help the requested work.
-
-## Source
-
-Original synthesis of Robert C. Martin et al.,
-[*Clean Code*, first edition](https://www.informit.com/store/clean-code-a-handbook-of-agile-software-craftsmanship-9780132350884),
-with contemporary adaptations identified in the references; no book listings are bundled.
+Run the narrow relevant checks and the repository's required validation. Explain
+what became clearer, what behavior intentionally changed, what actually ran, and
+remaining uncertainty. A no-change conclusion is valid when more abstraction
+would not help the requested work.
