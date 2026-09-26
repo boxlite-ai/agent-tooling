@@ -271,9 +271,9 @@ Audit history components:
 | `scripts/audit-reflection-gate.sh` → `.agents/lib/audit-reflection-gate.sh` | Bind scoped verdict/Git audits before launch and acceptance; snapshot evidence; recheck prompt epoch; reconcile dossiers. |
 | `.agents/prompts/audit-reflection.md`, `.agents/prompts/git-audit-history.md` | Shared reconciliation contract and native Git prepare/record procedure. |
 
-Cycles bind repository/session/prompt epoch/branch/gate; cap at eight failures,
+Cycles bind a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`; cap at eight failures,
 sixteen attempts, and 1 MiB. PASS closes a cycle; the next operation starts another.
-Runner failures record ERROR; cancellation is separate. Retain four closed cycles,
+Runner failures record ERROR; cancellation is separate. Retain at most four closed cycles per context,
 four retired contexts/session, and the latest immutable input/context. Identity-checked
 cleanup preserves current-epoch evidence. Snapshots retain bounded transcripts,
 sanitized headless diffs, or immutable native Git trees.

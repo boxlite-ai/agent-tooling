@@ -24,7 +24,7 @@ Repository comparisons use inspected revision `15819052960ad81013bd0a524cef054c7
 
 ## Contract
 
-- Scope history by worktree, session, prompt epoch, branch, and gate. Bind code/command hashes to attempts so corrections retain history. New prompts revoke old authority; unscoped callers keep legacy behavior.
+- Scope history by a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`. Bind code/command hashes to attempts so corrections retain history. New prompts revoke old authority; unscoped callers keep legacy behavior.
 - Reconcile from the first retry. Count distinct FAIL/ERROR outcomes; duplicates are idempotent. ERROR describes runner failure, not a code defect. Cancellation, stale results, advisories, and IN_PROGRESS do not count.
 - Preserve finding IDs, invariants, behaviors, and closure criteria. Disposition every open/not_assessed finding; justify reopened findings, reversed advice, and changed criteria with comparison evidence. Never suppress real defects to converge.
 - Classify new findings as introduced, missed_earlier, or unknown. Earlier misses require the auditor's own coverage-gap explanation and performed review change. Unknown provenance must remain explicit; hashes alone cannot establish it.
@@ -40,7 +40,7 @@ The [state facade](../../.agents/lib/audit-reflection.sh) exposes `prepare`, `re
 - Serialize transitions under one lock, released before model execution. Reuse bounded regular-file reads and atomic writes; recheck epoch, input hashes, and file identity before acceptance. Never execute commands from reflection text.
 - Limits: 8 FAIL/ERROR outcomes, 16 attempts, 64 KiB/dossier, 8 KiB/reflection, 1 MiB/cycle. Reflection failures count. Missing/corrupt evidence blocks; exhaustion requires human direction and reports INCOMPLETE, never PASS.
 - Exhausted Stop audits use `continue:false`; Git operations remain denied. Existing explicit overrides stay visible and never fabricate PASS.
-- Retain four closed cycles/context, four retired contexts/session, and only the latest immutable input/context. Identity-checked cleanup preserves active evidence. History remains local; no cross-request learning or automatic publication.
+- Retain at most four closed cycles per context, four retired contexts/session, and only the latest immutable input/context. Identity-checked cleanup preserves active evidence. History remains local; no cross-request learning or automatic publication.
 
 ## Alternatives and validation
 
