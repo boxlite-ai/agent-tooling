@@ -58,8 +58,10 @@ URL, including drafts; body-preserving operations fetch the published body and
 match its branch and HEAD. GitHub renders the body; an exact anchor target outside
 code must match the document. The same rendered HTML must contain a level-two
 **How it works** section with content before the next peer or higher heading.
+Each matching section is checked independently; any qualifying section suffices.
 Nested headings alone, comments, quoted sections, example headings, and placeholder-only
-text cannot satisfy it; prose, lists, tables, and diagrams can. This applies to
+text, including repeated or mixed placeholders, cannot satisfy it; prose, lists,
+tables, and diagrams can. This applies to
 drafts, replacement descriptions, ready operations, and metadata-only edits.
 The render call is bounded to 20 seconds and 64 KiB;
 failures block publication. Hidden source URLs do not count as links. Direct API

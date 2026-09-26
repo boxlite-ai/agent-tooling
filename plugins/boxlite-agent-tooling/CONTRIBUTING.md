@@ -68,7 +68,9 @@ See [design-document enforcement](ARCHITECTURE.md#design-documents) for validati
 - The local PR gate requires a level-two **How it works** heading with content.
   Explain the causal path or rationale beneath it; a short sentence is sufficient
   for a simple change. Hidden comments, quoted examples, empty sections, and
-  placeholder-only text such as `TBD` are rejected. Reviewers check accuracy.
+  placeholder-only text such as `TBD` are rejected, including repeated or mixed
+  placeholders. If headings repeat, at least one section must qualify on its own.
+  Reviewers check accuracy.
 - Include decisive verification as `command → observed result`. For a fix, briefly
   report the failure with all production changes reverted and the pass with the
   complete fix restored. Do not present old results as newly verified.

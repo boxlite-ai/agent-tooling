@@ -6,6 +6,13 @@ _pr_description_check_explanation() { # bounded GitHub-rendered HTML
   if ! printf '%s' "$1" | perl -CSD -0777 -e '
     use strict;
     use warnings;
+    sub has_explanation {
+      my ($content) = @_;
+      $content =~ s/&(?:\#\d+|\#x[0-9a-f]+|[a-z]+);//ig;
+      $content =~ s/^\s+|\s+$//g;
+      return $content =~ /[\p{L}\p{N}]/ &&
+        $content !~ /\A(?:(?:TODO|TBD|N\/?A|Not\s+applicable)[.!]?(?:\s+|\z))+\z/i;
+    }
     my $html = <STDIN> // "";
     $html =~ s/<!--.*?(?:-->|\z)//sg;
     my %example = (blockquote => 0, pre => 0, code => 0);
@@ -24,7 +31,10 @@ _pr_description_check_explanation() { # bounded GitHub-rendered HTML
         if ($name =~ /^h([1-6])$/) {
           my $level = $1;
           if (!$closing) {
-            last if $active && $level <= 2;
+            if ($active && $level <= 2) {
+              exit 0 if has_explanation($content);
+              ($active, $content) = (0, "");
+            }
             ($heading_level, $heading) = ($level, "");
           } else {
             $heading =~ s/^\s+|\s+$//g;
@@ -38,10 +48,7 @@ _pr_description_check_explanation() { # bounded GitHub-rendered HTML
       if ($heading_level) { $heading .= $text; }
       elsif ($active) { $content .= "$text "; }
     }
-    $content =~ s/&(?:\#\d+|\#x[0-9a-f]+|[a-z]+);//ig;
-    $content =~ s/^\s+|\s+$//g;
-    exit($active && $content =~ /[\p{L}\p{N}]/ &&
-      $content !~ /^(?:TODO|TBD|N\/?A|Not applicable)[.!]?$/i ? 0 : 1);
+    exit($active && has_explanation($content) ? 0 : 1);
   '; then
     printf 'PR description requires a nonempty ## How it works section. Explain the mechanism or non-code rationale; comments, quotations, example headings, and placeholder-only text do not count.'
     return 1
