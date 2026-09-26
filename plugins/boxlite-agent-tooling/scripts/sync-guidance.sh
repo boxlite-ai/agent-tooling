@@ -97,6 +97,8 @@ writing_prompt="$(concise_writing_prompt "$plugin_root")" || exit 1
 canonical_text="$(cat "$workflow_template")"
 canonical="$(mktemp "${TMPDIR:-/tmp}/agent-tooling-guidance.XXXXXX")"
 tmp_files+=("$canonical")
+# Bash 5.2 expands replacement ampersands; quoting adds literal quotes on Bash 3.2.
+shopt -u patsub_replacement 2>/dev/null || true
 printf '%s\n' "${canonical_text//\{\{concise_writing\}\}/$writing_prompt}" > "$canonical"
 canonical_sha="$(shasum -a 256 "$canonical" | awk '{print $1}')"
 canonical_sha12="${canonical_sha:0:12}"

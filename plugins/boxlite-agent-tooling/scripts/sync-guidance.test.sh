@@ -255,6 +255,15 @@ for version in FIRST SECOND; do
   grep -q "$version shared writing rule" "$R/AGENTS.md" \
     && ok "$version shared rules are delivered" || bad "$version shared rules are delivered"
 done
+literal_rule='Keep evidence & uncertainty; preserve \paths.'
+printf '%s\n' "$literal_rule" > "$writing_file"
+run_sync "$WRITING_PLUGIN/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
+check_eq "literal writing sync succeeds" "$?" 0
+if grep -Fxq -- "$literal_rule" "$R/AGENTS.md"; then
+  ok "writing metacharacters are delivered literally"
+else
+  bad "writing metacharacters are delivered literally"
+fi
 cp "$R/AGENTS.md" "$TMP/writing-snapshot"
 for invalid in missing empty unresolved; do
   case "$invalid" in

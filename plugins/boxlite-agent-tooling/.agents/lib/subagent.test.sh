@@ -479,8 +479,7 @@ check    "substitutes a placeholder"        "Hello world"  "$out"
 check    "substitutes every occurrence"     "twice: world" "$out"
 check_no "frontmatter never reaches output" "placeholders:" "$out"
 
-# Values are branch names, paths and commit text. sed would choke on & and \1; bash
-# string replacement does not, and nothing here is ever eval'd.
+# Replacements preserve shell metacharacters across Bash versions.
 out="$(subagent_prompt t "$TMP" 'who=a&b\1$(touch '"$TMP"'/PWNED)')"
 check "passes shell/sed metacharacters through as text" 'a&b\1$(touch' "$out"
 [ -e "$TMP/PWNED" ] && bad "a substituted value cannot execute" || ok "a substituted value cannot execute"

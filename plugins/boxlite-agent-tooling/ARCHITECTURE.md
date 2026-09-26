@@ -97,6 +97,7 @@ commands, not a GitHub server policy: other clients, script files, browser edits
 later bot additions are outside it. Writing denials never consume an acknowledgment.
 `scripts/sync-guidance.sh` expands the single `{{concise_writing}}` slot in
 `guidance/workflow.md` with `.agents/prompts/concise-writing.md` before splicing.
+Replacement values preserve literal ampersands and backslashes.
 The hash covers rendered text; edits to either source mark the revision dirty.
 Missing, empty, or unrenderable shared writing fails before consumer files change.
 Consumer instructions contain the complete rules and need no runtime includes.
@@ -110,6 +111,8 @@ ignoring case, punctuation, and wrapping. Only verified root instruction blocks
 and fenced examples are exempt. Diagnostics name the copied passage's file and line;
 paraphrased rules remain a review responsibility. This is repository CI wiring;
 requiring its status before merge is a separate GitHub ruleset setting.
+CI permits `/usr/bin/unshare` through AppArmor and probes user/PID namespace
+creation before tests; Stop fixtures require the hook's process containment.
 
 ### PR size and stacks
 

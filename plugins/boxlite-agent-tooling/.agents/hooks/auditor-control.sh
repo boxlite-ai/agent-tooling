@@ -250,7 +250,7 @@ auditor_control_write_pending_stop_receipt() {  # scope auditor generation
 auditor_control_add_completion_receipt() {  # scope auditor generation
   local receipt_scope="$1" auditor="$2" generation="$3"
   local completion_file="$auditor_control_state_dir/completion.$receipt_scope.$auditor.$generation.json"
-  local completion_json created_at remaining now
+  local completion_json="" created_at remaining now
   now="$(date +%s)"; remaining=1
   if [[ -e "$completion_file" || -L "$completion_file" ]]; then
     completion_json="$(verdict_audit_read_single_record "$completion_file" 2>/dev/null)" \

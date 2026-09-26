@@ -80,6 +80,19 @@ write_codex_subagent_transcript() {  # path, parent session, agent id, agent pat
   jq -nc '{type:"event_msg",payload:{type:"task_started"}}' >> "$1"
 }
 
+echo "## First completion creates a receipt without prior state"
+R="$(setup)"
+scope="$(scope_of "$R" fresh-receipt)"
+CLAUDE_PROJECT_DIR="$R" bash "$CONTROL" external-start verdict-auditor fresh "$scope" 101-102-3
+completion_rc=0
+CLAUDE_PROJECT_DIR="$R" bash "$CONTROL" external-stop verdict-auditor fresh "$scope" PASS \
+  2>"$R/stop.err" || completion_rc=$?
+receipt="$R/.agents/state/auditor-control/completion.$scope.verdict-auditor.fresh.json"
+check_eq "first completion succeeds and records one delivery" \
+  "rc=$completion_rc remaining=$(jq -r '.remaining' "$receipt" 2>/dev/null) stderr=$(cat "$R/stop.err")" \
+  "rc=0 remaining=1 stderr="
+rm -rf "$R"
+
 R="$(setup)"
 session="session-a"
 scope="$(scope_of "$R" "$session")"
