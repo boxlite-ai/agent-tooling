@@ -10,7 +10,7 @@ mkdir -p "$repo/plugins"
 cp -R "$plugin_root" "$repo/plugins/boxlite-agent-tooling"
 git init -q "$repo"
 fixture_plugin="$repo/plugins/boxlite-agent-tooling"
-policy="$fixture_plugin/.agents/prompts/concise-writing.md"
+policy="$fixture_plugin/.agents/skills/boxlite-writing/SKILL.md"
 printf '%s\n' 'Report measured harbor outcomes before proposing another cargo routing change.' > "$policy"
 refresh_guidance() { bash "$fixture_plugin/scripts/sync-guidance.sh" --force "$repo" >/dev/null 2>&1; }
 refresh_guidance
@@ -31,7 +31,7 @@ copy="$repo/.claude/agents/duplicate.md"
 printf '%s\n' 'REPORT **MEASURED** harbor outcomes' 'before proposing another cargo routing change.' > "$copy"
 expect 'untracked agent copy ignores case, markup and wrapping' 1 '.claude/agents/duplicate.md:1'
 git -C "$repo" add .claude/agents/duplicate.md
-expect 'tracked agent copy fails too' 1 'concise-writing.md'
+expect 'tracked copy diagnostic references the skill by name' 1 'reference the boxlite-writing skill'
 printf '%s\n' '<!-- agent-tooling:guidance:begin rev=fake sha256=000000000000 -->' \
   'Report measured harbor outcomes before proposing another cargo routing change.' \
   '<!-- agent-tooling:guidance:end -->' > "$copy"
@@ -47,8 +47,7 @@ printf '%s\n' '<!-- agent-tooling:guidance:begin rev=fake sha256=000000000000 --
 expect 'an unchecked bridge block cannot exempt copies' 1 'CLAUDE.md:'
 cp "$scratch/claude" "$repo/CLAUDE.md"
 printf '%s\n' 'Brief harbor reports prevent confusion.' >> "$policy"
-expect 'source edit without regeneration fails' 1 'behind the adopted tooling revision'
-refresh_guidance
+expect 'skill edits do not require workflow regeneration' 0 ''
 printf '%s\n' 'Brief harbor reports prevent confusion.' > "$copy"
 expect 'new short rule is loaded on the next invocation' 1 '.claude/agents/duplicate.md:1'
 rm "$copy"
@@ -57,9 +56,9 @@ printf '\nReport measured harbor outcomes before proposing another cargo routing
 expect 'copy outside the generated block fails' 1 'AGENTS.md:'
 refresh_guidance
 cp "$repo/AGENTS.md" "$scratch/agents"
-sed '/Report measured harbor outcomes/s/Report/Fabricate/' "$scratch/agents" > "$repo/AGENTS.md"
+sed 's/Apply the/Ignore the/' "$scratch/agents" > "$repo/AGENTS.md"
 expect 'edited generated block fails integrity' 1 'edited by hand'
 cp "$scratch/agents" "$repo/AGENTS.md"
 printf ' \n' > "$policy"
-expect 'empty canonical source fails closed' 1 'empty prompt'
+expect 'empty canonical source fails closed' 1 'canonical source contains no checkable passages'
 printf 'RESULT: %s passed, 0 failed\n' "$pass"

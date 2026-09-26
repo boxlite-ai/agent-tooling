@@ -4,7 +4,7 @@
 # and perl and jq on PATH; callers own those checks and all reporting.
 #
 # A turn ending on a dense reply gets one more message using the prompt in
-# .agents/prompts/concise-writing.md. The original reply stays as written and the result
+# the boxlite-writing skill. The original reply stays as written and the result
 # follows it. A summary that needs a tool to render or send is new tool work, so the
 # verdict check judges that answer as usual.
 # The Stop gate asks only after the verdict check has judged and allowed the turn, or a

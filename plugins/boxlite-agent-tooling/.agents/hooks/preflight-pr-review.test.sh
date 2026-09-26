@@ -907,7 +907,7 @@ assert_reason_budget "title denial stays bounded" \
 write_marker "reviewed: concise body"
 body_reason="$(reason_for "gh pr create $FEAT --body '$LONG_BODY'")"
 assert_reason_budget "size denial stays bounded" "$body_reason"
-assert_reason_contains "size denial uses reply-summary guidance" "$body_reason" 'visuals > tables > bullets > prose'
+assert_reason_contains "size denial names the writing skill" "$body_reason" 'boxlite-writing'
 
 echo
 echo "## Review prompts are loaded at the public hook boundary"
@@ -915,7 +915,8 @@ fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
 cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
-cp "$REPO_ROOT/.agents/prompts/concise-writing.md" "$fixture_plugin/.agents/prompts/"
+mkdir -p "$fixture_plugin/.agents/skills/boxlite-writing"
+cp "$REPO_ROOT/.agents/skills/boxlite-writing/SKILL.md" "$fixture_plugin/.agents/skills/boxlite-writing/"
 cp "$REPO_ROOT/.agents/prompts/timed-user-prompt.md" "$fixture_plugin/.agents/prompts/"
 HOOK="$fixture_plugin/.agents/hooks/preflight-pr-review.sh"
 cat > "$fixture_plugin/.agents/prompts/pr-review-ack.md" <<'PROMPT'
@@ -943,15 +944,24 @@ assert_reason_contains "long-ref fixture reaches the recovery path" \
 assert_reason_contains "body guidance is loaded from its document" \
   "$(reason_for "gh pr create $FEAT --body ''")" 'Fixture description guidance'
 
-printf 'Fixture description guidance\n{{concise_writing}}\n' > "$fixture_plugin/.agents/prompts/pr-description-guidance.md"
-for version in FIRST SECOND; do
-  printf '%s shared writing rule\n' "$version" > "$fixture_plugin/.agents/prompts/concise-writing.md"
-  assert_reason_contains "$version shared rules reach PR description guidance" \
-    "$(reason_for "gh pr create $FEAT --body ''")" "$version shared writing rule"
+cp "$REPO_ROOT/.agents/prompts/pr-description-guidance.md" "$fixture_plugin/.agents/prompts/"
+for skill_state in changed missing; do
+  if [[ "$skill_state" == changed ]]; then
+    printf 'Unique writing policy marker.\n' > "$fixture_plugin/.agents/skills/boxlite-writing/SKILL.md"
+  else
+    rm -f "$fixture_plugin/.agents/skills/boxlite-writing/SKILL.md"
+  fi
+  body_reason="$(reason_for "gh pr create $FEAT --body ''")"
+  assert_reason_contains "$skill_state skill leaves its name in PR guidance" "$body_reason" 'boxlite-writing'
+  if [[ "$body_reason" != *'Unique writing policy marker.'* ]]; then
+    pass=$((pass + 1)); printf '  PASS  %s skill body is not embedded\n' "$skill_state"
+  else
+    fail=$((fail + 1)); printf '  FAIL  %s skill body is embedded\n' "$skill_state"
+  fi
 done
 
-for prompt_name in pr-review-ack pr-review-question pr-description-guidance concise-writing; do
-  prompt_file="$fixture_plugin/.agents/prompts/$prompt_name.md"
+for prompt_file in "$fixture_plugin/.agents/prompts/"{pr-review-ack,pr-review-question,pr-description-guidance}.md; do
+  prompt_name="${prompt_file#"$fixture_plugin/"}"
   cp "$prompt_file" "$TMP/prompt-backup"
   for invalid in missing empty unresolved; do
     case "$invalid" in

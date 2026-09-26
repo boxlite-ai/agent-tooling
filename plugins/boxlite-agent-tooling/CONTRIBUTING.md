@@ -6,12 +6,15 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | Required guidance | Canonical source |
 | --- | --- |
 | Research, design docs, PR size, splitting, stacks, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
-| Human-facing writing rules | [Writing prompt](.agents/prompts/concise-writing.md), embedded in workflow and PR guidance |
+| Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
 | PR explanations | [Description guidance](.agents/prompts/pr-description-guidance.md) |
 
-Edit shared writing rules only in the writing prompt above; other documents must
-reference or compose it. Keep task-specific requirements with their tasks, and
-regenerate consumer instructions instead of editing their generated copies.
+Reference the writing skill by name; do not copy its rules into other documents or
+hook messages. Keep task-specific requirements with their tasks, and regenerate
+consumer instructions instead of editing their generated copies.
+
+Refer to skills by name in prose and prompts, with the name as link text when useful.
+Keep file paths in link targets, tests, and diagnostics that locate a problem.
 Run `bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .` before
 submitting Markdown changes; the Writing ownership workflow runs the same gate.
 

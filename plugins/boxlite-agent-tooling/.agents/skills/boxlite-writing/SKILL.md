@@ -1,7 +1,6 @@
 ---
-name: concise-writing
-used-by: .agents/lib/concise-writing.sh, .agents/hooks/preflight-pr-review.sh, scripts/sync-guidance.sh
-description: Shared wording for all human-facing output.
+name: boxlite-writing
+description: Write or shorten human-facing replies, docs, PRs, issues, and comments using shared rules.
 ---
 
 Walls of text are forbidden. Write minimally, including prompts. Preserve evidence, risks, failures, uncertainty.

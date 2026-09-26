@@ -48,7 +48,7 @@ block_content() {
        /^<!-- agent-tooling:guidance:end -->$/ { exit } body { print }' "$1"
 }
 
-# Lint the delivered policy, including shared writing, rather than its template.
+# Lint the delivered workflow, including its skill reference.
 R="$TMP/lint"; mkrepo "$R"
 run_sync "$SYNC" "$R" >/dev/null 2> "$TMP/err"
 check_eq "canonical guidance renders" "$?" 0
@@ -74,7 +74,9 @@ else
 fi
 # Line 1 is the managed-by notice and legitimately names the tooling repo; every
 # other line must be free of repo-, path-, and toolchain-specific residue.
-leaks="$(tail -n +2 "$CANON" | grep -inE 'boxlite|imagemanager|jailer' || true)"
+# The exact shared skill identifier is portable across consumer repositories.
+# shellcheck disable=SC2016 # Match literal Markdown backticks.
+leaks="$(tail -n +2 "$CANON" | sed 's/`boxlite-writing`//g' | grep -inE 'boxlite|imagemanager|jailer' || true)"
 [[ -z "$leaks" ]] && ok "no domain names leak past the notice line" \
                   || bad "domain names leak past the notice line: $leaks"
 leaks="$(tail -n +2 "$CANON" | grep -nE '\]\(\./|/codex:|src/|`make [a-z]' || true)"
@@ -243,40 +245,34 @@ grep -q 'behind the adopted tooling revision' "$TMP/err" && ok "staleness is sym
                                                          || bad "staleness is symmetric"
 
 echo
-echo "## Shared writing edits reach consumers without changing the workflow template"
+echo "## Workflow guidance references the skill without loading its contents"
 WRITING_PLUGIN="$TMP/writing-plugin"
 cp -R "$PLUGIN_ROOT" "$WRITING_PLUGIN"
 R="$TMP/shared-writing"; mkrepo "$R"
-writing_file="$WRITING_PLUGIN/.agents/prompts/concise-writing.md"
-for version in FIRST SECOND; do
-  printf '%s shared writing rule\n' "$version" > "$writing_file"
-  run_sync "$WRITING_PLUGIN/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
-  check_eq "$version writing sync succeeds" "$?" 0
-  grep -q "$version shared writing rule" "$R/AGENTS.md" \
-    && ok "$version shared rules are delivered" || bad "$version shared rules are delivered"
-done
-literal_rule='Keep evidence & uncertainty; preserve \paths.'
-printf '%s\n' "$literal_rule" > "$writing_file"
+writing_file="$WRITING_PLUGIN/.agents/skills/boxlite-writing/SKILL.md"
+printf 'Unique writing policy marker.\n' > "$writing_file"
 run_sync "$WRITING_PLUGIN/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
-check_eq "literal writing sync succeeds" "$?" 0
-if grep -Fxq -- "$literal_rule" "$R/AGENTS.md"; then
-  ok "writing metacharacters are delivered literally"
+check_eq "skill-reference sync succeeds" "$?" 0
+if grep -qF 'boxlite-writing' "$R/AGENTS.md" \
+   && ! grep -qF 'Unique writing policy marker.' "$R/AGENTS.md"; then
+  ok "consumer instructions name the skill without copying its rules"
 else
-  bad "writing metacharacters are delivered literally"
+  bad "consumer instructions name the skill without copying its rules"
 fi
 cp "$R/AGENTS.md" "$TMP/writing-snapshot"
-for invalid in missing empty unresolved; do
-  case "$invalid" in
-    missing) rm -f "$writing_file" ;;
+for change in changed empty unresolved missing; do
+  case "$change" in
+    changed) printf 'Changed writing policy.\n' > "$writing_file" ;;
     empty) printf ' \n' > "$writing_file" ;;
     unresolved) printf '{{missing_value}}\n' > "$writing_file" ;;
+    missing) rm -f "$writing_file" ;;
   esac
   run_sync "$WRITING_PLUGIN/scripts/sync-guidance.sh" "$R" > "$TMP/out" 2> "$TMP/err"
   status=$?
-  if [[ "$status" != 0 && -s "$TMP/err" ]] && cmp -s "$R/AGENTS.md" "$TMP/writing-snapshot"; then
-    ok "$invalid writing fails before consumer changes"
+  if [[ "$status" == 0 ]] && cmp -s "$R/AGENTS.md" "$TMP/writing-snapshot"; then
+    ok "$change skill does not affect workflow synchronization"
   else
-    bad "$invalid writing fails before consumer changes (exit=$status)"
+    bad "$change skill does not affect workflow synchronization (exit=$status)"
   fi
 done
 
@@ -370,12 +366,14 @@ git -C "$PLUGIN3" add -A && git -C "$PLUGIN3" commit -qm canon
 run_sync "$PLUGIN3/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
 head -1 "$R/AGENTS.md" | grep -q -- '-dirty' && bad "a clean re-splice drops the suffix" \
                                              || ok "a clean re-splice drops the suffix"
-printf '\nShared writing changed.\n' >> "$PLUGIN3/.agents/prompts/concise-writing.md"
+printf '\nShared writing changed.\n' >> "$PLUGIN3/.agents/skills/boxlite-writing/SKILL.md"
+cp "$R/AGENTS.md" "$TMP/clean-guidance"
 run_sync "$PLUGIN3/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
-if head -1 "$R/AGENTS.md" | grep -q -- '-dirty sha256='; then
-  ok "a shared-writing-only edit also marks the stamp dirty"
+if cmp -s "$R/AGENTS.md" "$TMP/clean-guidance" \
+   && ! grep -q 'canonical guidance is modified' "$TMP/err"; then
+  ok "a skill-only edit leaves the workflow stamp unchanged"
 else
-  bad "a shared-writing-only edit also marks the stamp dirty"
+  bad "a skill-only edit leaves the workflow stamp unchanged"
 fi
 
 echo

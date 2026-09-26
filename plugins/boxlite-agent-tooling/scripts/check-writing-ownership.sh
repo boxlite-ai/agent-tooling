@@ -7,7 +7,7 @@ for dependency in git perl; do
 done
 repo_root="$(git -C "${1:-.}" rev-parse --show-toplevel)"
 plugin_root="$repo_root/plugins/boxlite-agent-tooling"
-source_relative='plugins/boxlite-agent-tooling/.agents/prompts/concise-writing.md'
+source_relative='plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md'
 bash "$plugin_root/scripts/sync-guidance.sh" --check-current "$repo_root"
 inventory="$(mktemp)"
 trap 'rm -f -- "$inventory"' EXIT
@@ -36,7 +36,10 @@ for my $sentence (split /[.!?](?:\s|\z)|\n/, $policy) {
     my @tokens = words($sentence);
     $phrases{join ' ', @tokens} = 1 if @tokens >= 5 && @tokens < 8;
 }
-die "writing ownership: canonical source contains no checkable passages\n" unless %phrases;
+unless (%phrases) {
+    print STDERR "writing ownership: canonical source contains no checkable passages\n";
+    exit 1;
+}
 my $failed = 0;
 FILE: for my $path (sort split /\0/, read_text($inventory)) {
     next unless $path =~ /\.md\z/i && $path ne $owner;
@@ -72,7 +75,7 @@ FILE: for my $path (sort split /\0/, read_text($inventory)) {
             for my $length (5 .. scalar @window) {
                 my $start = @window - $length;
                 next unless $phrases{join ' ', @window[$start .. $#window]};
-                print STDERR "$path:$lines[$start]: copied writing policy; compose or reference $owner\n";
+                print STDERR "$path:$lines[$start]: copied writing policy; reference the boxlite-writing skill\n";
                 $failed = 1;
                 next FILE;
             }
