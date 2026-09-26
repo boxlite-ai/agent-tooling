@@ -27,12 +27,11 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
 | Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
 
-The PR description contract in `CONTRIBUTING.md` requires every PR to explain how
-the change produces its intended result, using the form best suited to the PR.
-Before code is written, a 1–3 page design doc must exist; every PR must link it,
-preferably in a GitHub issue, then Notion, then a Linear issue.
-The shared workflow requires **Related work and lessons** in every design document,
-connecting precise sources and relevant constraints to design decisions.
+### Design documents
+
+Policy lives in the [shared workflow](guidance/workflow.md#workflow); registration
+and publishing steps live in [CONTRIBUTING.md](CONTRIBUTING.md#pull-request-descriptions).
+
 `scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
 provider read; the gate rechecks existence, nonempty content, and the shared
 paragraph/list limits, with a leading TL;DR under 40 words. No total-word cap applies.
@@ -60,7 +59,10 @@ match its branch and HEAD. GitHub renders the body; an exact anchor target outsi
 code must match the document. The render call is bounded to 20 seconds and 64 KiB;
 failures block publication. Hidden source URLs do not count as links. Direct API
 and browser PR writes remain outside this CLI check.
-The same hook checks PR bodies (including drafts), issue/discussion bodies, comments,
+
+### GitHub writing
+
+The PR-review hook checks PR bodies (including drafts), issue/discussion bodies, comments,
 reviews, close/reopen comments, release notes, and REST body/description fields.
 `.agents/lib/github-writing.sh` applies `.agents/lib/reply-summary.sh`'s shared
 limits: at most 120 words total, paragraphs at most 80 and list items at
@@ -81,8 +83,8 @@ before consuming PR acknowledgments. There is no automatic disclosure exception.
 This is a heuristic against accidental copies, not a provenance verifier or secret
 scanner: paraphrases, unrecognized languages, arbitrary private facts, attachments,
 and external publishing routes require separate controls. Credentials and host
-permissions are unchanged. Shared guidance requires public evidence or explicit
-authorization for the exact outgoing content and destination.
+permissions are unchanged. Disclosure policy lives in the
+[shared workflow](guidance/workflow.md#workflow).
 
 The existing shell scanner supplies literal argv without executing it. Inline bodies
 are inspectable; body files, stdin, editors, generated text and GraphQL text mutations are
@@ -93,9 +95,28 @@ comments and quoted strings and recognizes all ignored token separators.
 This is a hook on recognized `gh`
 commands, not a GitHub server policy: other clients, script files, browser edits and
 later bot additions are outside it. Writing denials never consume an acknowledgment.
-`guidance/workflow.md` carries the same writing rules into consumer instructions.
+`scripts/sync-guidance.sh` expands the single `{{concise_writing}}` slot in
+`guidance/workflow.md` with `.agents/prompts/concise-writing.md` before splicing.
+Replacement values preserve literal ampersands and backslashes.
+The hash covers rendered text; edits to either source mark the revision dirty.
+Missing, empty, or unrenderable shared writing fails before consumer files change.
+Consumer instructions contain the complete rules and need no runtime includes.
 
-The 400-line policy in `guidance/workflow.md` is enforced for supported direct
+The repository's [Writing ownership workflow](../../.github/workflows/writing-ownership.yml)
+runs `scripts/check-writing-ownership.sh` and the composition tests. The gate uses
+`sync-guidance.sh --check-current` to reject stale output; ordinary consumer
+`--check` keeps its warning behavior. It scans tracked and untracked Markdown for
+eight-word matches or complete five-to-seven-word rules from concise-writing,
+ignoring case, punctuation, and wrapping. Only verified root instruction blocks
+and fenced examples are exempt. Diagnostics name the copied passage's file and line;
+paraphrased rules remain a review responsibility. This is repository CI wiring;
+requiring its status before merge is a separate GitHub ruleset setting.
+CI permits `/usr/bin/unshare` through AppArmor and probes user/PID namespace
+creation before tests; Stop fixtures require the hook's process containment.
+
+### PR size and stacks
+
+The size policy in [the shared workflow](guidance/workflow.md#workflow) is enforced for supported direct
 `gh pr create/edit/ready` commands by `.agents/lib/pr-size.sh`. It reads GitHub's
 published comparison (additions + deletions, including tests and generated text).
 Unknown or truncated comparisons fail closed. Creation requires a published branch;
@@ -103,15 +124,14 @@ Base-changing edits, fork creation, and opaque invocations are unsupported.
 Git pushes, direct API calls, and browser writes are outside this size check;
 it is not a repository-wide enforcement boundary.
 
-Split work defaults to one tracking issue with a PR checklist, reusing an existing
-issue for the outcome. `.agents/prompts/split-pr-tracking-issue.md` supplies its body
-template: related work and lessons, design, steps, open questions, and implementation
-history. Separate issues are reserved for work needing independent tracking; splitting alone requires no
-milestone or Project. This is agent workflow guidance, not an issue-creation gate.
-Dependent slices use native GitHub stacks as described in `guidance/workflow.md`.
+The workflow owns decomposition and stack requirements; the
+[tracking-issue template](.agents/prompts/split-pr-tracking-issue.md) supplies the plan structure.
+There is no issue-creation gate.
 Stack commands are not recognized by the per-PR publication checks: agents publish
 each layer through the guarded commands, then use `gh stack link` with verified
 existing PR URLs and matching bases. This is workflow guidance, not a new hook boundary.
+
+### Timed confirmations
 
 `.agents/lib/timed-user-prompt.sh` provides the reusable three-minute confirmation
 lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-supplied
@@ -184,12 +204,16 @@ Sources: [question timeout](https://code.claude.com/docs/en/tools-reference#ques
 PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr-review-question.md`
 supplies the shared explanation check, `.agents/prompts/pr-review-ack.md` supplies both
 normal and bounded local acknowledgment instructions, `.agents/prompts/pr-description-guidance.md`
-supplies body-writing guidance, and `.agents/prompts/pr-author-review.md` supplies the
+composes shared concise-writing with PR-specific guidance, and `.agents/prompts/pr-author-review.md` supplies the
 GitHub comment. Missing, empty, or unrenderable prompts fail closed before consuming
 a local acknowledgment or publishing GitHub acknowledgment success. A local recovery
 prompt over 1200 bytes also fails closed. No embedded fallback copy is kept in Bash.
+Writing denials deliver the checker diagnostic and composed guidance directly;
+they never substitute acknowledgment recovery text for writing instructions.
 
-Git gates. They run for any process and bind only when `CLAUDECODE`, `CODEX_SANDBOX`
+### Git gates
+
+They run for any process and bind only when `CLAUDECODE`, `CODEX_SANDBOX`
 or `AGENT_GATED=1` is in the environment.
 
 | A person or agent does this | Gate | What happens |
@@ -198,6 +222,8 @@ or `AGENT_GATED=1` is in the environment.
 | The commit message is final | `.githooks/commit-msg` | Binds the audited subject, then publishes a receipt naming the commit by parent and tree. |
 | Runs `git push` | `.githooks/pre-push` | The same installation and guidance checks; spends the receipt to skip re-auditing an identical commit, otherwise audits the pushed range; arms `.agents/watch/pr-watch.sh`. |
 | Checks out, merges or rewrites | `.githooks/post-checkout`, `.githooks/post-merge`, `.githooks/post-rewrite` | `scripts/sync-installation.sh`, then the chained hook. |
+
+### Audit producers
 
 Producers for callers with no agent runtime.
 
@@ -208,6 +234,14 @@ Producers for callers with no agent runtime.
 
 An agent with a built-in spawns the auditor itself, `Task` on Claude Code and
 `collaboration.spawn_agent` on Codex, from the specs in `.claude/agents/`.
+
+Both commit/push paths render `.agents/prompts/commit-push-criteria.md` into their
+task through `subagent_prompt`; missing, empty, or unresolved criteria block dispatch.
+The native spec owns task-input validation; the task template supplies its JSON record
+and shared criteria. Verdict runners already load the full verdict spec, so their
+task template supplies only the record and refers to that spec's rules.
+
+### Author review acknowledgment
 
 GitHub events run `.github/workflows/author-review.yml` from trusted base/default-branch
 code. `scripts/pr-author-review.sh` checks dependencies and calls the single facade
@@ -334,7 +368,7 @@ than one session can share a checkout.
 - Stop gate to verdict check: after checking TL;DR, `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/preflight-verdict-check.sh`. It learns which rung decided from `VERDICT_DECISION_OUT`. Missing dependencies fail closed.
 - Mandatory summary: `.agents/lib/concise-writing.sh` checks for an ATX TL;DR heading and summary prose outside fences, quotes, and comments. Human-facing replies must start there; the entire section has at most 39 words using the shared Unicode-aware counter. Denials name the failed condition and correction; length failures report the count and limit, explaining that a peer or higher-level heading ends the section. Inspection failures remain blocked. Repeated continuations cannot bypass it. Missing Stop text falls back to a bounded transcript snapshot; unreadable or truncated snapshots fail closed. Explicitly empty reply text remains empty without replaying earlier text; verdict auditing still runs. Internal instructions and tool payloads need no summary. Sentence simplicity remains a writing instruction.
 - Enforcement scope: Stop checks the final reply after generation; it cannot retract streamed commentary. GitHub checks cover recognized CLI calls, not browser or connector writes. Design checks cover fetched GitHub, Linear, and Notion content; native Notion headings retain their structure. Shared guidance applies to every human-facing output across these surfaces.
-- Shared writing prompt: `.agents/prompts/concise-writing.md` is loaded through `subagent_prompt` for Stop and GitHub reminders. `{{max_words}}` remains the 60-word follow-up budget; TL;DR itself stays under 40 words. Dense paragraphs over 80 words or list items over 40 still trigger shortening. A broken prompt reports stderr without recording an ask or changing the verdict result; it cannot bypass the independent TL;DR check.
+- Shared writing prompt: `.agents/prompts/concise-writing.md` is loaded through `subagent_prompt` for Stop, GitHub reminders, PR guidance, and generated workflow instructions. Its static shortening budget is not a general document limit. Dense paragraphs over 80 words or list items over 40 still trigger shortening. At Stop, a broken prompt reports stderr without recording an ask or changing the verdict result; it cannot bypass the independent TL;DR check.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`. One refresh runs at a time, held by `.git/agent-tooling/.refresh.lock` (`scripts/refresh-installation.sh:31`), and a refresh that finds it held skips. Breaking that lock would race its holder, so one left behind by a killed run is reported rather than cleared: `scripts/verify-installation.sh:22`, which every commit and push runs, names it once it is an hour old. Without that, the automatic refresh is dead and only a log nobody reads would say so.
 
 - Offline installation repair: `templates/install.sh` routes the recorded cache through
@@ -428,7 +462,7 @@ non-blocking `advisories`, which never decide the verdict.
 - **blind-allow**: the rung under which a turn ends unjudged because the gate could not read its text.
 - **hold**: `.agent-tooling/hold`, one full lowercase SHA that freezes adoption; a malformed hold fails closed.
 - **tooling.ref**: the branch or tag consumers float on; the validated revision they run is recorded in `.git/agent-tooling/current`.
-- **guidance block**: the hash-marked splice of `guidance/workflow.md` into a consumer's `AGENTS.md`; missing or edited fails the gates, behind only warns.
+- **guidance block**: the hash-marked rendered workflow and shared writing prompt in a consumer's `AGENTS.md`; missing or edited fails the gates, behind only warns.
 - **twins**: `hooks/hooks.json` and `hooks/codex-hooks.json`, behaviourally identical except `asyncRewake` against `async` and the events only one host has.
 - **watch**: one run of `.agents/watch/pr-watch.sh` after a push, streaming CI and PR events as JSON lines under one watch id.
 - **wake**: the turn Claude Code starts when an `asyncRewake` hook exits 2; its prompt carries the hook's stderr in a reminder after the host's envelope, and it is internal only while its one-time nonce is unspent.
@@ -446,7 +480,7 @@ hooks/                  the twin host hook manifests
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
-guidance/workflow.md    the canonical guidance spliced into consumers
+guidance/workflow.md    workflow template composed with concise-writing for consumers
 host-parity.test.sh     what keeps the three hosts loading the same assets
 architecture.test.sh    what keeps this map honest
 ```

@@ -58,7 +58,7 @@ For each stable finding ID, state:
 2. which assumption went unverified and why;
 3. which repository rule was violated;
 4. which cheap check would have caught it;
-5. which revision or hunk introduced it, or `unknown` without evidence.
+5. which revision, hunk, or `fix_attempt_id` introduced it, or `unknown` without evidence.
 
 Name each per-finding failure class. Add a shared pattern only with evidence.
 
@@ -71,8 +71,8 @@ Run all four checks before changing production code:
 4. **Variants:** enumerate every covered type’s destructor, serializer, and contract.
 
 At two or more occurrences, require the cheapest repository-specific executable
-preflight with positive/negative fixtures until installed. Otherwise require
-revision-bound evidence.
+preflight with positive/negative fixtures before changing production code; keep the
+obligation active until installed. Otherwise require revision-bound evidence.
 
 ## Reproduce, fix, and verify
 

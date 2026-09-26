@@ -1,20 +1,11 @@
 ---
 name: concise-writing
-used-by: .agents/lib/concise-writing.sh
-placeholders: max_words
+used-by: .agents/lib/concise-writing.sh, .agents/hooks/preflight-pr-review.sh, scripts/sync-guidance.sh
 description: Shared wording for all human-facing output.
 ---
 
-Every human-facing output must include a `## TL;DR` section containing one simple sentence, as short as possible.
-This includes replies, progress updates, design docs, PR descriptions, GitHub comments, reviews, issues, and release notes.
-Never skip TL;DR because the output is already concise.
-For replies, put TL;DR at the beginning and keep the entire section under 40 words.
+Walls of text are forbidden. Write minimally, including prompts. Preserve evidence, risks, failures, uncertainty.
 
-Walls of text are forbidden. Prefer: visuals > tables > bullets > prose (under {{max_words}} words; 120 for complex topics).
+Every human-facing output: `## TL;DR` (one simple sentence; section <40 words); first in replies/designs.
 
-Always include a brief real example when it helps the user understand.
-
-Public artifacts require public evidence or explicitly authorized material. Never
-include private messages, memory citations, internal context, or paraphrases without
-disclosure permission for that exact content and destination. A check passing is not
-disclosure approval.
+Prefer: visuals > tables > bullets > prose (under 40 words; 120 for complex topics); Always include a brief real example when it helps the user understand.

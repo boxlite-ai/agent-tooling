@@ -379,6 +379,7 @@ echo "## Model-visible prompts and specs have explicit size ceilings"
 # clarification from silently rebuilding the multi-thousand-word payload this suite
 # reduced; both word and byte bounds make the budget resistant to formatting tricks.
 for budget in \
+  '.agents/prompts/commit-push-criteria.md:100:900' \
   '.agents/prompts/commit-push-runner.md:280:1900' \
   '.agents/prompts/commit-push-task.md:140:1100' \
   '.agents/prompts/verdict-runner.md:110:850' \
@@ -420,15 +421,20 @@ static_precedes_dynamic() {  # description, rendered prompt, static probe, dynam
     bad "$description (static=${static_line:-missing} dynamic=${dynamic_line:-missing})"
   fi
 }
+# Host-fixture subshells above do not change this suite's plugin root.
+# shellcheck disable=SC2031
+audit_criteria="$(subagent_prompt commit-push-criteria "$PLUGIN_ROOT")"
 commit_runner_rendered="$(subagent_prompt commit-push-runner "$PLUGIN_ROOT" \
+  "audit_criteria=$audit_criteria" \
   'command_json={"marker":"DYNAMIC_COMMIT_RUNNER"}' head=h diff_hash=d \
   command_hash=c commit_subject_hash=s audit_context=DYNAMIC_COMMIT_CONTEXT)"
 static_precedes_dynamic "commit runner keeps reusable policy before run data" \
   "$commit_runner_rendered" 'findings: []' DYNAMIC_COMMIT_RUNNER
 commit_task_rendered="$(subagent_prompt commit-push-task "$PLUGIN_ROOT" \
+  "audit_criteria=$audit_criteria" \
   'task_input_json={"marker":"DYNAMIC_COMMIT_TASK"}')"
 static_precedes_dynamic "commit task keeps reusable policy before run data" \
-  "$commit_task_rendered" 'Follow the auditor spec' DYNAMIC_COMMIT_TASK
+  "$commit_task_rendered" 'findings: []' DYNAMIC_COMMIT_TASK
 # verdict-runner is the only verdict prompt. The Stop gate runs its auditor
 # synchronously rather than emitting a spawn instruction, so the task-prompt twin it
 # used to pair with is gone; the byte-identical-body check that compared the two went
@@ -436,7 +442,7 @@ static_precedes_dynamic "commit task keeps reusable policy before run data" \
 verdict_rendered="$(subagent_prompt verdict-runner "$PLUGIN_ROOT" \
   'task_input_json={"marker":"DYNAMIC_VERDICT_TASK"}')"
 static_precedes_dynamic "verdict-runner keeps reusable policy before run data" \
-  "$verdict_rendered" 'bind `generation` exactly' DYNAMIC_VERDICT_TASK
+  "$verdict_rendered" 'dossier bindings' DYNAMIC_VERDICT_TASK
 
 model_documents="$(cat \
   "$PLUGIN_ROOT"/.agents/prompts/*.md \
@@ -473,8 +479,7 @@ check    "substitutes a placeholder"        "Hello world"  "$out"
 check    "substitutes every occurrence"     "twice: world" "$out"
 check_no "frontmatter never reaches output" "placeholders:" "$out"
 
-# Values are branch names, paths and commit text. sed would choke on & and \1; bash
-# string replacement does not, and nothing here is ever eval'd.
+# Replacements preserve shell metacharacters across Bash versions.
 out="$(subagent_prompt t "$TMP" 'who=a&b\1$(touch '"$TMP"'/PWNED)')"
 check "passes shell/sed metacharacters through as text" 'a&b\1$(touch' "$out"
 [ -e "$TMP/PWNED" ] && bad "a substituted value cannot execute" || ok "a substituted value cannot execute"

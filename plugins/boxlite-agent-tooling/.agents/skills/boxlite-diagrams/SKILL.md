@@ -33,13 +33,8 @@ asked.
 
 ## Split a big topic
 
-Every diagram must fit 1600×900 (validated). Shape decides, not node count:
-
-| Diagram | Renders | |
-| --- | --- | --- |
-| 20 nodes, top-down chain | 148×1946 | too tall |
-| 12 nodes, fanned out | 1879×164 | too wide |
-| 16 nodes, zoned | 1504×562 | fits |
+Every diagram must fit 1600×900 (validated). Shape decides, not node count;
+see the [measured examples](references/architecture-composition.md#fit-a-laptop-screen).
 
 Draw one diagram. Split only when its own honest view at its altitude cannot fit or
 mixes altitudes — then test each child the same way, so depth follows the subject:

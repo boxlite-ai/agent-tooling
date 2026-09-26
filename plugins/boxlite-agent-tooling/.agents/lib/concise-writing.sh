@@ -74,7 +74,7 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
 
 concise_writing_prompt() { # tooling-root
   local prompt
-  prompt="$(subagent_prompt concise-writing "$1" max_words=60)" || return $?
+  prompt="$(subagent_prompt concise-writing "$1")" || return $?
   if [[ "$prompt" != *[![:space:]]* ]]; then
     printf 'concise-writing: empty prompt: %s/.agents/prompts/concise-writing.md\n' "$1" >&2
     return 1

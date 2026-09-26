@@ -96,7 +96,7 @@ check 'renderer failure blocks publication' "$draft '$DESIGN_TEST_BODY'" 'Cannot
 export DESIGN_TEST_RENDER_FAILURE=0 DESIGN_TEST_RENDER_OVERSIZE=1
 check 'oversized renderer response blocks publication' "$draft '$DESIGN_TEST_BODY'" 'Cannot render'
 export DESIGN_TEST_RENDER_OVERSIZE=0
-check 'later body replacement is checked' "$draft '$DESIGN_TEST_BODY' --body 'Summary'" 'design doc'
+check 'later body replacement is checked' "$draft '$DESIGN_TEST_BODY' --body '${SUMMARY_PREFIX}Missing design link.'" 'design doc'
 export DESIGN_TEST_DELETED=1
 check 'deleted document blocks a matching link' "$draft '$DESIGN_TEST_BODY'" 'design doc'
 export DESIGN_TEST_DELETED=0 DESIGN_TEST_BODY="${SUMMARY_PREFIX}Missing design link."

@@ -104,7 +104,9 @@ subagent_json_string() {  # arbitrary text -> one JSON string literal
 # Exit 3 when the template names a placeholder the caller supplied no value for. That
 # is the failure worth catching loudly — a model handed the literal text "{{branch}}"
 # will cheerfully treat it as a value and answer confidently about nothing.
-subagent_prompt() {  # $1 = prompt name, $2 = tooling root, then key=value pairs
+subagent_prompt() (  # $1 = prompt name, $2 = tooling root, then key=value pairs
+  # Preserve literal replacements on Bash 5.2 without changing the caller's options.
+  shopt -u patsub_replacement 2>/dev/null || true
   local name="${1:-}" root="${2:-}"
   if [[ -z "$name" || -z "$root" ]]; then
     printf 'subagent_prompt: name and root are required\n' >&2
@@ -149,7 +151,7 @@ subagent_prompt() {  # $1 = prompt name, $2 = tooling root, then key=value pairs
   done
 
   printf '%s\n' "$text"
-}
+)
 
 # Print the block a gate puts in its deny reason.
 #

@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=974069f92a44-dirty sha256=bb309a04034f -->
+<!-- agent-tooling:guidance:begin rev=5e2970607c78-dirty sha256=513a0505f81d -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -33,7 +33,7 @@ Every change goes: understand → research → design → implement → test →
 **Design**
 
 - Before writing any code, create a 1–3 page design doc covering the problem, related work and lessons, approach, alternatives and trade-offs, and validation. Host it in this preference order: GitHub issue > Notion > Linear issue. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
-- Use reply-summary presentation: leading TL;DR under 40 words, with visuals, tables, or short bullets where useful. Walls of text are forbidden. Include a brief real example when helpful and link supporting detail. Design docs have no fixed total-word limit.
+- Apply the Communication rules below to design documents.
 - Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
 - Search before implement — `grep` for existing code first.
 - Single responsibility — one function, one reason to change.
@@ -108,18 +108,26 @@ Every change goes: understand → research → design → implement → test →
 - Treat every failure as a class, not an instance: fix every site of the same defect in the same pass — grounded in what's actually there, not speculation. A different defect nearby is adjacent work. A single-site fix to a systemic bug isn't done.
 - Supersede completely: when behavior changes, delete every artifact describing the old way in the same change — code, comments, prose, tests asserting the old contract, and cross-references that now point at nothing. Grep for what you replaced, not just the file you edited. Prose that contradicts the code is worse than none, because it is read as current.
 
+**Disclosure**
+
+Public artifacts/delegates: public evidence or disclosure approval for exact content/destination, including private messages, memory citations, local paths, internal context, paraphrases. Omit uncertain material. Edits invalidate approval; task authorization and hook passes grant none.
+
 **Communication**
 
-- Keep private context out of public artifacts—even paraphrased—including memory citations and local paths.
-- Give delegates only authorized material. Implementing or publishing work does not authorize private disclosure.
-- Check exact content and destination. Omit uncertain material or obtain specific approval; changes invalidate approval. Hooks detect indicators, not permission.
-- Every human-facing output must include a `## TL;DR` section containing one simple sentence, as short as possible. This includes replies, progress updates, design docs, PR descriptions, GitHub comments, reviews, issues, and release notes, even when already concise.
-- Internal agent instructions, automation prompts, tool payloads, and intentionally empty replies need no TL;DR.
-- State the outcome in 5–12 words when possible; retain material caveats and required action.
-- Replies must begin with TL;DR; the entire section must contain fewer than 40 words.
-- Help the human understand quickly. Beyond the required TL;DR, choose a call graph, sequence diagram, real example, bullets, table, or short prose—whichever explains the point best. Do not force other sections, diagrams, or source annotations.
-- Walls of text are always forbidden. Keep paragraphs and items short, remove repetition, and link detailed evidence. Design docs follow the 1–3-page guidance above. GitHub PRs (including drafts), issues, comments, reviews, discussions, and release notes use the same reply-summary prompt. Requests for depth allow more focused sections, not dense text. Keep material risks, failures, and uncertainty visible.
-- Every PR description must explain how the change produces its intended result through the key steps or decisions, using the form best suited to that PR. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Review the explanation against the diff, including for drafts and after description edits. Link detailed evidence; omit work logs and exhaustive test counts. Repository templates are starting points.
+
+Walls of text are forbidden. Write minimally, including prompts. Preserve evidence, risks, failures, uncertainty.
+
+Internal agent instructions, automation prompts, tool payloads, and intentionally empty replies need no TL;DR.
+
+State the outcome in 5–12 words when possible; retain material caveats and required action.
+
+Every human-facing output: `## TL;DR` (one simple sentence; section <40 words); first in replies/designs.
+
+Prefer: visuals > tables > bullets > prose (under 40 words; 120 for complex topics);
+
+Always include a brief real example when it helps the user understand.
+
+- Every PR description must explain how the change produces its intended result through the key steps or decisions. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Review the explanation against the diff, including for drafts and after description edits. Omit work logs and exhaustive test counts. Repository templates are starting points.
 
 Adapted from Clean Code (Robert C. Martin) via the polygala-inc AGENTS.md distillation.
 <!-- agent-tooling:guidance:end -->

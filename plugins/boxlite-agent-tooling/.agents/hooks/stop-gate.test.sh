@@ -146,7 +146,7 @@ decision_of() {
 expected_request="$(
   # shellcheck source=../lib/subagent.sh
   source "$REPO_ROOT/.agents/lib/subagent.sh"
-  subagent_prompt concise-writing "$REPO_ROOT" max_words=60
+  subagent_prompt concise-writing "$REPO_ROOT"
 )"
 asked_as_context() {
   [[ "$(field "$1" '.hookSpecificOutput.hookEventName')" == Stop \
@@ -654,11 +654,11 @@ for host in claude codex; do
   else
     prompt_field='.reason'
   fi
-  printf '%s: summarize in {{max_words}} words.\n' "$host" > "$prompt_file"
+  printf '%s: summarize in 40 words.\n' "$host" > "$prompt_file"
   S="prompt-$host"; R="$(new_repo "$S")"
   append_assistant "$R" "$long_reply"
   out="$(gate_stop "$R" "$S" false "$long_reply" NO "$host")"
-  [[ "$(field "$out" "$prompt_field")" == "$host: summarize in 60 words." ]] \
+  [[ "$(field "$out" "$prompt_field")" == "$host: summarize in 40 words." ]] \
     && keeps_triage_note "$out" || edits_status=1
   for operation in 'pr comment 7' 'pr create --title "feat: share prompt"'; do
     github_output="$(jq -nc --arg command "gh $operation --body '$long_reply'" \
@@ -666,7 +666,7 @@ for host in claude codex; do
       | bash "$prompt_fixture/plugin copy/.agents/hooks/preflight-pr-review.sh")"
     github_reason="$(field "$github_output" '.hookSpecificOutput.permissionDecisionReason')"
     [[ "$(field "$github_output" '.hookSpecificOutput.permissionDecision')" == deny \
-       && "${github_reason#*$'\n\n'}" == "$host: summarize in 60 words." ]] || edits_status=1
+       && "${github_reason#*$'\n\n'}" == "$host: summarize in 40 words." ]] || edits_status=1
   done
   rm -rf "$R"
 done

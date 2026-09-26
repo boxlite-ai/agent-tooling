@@ -145,6 +145,7 @@ schema intact; Codex requires project trust and command-hook approval via `/hook
 ## Validate
 
 ```sh
+bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .
 bash plugins/boxlite-agent-tooling/host-parity.test.sh
 bash plugins/boxlite-agent-tooling/architecture.test.sh
 claude plugin validate plugins/boxlite-agent-tooling
@@ -161,15 +162,7 @@ plugins/boxlite-agent-tooling/scripts/setup.sh /path/to/consumer
 
 ## Author review acknowledgment
 
-The PR author acknowledges reading the current diff by posting a new comment:
-
-```text
-/reviewed 0123456789abcdef0123456789abcdef01234567
-```
-
-Use the full head SHA from the bot's comment. Once `Author reviewed the PR` passes,
-click **Ready for review**. New commits or edits/deletion of the acknowledgment
-return the PR to draft and require a fresh comment.
+PR authors: follow the [acknowledgment steps](plugins/boxlite-agent-tooling/CONTRIBUTING.md#author-review-acknowledgment).
 
 For consumers:
 

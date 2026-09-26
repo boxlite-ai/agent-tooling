@@ -1232,6 +1232,43 @@ else
   fail=$((fail + 1)); printf '  FAIL  blocked commit task is self-contained without parent history\n'
 fi
 
+criteria_file="$BOTH_REPO/.agents/prompts/commit-push-criteria.md"
+for criteria_version in FIRST SECOND; do
+  printf 'Shared criteria %s\n' "$criteria_version" > "$criteria_file"
+  criteria_task="$(task_text_from_reason "$(both_reason "")")"
+  if [[ "$criteria_task" == *"Shared criteria $criteria_version"* ]]; then
+    pass=$((pass + 1)); printf '  PASS  native audit reloads shared criteria %s\n' "$criteria_version"
+  else
+    fail=$((fail + 1)); printf '  FAIL  native audit omitted shared criteria %s\n' "$criteria_version"
+  fi
+done
+for criteria_state in empty missing unresolved; do
+  case "$criteria_state" in
+    empty) : > "$criteria_file" ;;
+    missing) rm -f "$criteria_file" ;;
+    unresolved) printf '{{unsupplied}}\n' > "$criteria_file" ;;
+  esac
+  criteria_status=0
+  criteria_output="$(printf '%s' '{"tool_input":{"command":"git commit -m test"}}' \
+    | (cd "$BOTH_REPO" && CLAUDE_PROJECT_DIR="$BOTH_REPO" bash .agents/hooks/preflight-commit-push.sh) \
+    2>"$TMP/criteria.err")" || criteria_status=$?
+  if [[ "$criteria_status" == 2 && -z "$criteria_output" ]] \
+     && grep -q 'commit-push-criteria' "$TMP/criteria.err"; then
+    pass=$((pass + 1)); printf '  PASS  native audit blocks %s criteria before dispatch\n' "$criteria_state"
+  else
+    fail=$((fail + 1)); printf '  FAIL  native audit accepted %s criteria\n' "$criteria_state"
+  fi
+done
+cp "$REPO_ROOT/.agents/prompts/commit-push-criteria.md" "$criteria_file"
+
+criteria_command="git commit -m 'test: {{audit_criteria}}'"
+criteria_task="$(task_text_from_reason "$(reason_for_repo "$BOTH_REPO" "$criteria_command")")"
+if [[ "$(task_record_from_text "$criteria_task" | jq -r .target_command)" == "$criteria_command" ]]; then
+  pass=$((pass + 1)); printf '  PASS  criteria placeholder inside task data stays literal\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  criteria substitution modified task data\n'
+fi
+
 # Filesystem paths may legally contain newlines. The native task must preserve the
 # exact path inside its one JSON record without turning the following bytes into a
 # second model instruction anywhere in the denial text.

@@ -253,23 +253,6 @@ actual-tree check succeeds. Commit them atomically with the accepted reviewer re
 On any rejection—including surface expansion—discard them all; no phantom ID or
 sequence advancement may survive.
 
-Accept a response only while its request ID is pending and every later ledger generation
-is a contiguous parent-bound subordinate adjudication transition with a valid chain
-digest and consumed single-use ID. First safely recapture actual HEAD, canonical status,
-every review-item digest, adjacent-contract version, protected objective/authority
-artifacts, ordered instruction/spec records, both change-contract digests, `surface_fingerprint`, and
-`review_target_digest`; each must match the root and pending request, with no unrelated
-dirty entry or newly applicable external binding. An instruction/spec source changed
-inside the intended surface remains review output, not adopted authority. Changed
-intent requires rebaseline; other drift consumes/rejects the request as `binding`.
-Generation equality alone cannot
-detect an external tree write. Atomically
-consume that ID and append an immutable
-entry plus its provisional allocations to `reviewer_receipts` at
-`accepted_generation`, exactly the next generation; a
-consumed or absent ID is `INPUT_ERROR`. For any invalid response or failed class
-adjudication, atomically consume the pending ID instead into
-`review_request_rejections` at `rejected_generation`, exactly the next generation, and
-return `INPUT_ERROR`; a retry requires a fresh request ID. Later fix attempts validate the stored receipt
-ID, accepted request, reviewed-after-attempt value, and fingerprints—not equality with
-the now-newer ledger generation.
+Read and apply the ledger's [receipt acceptance protocol](iteration-ledger.md#independent-reviewer-receipt)
+before accepting or rejecting the normalized result. It owns pending-request and
+generation checks, actual-tree recapture, atomic consumption, rejection, and retry.

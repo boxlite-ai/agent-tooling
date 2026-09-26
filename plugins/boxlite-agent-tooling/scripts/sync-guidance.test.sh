@@ -16,7 +16,6 @@ set -uo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SYNC="$PLUGIN_ROOT/scripts/sync-guidance.sh"
-CANON="$PLUGIN_ROOT/guidance/workflow.md"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf -- "$TMP"' EXIT
 
@@ -44,6 +43,17 @@ mkrepo() {  # $1 = directory
 
 marker_sha() { head -n1 "$1" | sed -E 's/.* sha256=([0-9a-f]{12}) -->$/\1/'; }
 canon_sha12() { shasum -a 256 "$1" | awk '{print substr($1, 1, 12)}'; }
+block_content() {
+  awk '/^<!-- agent-tooling:guidance:begin / { getline; body=1; next }
+       /^<!-- agent-tooling:guidance:end -->$/ { exit } body { print }' "$1"
+}
+
+# Lint the delivered policy, including shared writing, rather than its template.
+R="$TMP/lint"; mkrepo "$R"
+run_sync "$SYNC" "$R" >/dev/null 2> "$TMP/err"
+check_eq "canonical guidance renders" "$?" 0
+CANON="$TMP/rendered-workflow.md"
+block_content "$R/AGENTS.md" > "$CANON"
 
 echo "## The canonical document is small and domain-neutral"
 lines="$(wc -l < "$CANON" | tr -d ' ')"
@@ -217,18 +227,62 @@ run_sync "$PLUGIN2/scripts/sync-guidance.sh" --check "$R" >/dev/null 2> "$TMP/er
 check_eq "newer revision's check still exits 0" "$?" 0
 grep -q 'behind the adopted tooling revision' "$TMP/err" && ok "newer revision warns stale" \
                                                         || bad "newer revision warns stale"
+run_sync "$PLUGIN2/scripts/sync-guidance.sh" --check-current "$R" >/dev/null 2> "$TMP/err"
+check_eq "repository check rejects stale guidance" "$?" 1
 run_sync "$PLUGIN2/scripts/sync-guidance.sh" "$R" > "$TMP/out" 2>/dev/null
 check_eq "newer revision splices" "$?" 0
+run_sync "$PLUGIN2/scripts/sync-guidance.sh" --check-current "$R" >/dev/null 2> "$TMP/err"
+check_eq "repository check accepts current guidance" "$?" 0
 grep -q 'Extra shared rule for this test' "$R/AGENTS.md" && ok "block carries the new text" \
                                                          || bad "block carries the new text"
-check_eq "marker hash follows the new content" "$(marker_sha "$R/AGENTS.md")" "$(canon_sha12 "$PLUGIN2/guidance/workflow.md")"
+block_content "$R/AGENTS.md" > "$TMP/rendered-new.md"
+check_eq "marker hash follows the delivered content" "$(marker_sha "$R/AGENTS.md")" "$(canon_sha12 "$TMP/rendered-new.md")"
 run_sync "$SYNC" --check "$R" >/dev/null 2> "$TMP/err"
 check_eq "old revision now sees it as stale, not broken" "$?" 0
 grep -q 'behind the adopted tooling revision' "$TMP/err" && ok "staleness is symmetric" \
                                                          || bad "staleness is symmetric"
 
 echo
+echo "## Shared writing edits reach consumers without changing the workflow template"
+WRITING_PLUGIN="$TMP/writing-plugin"
+cp -R "$PLUGIN_ROOT" "$WRITING_PLUGIN"
+R="$TMP/shared-writing"; mkrepo "$R"
+writing_file="$WRITING_PLUGIN/.agents/prompts/concise-writing.md"
+for version in FIRST SECOND; do
+  printf '%s shared writing rule\n' "$version" > "$writing_file"
+  run_sync "$WRITING_PLUGIN/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
+  check_eq "$version writing sync succeeds" "$?" 0
+  grep -q "$version shared writing rule" "$R/AGENTS.md" \
+    && ok "$version shared rules are delivered" || bad "$version shared rules are delivered"
+done
+literal_rule='Keep evidence & uncertainty; preserve \paths.'
+printf '%s\n' "$literal_rule" > "$writing_file"
+run_sync "$WRITING_PLUGIN/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
+check_eq "literal writing sync succeeds" "$?" 0
+if grep -Fxq -- "$literal_rule" "$R/AGENTS.md"; then
+  ok "writing metacharacters are delivered literally"
+else
+  bad "writing metacharacters are delivered literally"
+fi
+cp "$R/AGENTS.md" "$TMP/writing-snapshot"
+for invalid in missing empty unresolved; do
+  case "$invalid" in
+    missing) rm -f "$writing_file" ;;
+    empty) printf ' \n' > "$writing_file" ;;
+    unresolved) printf '{{missing_value}}\n' > "$writing_file" ;;
+  esac
+  run_sync "$WRITING_PLUGIN/scripts/sync-guidance.sh" "$R" > "$TMP/out" 2> "$TMP/err"
+  status=$?
+  if [[ "$status" != 0 && -s "$TMP/err" ]] && cmp -s "$R/AGENTS.md" "$TMP/writing-snapshot"; then
+    ok "$invalid writing fails before consumer changes"
+  else
+    bad "$invalid writing fails before consumer changes (exit=$status)"
+  fi
+done
+
+echo
 echo "## Uncommitted consumer edits are never entangled with a splice"
+R="$TMP/stale"
 git -C "$R" add -A && git -C "$R" commit -qm adopt-plugin2
 printf 'domain note\n' >> "$R/AGENTS.md"   # tracked file, now dirty, outside the block
 printf -- '- Second extra rule.\n' >> "$PLUGIN2/guidance/workflow.md"
@@ -291,8 +345,8 @@ check_eq "still no block written" "$(grep -c '^<!-- agent-tooling:guidance:begin
 
 echo
 echo "## A splice from a modified canonical says so in the stamp"
-# The stamp is only useful if `git show <rev>:guidance/workflow.md` reproduces the
-# block. Splicing from a working tree whose canonical is modified would name a
+# The stamp is only useful if the revision's sources reproduce the block.
+# Splicing from a working tree whose canonical is modified would name a
 # revision that never held the text — the exact way a misleading stamp reached a
 # consumer during the first rollout.
 PLUGIN3="$TMP/plugin3"
@@ -316,6 +370,13 @@ git -C "$PLUGIN3" add -A && git -C "$PLUGIN3" commit -qm canon
 run_sync "$PLUGIN3/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
 head -1 "$R/AGENTS.md" | grep -q -- '-dirty' && bad "a clean re-splice drops the suffix" \
                                              || ok "a clean re-splice drops the suffix"
+printf '\nShared writing changed.\n' >> "$PLUGIN3/.agents/prompts/concise-writing.md"
+run_sync "$PLUGIN3/scripts/sync-guidance.sh" "$R" >/dev/null 2> "$TMP/err"
+if head -1 "$R/AGENTS.md" | grep -q -- '-dirty sha256='; then
+  ok "a shared-writing-only edit also marks the stamp dirty"
+else
+  bad "a shared-writing-only edit also marks the stamp dirty"
+fi
 
 echo
 echo "## A hand-edited block fails closed until forced"

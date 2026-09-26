@@ -67,6 +67,12 @@ load_writing_policy() {
   writing_loaded=1
 }
 
+deny_writing() { # bounded checker diagnostic plus shared prompt text
+  jq -nc --arg reason "$1" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+  exit 0
+}
+
 inspect_github_writing() { # first gh argument index, literal context (default 1)
   local start="$1" cursor="$1" literal="${2:-1}" reason
   load_writing_policy
@@ -1502,11 +1508,9 @@ if [[ -n "$writing_error" ]]; then
   # shellcheck source=../lib/subagent.sh
   source "$tooling_root/.agents/lib/subagent.sh"
   writing_guidance="$(concise_writing_prompt "$tooling_root")" || exit 2
-  jq -nc --arg reason "$writing_error
+  deny_writing "$writing_error
 
-$writing_guidance" \
-    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
-  exit 0
+$writing_guidance"
 fi
 
 (( protected_count > 0 || opaque_protected_count > 0 )) || exit 0
@@ -1579,7 +1583,9 @@ load_review_prompt() { # prompt name, tooling root, optional key=value pairs
 # normal denials and long-ref recovery, so the review question cannot drift out of one.
 review_question="$(load_review_prompt pr-review-question "$tooling_root")" || exit 2
 load_writing_policy
-description_guidance="$(load_review_prompt pr-description-guidance "$tooling_root")" || exit 2
+writing_guidance="$(concise_writing_prompt "$tooling_root")" || exit 2
+description_guidance="$(load_review_prompt pr-description-guidance "$tooling_root" \
+  "concise_writing=$writing_guidance")" || exit 2
 ack_instruction="$(load_review_prompt pr-review-ack "$tooling_root" \
   "review_question=$review_question" "context= for gh pr $subcmd; bind $branch@$head")" || exit 2
 bounded_ack_recovery="$(load_review_prompt pr-review-ack "$tooling_root" \
@@ -1743,11 +1749,11 @@ while (( body_index < protected_body_count )); do
   pr_body="${protected_body_values[$body_index]}"
   if ! body_error="$(github_writing_check_body "$pr_body")"; then
     if [[ "$pr_body" != *[![:space:]]* ]]; then
-      deny "$body_error
+      deny_writing "$body_error
 ${description_guidance}"
     fi
     writing_guidance="$(concise_writing_prompt "$tooling_root")" || exit 2
-    deny "$body_error
+    deny_writing "$body_error
 
 $writing_guidance"
   fi
