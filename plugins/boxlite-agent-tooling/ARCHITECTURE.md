@@ -485,7 +485,7 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         clean-code, shell-engineering, boxlite-visualize, boxlite-examples, adversarial-iteration
+.agents/skills/         boxlite-coding, shell-engineering, boxlite-visualize, boxlite-examples, adversarial-iteration
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
@@ -499,7 +499,8 @@ paths; for example, "Use boxlite-visualize to show the cloud deployment architec
 The skill produces `diagram.md` and `evidence.json`, then validates rendering, fit,
 and source traceability into `validation.json` before visual inspection.
 
-The `clean-code` skill is a portable Markdown guide for implementation, refactoring,
-and maintainability review. The existing `skills/` symlink exposes it to plugin
-hosts; copying its directory also works without plugin scripts. It preserves the
-receiving repository's workflow and permission boundaries.
+The `boxlite-coding` skill has a short entry point with optional references for
+coding decisions, refactoring cases, and first-edition Clean Code sources. The
+existing `skills/` symlink exposes it to plugin hosts; standalone sharing copies
+the complete directory, including references, without plugin scripts. It preserves
+the receiving repository's workflow and permission boundaries.

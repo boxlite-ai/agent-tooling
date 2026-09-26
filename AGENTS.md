@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=0f52d00af42b-dirty sha256=40558dcb41f8 -->
+<!-- agent-tooling:guidance:begin rev=5cc376dcb383-dirty sha256=9891d0f4698d -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -125,5 +125,5 @@ Prefer: visuals > tables > bullets > prose (under 40 words; 120 for complex topi
 
 - Review each PR's required explanation against the diff, including drafts and description edits. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Omit work logs and exhaustive test counts. Repository templates are starting points.
 
-See the `clean-code` skill for implementation and review guidance.
+See the `boxlite-coding` skill for implementation and review guidance.
 <!-- agent-tooling:guidance:end -->

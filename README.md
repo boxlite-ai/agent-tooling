@@ -11,20 +11,22 @@ agents, lifecycle hooks, Git gates, and PR watchers. Copilot installation is unt
 | [Contributing](plugins/boxlite-agent-tooling/CONTRIBUTING.md) | Design docs, small PRs, and review acknowledgment |
 | [Shared workflow](plugins/boxlite-agent-tooling/guidance/workflow.md) | Engineering guidance synced into consumer instructions |
 
-## Clean Code skill
+## BoxLite Coding skill
 
-Use [clean-code](plugins/boxlite-agent-tooling/.agents/skills/clean-code/SKILL.md)
+Use [boxlite-coding](plugins/boxlite-agent-tooling/.agents/skills/boxlite-coding/SKILL.md)
 to apply the engineering principles during implementation, refactoring, or review.
 It connects concrete maintainability problems to small changes while preserving
 contracts, resource ownership, and the receiving project's conventions.
 
-Try: "Use clean-code to review this module's error handling without editing it."
+Try: "Use boxlite-coding to review this module's error handling without editing it."
 
 The plugin exposes the skill through its existing shared skills directory.
-For standalone sharing, copy the entire `clean-code` directory into a skill
-location supported by your agent. It contains one self-contained `SKILL.md`, with
-no helper scripts or plugin dependencies. Repository workflow rules remain in
-`AGENTS.md`; the skill supplies focused engineering guidance.
+For standalone sharing, copy the entire `boxlite-coding` directory into a skill
+location supported by your agent, including its `references/` directory. The short
+entry point links decision criteria, refactoring cases, and a
+[first-edition source map](plugins/boxlite-agent-tooling/.agents/skills/boxlite-coding/references/book-map.md).
+There are no helper scripts or plugin dependencies. Repository workflow rules
+remain in `AGENTS.md`; the skill supplies focused engineering guidance.
 
 ## Example-led explanations
 
