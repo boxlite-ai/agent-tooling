@@ -255,8 +255,10 @@ GitHub events run `.github/workflows/author-review.yml` from trusted base/defaul
 code. `scripts/pr-author-review.sh` checks dependencies and calls the single facade
 `pr_author_review_run` in `.agents/lib/pr-author-review.sh`. This gate is independent of
 all local hooks above.
-Both review prompts ask whether How it works explains the mechanism or rationale in the diff;
-acknowledgment remains bound to the commit SHA and does not certify description quality
+The PR template, authoring guidance, and both review prompts direct authors and
+reviewers to apply `boxlite-writing` to the description, including drafts
+and revisions. The review question also checks How it works against the diff.
+Acknowledgment remains bound to the commit SHA and does not certify description quality
 or expire on body edits.
 
 | Current PR state | Gate result | Contributor action |
