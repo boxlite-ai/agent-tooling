@@ -261,42 +261,26 @@ commit adds no new author acknowledgment. See the equivalent queue carry-forward
 
 ## State files
 
-`scripts/audit-reflection.sh` exposes bounded cycle history through the source-only
-`.agents/lib/audit-reflection.sh` facade and pure `.agents/lib/audit-reflection.jq`
-transition. A cycle binds repository, session, prompt epoch, branch, and audit kind.
-Attempt IDs deduplicate delivery and reject changed inputs or results; immutable
-input snapshots retain comparison evidence. The CLI serializes transitions and
-uses the existing regular-file/atomic-write helpers. Session-scoped verdict runs
-use this history before launch and before accepting a dossier. Each cycle holds at most eight failures, sixteen total
-attempts, and 1 MiB; PASS closes it, and another context cannot reuse its state.
-`.agents/lib/audit-reconciliation.jq` validates history-bound finding dispositions,
-coverage, and introduction evidence. It allocates stable finding IDs, requires
-evidence when a resolved finding reopens, and rejects PASS with unresolved history.
-`.agents/lib/audit-reflection-contract.jq` stops preparation after two failed runs
-until `submit` supplies reflection covering their IDs and current history hash.
-Preparation freezes its digest; a later PASS needs an independent sufficient
-assessment of that reflection and its executed checks. Another failure invalidates
-the submission. Reflection cannot be replaced while an audit is active.
-`.agents/lib/audit-reflection-gate.sh` adapts scoped gates to this facade, snapshots
-active history for the auditor, and binds judgments to the attempt and operation.
-Cancellation is recorded separately from failure. A fresh operation after PASS
-starts a cycle; up to four closed diagnostic cycles remain within the byte limit.
-The auditor follows `.agents/prompts/audit-reflection.md`; Stop preserves unresolved
-history through triage and summary shortcuts. Unscoped standalone callers retain the
-legacy dossier contract. Immutable snapshots include the bounded transcript and Git tree.
-`scripts/audit-reflection-gate.sh` exposes the same bounded adapter to native auditors.
-The commit/push structured output schema carries nullable reconciliation and reflection
-assessments; legacy unscoped callers omit those fields or use null.
-Prompt-scoped commit/push auditors prepare history before their independent review.
-Headless runs preserve sanitized diff evidence; native runs preserve immutable Git
-trees. Both record through the same adapter, and the Git gate reconciles the result
-before consumption. Failed runner execution records ERROR; cancellation is separate.
-Native Git auditors load `.agents/prompts/git-audit-history.md` only for scoped work.
-Preparation and acceptance recheck the prompt epoch. The adapter keeps only the latest
-immutable auditor input per context and four retired context files per session;
-identity-checked cleanup never evicts current-epoch history. Push receipts consult
-scoped push history before skipping an audit. Exhausted Stop audits terminate with
-`continue:false` and an INCOMPLETE reason; Git operations remain denied without PASS.
+Audit history components:
+
+| Entry point | Responsibility |
+| --- | --- |
+| `scripts/audit-reflection.sh` → `.agents/lib/audit-reflection.sh` → `.agents/lib/audit-reflection.jq` | Serialize bounded state transitions; deduplicate attempts; validate immutable bindings; atomically write regular files. |
+| `.agents/lib/audit-reconciliation.jq` | Stable finding IDs, dispositions, coverage, provenance, and reopening evidence; reject unresolved PASS. |
+| `.agents/lib/audit-reflection-contract.jq` | After two failures, require current reflection covering every failed ID and an independent sufficient assessment for PASS. Freeze active reflection; invalidate after failure. |
+| `scripts/audit-reflection-gate.sh` → `.agents/lib/audit-reflection-gate.sh` | Bind scoped verdict/Git audits before launch and acceptance; snapshot evidence; recheck prompt epoch; reconcile dossiers. |
+| `.agents/prompts/audit-reflection.md`, `.agents/prompts/git-audit-history.md` | Shared reconciliation contract and native Git prepare/record procedure. |
+
+Cycles bind repository/session/prompt epoch/branch/gate; cap at eight failures,
+sixteen attempts, and 1 MiB. PASS closes a cycle; the next operation starts another.
+Runner failures record ERROR; cancellation is separate. Retain four closed cycles,
+four retired contexts/session, and the latest immutable input/context. Identity-checked
+cleanup preserves current-epoch evidence. Snapshots retain bounded transcripts,
+sanitized headless diffs, or immutable native Git trees.
+
+Stop triage/summary shortcuts and push receipts must respect unresolved history.
+Exhausted Stop audits return `continue:false` and INCOMPLETE; Git remains denied without
+PASS. Unscoped callers retain legacy contracts with omitted/null history assessments.
 
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
 than one session can share a checkout.
