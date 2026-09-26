@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=134fc2def961-dirty sha256=b6d38ce43936 -->
+<!-- agent-tooling:guidance:begin rev=71e26b0a9d2a-dirty sha256=112dd237ba80 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -47,10 +47,8 @@ Every change goes: understand → research → design → implement → test →
 
 **Documentation (every PR)**
 
-- Every PR, including drafts, must add meaningful project documentation or update existing documentation in the same PR. Prefer the existing canonical document; create a new one only when no suitable home exists.
-- Document the behavior, contract, usage, or maintenance knowledge affected by the change. Explain what readers need to understand or do, with examples when useful; for an internal refactor, document the relevant invariant or design rationale.
-- Token edits, formatting-only changes, file lists, and copied PR summaries do not satisfy this requirement. A linked design doc or PR description alone does not replace maintained project documentation. A documentation-only PR satisfies the rule through its substantive documentation changes.
-- Link the changed documentation section in the PR description. Before publication and after scope changes, review it against the final diff for accuracy, usefulness, and stale instructions; documentation quality is a review criterion, not a filename check.
+- Every PR, including drafts, must add or update meaningful project docs. Prefer existing docs; explain changed behavior, usage, contracts, or maintenance (including refactor rationale).
+- Link the changed section in the PR and review it against the final diff. Design links, PR summaries, file lists, formatting, and token edits alone do not count.
 
 **PR size and decomposition (hard requirement)**
 
