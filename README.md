@@ -157,6 +157,14 @@ its instructions. Try: "Use boxlite-writing to shorten this PR description."
 
 After a push, the Git hook starts the PR watcher; the agent attaches to its event stream. Idle delivery needs host support: a Codex heartbeat or Claude Monitor. See the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
 
+Monitoring intent and pending events survive execution-session replacement.
+From the watched worktree, register once with
+`bash <plugin-root>/.agents/watch/pr-watch-session.sh --start --branch <branch> --pr <number>`.
+Subsequent calls without `--start` return bounded pending events and reconcile the
+producer. Acknowledge reported event IDs with `--ack <id>`; use `--cancel` to stop.
+Recovery honors the original deadline. Full pending storage stops polling until
+drained; host and OS settings still control desktop notifications.
+
 For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh) retries recorded transient failures within bounded budgets. It requires `claude`, `jq`, `curl`, the failure-recording hook, and a matching `CLAUDE_PROJECT_DIR`.
 
 ### BoxLite Clean Code skill

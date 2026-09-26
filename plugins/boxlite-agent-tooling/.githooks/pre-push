@@ -507,8 +507,7 @@ arm_pr_watch() {
   # shellcheck source=../.agents/lib/pr-watch-state.sh
   source "$watch_helpers" 2>/dev/null || return 0
 
-  local log_dir log_dir_identity branch_key watch_id ready_watch_id event_log daemon_log
-  local ready_dir ready_fifo
+  local log_dir branch_key ready_watch_id event_log
   local entries='[]' entry manifest_key manifest_path
   local armed_refs=0 omitted_refs=0 omitted_refs_overflow=0
   local max_attached_refs=4 max_omitted_refs=1000000
@@ -522,8 +521,7 @@ arm_pr_watch() {
   log_dir="$(git -C "$repo_root" rev-parse --git-path pr-watch 2>/dev/null)" || return 0
   [[ "$log_dir" != /* ]] && log_dir="$repo_root/$log_dir"
   mkdir -p "$log_dir" 2>/dev/null || return 0
-  log_dir_identity="$(pr_watch_state_directory_identity "$log_dir" 2>/dev/null)" \
-    || return 0
+  pr_watch_state_directory_identity "$log_dir" >/dev/null 2>&1 || return 0
 
   local local_ref local_sha remote_ref remote_sha branch
   while read -r local_ref local_sha remote_ref remote_sha; do
@@ -539,41 +537,9 @@ arm_pr_watch() {
       omit_ref
       continue
     }
-    watch_id="$(pr_watch_new_id "$log_dir" "$branch_key" 2>/dev/null)" || {
-      omit_ref
-      continue
-    }
     event_log="$log_dir/${branch_key}.jsonl"
-    daemon_log="$log_dir/${branch_key}.daemon.log"
-    ready_dir="$(mktemp -d "$log_dir/.watch-ready.XXXXXX" 2>/dev/null)" || {
-      omit_ref
-      continue
-    }
-    ready_fifo="$ready_dir/ready"
-    if ! mkfifo "$ready_fifo" 2>/dev/null || ! exec 9<> "$ready_fifo"; then
-      rm -f "$ready_fifo" 2>/dev/null || true
-      rmdir "$ready_dir" 2>/dev/null || true
-      omit_ref
-      continue
-    fi
-    rm -f "$ready_fifo" 2>/dev/null || true
-    rmdir "$ready_dir" 2>/dev/null || true
-    # nohup + disown, not setsid: macOS ships no setsid. The helper selects one
-    # nonblocking regular log descriptor before exec, so a FIFO/symlink cannot
-    # retain git's pipe or strand a child after the bounded readiness wait.
-    nohup bash -c '
-      source "$1" || exit 127
-      shift
-      pr_watch_exec_with_regular_log "$@"
-    ' -- "$watch_helpers" "$daemon_log" "$log_dir_identity" \
-      bash "$watcher" --branch "$branch" --sha "$local_sha" \
-      --watch-id "$watch_id" --ready-fd 9 >/dev/null 2>&1 &
-    disown 2>/dev/null || true
-    if ! IFS= read -r -t 3 -u 9 ready_watch_id; then
-      ready_watch_id=""
-    fi
-    exec 9>&-
-    if ! pr_watch_id_is_valid "$ready_watch_id"; then
+    if ! ready_watch_id="$(pr_watch_start "$watcher" "$log_dir" \
+        "$branch" "$local_sha" "" 2>/dev/null)"; then
       omit_ref
       continue
     fi

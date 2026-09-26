@@ -354,14 +354,31 @@ than one session can share a checkout.
 
 ## Boundaries
 
+- Pending delivery: `.agents/lib/pr-watch-pending.sh` retains up to 128 events
+  outside the replaceable generation journal. Content-derived event IDs exclude
+  timestamps and generation IDs. Publishing precedes detection deduplication;
+  acknowledgment removes the exact pending record. Full capacity stops polling
+  with an error instead of silently discarding unread events. Replays after an
+  interrupted acknowledgment are possible; delivery is not exactly once.
+- Producer launch: `pr_watch_start` in `.agents/lib/pr-watch-state.sh` starts the
+  complete log supervisor in a new POSIX session before forking its children.
+  Both `.githooks/pre-push` and `.agents/watch/pr-watch-start.sh` use this bounded
+  readiness handshake. Caller process-group cleanup cannot kill the logger or
+  producer; a repeated start returns the live generation. This is not service
+  supervision or reboot persistence.
 - Idle PR delivery: `.agents/hooks/post-remote-write-watch.sh` emits setup; the
   agent registers/verifies one native one-minute Codex heartbeat. Claude uses
   Monitor. `.agents/watch/consumer-lifecycle.md` defines draining, cleanup, and
-  failure reporting. Cursors do not survive host restarts. The hook accepts
+  failure reporting. `.agents/watch/pr-watch-session.sh` persists branch-bound
+  intent, monitoring deadlines, and bounded recovery attempts outside execution
+  sessions. A per-target descriptor lease serializes reconciliation. Healthy
+  polling resets consecutive failures; cancellation and deadlines prevent
+  automatic resurrection. Pending delivery survives host restarts. The hook accepts
   `command`/`stdout` or `cmd`/`output`; supplied nonzero/null exit codes cannot arm.
-  Saved prompts reference that policy. Unexpected stream endings permit one
-  recovery attempt; failed recovery suspends the watch with a coverage warning.
-  `notificationPolicy: failed_runs_only` mutes successful-run alerts. Quiet runs
+  Saved prompts reference that policy and saved worktree/branch targets.
+  Unexpected stream endings reconcile durable intent; degraded coverage is
+  reported while bounded retries continue. Requested alerts use the default
+  notification policy, preserving an explicit user mute. Quiet runs
   emit no message; new events get concise human-facing summaries. Internal
   automation instructions need no TL;DR.
   Text-contract tests guard required instructions, not model obedience or live delivery.
