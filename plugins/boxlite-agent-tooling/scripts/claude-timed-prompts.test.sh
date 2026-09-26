@@ -86,12 +86,12 @@ if [[ "$1" == repo ]]; then
   printf '%s' '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}'
 elif [[ "$*" == 'api --hostname github.com markdown -f mode=gfm -f text='* ]]; then
   [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2
-  printf '<a href="https://github.com/example/repo/issues/123">Design</a>'
+  printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>'
 elif [[ "$1" == api ]]; then
   printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}'
 else
   jq -nc --arg head "$(git rev-parse HEAD)" \
-    '{baseRefOid:$head,headRefOid:$head,headRefName:"feature",additions:1,deletions:0,body:"## TL;DR\n\nFixture summary.\n\nhttps://github.com/example/repo/issues/123"}'
+    '{baseRefOid:$head,headRefOid:$head,headRefName:"feature",additions:1,deletions:0,body:"## TL;DR\n\nFixture summary.\n\n## How it works\n\nRetry failed calls once.\n\nhttps://github.com/example/repo/issues/123"}'
 fi
 GH
 chmod +x "$scratch/bin/gh"

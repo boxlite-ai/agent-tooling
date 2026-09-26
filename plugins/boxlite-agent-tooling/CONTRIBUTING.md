@@ -65,6 +65,10 @@ See [design-document enforcement](ARCHITECTURE.md#design-documents) for validati
 
 - Apply the shared description guidance and [review question](.agents/prompts/pr-review-question.md)
   before publishing, including drafts and description edits.
+- The local PR gate requires a level-two **How it works** heading with content.
+  Explain the causal path or rationale beneath it; a short sentence is sufficient
+  for a simple change. Hidden comments, quoted examples, empty sections, and
+  placeholder-only text such as `TBD` are rejected. Reviewers check accuracy.
 - Include decisive verification as `command → observed result`. For a fix, briefly
   report the failure with all production changes reverted and the pass with the
   complete fix restored. Do not present old results as newly verified.
@@ -102,10 +106,14 @@ Design doc: https://github.com/example/repo/issues/123
 
 Documentation: [SDK CI matrix](docs/ci.md#sdk-matrix).
 
+## How it works
+
 - The workflow selects a reduced SDK matrix for PRs and the full matrix for weekly
   and manual runs.
 - PR changing both SDKs: 21 jobs → 11.
 - Every supported version still runs on Linux x64; macOS/ARM use the latest version.
+
+## Verification
 
 Verification: `make test:apps:infra` → passed. Hosted CI timing has not been measured.
 ````

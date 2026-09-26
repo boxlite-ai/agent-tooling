@@ -5,4 +5,4 @@ placeholders:
 description: Shared explanation check for local and GitHub PR review.
 ---
 
-Does the description accurately explain the mechanism shown in the diff?
+Does the How it works section accurately explain the mechanism or rationale shown in the diff?

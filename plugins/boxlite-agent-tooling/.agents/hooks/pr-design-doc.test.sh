@@ -8,7 +8,7 @@ git init -q -b feature "$scratch/repo"
 git -C "$scratch/repo" -c user.name=test -c user.email=test@example.invalid commit -qm fixture --allow-empty
 mkdir -p "$scratch/bin" "$scratch/repo/.agents/state"
 export DESIGN_TEST_URL=https://github.com/example/repo/issues/1
-export SUMMARY_PREFIX=$'## TL;DR\n\nFixture summary.\n\n'
+export SUMMARY_PREFIX=$'## TL;DR\n\nFixture summary.\n\n## How it works\n\nVerify the document link.\n\n'
 export DESIGN_TEST_BODY="${SUMMARY_PREFIX}Design doc: $DESIGN_TEST_URL"
 # Link-fragment fixtures captured from GitHub POST /markdown (mode=gfm), 2026-09-23.
 export DESIGN_TEST_RENDER_FIXTURES="$plugin/.agents/hooks/fixtures/pr-design-doc-render.jsonl"
@@ -18,6 +18,7 @@ case "$*" in
   'api --hostname github.com markdown -f mode=gfm -f text='*)
     [[ "${DESIGN_TEST_RENDER_FAILURE:-0}" == 0 ]] || exit 1
     if [[ "${DESIGN_TEST_RENDER_OVERSIZE:-0}" == 1 ]]; then printf '%65537s' x; exit; fi
+    printf '<h2>How it works</h2><p>Verify the document link.</p>\n'
     body="${8#text=}"
     jq -er --arg body "${body#"${SUMMARY_PREFIX}"}" 'select(.body == $body) | .html' "$DESIGN_TEST_RENDER_FIXTURES" ;;
   'api --hostname github.com repos/example/repo/issues/1')
@@ -106,7 +107,7 @@ check 'ready checks the published body' 'gh pr ready 42' 'link the registered de
 check 'metadata edits check the published body' 'gh pr edit 42 --add-label safe' 'link the registered design doc'
 cmp .agents/state/pr-reviewed.json "$scratch/marker-before"
 rm .agents/state/pr-reviewed.json
-export SUMMARY_PREFIX=$'## TL;DR\n\nFixture summary.\n\n'
+export SUMMARY_PREFIX=$'## TL;DR\n\nFixture summary.\n\n## How it works\n\nVerify the document link.\n\n'
 export DESIGN_TEST_BODY="${SUMMARY_PREFIX}Design doc: $DESIGN_TEST_URL"
 check 'matching published body reaches human review' 'gh pr ready 42' 'Review required'
 export DESIGN_TEST_BODY="Design doc: $DESIGN_TEST_URL"

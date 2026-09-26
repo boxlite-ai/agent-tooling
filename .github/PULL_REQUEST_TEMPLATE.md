@@ -10,9 +10,10 @@ Design doc: <!-- Full registered URL. -->
 Documentation: <!-- Link meaningful project docs added or updated in this PR;
 prefer existing docs. -->
 
-## Summary
+## How it works
 
-<!-- Explain the problem, how the change works, and the result. -->
+<!-- Explain the trigger, key decisions, and result; for non-code changes, give
+the rationale. Replace this comment with an explanation, even for a draft. -->
 
 ## Verification
 

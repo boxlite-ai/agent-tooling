@@ -1774,15 +1774,15 @@ if (( size_status )); then
   exit 0
 fi
 
-for design_library in design-doc.sh pr-design-doc.sh; do
-  [[ -r "$tooling_root/.agents/lib/$design_library" ]] || deny 'The design doc verifier is unavailable.'
+for description_library in design-doc.sh pr-description.sh; do
+  [[ -r "$tooling_root/.agents/lib/$description_library" ]] || deny 'The PR description verifier is unavailable.'
 done
 # shellcheck source=../lib/design-doc.sh
 source "$tooling_root/.agents/lib/design-doc.sh"
-# shellcheck source=../lib/pr-design-doc.sh
-source "$tooling_root/.agents/lib/pr-design-doc.sh"
-design_reason="$(pr_design_doc_check "$repo_root" "${protected_size_args[@]}")" || {
-  deny "${design_reason:-The design doc check failed; nothing was authorized.}"
+# shellcheck source=../lib/pr-description.sh
+source "$tooling_root/.agents/lib/pr-description.sh"
+description_reason="$(pr_description_check "$repo_root" "${protected_size_args[@]}")" || {
+  deny "${description_reason:-The PR description check failed; nothing was authorized.}"
 }
 
 (( protected_ack_count > 0 )) || exit 0

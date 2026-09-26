@@ -13,7 +13,7 @@ mkdir -p "$scratch/bin"
 cat > "$scratch/bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
-  'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<a href="https://github.com/example/repo/issues/123">Design</a>' ;;
+  'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
   'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
   'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
@@ -49,7 +49,11 @@ for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
   check "$operation rejects dense prose" "gh $operation --body '$dense'" deny
   check "$operation accepts a summary" "gh $operation --body '## TL;DR
 
-Retry only failed requests. Verified with the timeout test. https://github.com/example/repo/issues/123'" allow
+Retry only failed requests.
+
+## How it works
+
+Retry a failed call once. Verified with the timeout test. https://github.com/example/repo/issues/123'" allow
 done
 check 'draft requires inspectable body' 'gh pr create --draft --title WIP' deny
 check 'issue requires inspectable body' 'gh issue create --title Bug' deny

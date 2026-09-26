@@ -1,8 +1,54 @@
 #!/usr/bin/env bash
-# PR document-link facade over literal argv already validated by the shell scanner.
+# PR description facade over literal argv already validated by the shell scanner.
 # Requires design-doc.sh, git, gh, jq and perl; prints a denial reason on failure.
 
-pr_design_doc_check() { # root, create|edit|ready, validated gh PR arguments
+_pr_description_check_explanation() { # bounded GitHub-rendered HTML
+  if ! printf '%s' "$1" | perl -CSD -0777 -e '
+    use strict;
+    use warnings;
+    my $html = <STDIN> // "";
+    $html =~ s/<!--.*?(?:-->|\z)//sg;
+    my %example = (blockquote => 0, pre => 0, code => 0);
+    my ($heading_level, $heading, $active, $content) = (0, "", 0, "");
+    # GitHub owns Markdown parsing. Track nested examples in its sanitized HTML;
+    # code may explain an active section, but cannot supply the section heading.
+    while ($html =~ m{<(/?)([a-z][a-z0-9-]*)\b(?:[^>"\x27]|"[^"]*"|\x27[^\x27]*\x27)*>|([^<]+)|<}g) {
+      my ($closing, $name, $text) = ($1, $2, $3);
+      if (defined $name) {
+        if (exists $example{$name}) {
+          $example{$name}++ unless $closing;
+          $example{$name}-- if $closing && $example{$name};
+          next;
+        }
+        next if grep { $_ > 0 } values %example;
+        if ($name =~ /^h([1-6])$/) {
+          my $level = $1;
+          if (!$closing) {
+            last if $active && $level <= 2;
+            ($heading_level, $heading) = ($level, "");
+          } else {
+            $heading =~ s/^\s+|\s+$//g;
+            $active = 1 if $heading_level == 2 && $heading =~ /^How it works$/i;
+            $heading_level = 0;
+          }
+        }
+        next;
+      }
+      next unless defined $text && !$example{blockquote};
+      if ($heading_level) { $heading .= $text; }
+      elsif ($active) { $content .= "$text "; }
+    }
+    $content =~ s/&(?:\#\d+|\#x[0-9a-f]+|[a-z]+);//ig;
+    $content =~ s/^\s+|\s+$//g;
+    exit($active && $content =~ /[\p{L}\p{N}]/ &&
+      $content !~ /^(?:TODO|TBD|N\/?A|Not applicable)[.!]?$/i ? 0 : 1);
+  '; then
+    printf 'PR description requires a nonempty ## How it works section. Explain the mechanism or non-code rationale; comments, quotations, example headings, and placeholder-only text do not count.'
+    return 1
+  fi
+}
+
+pr_description_check() { # root, create|edit|ready, validated gh PR arguments
   local root="$1" operation="$2" token body="" count=0 selector="" url response
   shift 2
   while (( $# )); do
@@ -67,4 +113,5 @@ pr_design_doc_check() { # root, create|edit|ready, validated gh PR arguments
   ' "$url"; then
     printf 'PR must link the registered design doc: %s' "$url"; return 1
   fi
+  _pr_description_check_explanation "$response"
 }
