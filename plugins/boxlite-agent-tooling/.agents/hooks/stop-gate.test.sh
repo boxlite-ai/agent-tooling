@@ -174,6 +174,37 @@ long_reply="$(printf 'word%.0s ' {1..81})"
 short_reply="Done: the gate asks for a small closing reply. Say go to commit."
 long_claim="$(printf 'more%.0s ' {1..121})and the root cause is the stale index."
 
+check_writing_continuations() {
+  local host S R payload out
+  for host in claude codex; do
+    S="tldr-to-dense-$host"; R="$(new_repo "$S")"
+    payload="$(stop_payload "$R" "$S" false '' | jq '.last_assistant_message = "Missing summary."')"
+    out="$(run_in_repo "$R" "$HOOK" NO "$host" "$payload")"
+    jq -e '.decision == "block" and (.reason | contains("TL;DR"))' <<<"$out" >/dev/null
+    expect "$host: the first missing summary gets a correction" "$?" "out=$out"
+    append_assistant "$R" "$long_reply"
+    out="$(gate_stop "$R" "$S" true "$long_reply" NO "$host")"
+    judged_without_ask "$out" "$R"
+    expect "$host: a TL;DR correction cannot trigger a density reminder" "$?" "out=$out"
+    prompt_hook "$R" "$S" turn-2
+    out="$(gate_stop "$R" "$S" false "$long_reply" NO "$host")"
+    asked "$out"
+    expect "$host: a new turn can receive a writing reminder" "$?" "out=$out"
+    append_tool_call "$R"
+    append_assistant "$R" "$long_claim"
+    payload="$(stop_payload "$R" "$S" true '' | jq '.last_assistant_message = "The root cause is the stale index."')"
+    out="$(TEST_AUDIT_VERDICT=FAIL run_in_repo "$R" "$HOOK" YES "$host" "$payload")"
+    audit_ran "$R" && [[ "$(decision_of "$out")" == block && "$out" != *'Missing a Markdown TL;DR heading'* ]]
+    expect "$host: new work after a reminder still reaches the failing audit without TL;DR" "$?" "out=$out"
+    rm -rf "$R"
+  done
+}
+if [[ "${1:-}" == writing-continuations ]]; then
+  check_writing_continuations
+  printf 'RESULT: %s passed, %s failed\n' "$pass" "$fail"
+  exit $(( fail > 0 ? 1 : 0 ))
+fi
+
 printf '## Summary requests follow text-block density\n'
 check_summary_density() {  # name reply ask|skip
   local name="$1" reply="$2" expected="$3" repo output status
@@ -352,6 +383,9 @@ out="$(gate_stop "$R" "$S" true "$long_again" NO claude)"
 judged_without_ask "$out" "$R"
 expect "a long answer to the ask is judged and never asked twice in a row" \
   "$?" "out=$out classifier=$(classifier_ran "$R")"
+out="$(gate_stop "$R" "$S" true "$long_again" NO claude)"
+judged_without_ask "$out" "$R"
+expect "a third Stop in the same turn does not repeat the writing reminder" "$?" "out=$out"
 rm -rf "$R"
 
 S="audited-answer"; R="$(new_repo "$S")"
@@ -471,9 +505,11 @@ rm -rf "$R"
 S="after-fail"; R="$(new_repo "$S")"
 append_assistant "$R" "$long_reply"
 out="$(gate_stop "$R" "$S" true "$long_reply" NO claude)"
-asked "$out"
-expect "a continued turn that was never asked still gets the ask" "$?" "out=$out"
+judged_without_ask "$out" "$R"
+expect "an unrelated Stop continuation also suppresses writing reminders" "$?" "out=$out"
 rm -rf "$R"
+
+check_writing_continuations
 
 # Harness text is allowed without a judgment, so it is no turn to summarize.
 S="harness"; R="$(new_repo "$S")"
