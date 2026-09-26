@@ -7,10 +7,8 @@ description: Shared wording for all human-facing output.
 
 Every human-facing output must include a `## TL;DR` section containing one simple sentence, as short as possible.
 This includes replies, progress updates, design docs, PR descriptions, GitHub comments, reviews, issues, and release notes.
-State the outcome in 5–12 words when possible; retain material caveats and required action.
 Never skip TL;DR because the output is already concise.
 For replies, put TL;DR at the beginning and keep the entire section under 40 words.
-Internal agent instructions, automation prompts, tool payloads, and intentionally empty replies need no TL;DR.
 
 Walls of text are forbidden. Prefer: visuals > tables > bullets > prose (under {{max_words}} words; 120 for complex topics).
 
