@@ -15,6 +15,11 @@ Understand the existing contract, choose one useful improvement, verify the
 affected behavior, then keep or reverse the change according to the result.
 A smaller function or additional abstraction is valuable only when it helps readers.
 
+## Examples
+
+For concrete illustrations, open the [example index](references/examples.md) and
+read only the topics relevant to the current code.
+
 ## Establish the contract
 
 - Inspect callers, implementation, tests, and docs. Separate intentional behavior

@@ -167,8 +167,10 @@ Try: "Use boxlite-clean-code to review this module's error handling without edit
 
 The plugin exposes the skill through its existing shared skills directory.
 For standalone sharing, copy the entire `boxlite-clean-code` directory into a skill
-location supported by your agent. Its single `SKILL.md` contains the essential
-principles, refactoring loop, and verification guidance without supporting files.
+location supported by your agent, including its `references/` directory. The core
+keeps essential principles and verification guidance; the
+[example index](plugins/boxlite-agent-tooling/.agents/skills/boxlite-clean-code/references/examples.md)
+routes concrete coding concerns to focused addons. Load only the relevant topics.
 There are no helper scripts or plugin dependencies. Repository workflow rules
 remain in `AGENTS.md`; the skill supplies focused engineering guidance.
 
