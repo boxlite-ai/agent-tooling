@@ -490,7 +490,7 @@ hooks/                  the twin host hook manifests
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
-guidance/workflow.md    workflow naming boxlite-writing for consumers
+guidance/workflow.md    workflow naming boxlite-writing and boxlite-clean-code for consumers
 host-parity.test.sh     what keeps the three hosts loading the same assets
 architecture.test.sh    what keeps this map honest
 ```
@@ -506,3 +506,8 @@ index loads topic addons under `references/` only when relevant. The existing
 `skills/` symlink exposes the complete directory to plugin hosts; standalone
 sharing copies that directory, including references. It preserves the receiving
 repository's workflow and permission boundaries and needs no plugin scripts.
+Shared workflow, shell guidance, fixer prompts, and audit criteria reference it by
+name for general coding and test quality. Their own instructions retain repository
+gates, Bash contracts, iteration receipts, and audit evidence requirements.
+The full Research and Test sections remain inline in workflow guidance, together
+with reproduce-before-fix and challenge-assumptions instructions.

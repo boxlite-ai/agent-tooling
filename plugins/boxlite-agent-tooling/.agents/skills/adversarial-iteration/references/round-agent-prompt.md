@@ -114,7 +114,7 @@ For each finding:
    failure is `INVALID` unless it is the defect.
    Remove the adapter before the fixed pass and discard the copy afterward.
 3. **Plan and fix:** reference REFLECT, the assertion, decisive cheap check, smallest
-   satisfying primitive, and adjacent contracts; then implement the smallest fix.
+   satisfying primitive, and adjacent contracts; implement using `boxlite-clean-code`.
 4. **Mutation preparation:** propose a semantic mutant for every new
    finding. Capture each as a protected immutable patch with digest and expected touched
    entries. Do not call it representative or claim it was killed. A fresh read-only
@@ -301,8 +301,8 @@ award review coverage.
 - Never execute fixer-supplied shell text. The orchestrator resolves `runner_id` through
   repository tooling, validates structured `argv` against its allowlist, supplies the
   isolated working directory, and invokes without shell interpolation.
-- Do not weaken an assertion, skip a reproducer, or accept an equivalent mutant
-  without replacing it or recording a concrete equivalence rationale.
+- Do not skip a reproducer or accept an equivalent mutant without replacing it or
+  recording a concrete equivalence rationale.
 - `CANDIDATE` means only that untrusted fix and verification proposals were returned;
   it is not reviewer `FINDINGS`, verification success, or a terminal outcome.
 - A fixer never emits `FINDINGS`, `BLOCKED`, `ZERO_FINDINGS`, `DIVERGED`, or `COMPLETE`.
