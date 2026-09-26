@@ -5,86 +5,83 @@ description: Apply Clean Code principles when implementing, refactoring, or revi
 
 # BoxLite Clean Code
 
-Make intent, contracts, and ownership easier to understand and change. Treat
-principles as decision tools: identify a concrete problem before applying a rule.
-Follow the receiving repository's conventions, workflow, and permissions.
+Clarify intent, contracts, and ownership. Prefer obvious code and small, task-relevant
+changes; don't rewrite or reformat unrelated code. Follow repository workflow and permissions.
 
 ## How it works
 
-Understand the existing contract, choose one useful improvement, verify the
-affected behavior, then keep or reverse the change according to the result.
-A smaller function or additional abstraction is valuable only when it helps readers.
+Establish the contract, improve, verify, then keep or reverse.
+Apply principles to concrete problems; abstractions must earn their cost.
 
 ## Examples
 
-For concrete illustrations, open the [example index](references/examples.md) and
-read only the topics relevant to the current code.
+[Example index](references/examples.md): read only relevant topics.
+Keep repository examples in local instructions.
 
 ## Establish the contract
 
-- Inspect callers, implementation, tests, and docs. Separate intentional behavior
-  changes from refactoring; resolve material ambiguity before changing public APIs.
-- Preserve relevant outputs, defaults, errors, input consumption, mutations,
+- Search code before implementing. Inspect callers, implementation, docs, and nearby
+  tests/scripts. Follow local naming, module layout, tests, logging, errors, formatter,
+  linter, language level, and module style.
+- Separate intentional behavior changes from refactoring; resolve material API
+  ambiguity. Preserve outputs, defaults, errors, input consumption, mutations,
   effect counts, ordering, atomicity, resource lifetime, and compatibility.
-- Keep reviews read-only unless edits are requested. Ground findings in a source
-  location, consequence, and proportionate remedy.
-- Check real consumers before deleting or renaming APIs. Local usage search alone
-  cannot establish that a published API has no external callers.
+- Review read-only unless edits are requested; give source location, consequence, and proportionate remedy.
+- Check real consumers before deleting/renaming APIs; local search cannot rule out external callers.
 
 ## Apply the essential principles
 
 | Concern | Decision |
 | --- | --- |
-| Names | Reveal purpose, domain, units, and effects. Use consistent vocabulary and enough context for the scope; avoid meaningless suffixes and encodings. |
-| Functions | Keep one coherent responsibility and abstraction level. Extract a meaningful concept, not a wrapper that restates a condition. Prefer clear control flow over nesting. |
-| Parameters | Separate genuinely different workflows; group values with shared meaning. Do not impose argument quotas or hide inputs in mutable fields to shorten signatures. |
-| Cohesion | Group behavior that changes for the same reason; separate independent responsibilities. Let one operation own required sequencing instead of teaching every caller the helper order. |
-| State | Keep temporary state local and ownership explicit. An extraction must not introduce shared state, longer lifetimes, or lost reentrancy merely to look smaller. |
-| Duplication | Share the same rule or transformation, not coincidentally similar syntax. Avoid abstractions justified only by hypothetical callers or tests written to preserve them. |
-| Representation | Choose for the real change: data plus procedures can simplify new operations; objects can localize new variants. Use language-native records, composition, or exhaustive matching where appropriate. |
-| Errors | Preserve causes and useful context; classify failures by caller recovery. Keep absence, empty success, invalid input, and failure distinct. Use idiomatic errors or results; never silently turn failure into success. |
-| Boundaries | An adapter should own useful translation, capability limits, or error policy. Avoid wrappers that mirror whole APIs. Separate major dependency assembly from runtime use without requiring a framework. |
-| Comments and layout | Explain constraints, intent, and non-obvious reasoning; preserve legal notices. Remove misleading commentary and dead code. Keep related behavior near its use and follow repository formatting. |
-| Tests | Make setup, operation, and expected outcome readable. Multiple assertions can describe one contract. Use independent fixtures; a fake passing does not verify a real integration, and coverage does not prove correctness. |
+| Names | Reveal purpose, domain, units, effects, and scope with consistent vocabulary. Booleans are predicates (`is_ready`). Avoid meaningless suffixes/encodings and `data`/`info`/`tmp`/`thing`/`handle`/`process` outside tiny scopes. Never reuse a variable for two concepts in one scope. |
+| Functions | One responsibility and abstraction level. Extract concepts, not wrappers restating conditions. Prefer guard clauses and early returns over nesting. |
+| Parameters | Short argument lists; group related values. Split boolean-selected workflows. No argument quotas or moving inputs into mutable fields just to shorten signatures. |
+| Cohesion | Group related state/behavior; separate reasons to change. Expose 1–2 facade operations; keep internals/helpers private so callers need not learn order, shared state, or helper graphs. Small stateless utility modules of pure helpers are exempt. |
+| State | Keep temporary state local and ownership explicit; extraction must not add shared state, longer lifetimes, or lost reentrancy. |
+| Duplication | Share rules, policies, transformations—not similar syntax. Keep small local duplication when abstraction hides behavior. Build only what is used; delete dead code. Reject hypothetical callers or tests preserving unused abstractions. |
+| Representation | Consider data/procedures for new operations, objects for variants. Prefer composition over inheritance/framework magic; use native records or exhaustive matches where appropriate. |
+| Errors | Fail fast on missing config/invalid input. Include operation, resource ID, endpoint/status, input shape where applicable; preserve causes, mask secrets. Classify by recovery; distinguish absence, empty success, invalid input, failure. Use idiomatic errors/results; never swallow failure. |
+| Boundaries | Validate untrusted inputs on entry; trust validated internals. Ask what each layer needs to know. Adapters own translation, capability limits, or error policy; avoid whole-API mirrors. Separate major assembly from runtime use; no framework required. |
+| Comments/layout | Explain why: intent, constraints, trade-offs. Preserve legal notices; remove misleading, redundant, or dead-decision comments. Keep related behavior nearby; follow formatting conventions. |
+| Tests | Readable setup, operation, outcomes; multiple assertions may cover one contract. Independent fixtures. Fakes don't verify integration; coverage doesn't prove correctness. |
 
-Preserve the design priorities: verified behavior, removal of duplicated rules,
-expressed intent, then fewer components. Tiny-class proliferation can undermine
-the earlier goals. Measure before optimizing.
+Prioritize verified behavior, shared rules, intent, then fewer components.
+Avoid tiny-class proliferation. Measure before optimizing.
 
 ## Make effects and concurrency explicit
 
-- Name mutations, network calls, file writes, and other effects honestly. Identify
-  who owns cleanup, including partial failure, cancellation, and shutdown.
-- Preserve whole-operation invariants. Individually thread-safe methods do not
-  make check-then-act atomic. Reserving and returning an item may need one operation.
-- Bound queues, concurrency, waiting, and retries. Establish idempotency before
-  repeating effects. Check lock order, starvation, and termination as well as races.
-  Wait for completion signals rather than sleeping to guess when an event occurred.
-- Control known conflicting boundaries in regression tests; propagate worker
-  failures and assert completion. Bounded stress adds evidence, not proof.
-- Validate external inputs and keep secrets out of errors, logs, and fixtures.
+- Expose effects at call sites: mutations, network calls, file writes, process exec.
+  Own cleanup of all resources through partial failure, cancellation, and shutdown.
+- Preserve whole-operation invariants: individually thread-safe methods do not make
+  check-then-act atomic. Reserve and return an item in one operation when needed.
+- Make external-work timeouts, retries, and cancellation explicit. Bound queues,
+  concurrency, memory, and waiting. Establish idempotency before retrying effects,
+  or document why repetition is safe. Check lock order, starvation, and termination.
+  Wait for completion signals instead of sleeping to guess event completion.
+- Control conflicting boundaries in regression tests; propagate worker failures
+  and assert completion. Bounded stress supplies evidence, not proof.
+- Keep secrets out of errors, logs, and fixtures.
 
 ## Refactor in small, reversible steps
 
-1. Name the confusion or risk and the contract that must survive.
-2. Make one move, then check the affected production boundary and real callers,
-   including defaults, failure paths, ordering, and observable effects.
-3. Re-read the result. Inline, regroup, or revert an extraction that adds navigation,
-   arbitrary parameters, or hidden state without improving comprehension.
-4. Remove migration scaffolding after callers move; update superseded explanations.
-
-For example, replacing several parser maps with one representation can preserve
-successful parsing while breaking missing-value or wrong-type lookup defaults.
-Check the caller's complete contract before declaring the refactor equivalent.
+1. Name the risk/confusion and contract to preserve.
+2. Make one move; check real callers and production boundaries, including defaults,
+   failures, order, effects. Merging parser maps must preserve missing/wrong-type
+   lookup defaults as well as valid parsing.
+3. Re-read; reverse extractions adding navigation, arbitrary parameters, or hidden state
+   without clarity. Remove migration scaffolding and update superseded explanations
+   after callers move. Make no change when abstraction adds no value.
 
 ## Verify and report
 
-For a defect, demonstrate the original failure with every production change
-reverted, then restore the complete fix and observe the pass. Tests must exercise
-project behavior, not test-built values or a substitute implementation. Never weaken
-assertions to force a pass; correct the code or establish an intentional contract change.
+Add/update tests for changed branching, parsing, retries, security, and boundaries.
+For bugs, write a focused reproducer first; observe the defect before fixing.
+Verify with every production change reverted, then restore the complete fix
+and observe the pass; follow the repository's compatibility-adapter procedure.
 
-Run the narrow relevant checks and the repository's required validation. Explain
-what became clearer, what behavior intentionally changed, what actually ran, and
-remaining uncertainty. A no-change conclusion is valid when more abstraction
-would not help the requested work.
+Test project behavior, not test-built values, substitutes, or only a library/framework.
+Never weaken assertions for a pass; fix code or establish an intentional contract change.
+
+Run the smallest relevant check first; broaden for risk and required validation.
+Claim only checks run. Report intentional changes, clarity, observed results,
+blockers, residual risk, and uncertainty.
