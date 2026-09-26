@@ -509,3 +509,5 @@ repository's workflow and permission boundaries and needs no plugin scripts.
 Shared workflow, shell guidance, fixer prompts, and audit criteria reference it by
 name for general coding and test quality. Their own instructions retain repository
 gates, Bash contracts, iteration receipts, and audit evidence requirements.
+The full Research and Test sections remain inline in workflow guidance, together
+with reproduce-before-fix and challenge-assumptions instructions.

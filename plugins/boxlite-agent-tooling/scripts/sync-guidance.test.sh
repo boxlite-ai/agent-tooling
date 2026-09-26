@@ -113,6 +113,8 @@ require_semantic_rule "guidance pins full-revert red proof" \
   'revert .*every.* production change.*only the test remains'
 require_semantic_rule "guidance constrains test-only compatibility adapters" \
   'test-only compatibility adapter.*must not implement the fix.*alter the defect check.*become the failure signal'
+require_semantic_rule "guidance pins production-boundary tests" \
+  'data must come from production code under test'
 
 echo
 echo "## A repository with no instructions files gets the canonical layout"

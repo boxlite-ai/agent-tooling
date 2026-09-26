@@ -8,6 +8,7 @@ Apply the `boxlite-clean-code` skill for design, implementation, refactoring, an
 **Understand**
 
 - Read this file, the nearest README/CONTRIBUTING, relevant docs, and the actual source before editing.
+- Reproduce-before-fix: when fixing a bug, write the failing test first, observe it fail, then fix.
 - If docs and implementation disagree, capture the conflict and ask before making architectural assumptions.
 
 **Research**
@@ -20,7 +21,7 @@ Apply the `boxlite-clean-code` skill for design, implementation, refactoring, an
 
 - Before writing any code, create a 1–3 page design doc covering the problem, related work and lessons, approach, alternatives and trade-offs, and validation. Host it in this preference order: GitHub issue > Notion > Linear issue. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
 - Apply the Communication rules below to design documents.
-- Challenge assumptions, including your own, before settling on an approach.
+- Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
 
 **Documentation (every PR)**
 
@@ -58,7 +59,12 @@ Apply the `boxlite-clean-code` skill for design, implementation, refactoring, an
   1. You must revert **every** production change — every non-test file back to its pre-fix state, only the test remains. If that revert changes an API, signature, or schema so the test cannot compile or reach its defect check, keep production fully reverted and add only the smallest temporary test-only compatibility adapter needed to exercise the old contract. A test-only compatibility adapter may adapt setup or invocation only; it must not implement the fix, alter the defect check, or become the failure signal. Run the test. It must reach the defect check and fail for the original bug — log the observed failure signal (assertion text, hang, panic). **Partial reverts, mental simulation, or "it would obviously fail without the fix" are treated as cheating.** If no such adapter can preserve that signal, stop and surface the blocker.
   2. Remove any temporary compatibility adapter, restore the production change in full, and run the test. It must pass.
      Without a complete step 1 you've only proved your code works, not that the fix was necessary or that this test would have caught the bug.
+- A test is only meaningful when there's something that could go wrong between the data being produced and the assertion being made. If the test builds the value it then asserts on (e.g., formatting a string and then asserting that the same string contains a substring it just put in), the assertion is tautological — nothing crossed a boundary, so nothing is being tested. The data must come from production code under test, not from the test body itself.
+- Add or update tests when behavior changes around branching, parsing, retries, security checks, or boundaries.
+- Prefer focused tests that prove the _right_ reason for the change.
+- Do not create tests that don't actually test project code. A test that only exercises stdlib or framework code is not a real test.
 - Temporary tests that don't reference a project symbol must be written to a temporary directory — they are not production tests.
+- Never weaken a test to force it green — fix the code under test, not the assertion.
 
 **Cross-cutting** (apply at every phase)
 
