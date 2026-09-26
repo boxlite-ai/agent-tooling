@@ -8,8 +8,8 @@
 # follows it. A summary that needs a tool to render or send is new tool work, so the
 # verdict check judges that answer as usual.
 # The Stop gate asks only after the verdict check has judged and allowed the turn, or a
-# user's override let it end, and never twice in a row, so a model that cannot shorten
-# its answer ends the turn on the next Stop instead of looping.
+# user's override let it end, and never on a Stop continuation, so a model that cannot
+# shorten its answer reaches the verdict check instead of another writing reminder.
 #
 # ONE session-scoped record remembers the ask until the next Stop takes it. Its body is
 # `<prompt-epoch> <mode> <tool-count>`:
