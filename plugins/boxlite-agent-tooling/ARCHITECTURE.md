@@ -52,13 +52,22 @@ Shell commands, other clients,
 and arbitrary MCP writers are outside it; shell-created code still requires a design
 under the workflow guidance. Shell commands retain host permissions and the separate
 commit/push and PR gates, without a research-command allowlist.
-`.agents/lib/pr-design-doc.sh` checks `gh pr create`, `edit`, and `ready` before
+`.agents/lib/pr-description.sh` checks `gh pr create`, `edit`, and `ready` before
 review acknowledgment handling. Literal bodies must link the registered canonical
 URL, including drafts; body-preserving operations fetch the published body and
 match its branch and HEAD. GitHub renders the body; an exact anchor target outside
-code must match the document. The render call is bounded to 20 seconds and 64 KiB;
+code must match the document. The same rendered HTML must contain a level-two
+**How it works** section with content before the next peer or higher heading.
+Each matching section is checked independently; any qualifying section suffices.
+Nested headings alone, comments, quoted sections, example headings, and placeholder-only
+text, including repeated or mixed placeholders, cannot satisfy it; prose, lists,
+tables, and diagrams can. This applies to
+drafts, replacement descriptions, ready operations, and metadata-only edits.
+The render call is bounded to 20 seconds and 64 KiB;
 failures block publication. Hidden source URLs do not count as links. Direct API
-and browser PR writes remain outside this CLI check.
+and browser PR writes remain outside this CLI check. Structural failures leave
+the author-review acknowledgment untouched. Other peer-review artifacts follow the shared writing
+rule; their classification and explanation accuracy remain review responsibilities.
 
 ### GitHub writing
 
@@ -247,7 +256,7 @@ GitHub events run `.github/workflows/author-review.yml` from trusted base/defaul
 code. `scripts/pr-author-review.sh` checks dependencies and calls the single facade
 `pr_author_review_run` in `.agents/lib/pr-author-review.sh`. This gate is independent of
 all local hooks above.
-Both review prompts ask whether the description explains the mechanism in the diff;
+Both review prompts ask whether How it works explains the mechanism or rationale in the diff;
 acknowledgment remains bound to the commit SHA and does not certify description quality
 or expire on body edits.
 

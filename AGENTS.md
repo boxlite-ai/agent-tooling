@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=383029e0d20b sha256=da0fddac797e -->
+<!-- agent-tooling:guidance:begin rev=953ac30ea51a sha256=7888a1f23029 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -119,9 +119,11 @@ Walls of text are forbidden. Write minimally, including prompts. Preserve eviden
 
 Every human-facing output: `## TL;DR` (one simple sentence; section <40 words); first in replies/designs.
 
+Artifacts submitted for peer review must include `## How it works`, explaining how key steps or decisions produce the result. This includes every PR, draft, design proposal, and revision. For non-code changes, explain the rationale; one sentence can suffice.
+
 Prefer: visuals > tables > bullets > prose (under 40 words; 120 for complex topics); Always include a brief real example when it helps the user understand.
 
-- Every PR description must explain how the change produces its intended result through the key steps or decisions. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Review the explanation against the diff, including for drafts and after description edits. Omit work logs and exhaustive test counts. Repository templates are starting points.
+- Review each PR's required explanation against the diff, including drafts and description edits. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Omit work logs and exhaustive test counts. Repository templates are starting points.
 
 Adapted from Clean Code (Robert C. Martin) via the polygala-inc AGENTS.md distillation.
 <!-- agent-tooling:guidance:end -->

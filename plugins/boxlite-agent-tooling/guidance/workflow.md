@@ -104,6 +104,6 @@ Public artifacts/delegates: public evidence or disclosure approval for exact con
 
 {{concise_writing}}
 
-- Every PR description must explain how the change produces its intended result through the key steps or decisions. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Review the explanation against the diff, including for drafts and after description edits. Omit work logs and exhaustive test counts. Repository templates are starting points.
+- Review each PR's required explanation against the diff, including drafts and description edits. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Omit work logs and exhaustive test counts. Repository templates are starting points.
 
 Adapted from Clean Code (Robert C. Martin) via the polygala-inc AGENTS.md distillation.
