@@ -317,6 +317,8 @@ than one session can share a checkout.
   `command`/`stdout` or `cmd`/`output`; supplied nonzero/null exit codes cannot arm.
   Saved prompts reference that policy. Unexpected stream endings permit one
   recovery attempt; failed recovery suspends the watch with a coverage warning.
+  `notificationPolicy: failed_runs_only` mutes successful-run alerts. Quiet runs
+  emit no message; new events get concise task messages without headings.
   Text-contract tests guard required instructions, not model obedience or live delivery.
 - Watcher to commands: `.agents/watch/pr-watch.sh` owns the external command group
   and its timeout/output monitors. Monitor cancellation uses KILL and wait because
