@@ -44,9 +44,22 @@ check() {
 dense="$(printf 'word %.0s' {1..81})"
 long="$(printf 'word %.0s' {1..121})"
 bullet="- $(printf 'word %.0s' {1..41})"
+structured="## TL;DR
+
+Allow complete structured documents.
+
+## How it works
+
+$(printf 'word %.0s' {1..60})
+
+$(printf 'word %.0s' {1..60})
+
+https://github.com/example/repo/issues/123"
 for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
   'issue create --title Bug' 'issue edit 7' 'issue comment 7' 'discussion create --title Topic'; do
   check "$operation rejects dense prose" "gh $operation --body '$dense'" deny
+  check "$operation accepts a structured document over 120 words" \
+    "gh $operation --body '$structured'" allow
   check "$operation accepts a summary" "gh $operation --body '## TL;DR
 
 Retry only failed requests.
@@ -70,20 +83,29 @@ Fixed.'" allow
 check 'attached long body' "gh issue comment 7 --body='$dense'" deny
 check 'paragraph limit' "gh issue comment 7 --body '$dense'" deny
 check 'bullet limit' "gh issue comment 7 --body '$bullet'" deny
-check 'fences do not evade total' "gh issue comment 7 --body '~~~
+check 'long code example keeps its summary' "gh issue comment 7 --body '## TL;DR
+
+Explain the example.
+
+## Example
+
+~~~
 $long
-~~~'" deny
+~~~'" allow
 check 'Chinese counts per character' "gh issue comment 7 --body '$(printf '字%.0s' {1..81})'" deny
-check '120 words in short blocks' "gh issue comment 7 --body '## TL;DR
+check '39-word summary' "gh issue comment 7 --body '## TL;DR
 
-$(printf 'word %.0s' {1..59})
+$(printf 'word %.0s' {1..39})'" allow
+check '40-word summary' "gh issue comment 7 --body '## TL;DR
 
-$(printf 'word %.0s' {1..60})'" allow
-check '121 words in short blocks' "gh issue comment 7 --body '## TL;DR
+$(printf 'word %.0s' {1..40})'" deny 'TL;DR section'
+check 'oversized structured document' "gh issue comment 7 --body '$structured
 
-$(printf 'word %.0s' {1..59})
+## Example
 
-$(printf 'word %.0s' {1..61})'" deny
+~~~
+$(printf 'x%.0s' {1..8001})
+~~~'" deny 'too long'
 check 'release notes' "gh release create v1 --notes '$dense'" deny
 check 'short release notes' "gh release create v1 --notes '## TL;DR
 
@@ -105,6 +127,14 @@ check 'REST typed body' "gh api repos/o/r/issues/7/comments -Fbody='$dense'" den
 check 'REST concise body' "gh api repos/o/r/issues/7/comments -f 'body=## TL;DR
 
 Fixed.'" allow
+for field in body description 'comments[][body]'; do
+  check 'REST structured document over 120 words' \
+    "gh api repos/o/r/issues/7 -f '$field=$structured'" allow
+done
+check 'REST typed structured document over 120 words' \
+  "gh api repos/o/r/issues/7 -F 'body=$structured'" allow
+check 'structured release notes over 120 words' \
+  "gh release create v1 --notes '$structured'" allow
 check 'REST nested review body' "gh api repos/o/r/pulls/7/reviews -f 'comments[][body]=$dense'" deny
 check 'REST input is opaque' 'gh api repos/o/r/issues/7/comments --input /tmp/body.json' deny
 check 'REST explicit GET has no published body' "gh api repos/o/r/issues -X GET -f body='$dense'" allow

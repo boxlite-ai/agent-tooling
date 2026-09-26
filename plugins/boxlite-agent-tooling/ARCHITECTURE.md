@@ -73,13 +73,15 @@ rule; their classification and explanation accuracy remain review responsibiliti
 
 The PR-review hook checks PR bodies (including drafts), issue/discussion bodies, comments,
 reviews, close/reopen comments, release notes, and REST body/description fields.
-`.agents/lib/github-writing.sh` applies `.agents/lib/reply-summary.sh`'s shared
-limits: at most 120 words total, paragraphs at most 80 and list items at
-most 40. Fences and tables still count toward the total; Chinese/Japanese characters
+`.agents/lib/github-writing.sh` reuses `.agents/lib/reply-summary.sh`'s block
+limits: paragraphs at most 80 words and list items at most 40. Complete documents
+have no total-word cap; the Stop gate's 120-word restatement budget is separate.
+Fences and tables are excluded from block limits; Chinese/Japanese characters
 count individually. Empty text and inputs over 8000 shell characters fail closed.
 Denials reuse the `boxlite-writing` skill; clarity remains a reviewer judgment.
-Every inspected body also needs a TL;DR heading and summary prose, including short
+Every inspected body also needs a TL;DR section of at most 39 words, including short
 comments, design documents, and published PR bodies checked on ready/metadata edits.
+Only a peer or higher heading ends that section; nested headings do not reset it.
 The author-review publisher checks its rendered bot comment for privacy indicators
 and a summary before POST or PATCH.
 

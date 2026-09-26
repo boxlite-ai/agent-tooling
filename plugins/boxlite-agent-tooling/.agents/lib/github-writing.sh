@@ -53,14 +53,11 @@ github_writing_check_body() { # body
     return 1
   fi
   github_writing_check_privacy "$body" || return 1
-  if ! reply_summary_fits_restatement "$body"; then
-    printf 'GitHub text exceeds the reply-summary limit of %s words or could not be counted.' \
-      "$reply_summary_restatement_max_words"
-    return 1
-  fi
+  # Complete artifacts need room for evidence; the restatement budget belongs
+  # only to the Stop gate's unaudited follow-up reply.
   reply_summary_is_dense "$body" || density=$?
   case "$density" in
-    1) concise_writing_check_summary "$body"; return $? ;;
+    1) concise_writing_check_summary "$body" anywhere 39; return $? ;;
     0) printf 'GitHub text has a paragraph over %s words or a list item over %s words.' \
          "$reply_summary_paragraph_max_words" "$reply_summary_item_max_words" ;;
     *) printf 'GitHub text could not be counted.' ;;
