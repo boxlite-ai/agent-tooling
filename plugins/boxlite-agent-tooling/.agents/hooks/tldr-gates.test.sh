@@ -92,17 +92,17 @@ check details $'## TL;DR\n\nA concise answer.\n\n## Details\nSupporting evidence
 check closing_hashes $'### TL;DR ###\n\nA concise answer.' allow
 check trailing $'Details first.\n\n## TL;DR\n\nA concise answer.' allow deny 'Move the TL;DR heading'
 check words_39 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..39})" allow
-check words_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..40})" allow deny '40 words; limit 39'
-check paragraphs_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..20})"$'\n\n'"$(printf 'word %.0s' {1..20})" allow deny '40 words; limit 39'
-check chinese_40 $'## TL;DR\n\n'"$(printf '字%.0s' {1..40})" allow deny '40 words; limit 39'
+check words_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..40})" deny deny '40 words; limit 39'
+check paragraphs_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..20})"$'\n\n'"$(printf 'word %.0s' {1..20})" deny deny '40 words; limit 39'
+check chinese_40 $'## TL;DR\n\n'"$(printf '字%.0s' {1..40})" deny deny '40 words; limit 39'
 # Follow the denial literally: keep the summary, move supporting text under a peer heading.
 details="$(printf 'word %.0s' {1..40})"
-check explanation_counted $'## TL;DR\n\nRetry failed requests once.\n\n'"$details" allow deny '44 words; limit 39'
+check explanation_counted $'## TL;DR\n\nRetry failed requests once.\n\n'"$details" deny deny '44 words; limit 39'
 check corrected_explanation $'## TL;DR\n\nRetry failed requests once.\n\n## Details\n\n'"$details" allow
 check nested_heading $'## TL;DR\n\nRetry failed requests once.\n\n### Details\n\n'"$details" \
-  allow deny 'same or higher level'
+  deny deny 'same or higher level'
 check table_after $'## TL;DR\n\nA concise answer.\n\n| Gate | Result |\n|---|---|\n'"$(printf '| stop gate | denied the reply |\n%.0s' {1..10})" \
-  allow deny 'start a new section'
+  deny deny 'start a new section'
 
 for host in claude codex; do
   jq -nc '{type:"assistant",message:{content:[{type:"text",text:"Earlier progress."}]}}' > "$scratch/turn.jsonl"
