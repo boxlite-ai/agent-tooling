@@ -1,9 +1,12 @@
+<!-- Read and apply
+[boxlite-writing](https://github.com/boxlite-ai/agent-tooling/blob/main/plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md)
+to the PR description, including drafts and revisions.
+Follow the contributor guide before filling in this template:
+https://github.com/boxlite-ai/agent-tooling/blob/main/plugins/boxlite-agent-tooling/CONTRIBUTING.md#pull-request-descriptions -->
+
 ## TL;DR
 
 <!-- Summarize the intended result. -->
-
-<!-- Follow the contributor guide before filling in this template:
-https://github.com/boxlite-ai/agent-tooling/blob/main/plugins/boxlite-agent-tooling/CONTRIBUTING.md#pull-request-descriptions -->
 
 Design doc: <!-- Full registered URL. -->
 
@@ -12,8 +15,7 @@ prefer existing docs. -->
 
 ## How it works
 
-<!-- Explain the trigger, key decisions, and result; for non-code changes, give
-the rationale. Replace this comment with an explanation, even for a draft. -->
+<!-- Describe the mechanism or rationale. -->
 
 ## Verification
 
