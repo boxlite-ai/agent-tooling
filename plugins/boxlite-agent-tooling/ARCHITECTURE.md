@@ -476,7 +476,7 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         shell-engineering, boxlite-diagrams, boxlite-examples, adversarial-iteration
+.agents/skills/         shell-engineering, boxlite-visualize, boxlite-examples, adversarial-iteration
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
@@ -484,3 +484,8 @@ guidance/workflow.md    workflow template composed with concise-writing for cons
 host-parity.test.sh     what keeps the three hosts loading the same assets
 architecture.test.sh    what keeps this map honest
 ```
+
+Use `boxlite-visualize` to explain architecture, execution sequences, or source call
+paths; for example, "Use boxlite-visualize to show the cloud deployment architecture."
+The skill produces `diagram.md` and `evidence.json`, then validates rendering, fit,
+and source traceability into `validation.json` before visual inspection.
