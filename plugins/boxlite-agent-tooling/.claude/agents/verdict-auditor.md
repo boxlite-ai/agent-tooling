@@ -63,7 +63,7 @@ if complete claims or required proof cannot be established within these ceilings
 4. Read the repository's workflow and testing rules. The agent's prose, plausibility, and
    indirect inference are not proof. Apply these evidence standards:
 
-   - Fix works: a non-tautological reproducer exercises production symbols. When the
+   - Fix works: apply the `boxlite-clean-code` skill's verification standard. When the
      change touches core runtime/security or the turn asks for deep verification, also
      prove the repository-required two-side red/green check.
    - Tests pass: the turn names a re-runnable command; its transcript output or a safe

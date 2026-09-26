@@ -5,6 +5,8 @@ description: Engineer Bash hooks and gates while preserving I/O, fail-closed sta
 
 # Shell Engineering
 
+Apply the `boxlite-clean-code` skill for general design and test quality.
+
 Treat shell as a small program, not a command transcript. Before restructuring a hook,
 preserve its host-facing stdin, stdout, stderr, and exit-code contract.
 
@@ -15,8 +17,6 @@ preserve its host-facing stdin, stdout, stderr, and exit-code contract.
 - Put cohesive reusable behavior in `.agents/lib/`. Sourced libraries have no top-level
   mutation, exit, stdin read, or output.
 - Namespace exported functions and module variables; Bash has one global function table.
-- Expose a facade with one or two operations. Keep parsing, validation, persistence,
-  rendering, and orchestration private and separate.
 - Give lifecycle transitions one serialization owner. Do not encode state machines as
   cooperating booleans or make callers assemble lock order.
 - Pass cross-module values explicitly. Avoid dynamic dispatch, dynamic function names,
@@ -24,7 +24,6 @@ preserve its host-facing stdin, stdout, stderr, and exit-code contract.
 
 ## Boundaries and failure
 
-- Validate untrusted JSON, paths, identifiers, enums, and numeric limits once at entry.
 - Reuse `verdict-audit-state.sh` for bounded reads, atomic writes, inode checks, and
   state paths; do not recreate security-sensitive file primitives.
 - Use `printf` for machine output, quote expansions unless documented splitting is
@@ -45,15 +44,12 @@ notifications as distinct inputs.
 
 ## Verify
 
-1. Add a focused behavioral test at the public script boundary; structure checks only
-   supplement it.
-2. For a bug fix, prove the test red with every production change reverted, then green
-   with the complete fix restored.
-3. Run `bash -n` on every changed shell file.
-4. Run `shellcheck -x` when available; annotate every dynamic source with a nearby
+1. Exercise stdin, stdout, stderr, and exit behavior at the public script boundary.
+2. Run `bash -n` on every changed shell file.
+3. Run `shellcheck -x` when available; annotate every dynamic source with a nearby
    `# shellcheck source=` directive.
-5. Run the focused hook suite, host parity, then all plugin `*.test.sh` suites.
-6. Run `scripts/sync-guidance.sh --check` and `git diff --check`.
+4. Run the focused hook suite, host parity, then all plugin `*.test.sh` suites.
+5. Run `scripts/sync-guidance.sh --check` and `git diff --check`.
 
 References: [GNU Bash](https://www.gnu.org/software/bash/manual/bash.html),
 [ShellCheck](https://github.com/koalaman/shellcheck/blob/master/shellcheck.1.md), and the

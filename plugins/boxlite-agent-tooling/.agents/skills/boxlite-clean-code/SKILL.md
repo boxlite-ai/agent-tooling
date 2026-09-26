@@ -59,6 +59,7 @@ the earlier goals. Measure before optimizing.
   make check-then-act atomic. Reserving and returning an item may need one operation.
 - Bound queues, concurrency, waiting, and retries. Establish idempotency before
   repeating effects. Check lock order, starvation, and termination as well as races.
+  Wait for completion signals rather than sleeping to guess when an event occurred.
 - Control known conflicting boundaries in regression tests; propagate worker
   failures and assert completion. Bounded stress adds evidence, not proof.
 - Validate external inputs and keep secrets out of errors, logs, and fixtures.
@@ -80,7 +81,8 @@ Check the caller's complete contract before declaring the refactor equivalent.
 
 For a defect, demonstrate the original failure with every production change
 reverted, then restore the complete fix and observe the pass. Tests must exercise
-project behavior, not test-built values or a substitute implementation.
+project behavior, not test-built values or a substitute implementation. Never weaken
+assertions to force a pass; correct the code or establish an intentional contract change.
 
 Run the narrow relevant checks and the repository's required validation. Explain
 what became clearer, what behavior intentionally changed, what actually ran, and

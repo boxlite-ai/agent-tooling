@@ -86,8 +86,8 @@ grep -q 'agent-tooling:guidance:' "$CANON" \
   && bad "canonical must not contain its own marker string" \
   || ok "canonical does not contain its own marker string"
 
-# Size alone is not a safety contract. Pin the eager kernel's non-negotiable
-# semantics on single rules so prose reduction cannot delete one unnoticed.
+# Pin workflow-owned rules and the route to shared coding guidance. Coding
+# principles live in the skill; requiring them inline would recreate duplication.
 require_semantic_rule() { # description, same-line ERE
   local description="$1" pattern="$2"
   if grep -Ei "$pattern" "$CANON" >/dev/null 2>&1; then
@@ -99,21 +99,20 @@ require_semantic_rule() { # description, same-line ERE
 require_semantic_rule "guidance pins source-first understanding" \
   'README/CONTRIBUTING.*actual source before editing'
 require_semantic_rule "guidance pins focused scope" \
-  'small, deliberate changes.*don.t rewrite or reformat unrelated code'
-require_semantic_rule "guidance pins explicit errors and secret masking" \
-  'Explicit errors.*fail fast.*Never swallow silently.*Mask secrets'
-require_semantic_rule "guidance pins bounded concurrent work and cleanup" \
-  'Concurrency:.*No unbounded.*Close/release'
+  'Stay inside the ask: do and discuss only what the request needs'
+require_semantic_rule "guidance delegates coding decisions to the shared skill" \
+  'Apply the .*boxlite-clean-code.* skill for design, implementation, refactoring, and maintainability review'
+if [[ -r "$PLUGIN_ROOT/.agents/skills/boxlite-clean-code/SKILL.md" ]]; then
+  ok "referenced coding skill ships with the workflow"
+else
+  bad "referenced coding skill is missing"
+fi
 require_semantic_rule "guidance pins input validation and shell safety" \
-  'Security: no secrets.*Validate before.*Avoid shell execution with untrusted input'
+  'Never commit secrets.*Validate before.*avoid shell execution with untrusted input'
 require_semantic_rule "guidance pins full-revert red proof" \
   'revert .*every.* production change.*only the test remains'
 require_semantic_rule "guidance constrains test-only compatibility adapters" \
   'test-only compatibility adapter.*must not implement the fix.*alter the defect check.*become the failure signal'
-require_semantic_rule "guidance pins production-boundary tests" \
-  'data must come from production code under test'
-require_semantic_rule "guidance pins evidence-qualified reporting" \
-  'Don.t claim tests passed unless they actually ran.*residual risk'
 
 echo
 echo "## A repository with no instructions files gets the canonical layout"

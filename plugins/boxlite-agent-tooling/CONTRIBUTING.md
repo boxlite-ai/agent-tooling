@@ -6,11 +6,12 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | Required guidance | Canonical source |
 | --- | --- |
 | Research, design docs, PR size, splitting, stacks, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
+| General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
 | Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
 | PR explanations | [Description guidance](.agents/prompts/pr-description-guidance.md) |
 
-Reference the writing skill by name; do not copy its rules into other documents or
-hook messages. Keep task-specific requirements with their tasks, and regenerate
+Reference the writing and coding skills by name; do not copy their rules into other
+documents or hook messages. Keep task-specific requirements with their tasks, and regenerate
 consumer instructions instead of editing their generated copies.
 
 Refer to skills by name in prose and prompts, with the name as link text when useful.
