@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=acfb0bc8b32e-dirty sha256=6a40fe07953b -->
+<!-- agent-tooling:guidance:begin rev=71e26b0a9d2a-dirty sha256=112dd237ba80 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -44,6 +44,11 @@ Every change goes: understand → research → design → implement → test →
 - Composition over inheritance / framework magic.
 - Only what's used (Occam's razor) — design the simplest API that meets current requirements; no future-proofing. Delete dead code immediately.
 - No premature optimization — measure first.
+
+**Documentation (every PR)**
+
+- Every PR, including drafts, must add or update meaningful project docs. Prefer existing docs; explain changed behavior, usage, contracts, or maintenance (including refactor rationale).
+- Link the changed section in the PR and review it against the final diff. Design links, PR summaries, file lists, formatting, and token edits alone do not count.
 
 **PR size and decomposition (hard requirement)**
 

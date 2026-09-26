@@ -12,6 +12,9 @@ Walls of text are forbidden; prefer visuals, tables, or short bullets.
 Include a brief real example when helpful;
 link supporting detail. -->
 
+Documentation: <!-- Link meaningful project docs added or updated in this PR;
+prefer existing docs. -->
+
 ## Summary
 
 <!-- Explain the problem, how the change works, and the result. Use bullets, a real

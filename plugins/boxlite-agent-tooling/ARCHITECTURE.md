@@ -41,6 +41,8 @@ match its canonical root and branch (or detached HEAD). State reads and replacem
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
 Notion child blocks fail closed; list items and code retain their density semantics.
 Page length, related-work completeness, and design quality remain review criteria.
+Every PR requires substantive project docs; reviewers assess their quality.
+The design-doc gate does not inspect documentation diffs.
 The pre-edit gate covers native editor, notebook, and patch tools on both hosts.
 `.agents/lib/edit-scope.sh` passes edits whose targets all lie outside every work
 tree and Git directory, both where they are named and where their links lead, such

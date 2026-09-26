@@ -33,6 +33,11 @@ Every change goes: understand → research → design → implement → test →
 - Only what's used (Occam's razor) — design the simplest API that meets current requirements; no future-proofing. Delete dead code immediately.
 - No premature optimization — measure first.
 
+**Documentation (every PR)**
+
+- Every PR, including drafts, must add or update meaningful project docs. Prefer existing docs; explain changed behavior, usage, contracts, or maintenance (including refactor rationale).
+- Link the changed section in the PR and review it against the final diff. Design links, PR summaries, file lists, formatting, and token edits alone do not count.
+
 **PR size and decomposition (hard requirement)**
 
 - Target 100–200 changed lines; maximum 400 additions + deletions across the entire PR against its intended base (the immediately preceding branch for a stacked PR). Count tests, docs, and generated text. Drafts have the same limit; splitting commits does not reduce PR size.
