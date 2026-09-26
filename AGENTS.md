@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=71e26b0a9d2a-dirty sha256=112dd237ba80 -->
+<!-- agent-tooling:guidance:begin rev=974069f92a44-dirty sha256=bb309a04034f -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -114,6 +114,8 @@ Every change goes: understand → research → design → implement → test →
 - Give delegates only authorized material. Implementing or publishing work does not authorize private disclosure.
 - Check exact content and destination. Omit uncertain material or obtain specific approval; changes invalidate approval. Hooks detect indicators, not permission.
 - Every human-facing output must include a `## TL;DR` section containing one simple sentence, as short as possible. This includes replies, progress updates, design docs, PR descriptions, GitHub comments, reviews, issues, and release notes, even when already concise.
+- Internal agent instructions, automation prompts, tool payloads, and intentionally empty replies need no TL;DR.
+- State the outcome in 5–12 words when possible; retain material caveats and required action.
 - Replies must begin with TL;DR; the entire section must contain fewer than 40 words.
 - Help the human understand quickly. Beyond the required TL;DR, choose a call graph, sequence diagram, real example, bullets, table, or short prose—whichever explains the point best. Do not force other sections, diagrams, or source annotations.
 - Walls of text are always forbidden. Keep paragraphs and items short, remove repetition, and link detailed evidence. Design docs follow the 1–3-page guidance above. GitHub PRs (including drafts), issues, comments, reviews, discussions, and release notes use the same reply-summary prompt. Requests for depth allow more focused sections, not dense text. Keep material risks, failures, and uncertainty visible.

@@ -76,6 +76,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
   done
 }
 check missing 'A concise answer.' deny deny 'Missing a Markdown TL;DR heading'
+check visible_alert 'PR #141 needs review.' deny deny 'Missing a Markdown TL;DR heading'
 check bold_label '**TL;DR:** A concise answer.' deny deny 'literal line `## TL;DR`'
 check empty $'## TL;DR\n\n## Details\nA concise answer.' deny deny 'summary prose is missing or malformed'
 check symbol_start $'## TL;DR\n\n#120 is ready.' deny deny 'summary prose is missing or malformed'
@@ -100,6 +101,19 @@ check nested_heading $'## TL;DR\n\nRetry failed requests once.\n\n### Details\n\
   allow deny 'same or higher level'
 check table_after $'## TL;DR\n\nA concise answer.\n\n| Gate | Result |\n|---|---|\n'"$(printf '| stop gate | denied the reply |\n%.0s' {1..10})" \
   allow deny 'start a new section'
+
+for host in claude codex; do
+  jq -nc '{type:"assistant",message:{content:[{type:"text",text:"Earlier progress."}]}}' > "$scratch/turn.jsonl"
+  output="$(jq -nc --arg transcript "$scratch/turn.jsonl" \
+    '{hook_event_name:"Stop",last_assistant_message:"",transcript_path:$transcript}' \
+    | run_hook "$host" Stop stop-gate.sh)"
+  if [[ "$(jq -r '.decision // "allow"' <<<"$output")" != block ]]; then
+    pass=$((pass+1))
+  else
+    printf 'FAIL %s: an explicitly empty reply replayed earlier text: %s\n' "$host" "$output"
+    fail=$((fail+1))
+  fi
+done
 
 facade_failure() { # label, expected diagnostic, Markdown, optional counter behavior
   local label="$1" reason="$2" body="$3" counter="${4:-}" output status=0

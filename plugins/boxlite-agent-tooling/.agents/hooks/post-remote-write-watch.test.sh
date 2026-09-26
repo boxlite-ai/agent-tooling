@@ -2286,10 +2286,11 @@ else
   fail=$((fail + 1)); printf '  FAIL  a Claude host is named only the Monitor route (got: %.160s)\n' "$claude_ctx"
 fi
 codex_ctx="$(ctx_as_host codex "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
-if [[ "$codex_ctx" == *"background shell"* && "$codex_ctx" != *"Monitor({"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  a Codex host is named only the background-shell route\n'
+if [[ "$codex_ctx" == *"background shell"* && "$codex_ctx" == *"native heartbeat"* \
+   && "$codex_ctx" == *"every 1 minute"* && "$codex_ctx" != *"Monitor({"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  a Codex host gets a background consumer and one-minute heartbeat\n'
 else
-  fail=$((fail + 1)); printf '  FAIL  a Codex host is named only the background-shell route (got: %.160s)\n' "$codex_ctx"
+  fail=$((fail + 1)); printf '  FAIL  a Codex host gets a background consumer and one-minute heartbeat (got: %.160s)\n' "$codex_ctx"
 fi
 
 # The stream script must be addressed in the TOOLING tree (the hook's own
@@ -2310,7 +2311,7 @@ else
 fi
 
 if [[ "$got" == *"exactly ONE"* && "$got" == *"fail/cancel"* \
-   && "$got" == *"confirmed conflict"* && "$got" == *"including bots"* \
+   && "$got" == *"confirmed merge conflict"* && "$got" == *"including bots"* \
    && "$got" == *"passing checks stay silent"* ]]; then
   pass=$((pass + 1)); printf '  PASS  compact context preserves attach and alert contracts\n'
 else
@@ -2319,10 +2320,8 @@ fi
 
 echo
 echo "## The long-path fallback keeps the PR it resolved"
-# A tooling root this long pushes the full context past 1400 bytes while the fallback
-# still fits, so the hook sends the fallback. That text must still name a PR the hook
-# has read, not tell the agent that none may exist.
-LONG_LINK_PARENT="$TMP/$(printf '%0150d' 0 | tr 0 f)"
+# Force compact rendering without exceeding its budget.
+LONG_LINK_PARENT="$TMP/$(printf '%0220d' 0 | tr 0 f)"
 mkdir -p "$LONG_LINK_PARENT"
 ln -s "$REPO_ROOT" "$LONG_LINK_PARENT/t"
 is_fallback_context() {  # context

@@ -1,37 +1,41 @@
-# CI auto-fix escalation policy
+# PR watch policy
 
-The watcher reports events; this policy decides what an agent may change without
-asking a human.
-Notification is separate: report every comment and review, including bots.
+## TL;DR
+
+Attach safely; escalate before risky edits.
+
+## Consumer setup
+
+Before attaching, read [consumer-lifecycle.md](consumer-lifecycle.md).
+
+Report every comment/review, including bots.
 
 ## Auto-fix limits
 
-- At most **2 auto-fix attempts per PR head**. After the second failed push,
-  stop and report.
-- **Never weaken** a test/assertion, add a skip, or widen an allow-list to pass CI.
-- Never push automatically to `main`.
-- Read the real failure first: `gh run view <run-id> --log-failed`.
-- Reproduce with the smallest relevant local target before pushing.
+- Maximum **2 auto-fix attempts per PR head**; stop/report after two failed pushes.
+- **Never weaken** tests/assertions, skip tests, or widen allow-lists to pass CI.
+- No automatic pushes to `main`.
+- Inspect `gh run view <run-id> --log-failed`; reproduce with the smallest relevant
+  local target before pushing.
 
 ## Escalate instead of acting
 
-Ask the human if any condition holds:
+Ask first:
 
-1. There is no code signal: runner OOM, network/cache failure, timeout, or a job
-   that never started. Report the run; do not edit or rerun it.
-2. The fix touches a file **not already in this PR's diff**
+1. No code signal: runner OOM, network/cache failures, timeouts, or never-started jobs.
+   Report the run; no edits/reruns.
+2. Files **not already in this PR's diff**
    (`git diff --name-only origin/main...HEAD`).
-3. The failing job is `e2e-local` or `e2e-cloud`.
-4. The fix touches `.githooks/`, `.claude/`, `.codex/`, or `.agents/`.
-5. A review asks for design/spec changes or depends on product intent.
-6. Two attempts have already run on this PR head.
+3. `e2e-local` or `e2e-cloud` failures.
+4. Changes under `.githooks/`, `.claude/`, `.codex/`, or `.agents/`.
+5. A review requests design/spec changes or depends on product intent.
+6. Two attempts already used on this head.
 7. The same check returns a **different error** after a fix.
 
 Otherwise fix, push, and report what changed and why.
 
 ## Review findings
 
-First compare against the merge base and identify findings this PR introduced.
-Fix introduced findings in this PR. Leave pre-existing findings unchanged and say
-so in the PR. Never resolve an unfixed finding without explaining why. Treat bot
-findings as claims: reproduce them before fixing or dismissing them.
+Compare against the merge base. Fix this PR's introduced findings; report
+pre-existing findings in the PR, unchanged. Explain why before resolving unfixed
+findings. Reproduce bot claims before fixing or dismissing them.

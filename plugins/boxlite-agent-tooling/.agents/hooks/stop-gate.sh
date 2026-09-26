@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop hook: confirmations and final-response checks run in sequence, so they
 # never race as separate Stop hooks would:
-#   Every nonempty agent reply must have a TL;DR, including repeated continuations.
+#   Every nonempty human-facing reply needs TL;DR; explicit empty replies stay empty.
 #   0. A pending timed confirmation resumes the agent; expiry selects its fallback.
 #   1. A small reply answering the previous Stop's ask ends the turn when no tool ran
 #      since the ask: it restates a turn the verdict check already judged.
@@ -52,10 +52,12 @@ payload="$(printf '%s' "$raw_payload" | jq -ecs '
 payload_string() { printf '%s' "$payload" | jq -r "if (.$1 | type) == \"string\" then .$1 else \"\" end"; }
 session_id="$(payload_string session_id)"
 last_assistant_message="$(payload_string last_assistant_message)"
+reply_is_supplied="$(printf '%s' "$payload" | jq -r '(.last_assistant_message | type) == "string"')"
 transcript_path="$(payload_string transcript_path)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/stop-gate.XXXXXX")" || exit 2
 trap 'rm -f "$scratch/payload" "$scratch/verdict-output" "$scratch/decisions" "$scratch/final-turn.json"; rmdir "$scratch" 2>/dev/null' EXIT
-if [[ -z "$last_assistant_message" && -n "$transcript_path" ]]; then
+# An explicit empty reply is intentional silence, not missing host data.
+if [[ "$reply_is_supplied" != true && -n "$transcript_path" ]]; then
   last_assistant_message="$(reply_summary_last_text "$transcript_path" "$scratch")" || {
     printf 'stop-gate: cannot read the final reply for the TL;DR check\n' >&2; exit 2;
   }
