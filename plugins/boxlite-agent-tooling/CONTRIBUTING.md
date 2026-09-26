@@ -18,6 +18,18 @@ Keep file paths in link targets, tests, and diagnostics that locate a problem.
 Run `bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .` before
 submitting Markdown changes; the Writing ownership workflow runs the same gate.
 
+## Release maintenance
+
+Bump the generic, Claude, and Codex plugin manifests together with both version
+fields in the Claude and Copilot marketplaces. The Codex marketplace follows
+`main` without a version field. Run `host-parity.test.sh` to verify agreement.
+
+After the release merges, run each consumer's `.agent-tooling/install.sh`, then
+refresh its host plugin. Verify the recorded revision, worktree hook path, managed
+guidance, and installed plugin version separately. Preserve explicit holds and
+unrelated worktree changes. Existing sessions need a plugin reload or a new task
+to load the updated resources.
+
 ## Commit & PR messages
 
 The preflight hook's denials point here as `CONTRIBUTING.md #commit--pr-messages`; keep this heading so that anchor resolves.
