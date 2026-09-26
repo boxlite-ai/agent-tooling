@@ -690,6 +690,14 @@ HOOK="$original_hook"
 unset HOOK_STDERR
 rm -rf "$prompt_fixture"
 
+S="empty-reply-audit"; R="$(new_repo "$S")"
+append_assistant "$R" "The root cause is the stale index."
+payload="$(stop_payload "$R" "$S" false '' | jq '.last_assistant_message = ""')"
+out="$(run_in_repo "$R" "$HOOK" YES '' "$payload")"
+[[ "$(decision_of "$out")" == block ]] && audit_ran "$R"
+expect "an empty reply still audits earlier claims" "$?" "$out"
+rm -rf "$R"
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))
