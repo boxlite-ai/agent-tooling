@@ -142,12 +142,7 @@ decision_of() {
   if [[ -z "$1" ]]; then printf allow; return; fi
   [[ "$(field "$1" '.decision')" == block ]] && printf block || printf allow
 }
-# Compare delivery with the editable template, without pinning its wording here.
-expected_request="$(
-  # shellcheck source=../lib/subagent.sh
-  source "$REPO_ROOT/.agents/lib/subagent.sh"
-  subagent_prompt concise-writing "$REPO_ROOT"
-)"
+expected_request='Use the boxlite-writing skill to shorten this response.'
 asked_as_context() {
   [[ "$(field "$1" '.hookSpecificOutput.hookEventName')" == Stop \
      && -n "$expected_request" \
@@ -674,14 +669,13 @@ printf '\n## Invariant: the ask record is gitignored, so it never enters the tre
 git -C "$REPO_ROOT" check-ignore -q .agents/state/reply-summary-ask
 expect ".agents/state/reply-summary-ask is gitignored" "$?" "not ignored"
 
-printf '\n## Reply-summary prompts are loaded from the plugin on each request\n'
-# Edit an isolated plugin copy: live prompt edits must not affect another test or
-# the developer's installed hook. The path also exercises checkout names with spaces.
+printf '\n## Writing reminders reference the skill without reading its body\n'
+# Isolate skill changes and exercise checkout names with spaces.
 prompt_fixture="$(mktemp -d)"
 cp -R "$REPO_ROOT" "$prompt_fixture/plugin copy"
 original_hook="$HOOK"
 HOOK="$prompt_fixture/plugin copy/.agents/hooks/stop-gate.sh"
-prompt_file="$prompt_fixture/plugin copy/.agents/prompts/concise-writing.md"
+prompt_file="$prompt_fixture/plugin copy/.agents/skills/boxlite-writing/SKILL.md"
 HOOK_STDERR="$prompt_fixture/stderr"
 edits_status=0
 for host in claude codex; do
@@ -690,11 +684,11 @@ for host in claude codex; do
   else
     prompt_field='.reason'
   fi
-  printf '%s: summarize in 40 words.\n' "$host" > "$prompt_file"
+  printf 'Unique writing policy marker.\n' > "$prompt_file"
   S="prompt-$host"; R="$(new_repo "$S")"
   append_assistant "$R" "$long_reply"
   out="$(gate_stop "$R" "$S" false "$long_reply" NO "$host")"
-  [[ "$(field "$out" "$prompt_field")" == "$host: summarize in 40 words." ]] \
+  [[ "$(field "$out" "$prompt_field")" == "$expected_request" ]] \
     && keeps_triage_note "$out" || edits_status=1
   for operation in 'pr comment 7' 'pr create --title "feat: share prompt"'; do
     github_output="$(jq -nc --arg command "gh $operation --body '$long_reply'" \
@@ -702,11 +696,11 @@ for host in claude codex; do
       | bash "$prompt_fixture/plugin copy/.agents/hooks/preflight-pr-review.sh")"
     github_reason="$(field "$github_output" '.hookSpecificOutput.permissionDecisionReason')"
     [[ "$(field "$github_output" '.hookSpecificOutput.permissionDecision')" == deny \
-       && "${github_reason#*$'\n\n'}" == "$host: summarize in 40 words." ]] || edits_status=1
+       && "${github_reason#*$'\n\n'}" == "$expected_request" ]] || edits_status=1
   done
   rm -rf "$R"
 done
-expect "Stop and GitHub hooks on both hosts render the same edited shared prompt" \
+expect "Stop and GitHub hooks on both hosts name the skill without copying its body" \
   "$edits_status" "stop=$out github=$github_output"
 
 rm -f "$prompt_file"
@@ -714,12 +708,12 @@ S="prompt-missing"; R="$(new_repo "$S")"
 append_assistant "$R" "$long_reply"
 out="$(gate_stop "$R" "$S" false "$long_reply" NO codex)"
 status=$?
-[[ "$status" == 0 && "$(decision_of "$out")" == allow \
-   && ! -e "$(session_state_path "$R" reply-summary-ask "$S")" ]] \
+[[ "$status" == 0 && -e "$(session_state_path "$R" reply-summary-ask "$S")" ]] \
+  && asked_as_block "$out" \
   && keeps_triage_note "$out" \
-  && ! logged_rung "$R" "$S" 'summary ask-continue' \
-  && grep -q 'no such prompt' "$HOOK_STDERR"
-expect "a missing template reports an error without asking or changing the verdict" \
+  && logged_rung "$R" "$S" 'summary ask-continue' \
+  && ! grep -q 'no such prompt' "$HOOK_STDERR"
+expect "a missing local skill does not prevent the host from receiving its name" \
   "$?" "status=$status out=$out stderr=$(cat "$HOOK_STDERR")"
 rm -rf "$R"
 HOOK="$original_hook"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compose workflow.md with concise-writing.md, then splice the guidance into a
+# Splice workflow.md, including its skill-name reference, into a
 # consumer's committed agent-instructions files, between HTML-comment markers, and
 # verify the splice stays intact.
 #
@@ -67,9 +67,9 @@ done
 repo_root="$(cd "$repo_root" && pwd -P)"
 
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-workflow_template="$plugin_root/guidance/workflow.md"
-[[ -r "$workflow_template" ]] || {
-  printf 'agent-tooling: canonical guidance is missing: %s\n' "$workflow_template" >&2
+canonical="$plugin_root/guidance/workflow.md"
+[[ -r "$canonical" ]] || {
+  printf 'agent-tooling: canonical guidance is missing: %s\n' "$canonical" >&2
   exit 1
 }
 
@@ -84,26 +84,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Compose before touching consumer files; links alone do not deliver prompt rules.
-# shellcheck source=../.agents/lib/subagent.sh
-source "$plugin_root/.agents/lib/subagent.sh"
-# shellcheck source=../.agents/lib/concise-writing.sh
-source "$plugin_root/.agents/lib/concise-writing.sh"
-writing_prompt="$(concise_writing_prompt "$plugin_root")" || exit 1
-[[ "$(grep -cxF '{{concise_writing}}' "$workflow_template")" == 1 ]] || {
-  printf 'agent-tooling: workflow must contain exactly one concise-writing placeholder\n' >&2
-  exit 1
-}
-canonical_text="$(cat "$workflow_template")"
-canonical="$(mktemp "${TMPDIR:-/tmp}/agent-tooling-guidance.XXXXXX")"
-tmp_files+=("$canonical")
-# Bash 5.2 expands replacement ampersands; quoting adds literal quotes on Bash 3.2.
-shopt -u patsub_replacement 2>/dev/null || true
-printf '%s\n' "${canonical_text//\{\{concise_writing\}\}/$writing_prompt}" > "$canonical"
 canonical_sha="$(shasum -a 256 "$canonical" | awk '{print $1}')"
 canonical_sha12="${canonical_sha:0:12}"
 tooling_rev="$(git -C "$plugin_root" rev-parse --short=12 HEAD 2>/dev/null || echo unversioned)"
-# The stamp names the revision whose workflow and writing prompt render the block.
+# The stamp names the revision whose workflow supplies the block.
 # That holds for every production splice, which runs from an
 # immutable fetched checkout — but not when someone splices from a working tree whose
 # canonical is modified, where the stamp would name a revision that never held this
@@ -114,7 +98,7 @@ tooling_rev="$(git -C "$plugin_root" rev-parse --short=12 HEAD 2>/dev/null || ec
 # one. Running it in --check too would put this warning in front of every commit
 # made in the tooling repository, where a modified canonical is the normal state.
 if [[ "$mode" == sync && "$tooling_rev" != unversioned ]] \
-   && [[ -n "$(git -C "$plugin_root" status --porcelain -- guidance/workflow.md .agents/prompts/concise-writing.md 2>/dev/null)" ]]; then
+   && [[ -n "$(git -C "$plugin_root" status --porcelain -- guidance/workflow.md 2>/dev/null)" ]]; then
   tooling_rev="$tooling_rev-dirty"
   printf 'agent-tooling: canonical guidance is modified in %s; stamping %s\n' \
     "$plugin_root" "$tooling_rev" >&2

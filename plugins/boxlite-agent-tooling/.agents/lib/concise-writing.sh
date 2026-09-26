@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Shared summary check and prompt renderer. Requires reply-summary.sh and perl;
-# rendering also needs subagent.sh.
+# Shared summary check and skill reminder. Requires reply-summary.sh and perl.
 # Source only; callers own dependency checks, host delivery and failure policy.
 
 concise_writing_check_summary() { # Markdown, anywhere|first, optional word limit
@@ -72,12 +71,6 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
   return 1
 }
 
-concise_writing_prompt() { # tooling-root
-  local prompt
-  prompt="$(subagent_prompt concise-writing "$1")" || return $?
-  if [[ "$prompt" != *[![:space:]]* ]]; then
-    printf 'concise-writing: empty prompt: %s/.agents/prompts/concise-writing.md\n' "$1" >&2
-    return 1
-  fi
-  printf '%s' "$prompt"
+concise_writing_reminder() {
+  printf '%s' 'Use the boxlite-writing skill to shorten this response.'
 }

@@ -1,7 +1,7 @@
 # Coding decisions
 
 Use the relevant section to connect a concrete concern to a change and its checks.
-Page numbers refer to the [first edition](book-map.md). Language and runtime
+Page numbers refer to the first edition of *Clean Code*. Language and runtime
 adaptations below are this skill's guidance, not claims made by the book.
 
 ## Names, functions, comments, and layout

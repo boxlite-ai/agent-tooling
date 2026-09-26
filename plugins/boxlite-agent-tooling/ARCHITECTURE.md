@@ -16,7 +16,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 | A person or host does this | Event | Script | What they see |
 | --- | --- | --- | --- |
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. An audit still running for the abandoned turn is revoked. |
-| Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | One compact reply-shape reminder. Not wired by the plugin manifests. |
+| Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
@@ -77,7 +77,7 @@ reviews, close/reopen comments, release notes, and REST body/description fields.
 limits: at most 120 words total, paragraphs at most 80 and list items at
 most 40. Fences and tables still count toward the total; Chinese/Japanese characters
 count individually. Empty text and inputs over 8000 shell characters fail closed.
-Denials reuse `.agents/prompts/concise-writing.md`; clarity remains a reviewer judgment.
+Denials reuse the `boxlite-writing` skill; clarity remains a reviewer judgment.
 Every inspected body also needs a TL;DR heading and summary prose, including short
 comments, design documents, and published PR bodies checked on ready/metadata edits.
 The author-review publisher checks its rendered bot comment for privacy indicators
@@ -104,18 +104,17 @@ comments and quoted strings and recognizes all ignored token separators.
 This is a hook on recognized `gh`
 commands, not a GitHub server policy: other clients, script files, browser edits and
 later bot additions are outside it. Writing denials never consume an acknowledgment.
-`scripts/sync-guidance.sh` expands the single `{{concise_writing}}` slot in
-`guidance/workflow.md` with `.agents/prompts/concise-writing.md` before splicing.
-Replacement values preserve literal ampersands and backslashes.
-The hash covers rendered text; edits to either source mark the revision dirty.
-Missing, empty, or unrenderable shared writing fails before consumer files change.
-Consumer instructions contain the complete rules and need no runtime includes.
+`scripts/sync-guidance.sh` splices `guidance/workflow.md`, which names the
+`boxlite-writing` skill without embedding its body. The hash and dirty-revision
+stamp depend only on workflow text; skill edits do not change generated instructions.
+Agents load the skill through host discovery. Hooks and synchronization do not read
+its body, so a missing local skill file does not prevent emitting the reference.
 
 The repository's [Writing ownership workflow](../../.github/workflows/writing-ownership.yml)
-runs `scripts/check-writing-ownership.sh` and the composition tests. The gate uses
+runs `scripts/check-writing-ownership.sh` and the reference-delivery tests. The gate uses
 `sync-guidance.sh --check-current` to reject stale output; ordinary consumer
 `--check` keeps its warning behavior. It scans tracked and untracked Markdown for
-eight-word matches or complete five-to-seven-word rules from concise-writing,
+eight-word matches or complete five-to-seven-word rules from the `boxlite-writing` skill,
 ignoring case, punctuation, and wrapping. Only verified root instruction blocks
 and fenced examples are exempt. Diagnostics name the copied passage's file and line;
 paraphrased rules remain a review responsibility. This is repository CI wiring;
@@ -213,11 +212,11 @@ Sources: [question timeout](https://code.claude.com/docs/en/tools-reference#ques
 PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr-review-question.md`
 supplies the shared explanation check, `.agents/prompts/pr-review-ack.md` supplies both
 normal and bounded local acknowledgment instructions, `.agents/prompts/pr-description-guidance.md`
-composes shared concise-writing with PR-specific guidance, and `.agents/prompts/pr-author-review.md` supplies the
+names the `boxlite-writing` skill alongside PR-specific guidance, and `.agents/prompts/pr-author-review.md` supplies the
 GitHub comment. Missing, empty, or unrenderable prompts fail closed before consuming
 a local acknowledgment or publishing GitHub acknowledgment success. A local recovery
 prompt over 1200 bytes also fails closed. No embedded fallback copy is kept in Bash.
-Writing denials deliver the checker diagnostic and composed guidance directly;
+Writing denials deliver the checker diagnostic and skill reference directly;
 they never substitute acknowledgment recovery text for writing instructions.
 
 ### Git gates
@@ -377,7 +376,7 @@ than one session can share a checkout.
 - Stop gate to verdict check: after checking TL;DR, `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/preflight-verdict-check.sh`. It learns which rung decided from `VERDICT_DECISION_OUT`. Missing dependencies fail closed.
 - Mandatory summary: `.agents/lib/concise-writing.sh` checks for an ATX TL;DR heading and summary prose outside fences, quotes, and comments. Human-facing replies must start there; the entire section has at most 39 words using the shared Unicode-aware counter. Denials name the failed condition and correction; length failures report the count and limit, explaining that a peer or higher-level heading ends the section. Stop checks writing only when `stop_hook_active` is false: one reminder can continue a turn, then further writing checks are skipped, including after unrelated Stop continuations. GitHub and design-document checks remain mandatory. Missing Stop text falls back to a bounded transcript snapshot; unreadable or truncated snapshots fail closed even on continuations. Explicitly empty reply text remains empty without replaying earlier text; verdict auditing still runs. Internal instructions and tool payloads need no summary. Sentence simplicity remains a writing instruction.
 - Enforcement scope: Stop checks the final reply after generation; it cannot retract streamed commentary. GitHub checks cover recognized CLI calls, not browser or connector writes. Design checks cover fetched GitHub, Linear, and Notion content; native Notion headings retain their structure. Shared guidance applies to every human-facing output across these surfaces.
-- Shared writing prompt: `.agents/prompts/concise-writing.md` is loaded through `subagent_prompt` for Stop, GitHub reminders, PR guidance, and generated workflow instructions. Its static shortening budget is not a general document limit. Dense paragraphs over 80 words or list items over 40 still trigger shortening. At Stop, a broken prompt reports stderr without recording an ask or changing the verdict result; it cannot bypass the independent TL;DR check.
+- Shared writing skill: `boxlite-writing` owns writing rules. Workflow, Stop, GitHub reminders, PR guidance, and the optional prompt hook reference it by name. `concise_writing_reminder` supplies the shared shortening request without reading skill files. Dense paragraphs over 80 words or list items over 40 still trigger shortening; the independent TL;DR check is unchanged.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`. One refresh runs at a time, held by `.git/agent-tooling/.refresh.lock` (`scripts/refresh-installation.sh:31`), and a refresh that finds it held skips. Breaking that lock would race its holder, so one left behind by a killed run is reported rather than cleared: `scripts/verify-installation.sh:22`, which every commit and push runs, names it once it is an hour old. Without that, the automatic refresh is dead and only a log nobody reads would say so.
 
 - Offline installation repair: `templates/install.sh` routes the recorded cache through
@@ -471,7 +470,7 @@ non-blocking `advisories`, which never decide the verdict.
 - **blind-allow**: the rung under which a turn ends unjudged because the gate could not read its text.
 - **hold**: `.agent-tooling/hold`, one full lowercase SHA that freezes adoption; a malformed hold fails closed.
 - **tooling.ref**: the branch or tag consumers float on; the validated revision they run is recorded in `.git/agent-tooling/current`.
-- **guidance block**: the hash-marked rendered workflow and shared writing prompt in a consumer's `AGENTS.md`; missing or edited fails the gates, behind only warns.
+- **guidance block**: the hash-marked workflow with its named writing-skill reference in a consumer's `AGENTS.md`; missing or edited fails the gates, behind only warns.
 - **twins**: `hooks/hooks.json` and `hooks/codex-hooks.json`, behaviourally identical except `asyncRewake` against `async` and the events only one host has.
 - **watch**: one run of `.agents/watch/pr-watch.sh` after a push, streaming CI and PR events as JSON lines under one watch id.
 - **wake**: the turn Claude Code starts when an `asyncRewake` hook exits 2; its prompt carries the hook's stderr in a reminder after the host's envelope, and it is internal only while its one-time nonce is unspent.
@@ -485,11 +484,11 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         boxlite-coding, shell-engineering, boxlite-visualize, boxlite-examples, adversarial-iteration
+.agents/skills/         boxlite-clean-code, shell-engineering, boxlite-visualize, boxlite-examples, adversarial-iteration, boxlite-writing
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
-guidance/workflow.md    workflow template composed with concise-writing for consumers
+guidance/workflow.md    workflow naming boxlite-writing for consumers
 host-parity.test.sh     what keeps the three hosts loading the same assets
 architecture.test.sh    what keeps this map honest
 ```
@@ -499,8 +498,8 @@ paths; for example, "Use boxlite-visualize to show the cloud deployment architec
 The skill produces `diagram.md` and `evidence.json`, then validates rendering, fit,
 and source traceability into `validation.json` before visual inspection.
 
-The `boxlite-coding` skill has a short entry point with optional references for
-coding decisions, refactoring cases, and first-edition Clean Code sources. The
+The `boxlite-clean-code` skill has a short entry point with optional references for
+coding decisions and refactoring cases grounded in the first edition of Clean Code. The
 existing `skills/` symlink exposes it to plugin hosts; standalone sharing copies
 the complete directory, including references, without plugin scripts. It preserves
 the receiving repository's workflow and permission boundaries.

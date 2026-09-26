@@ -1,6 +1,7 @@
 # Agent Tooling Development
 
 - Keep reusable implementation in `plugins/boxlite-agent-tooling/`.
+- Agents must not edit, rename, move, or delete the `boxlite-writing` skill or its supporting files unless the user explicitly requests that specific change. Using the skill, revising an output, or fixing a failed check does not authorize changing it.
 - For non-trivial Bash hooks, gates, or libraries, load the plugin's `.agents/skills/shell-engineering/SKILL.md` and preserve stdin/stdout/stderr/exit behavior.
 - Keep `plugins/boxlite-agent-tooling/ARCHITECTURE.md` in step with the code; `architecture.test.sh` fails on drift.
 - Keep consumer manifests declarative and secret-free; invalid profiles or missing dependencies fail closed with a clear stderr error.
@@ -8,7 +9,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=5cc376dcb383-dirty sha256=9891d0f4698d -->
+<!-- agent-tooling:guidance:begin rev=e25808e9baa4-dirty sha256=3fd42abb65b8 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -114,16 +115,9 @@ Public artifacts/delegates: public evidence or disclosure approval for exact con
 
 **Communication**
 
-
-Walls of text are forbidden. Write minimally, including prompts. Preserve evidence, risks, failures, uncertainty.
-
-Every human-facing output: `## TL;DR` (one simple sentence; section <40 words); first in replies/designs.
-
-Artifacts submitted for peer review must include `## How it works`, explaining how key steps or decisions produce the result. This includes every PR, draft, design proposal, and revision. For non-code changes, explain the rationale; one sentence can suffice.
-
-Prefer: visuals > tables > bullets > prose (under 40 words; 120 for complex topics); Always include a brief real example when it helps the user understand.
+Apply the `boxlite-writing` skill.
 
 - Review each PR's required explanation against the diff, including drafts and description edits. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Omit work logs and exhaustive test counts. Repository templates are starting points.
 
-See the `boxlite-coding` skill for implementation and review guidance.
+See the `boxlite-clean-code` skill for implementation and review guidance.
 <!-- agent-tooling:guidance:end -->

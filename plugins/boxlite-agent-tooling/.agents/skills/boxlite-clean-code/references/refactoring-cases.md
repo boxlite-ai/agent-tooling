@@ -1,7 +1,7 @@
 # Refactoring as an experiment
 
 These original summaries explain decisions, reversals, and useful checks from the
-[first edition](book-map.md). Apply the reasoning to the actual contract; the
+first edition of *Clean Code*. Apply the reasoning to the actual contract; the
 book's intermediate and final listings are not portable implementation templates.
 
 ## Args: migrate one responsibility at a time

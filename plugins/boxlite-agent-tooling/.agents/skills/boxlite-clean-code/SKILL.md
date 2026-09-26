@@ -1,9 +1,9 @@
 ---
-name: boxlite-coding
+name: boxlite-clean-code
 description: Apply Clean Code principles when implementing, refactoring, or reviewing maintainability.
 ---
 
-# BoxLite Coding
+# BoxLite Clean Code
 
 Make intent, contracts, and ownership easier to understand and change. Use
 evidence from the requested code to choose a proportionate improvement; a smell
@@ -37,7 +37,6 @@ successful local checks into evidence about untested integrations or deployments
 | --- | --- |
 | Naming, responsibility, representation, errors, tests, dependencies, concurrency | [Decision guide](references/decision-guide.md); use the relevant section |
 | A refactor changes several collaborating parts or its benefit is unclear | [Refactoring cases](references/refactoring-cases.md) |
-| Attribution, edition, chapter coverage, or checking a book claim | [Book map](references/book-map.md) |
 
 ## Work in reversible steps
 
@@ -71,6 +70,6 @@ is valid when an additional abstraction would not help the requested work.
 
 ## Source
 
-Original synthesis of Robert C. Martin et al., *Clean Code*, first edition,
-with contemporary adaptations identified in the references. See the
-[edition and chapter map](references/book-map.md); no book listings are bundled.
+Original synthesis of Robert C. Martin et al.,
+[*Clean Code*, first edition](https://www.informit.com/store/clean-code-a-handbook-of-agile-software-craftsmanship-9780132350884),
+with contemporary adaptations identified in the references; no book listings are bundled.

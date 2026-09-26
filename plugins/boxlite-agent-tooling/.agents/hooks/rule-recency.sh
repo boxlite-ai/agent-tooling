@@ -31,12 +31,7 @@ if [[ "$prompt_has_escaped_quote" == false ]]; then
 fi
 
 cat <<'EOF'
-REPLY SHAPE:
-- <=80 prose words by default; no walls of text. Keep uncertainty, risks, failures visible; link long evidence.
-- Choose call graph, sequence diagram, real example, bullets, table, or short prose by clarity; no form is mandatory.
-- Whenever useful, walk one real example step by step, showing what changes and the general rule. Label hypothetical values.
-- Answer first, in one sentence. No preamble, recap, praise, repetition, or closing offer.
-- Explicit depth requests allow more short sections, never dense text.
-- Non-trivial work: follow repository Workflow; research prior art before design.
+Apply the boxlite-writing skill.
+Non-trivial work: follow repository Workflow; research prior art before design.
 EOF
 exit 0

@@ -8,7 +8,7 @@
 #   2. preflight-verdict-check.sh judges the turn. Its block, error or allow is the
 #      answer, except that
 #   3. an allow that followed a judgment, on a last reply with a dense block, continues the
-#      turn once with the shared prompt, unless a Stop hook already continued it.
+#      turn once by naming boxlite-writing, unless a Stop hook already continued it.
 # The reply-summary rule and its record live in .agents/lib/reply-summary.sh. Both
 # decisions here join the verdict check's per-session decision log.
 #
@@ -32,7 +32,7 @@ run_verdict_check_alone() {
 for required_command in jq perl git; do
   command -v "$required_command" >/dev/null 2>&1 || { printf 'stop-gate: missing %s\n' "$required_command" >&2; exit 2; }
 done
-for library in verdict-audit-state.sh reply-summary.sh concise-writing.sh subagent.sh hook-host.sh; do
+for library in verdict-audit-state.sh reply-summary.sh concise-writing.sh hook-host.sh; do
   [[ -r "$tooling_root/.agents/lib/$library" ]] || { printf 'stop-gate: missing %s\n' "$library" >&2; exit 2; }
 done
 # shellcheck source=../lib/verdict-audit-state.sh
@@ -41,8 +41,8 @@ source "$tooling_root/.agents/lib/verdict-audit-state.sh"
 source "$tooling_root/.agents/lib/reply-summary.sh"
 # shellcheck source=../lib/concise-writing.sh
 source "$tooling_root/.agents/lib/concise-writing.sh"
-# shellcheck source=../lib/subagent.sh
-source "$tooling_root/.agents/lib/subagent.sh"
+# shellcheck source=../lib/hook-host.sh
+source "$tooling_root/.agents/lib/hook-host.sh"
 
 # ── Input: the payload fields this gate reads; anything malformed is the verdict
 #    check's to report ─────────────────────────────────────────────────────────
@@ -227,9 +227,7 @@ ask_is_due() {
 }
 ask_for_reply_summary() {
   local mode=block tools note request
-  # Load before recording the ask: a broken template must not leave a continuation
-  # record for a request that never reached the agent.
-  request="$(concise_writing_prompt "$tooling_root")" || return 1
+  request="$(concise_writing_reminder)" || return 1
   [[ "$(hook_host_kind)" == claude ]] && mode=context
   tools="$(final_turn_tool_count)" || tools="-"
   reply_summary_record_ask "$ask_file" "$entry_prompt_epoch" "$mode" "$tools" \
