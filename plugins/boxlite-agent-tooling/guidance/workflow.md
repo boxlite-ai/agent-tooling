@@ -9,69 +9,68 @@ Apply the `boxlite-clean-code` skill for design, implementation, refactoring, an
 
 - Read this file, the nearest README/CONTRIBUTING, relevant docs, and the actual source before editing.
 - Reproduce-before-fix: when fixing a bug, write the failing test first, observe it fail, then fix.
-- If docs and implementation disagree, capture the conflict and ask before making architectural assumptions.
+- If docs and code disagree, record the conflict and ask before assuming the architecture.
 
 **Research**
 
-- Before choosing an approach, examine relevant existing code and comparable projects. Cite precise source references: `file:line` for code, preferably with commit-pinned links; exact sections for documentation.
-- Every design document must include **Related work and lessons**: sources, observed approaches, relevant differences in constraints, and what the proposal adopts, adapts, or rejects—and why. Review whether the evidence supports the design decisions.
-- Scale research depth to the change's uncertainty and impact; do not impose citation quotas. If no useful comparison exists, record what was searched and why it was unsuitable. Shared research may be linked and reused with its applicability explained.
+- Before choosing an approach, examine relevant code and comparable projects. Cite `file:line` (prefer commit-pinned links) or exact documentation sections.
+- Every design must include **Related work and lessons**: sources, approaches, differing constraints, and what it adopts, adapts, or rejects—and why. Check that evidence supports the decisions.
+- Scale research to uncertainty and impact, without citation quotas. If no comparison is useful, record the search and reasons. Link reused research and explain its applicability.
 
 **Design**
 
-- Before writing any code, create a 1–3 page design doc covering the problem, related work and lessons, approach, alternatives and trade-offs, and validation. Host it in this preference order: GitHub issue > Notion > Linear issue. Every PR, including drafts, must link the doc and keep it aligned with the final scope.
-- Apply the Communication rules below to design documents.
+- Before coding, create a 1–3 page design: problem, related work and lessons, approach, alternatives, trade-offs, and validation. Prefer GitHub issue > Notion > Linear issue. Every PR, including drafts, must link it and keep it aligned with final scope.
+- Apply Communication rules to designs.
 - Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
 
 **Documentation (every PR)**
 
 - Every PR, including drafts, must add or update meaningful project docs. Prefer existing docs; explain changed behavior, usage, contracts, or maintenance (including refactor rationale).
-- Link the changed section in the PR and review it against the final diff. Design links, PR summaries, file lists, formatting, and token edits alone do not count.
+- Link the changed section and check it against the final diff. Design links, PR summaries, file lists, formatting, and token edits alone do not count.
 
 **PR size and decomposition (hard requirement)**
 
-- Target 100–200 changed lines; maximum 400 additions + deletions across the entire PR against its intended base (the immediately preceding branch for a stacked PR). Count tests, docs, and generated text. Drafts have the same limit; splitting commits does not reduce PR size.
-- Estimate before implementing; measure before creating a PR and before each update. If the base or size cannot be determined, resolve that uncertainty before publishing. Never omit tests, compress code, or hide changes to meet the limit.
-- For work exceeding the limit, prepare a concrete split plan in one tracking issue for the outcome. Reuse the existing issue, or create one if none exists. Use a checklist with each slice's scope, dependencies, acceptance criteria, estimated size, and PR link when available.
-- Use the installed tooling plugin's `.agents/prompts/split-pr-tracking-issue.md` template body, omitting its metadata and replacing its instructions with the plan. Keep the design, steps, open questions, and implementation history together.
-- Create separate issues only when work needs independent tracking, such as different owners, priorities, release schedules, or independently deferred outcomes. Splitting a PR alone does not require child issues, a milestone, or a Project.
-- Each slice becomes a coherent, working PR within the limit, including its relevant tests. Link the tracking issue and update its corresponding todo as the slice lands. Close the issue only when the agreed acceptance criteria are met. Implement and validate one slice at a time; re-plan if a slice grows beyond the limit.
-- **Mandatory:** dependent slices must use native [GitHub PR stacks](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-stacked-pull-requests) (`trunk ← PR1 ← PR2`). Preserve per-PR gates; link verified existing PR URLs with `gh stack link` and confirm GitHub stack membership. Rebase and revalidate affected layers after changes.
-- A human developer may authorize an oversized PR only after seeing its measured size, exact base/head, and proposed split. Ask once per attempt, without a preselected approval, for a typed response: `pr-size-exception: <specific reason this change must remain one PR>`.
-- The reason must identify the affected change, the concrete constraint, and why the proposed split is unsafe or impractical. Bare approvals, “urgent,” “too much work,” and generic convenience claims do not qualify. Never invent, paraphrase, or pre-fill the developer's reason.
-- Wait up to **3 minutes** from that question using a non-blocking prompt and an actual deadline. Continue reversible split preparation while waiting. Invalid replies do not restart the timer; an explicit cancellation or revised user instruction takes precedence.
-- Without a valid exception by the deadline, automatically follow the split plan and continue with small PRs; do not end the task waiting for permission. Silence is never approval for an oversized PR. If timed prompting is unavailable, keep the size limit and continue splitting.
-- Bind an exception to the shown repository, base/head, and measured diff; any change to that diff invalidates it. Preserve the developer's exact reason with that context in the PR description and tracking issue. An exception waives only size, never tests, review, or `reviewed:` acknowledgment.
-- A late reply cannot authorize an expired request. Only a new explicit human instruction to ask again permits renewal. Remeasure through the guarded PR operation and show the current diff and split first; never renew autonomously.
-- Renew with `scripts/timed-user-prompt.sh renew STATE REQUEST_ID USER_REQUEST`, relaying the human instruction verbatim. Renewal archives the expired attempt and starts a new ID and deadline; it grants no approval.
+- Target 100–200 lines; cap each PR at 400 additions + deletions against its intended base (the preceding branch in a stack). Count tests, docs, and generated text, including drafts. Splitting commits does not reduce size.
+- Estimate before implementation; measure before PR creation and every update. Resolve unknown base or size before publishing. Never omit tests, compress code, or hide changes to fit.
+- Over the limit: reuse one tracking issue, or create one if absent. Checklist each slice's scope, dependencies, acceptance criteria, estimated size, and eventual PR link.
+- Use the installed plugin's `.agents/prompts/split-pr-tracking-issue.md` body; remove metadata and replace instructions with the plan. Keep design, steps, questions, and implementation history together.
+- Separate issues only for independently tracked work: owners, priorities, releases, or deferred outcomes. Splitting alone needs no child issues, milestone, or Project.
+- Implement and validate one coherent, working slice at a time, with relevant tests and within the limit; re-plan oversized slices. Link the tracking issue, update todos as slices land, and close only when agreed acceptance criteria are met.
+- Dependent slices **must** use native [GitHub PR stacks](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-stacked-pull-requests) (`trunk ← PR1 ← PR2`). Preserve per-PR gates. Use `gh stack link` with verified existing PR URLs; confirm membership. Rebase and revalidate affected layers after changes.
+- For a size exception, show the human developer the measured size, exact base/head, and proposed split. Ask once per attempt, without preselected approval, for: `pr-size-exception: <specific reason this change must remain one PR>`.
+- The typed reason must identify the change, concrete constraint, and why splitting is unsafe or impractical. Bare approval, urgency, effort, or convenience does not qualify. Never invent, paraphrase, or pre-fill it.
+- Use a non-blocking prompt with a **3-minute** deadline from the question. Continue reversible split preparation. Invalid replies do not reset the timer; explicit cancellation or revised instructions take precedence.
+- Without a valid exception by the deadline, continue the split plan; do not end the task awaiting permission or treat silence as approval. If timed prompting is unavailable, keep the limit and split.
+- Bind exceptions to the shown repository, base/head, and diff; any diff change invalidates them. Record the exact reason and context in the PR and tracking issue. Only size is waived, never tests, review, or `reviewed:` acknowledgment.
+- Late replies cannot authorize expired requests. Renew only on a new explicit human request to ask again. First remeasure through the guarded PR operation and show the current diff and split.
+- Renew using `scripts/timed-user-prompt.sh renew STATE REQUEST_ID USER_REQUEST` with the human request verbatim. Renewal archives the attempt and creates a new ID and deadline; it grants no approval.
 
 **Implement**
 
-- Explicit paths — calculate from known roots, never assume.
-- Prepare before execute — setup before irreversible operations.
+- Calculate paths from known roots; never assume them.
+- Complete setup before irreversible operations.
 - Never commit secrets. Validate before SQL/shell/URL/path/HTML/prompt construction; avoid shell execution with untrusted input.
 - Don't paste long excerpts from books, tickets, or logs into source comments.
-- Add a new dependency only when it materially reduces risk or complexity.
+- Add dependencies only when they materially reduce risk or complexity.
 
 **Test**
 
-- Two-side verification for reproducer tests. When you add a test alongside a fix, demonstrate it in this order, both manually run:
-  1. You must revert **every** production change — every non-test file back to its pre-fix state, only the test remains. If that revert changes an API, signature, or schema so the test cannot compile or reach its defect check, keep production fully reverted and add only the smallest temporary test-only compatibility adapter needed to exercise the old contract. A test-only compatibility adapter may adapt setup or invocation only; it must not implement the fix, alter the defect check, or become the failure signal. Run the test. It must reach the defect check and fail for the original bug — log the observed failure signal (assertion text, hang, panic). **Partial reverts, mental simulation, or "it would obviously fail without the fix" are treated as cheating.** If no such adapter can preserve that signal, stop and surface the blocker.
-  2. Remove any temporary compatibility adapter, restore the production change in full, and run the test. It must pass.
-     Without a complete step 1 you've only proved your code works, not that the fix was necessary or that this test would have caught the bug.
-- A test is only meaningful when there's something that could go wrong between the data being produced and the assertion being made. If the test builds the value it then asserts on (e.g., formatting a string and then asserting that the same string contains a substring it just put in), the assertion is tautological — nothing crossed a boundary, so nothing is being tested. The data must come from production code under test, not from the test body itself.
+- For each test added with a fix, manually run both steps in order:
+  1. Revert **every** production change: restore every non-test file to its pre-fix state; only the test remains. If API, signature, or schema changes prevent compilation or reaching the defect check, keep production reverted and add the smallest temporary test-only compatibility adapter for the old contract. The test-only compatibility adapter may adjust setup or invocation only; it must not implement the fix, alter the defect check, or become the failure signal. Run the test: it must reach the defect check and fail for the original bug. Log the failure signal (assertion, hang, panic). **Partial reverts, mental simulation, and assumed failure are cheating.** If no adapter preserves the signal, stop and report the blocker.
+  2. Remove the adapter, restore all production changes, and rerun: the test must pass. Without step 1, a pass cannot prove the test catches the bug or the fix is necessary.
+- Test data must come from production code under test, across a boundary where behavior can fail. Asserting on a value built entirely by the test proves nothing—for example, checking a substring the test itself inserted.
 - Add or update tests when behavior changes around branching, parsing, retries, security checks, or boundaries.
-- Prefer focused tests that prove the _right_ reason for the change.
-- Do not create tests that don't actually test project code. A test that only exercises stdlib or framework code is not a real test.
-- Temporary tests that don't reference a project symbol must be written to a temporary directory — they are not production tests.
-- Never weaken a test to force it green — fix the code under test, not the assertion.
+- Focus tests on the reason for the change.
+- Test project code, not just stdlib or frameworks.
+- Put temporary tests without project-symbol references in a temporary directory, outside production tests.
+- Fix the code; never weaken a test to force a pass.
 
 **Cross-cutting** (apply at every phase)
 
-- Verify external findings against the working tree before acting. Reviews, lint, and PR comments work from a snapshot — they may name deleted code. `git grep` and `git diff` first.
-- Stay inside the ask: do and discuss only what the request needs. Anything adjacent — another bug, an unrelated cleanup, a related topic — is never a change or a section: file it for future improvement (GitHub issue, Linear issue, or a docs note) and give it one line at the end. "drop X" means drop X.
-- Treat every failure as a class, not an instance: fix every site of the same defect in the same pass — grounded in what's actually there, not speculation. A different defect nearby is adjacent work. A single-site fix to a systemic bug isn't done.
-- Supersede completely: when behavior changes, delete every artifact describing the old way in the same change — code, comments, prose, tests asserting the old contract, and cross-references that now point at nothing. Grep for what you replaced, not just the file you edited. Prose that contradicts the code is worse than none, because it is read as current.
+- Verify external findings against the working tree with `git grep` and `git diff` before acting; reviews, lint, and PR comments may reference stale code.
+- Stay inside the ask: do and discuss only what the request needs. File adjacent bugs, cleanup, or topics in a GitHub/Linear issue or docs note; mention them in one closing line, never a change or section. "drop X" means drop X.
+- Fix every evidenced site of the same defect in one pass; do not speculate. Different nearby defects are adjacent work; one site does not resolve a systemic bug.
+- When behavior changes, remove superseded code, comments, prose, old-contract tests, and broken references in the same change. Search all replaced terms, not just edited files; contradictory prose misleads readers.
 
 **Disclosure**
 
@@ -81,4 +80,4 @@ Public artifacts/delegates: public evidence or disclosure approval for exact con
 
 Apply the `boxlite-writing` skill.
 
-- Review each PR's required explanation against the diff, including drafts and description edits. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Omit work logs and exhaustive test counts. Repository templates are starting points.
+- Check PR explanations against the diff, including drafts and description edits. State the problem, resulting behavior, and decisive verification once; file lists alone do not explain a change. Omit work logs and exhaustive test counts. Adapt repository templates.
