@@ -310,6 +310,14 @@ than one session can share a checkout.
 
 ## Boundaries
 
+- Idle PR delivery: `.agents/hooks/post-remote-write-watch.sh` emits setup; the
+  agent registers/verifies one native one-minute Codex heartbeat. Claude uses
+  Monitor. `.agents/watch/consumer-lifecycle.md` defines draining, cleanup, and
+  failure reporting. Cursors do not survive host restarts. The hook accepts
+  `command`/`stdout` or `cmd`/`output`; supplied nonzero/null exit codes cannot arm.
+  Saved prompts reference that policy. Unexpected stream endings permit one
+  recovery attempt; failed recovery suspends the watch with a coverage warning.
+  Text-contract tests guard required instructions, not model obedience or live delivery.
 - Watcher to commands: `.agents/watch/pr-watch.sh` owns the external command group
   and its timeout/output monitors. Monitor cancellation uses KILL and wait because
   those observers have no shutdown work; command groups retain TERM then KILL.

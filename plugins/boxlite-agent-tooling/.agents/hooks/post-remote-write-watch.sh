@@ -12,7 +12,8 @@
 # .codex-plugin/plugin.json: the vendor manifests register, .agents/ implements.
 #
 # The context names the attach route this host has — Monitor for Claude Code, a
-# background shell for Codex — and names all of them when hook_host_kind answers
+# background shell plus a native task heartbeat for Codex — and names all of them
+# when hook_host_kind answers
 # `unknown`. That accessor is the only sanctioned way to ask; .agents/lib/hook-host.sh
 # carries which signals are trustworthy and which look right but are not.
 #
@@ -38,7 +39,7 @@
 set -euo pipefail
 
 payload="$(cat)"
-command="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')"
+command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // ""')"
 
 normalized="${command//$'\n'/;}"
 work="${normalized#"${normalized%%[![:space:]]*}"}"
@@ -53,16 +54,24 @@ fi
 
 [[ "${BOXLITE_PR_WATCH:-1}" == "0" ]] && exit 0
 
+# Native shell results can report failure without Git's usual diagnostic text.
+if printf '%s' "$payload" | jq -e '
+  (.tool_response | type) == "object"
+  and (.tool_response | has("exit_code"))
+  and .tool_response.exit_code != 0' >/dev/null; then
+  exit 0
+fi
+
 # tool_response is a string for some tools and an object for Bash; accept both
 # rather than assuming a shape.
 response="$(printf '%s' "$payload" \
   | jq -r 'if (.tool_response | type) == "string"
            then .tool_response
-           else ((.tool_response.stdout // "") + "\n" + (.tool_response.stderr // ""))
+           else ((.tool_response.stdout // .tool_response.output // "") + "\n" + (.tool_response.stderr // ""))
            end' 2>/dev/null || echo '')"
 
-# A failed push leaves nothing new to watch. PostToolUse never sees the exit
-# code, so the decision has to come from git's own output.
+# A failed push leaves nothing new to watch. Hosts without an exit code must
+# instead be checked against Git's own output.
 #
 # Match the whole `error:`/`fatal:` class, not a list of specific messages. A
 # local pre-push hook that exits non-zero — this repo's own audit gate — prints
@@ -934,67 +943,53 @@ if (( branch_count > 1 || omitted_ref_count > 0 )); then
   pushed_ref_count=$((branch_count + omitted_ref_count))
   branch_line="Remote write succeeded for ${pushed_ref_count} pushed branches; ${branch_count} exact watcher generations attached, ${omitted_ref_count} omitted."
 fi
-# Name the attach route this host actually has; fall back to all of them when the
-# host is unknown (a runtime this hook has not been taught about). Narrowing also
-# buys headroom against the 1400-byte ceiling enforced below.
+# Keep host-specific setup within the context budget.
+codex_attach_line="Codex: background shell; create/reuse ONE native heartbeat for this task every 1 minute."
 case "$(hook_host_kind)" in
   claude)
     attach_line="Claude: Monitor({command: <stream command>, persistent: true})."
     compact_attach_line="Claude: use Monitor with this command." ;;
   codex)
-    attach_line="Codex: run it in a background shell and read at natural pauses."
-    compact_attach_line="Codex: run it in a background shell." ;;
+    attach_line="$codex_attach_line"
+    compact_attach_line="$attach_line" ;;
   *)
-    attach_line="Claude: Monitor({command: <stream command>, persistent: true}). Codex: run it in a
-background shell and read at natural pauses. Without background support, cat its
-log before each turn ends."
-    compact_attach_line="Claude: use Monitor with this command. Codex: run it in a background shell. Without
-background support, drain it before turns end." ;;
+    attach_line="Claude: Monitor({command: <stream command>, persistent: true}). ${codex_attach_line}"
+    compact_attach_line="$attach_line" ;;
 esac
 
 context="${branch_line} ${pr_line}
-Attach exactly ONE consumer using the route below; do not attach twice or
-poll gh pr checks. Stream command:
+Attach exactly ONE consumer using the route below; do not poll gh pr checks.
+Read policy at JSON path ${policy_path_json} before attaching.
+Stream command:
   ${stream_command}
 
-${attach_line} Replay is bounded and generation-scoped; it exits at watch_end.
-
-fail/cancel: run gh run view <run-id> --log-failed. kind 'conflict': alert the
-human to the confirmed conflict (confirmed merge conflict) and inspect both
-revisions. comment/review/review_comment: summarize for the human. Before editing
-or changing history, read the escalation policy at JSON path ${policy_path_json}.
-Notify immediately for a failing required check, confirmed conflict, or every
-comment/review/thread including bots; routine passing checks stay silent. If the
-user declined this watch, do not attach."
+${attach_line}
+Bounded generation replay; ends at watch_end. Honor watch opt-outs.
+fail/cancel: gh run view <run-id> --log-failed; notify.
+kind 'conflict': report confirmed merge conflict; inspect both revisions.
+Report every new comment/review/thread including bots; routine passing checks stay silent."
 
 context_max_bytes=1400
 context_bytes="$(LC_ALL=C printf '%s' "$context" | wc -c | tr -d ' ')"
 if (( context_bytes > context_max_bytes )); then
-  # Paths are caller-controlled and can be unusually long. Keep the hook bounded
-  # rather than letting repeated path prose turn one advisory event into a large
-  # prompt. The one exact command is retained; it is the authoritative locator, and a
-  # PR number already read is kept, since it is digits and cannot grow with the paths.
+  # Preserve the exact command and resolved PR when paths exhaust the budget.
   context="${branch_line} ${compact_pr_line}
 Attach exactly ONE consumer.
+Read policy at JSON path ${policy_path_json} before attaching.
 Stream command:
   ${stream_command}
-${compact_attach_line} Read the escalation policy at JSON path
-${policy_path_json} before editing. Notify the human for fail/cancel, confirmed
-conflict, and every new comment/review/thread including bots; routine passing checks
-stay silent."
+${compact_attach_line}
+Report fail/cancel, confirmed merge conflict, and every new comment/review/thread
+including bots; routine passing checks stay silent."
 fi
 
-# Re-check the rendered fallback: its two %q paths and policy JSON are dynamic too.
-# At extreme path lengths, decline attachment. A raw follower cannot bind itself
-# to the armed watch_id across journal retirement and producer-start boundaries.
+# Recheck dynamic paths; raw replay cannot safely replace generation binding.
 context_bytes="$(LC_ALL=C printf '%s' "$context" | wc -c | tr -d ' ')"
 if (( context_bytes > context_max_bytes )); then
   [[ -z "$attachment_claim" ]] || discard_attachment_claim
-  context="Remote write succeeded and exact PR watchers were armed, but their safe attachment command exceeded the
-1400-byte context limit. No safe fallback was attached: raw branch-log replay can
-stop at a stale watch_end and miss the current generation. Inspect the bounded
-pr-watch logs locally if this watch is required; ask the human before editing,
-resolving conflicts, or changing history."
+  context="Remote write succeeded; attachment exceeds 1400 bytes. No safe fallback was attached:
+raw replay can select a stale generation. Inspect bounded logs; ask before edits,
+conflict resolution, or history changes."
 fi
 
 # A later real prompt or replacement lease revokes this exact publisher. Recheck

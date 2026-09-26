@@ -8,6 +8,7 @@
 #
 # Consumers:
 #   Claude Code  .agents/hooks/post-remote-write-watch.sh arms a Monitor on the log
+#   Codex        a background stream, drained by one native one-minute heartbeat
 #   other agents tail the log, or run this in the foreground
 #   humans       run pr-watch-stream.sh with the event path reported by the hook
 #
