@@ -37,7 +37,8 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
   for gate in github-claude github-codex github-codex-native design stop-claude stop-codex stop-transcript-claude stop-transcript-codex; do
     host=claude
     [[ "$gate" != *codex* ]] || host=codex
-    for active in false true; do
+    # First Stop, repeated continuations, then the next turn's first Stop.
+    for active in false true true false; do
       actual=allow
       wanted="$expected"
       case "$gate" in
@@ -53,6 +54,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
           output="$(bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 2>&1)" || actual=deny ;;
         stop-*)
           wanted="$reply_expected"
+          [[ "$active" != true ]] || wanted=allow
           jq -nc --arg body "$body" --arg host "$host" '
             if $host == "claude" then {type:"assistant",message:{content:[{type:"text",text:$body}]}}
             else {type:"response_item",payload:{type:"message",role:"assistant",phase:"final_answer",

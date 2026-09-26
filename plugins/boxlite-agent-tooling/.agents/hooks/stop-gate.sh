@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Stop hook: confirmations and final-response checks run in sequence, so they
 # never race as separate Stop hooks would:
-#   Every nonempty human-facing reply needs TL;DR; explicit empty replies stay empty.
+#   Writing reminders run only on the initial Stop; explicit empty replies stay empty.
 #   0. A pending timed confirmation resumes the agent; expiry selects its fallback.
 #   1. A small reply answering the previous Stop's ask ends the turn when no tool ran
 #      since the ask: it restates a turn the verdict check already judged.
 #   2. preflight-verdict-check.sh judges the turn. Its block, error or allow is the
 #      answer, except that
 #   3. an allow that followed a judgment, on a last reply with a dense block, continues the
-#      turn once with the shared prompt in .agents/prompts/concise-writing.md.
+#      turn once with the shared prompt, unless a Stop hook already continued it.
 # The reply-summary rule and its record live in .agents/lib/reply-summary.sh. Both
 # decisions here join the verdict check's per-session decision log.
 #
@@ -53,6 +53,7 @@ payload_string() { printf '%s' "$payload" | jq -r "if (.$1 | type) == \"string\"
 session_id="$(payload_string session_id)"
 last_assistant_message="$(payload_string last_assistant_message)"
 reply_is_supplied="$(printf '%s' "$payload" | jq -r '(.last_assistant_message | type) == "string"')"
+stop_hook_active="$(printf '%s' "$payload" | jq -r '.stop_hook_active == true')"
 transcript_path="$(payload_string transcript_path)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/stop-gate.XXXXXX")" || exit 2
 trap 'rm -f "$scratch/payload" "$scratch/verdict-output" "$scratch/decisions" "$scratch/final-turn.json"; rmdir "$scratch" 2>/dev/null' EXIT
@@ -62,7 +63,8 @@ if [[ "$reply_is_supplied" != true && -n "$transcript_path" ]]; then
     printf 'stop-gate: cannot read the final reply for the TL;DR check\n' >&2; exit 2;
   }
 fi
-if [[ -n "$last_assistant_message" ]] && ! summary_error="$(concise_writing_check_summary "$last_assistant_message" first 39)"; then
+if [[ "$stop_hook_active" != true && -n "$last_assistant_message" ]] \
+   && ! summary_error="$(concise_writing_check_summary "$last_assistant_message" first 39)"; then
   jq -nc --arg reason "$summary_error" '{decision:"block",reason:$reason}'
   exit 0
 fi
@@ -73,8 +75,6 @@ if [[ -n "$continuation" ]]; then
   printf '%s\n' "$continuation"
   exit 0
 fi
-
-stop_hook_active="$(printf '%s' "$payload" | jq -r 'if .stop_hook_active == true then "true" else "false" end')"
 
 project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 if ! repo_root="$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null)" \
@@ -212,7 +212,8 @@ fi
 # decision:block, which every host honors and records as a user message.
 ask_is_due() {
   local length_status=0
-  [[ "$asked" != true && "${VERDICT_GATE_HARD_BLOCK:-1}" != "0" ]] || return 1
+  [[ "$stop_hook_active" != true && "$asked" != true \
+     && "${VERDICT_GATE_HARD_BLOCK:-1}" != "0" ]] || return 1
   case "$(tail -n 1 "$scratch/decisions" 2>/dev/null)" in
     "override overridden-allow"|"dossier PASS-allow"|"dossier IN_PROGRESS-allow") ;;
     "triage NO-allow"|"regex none-allow") ;;
