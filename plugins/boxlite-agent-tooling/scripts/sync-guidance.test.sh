@@ -74,9 +74,9 @@ else
 fi
 # Line 1 is the managed-by notice and legitimately names the tooling repo; every
 # other line must be free of repo-, path-, and toolchain-specific residue.
-# The exact shared skill identifier is portable across consumer repositories.
+# These exact shared skill identifiers are portable across consumer repositories.
 # shellcheck disable=SC2016 # Match literal Markdown backticks.
-leaks="$(tail -n +2 "$CANON" | sed 's/`boxlite-writing`//g' | grep -inE 'boxlite|imagemanager|jailer' || true)"
+leaks="$(tail -n +2 "$CANON" | sed -e 's/`boxlite-writing`//g' -e 's/`boxlite-clean-code`//g' | grep -inE 'boxlite|imagemanager|jailer' || true)"
 [[ -z "$leaks" ]] && ok "no domain names leak past the notice line" \
                   || bad "domain names leak past the notice line: $leaks"
 leaks="$(tail -n +2 "$CANON" | grep -nE '\]\(\./|/codex:|src/|`make [a-z]' || true)"

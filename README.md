@@ -143,6 +143,7 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 
 | Task | Entry point |
 | --- | --- |
+| Implement, refactor, or review maintainability | [boxlite-clean-code](plugins/boxlite-agent-tooling/.agents/skills/boxlite-clean-code/SKILL.md) |
 | Shorten a reply, document, or PR description | [boxlite-writing](plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md) |
 | Explain a subsystem with a concrete example | “Use `boxlite-examples` to explain how this subsystem works.” |
 | Draw a diagram grounded in source | [boxlite-visualize](plugins/boxlite-agent-tooling/.agents/skills/boxlite-visualize/SKILL.md) |
@@ -157,6 +158,19 @@ its instructions. Try: "Use boxlite-writing to shorten this PR description."
 After a push, the Git hook starts the PR watcher; the agent attaches to its event stream. Idle delivery needs host support: a Codex heartbeat or Claude Monitor. See the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
 
 For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh) retries recorded transient failures within bounded budgets. It requires `claude`, `jq`, `curl`, the failure-recording hook, and a matching `CLAUDE_PROJECT_DIR`.
+
+### BoxLite Clean Code skill
+
+Use `boxlite-clean-code` to connect concrete maintainability problems to small changes
+while preserving contracts, resource ownership, and repository conventions.
+Try: "Use boxlite-clean-code to review this module's error handling without editing it."
+
+The plugin exposes the skill through its existing shared skills directory.
+For standalone sharing, copy the entire `boxlite-clean-code` directory into a skill
+location supported by your agent. Its single `SKILL.md` contains the essential
+principles, refactoring loop, and verification guidance without supporting files.
+There are no helper scripts or plugin dependencies. Repository workflow rules
+remain in `AGENTS.md`; the skill supplies focused engineering guidance.
 
 ### Optional prompt reminders
 
