@@ -70,6 +70,9 @@ transcript_turn_max_bytes=262144
 previous_dossier_max_bytes=65536
 previous_dossier_input_path=""
 previous_dossier_snapshot_path=""
+reflection_context=""
+reflection_pending=false
+history_path=""
 
 audit_state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
 if [[ ! -r "$audit_state_lib" ]]; then
@@ -79,6 +82,10 @@ if [[ ! -r "$audit_state_lib" ]]; then
 fi
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$audit_state_lib"
+# shellcheck source=../lib/audit-reflection.sh
+source "$tooling_root/.agents/lib/audit-reflection.sh"
+# shellcheck source=../lib/audit-reflection-gate.sh
+source "$tooling_root/.agents/lib/audit-reflection-gate.sh"
 # shellcheck disable=SC2154 # Assigned by verdict-audit-state.sh above.
 max_audit_timeout_seconds="$(( verdict_audit_lock_max_seconds - verdict_audit_deadline_slack_seconds ))"
 audit_timeout_is_numeric=true
@@ -380,6 +387,12 @@ stop_request_monitor() {
 cleanup_audit_lock() {
   local original_status=$? body owner_pid owner_token extra _ lease_status=0
   local control_cleanup_failed=false
+  if [[ "$reflection_pending" == true ]]; then
+    local reflection_terminal=error
+    (( original_status == 130 || original_status == 143 )) && reflection_terminal=cancel
+    audit_reflection_gate "$reflection_context" "$reflection_terminal" "$audit_token" \
+      "\"verdict runner exited with status $original_status\"" >/dev/null || true
+  fi
   if [[ -n "$transcript_snapshot_path" ]]; then
     rm -f "$transcript_snapshot_path" 2>/dev/null || true
     transcript_snapshot_path=""
@@ -894,6 +907,19 @@ fi
 source "$subagent_lib"
 expected_branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || printf '')"
 expected_head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || printf '')"
+if [[ "$session_scope" != "-" ]]; then
+  reflection_context="$(jq -nc --arg root "$project_dir" --arg session "$session_scope" \
+    --arg epoch "${audit_prompt_epoch:-0}" --arg branch "${expected_branch:-HEAD}" \
+    '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"verdict"}')" || exit 2
+  history_tree="$(compute_audit_tree_hash)" || exit 2
+  history_input="$(jq -nc --arg branch "$expected_branch" --arg head "$expected_head" \
+    --arg tree "$history_tree" --arg generation "$audit_generation" --slurpfile turn "$transcript_path" \
+    '{binding:{branch:$branch,head:$head,tree_hash:$tree,generation:$generation},
+      snapshot:{transcript:$turn,tree:$tree}}')" || exit 2
+  history_request="$(audit_reflection_gate "$reflection_context" prepare "$audit_token" "$history_input")" || exit 2
+  reflection_pending=true
+  history_path="$(jq -r .history_path <<<"$history_request")"
+fi
 task_input_json="$(jq -nc \
   --arg repo_root "$repo_root" \
   --arg transcript_path "$transcript_path" \
@@ -906,10 +932,18 @@ task_input_json="$(jq -nc \
     dossier_path:$dossier_path, previous_dossier_path:$previous_dossier_path,
     audit_generation:$audit_generation, expected_branch:$expected_branch,
     expected_head:$expected_head}')"
+if [[ -n "$history_path" ]]; then
+  task_input_json="$(jq -c --arg history "$history_path" '. + {history_path:$history}' <<<"$task_input_json")"
+fi
 if ! audit_prompt="$(subagent_prompt verdict-runner "$tooling_root" \
                       "task_input_json=${task_input_json}")"; then
   printf 'run-verdict-audit.sh: could not load .agents/prompts/verdict-runner.md.\n' >&2
   exit 2
+fi
+if [[ -n "$history_path" ]]; then
+  reflection_prompt="$(subagent_prompt audit-reflection "$tooling_root")" || exit 2
+  audit_prompt+=$'\nHistory schema JSON: '"$(jq -nc --arg path "$tooling_root/.agents/hooks/commit-push-audit.schema.json" '{path:$path}')"
+  audit_prompt+=$'\n\n'"$reflection_prompt"
 fi
 
 # The audit must be attributable to a fresh run, not a leftover dossier, so each
@@ -1233,6 +1267,10 @@ audit_json_is_valid=false
 [[ -n "$audit_json" ]] && audit_json_is_valid=true
 
 if [[ "$generation_matches" == true && "$audit_json_is_valid" == true ]]; then
+  if [[ "$reflection_pending" == true ]]; then
+    audit_reflection_gate "$reflection_context" record "$audit_token" "$audit_json" >/dev/null || exit 1
+    reflection_pending=false
+  fi
   # Promote bytes already parsed from the selected regular inode, never the auditor's
   # pathname. This closes both FIFO blocking and validate-then-rename replacement races.
   audit_verified_file="${audit_output_file}.verified-${audit_token}"

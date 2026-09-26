@@ -330,6 +330,22 @@ push_is_single_audited_commit() {  # remote-name
   local commit_facts parents parent tree="" subject="" subject_hash
 
   declare -F commit_audit_receipt_claim >/dev/null 2>&1 || return 1
+  # A receipt cannot dismiss findings from this session's current push review.
+  if [[ -n "$watch_binding_session_scope" ]]; then
+    local context history current_epoch
+    current_epoch="$(verdict_audit_read_single_record \
+      "$repo_root/.agents/state/verdict-prompt-epoch.$watch_binding_session_scope")" || return 1
+    [[ "$current_epoch" == "$watch_binding_prompt_epoch" ]] || return 1
+    # shellcheck source=../.agents/lib/audit-reflection.sh
+    source "$tooling_root/.agents/lib/audit-reflection.sh" || return 1
+    # shellcheck source=../.agents/lib/audit-reflection-gate.sh
+    source "$tooling_root/.agents/lib/audit-reflection-gate.sh" || return 1
+    context="$(jq -nc --arg root "$(cd "$repo_root" && pwd -P)" --arg session "$watch_binding_session_scope" \
+      --arg epoch "$current_epoch" --arg branch "$(git -C "$repo_root" branch --show-current)" \
+      '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"push"}')"
+    history="$(audit_reflection_gate "$context" inspect)" || return 1
+    jq -e '(.pending | not) and (.unresolved | not)' <<<"$history" >/dev/null || return 1
+  fi
 
   ref_updates="$(grep '[^[:space:]]' "$stdin_file")" || return 1
   [[ "$ref_updates" != *$'\n'* ]] || return 1        # more than one ref update
@@ -371,8 +387,8 @@ push_is_single_audited_commit() {  # remote-name
 }
 
 # Capture the original PreToolUse command binding before the delegated gate
-# consumes its handoff. This is best-effort state for the informational watcher;
-# audit behavior and push exit status never depend on it.
+# consumes its handoff. The watcher uses it for attribution; a scoped receipt also
+# checks its current epoch and unresolved audit history before skipping review.
 capture_pr_watch_binding() {
   local handoff="$repo_root/.agents/state/last-audit-handoff.json"
   local state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"

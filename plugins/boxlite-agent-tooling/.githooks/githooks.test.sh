@@ -178,6 +178,7 @@ setup() {
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
      "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
   cp "$REPO_ROOT/.agents/prompts/"*.md "$d/.agents/prompts/"
+  cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$d/.agents/lib/"
   printf 'x\n' > "$d/f"
 
   scratch="$(mktemp -d)"
@@ -192,6 +193,7 @@ setup() {
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
      "$REPO_ROOT/.agents/lib/hook-host.sh" "$plugin/.agents/lib/"
   git -C "$scratch" init -q
+  cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$plugin/.agents/lib/"
   git -C "$scratch" config user.email t@t.test
   git -C "$scratch" config user.name tester
   git -C "$scratch" add -A
@@ -770,11 +772,14 @@ jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$comman
   '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[]}' \
   > "$output"
 if [[ -n "${CODEX_FAKE_DELAY:-}" ]]; then
+  history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
+  [[ -z "$history" ]] || bash "$cd_arg/.agents/state/history-result-fixture.sh" "$history" "$output"
   perl -e 'select(undef,undef,undef,$ARGV[0])' "$CODEX_FAKE_DELAY"
 fi
 PUSH_FAKE_CODEX
 chmod +x "$R/bin/codex"
 push_lifecycle_session="session-codex-push"
+cp "$REPO_ROOT/scripts/fixtures/audit-history-result.sh" "$R/.agents/state/history-result-fixture.sh"
 push_lifecycle_scope="git-$(printf '%s' "$push_lifecycle_session" | git -C "$R" hash-object --stdin)"
 push_lifecycle_epoch=1201-1202-12
 printf '%s\n' "$push_lifecycle_epoch" \
@@ -1621,6 +1626,31 @@ grep -q 'push audit skipped' "$R/err.txt" && skip_named=yes || skip_named=no
 check_eq "audited single commit → push skips the audit, receipt consumed" \
   "rc=$push_rc before=$receipts_after_commit skip=$skip_named after=$(receipt_count "$R")" \
   "rc=0 before=1 skip=yes after=0"
+rm -rf "$R" "$B"
+
+# Pending findings require a push review even when the commit has a valid receipt.
+read -r R B < <(setup_pushed)
+commit_audited "$R"
+history_scope="git-$(printf receipt-history | git -C "$R" hash-object --stdin)"
+history_epoch=1201-1202-1
+printf '%s\n' "$history_epoch" > "$R/.agents/state/verdict-prompt-epoch.$history_scope"
+history_context="$(jq -nc --arg root "$(cd "$R" && pwd -P)" --arg session "$history_scope" \
+  --arg epoch "$history_epoch" --arg branch "$(git -C "$R" branch --show-current)" \
+  '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"push"}')"
+history_attempt="$(printf '{"binding":{"head":"fixture"},"snapshot":{"diff":"reviewed bytes"}}' \
+  | bash "$REPO_ROOT/scripts/audit-reflection-gate.sh" "$history_context" prepare)"
+printf '"prior push auditor failed"' | bash "$REPO_ROOT/scripts/audit-reflection-gate.sh" \
+  "$history_context" error "$(jq -r .attempt_id <<<"$history_attempt")" >/dev/null
+jq -nc --arg branch "$(git -C "$R" branch --show-current)" --arg head "$(git -C "$R" rev-parse HEAD)" \
+  --arg hash "$(printf push | hash_stdin)" --arg scope "$history_scope" --arg epoch "$history_epoch" \
+  --argjson pid "$$" --arg token "$(verdict_audit_process_start_token "$$")" \
+  '{branch:$branch,head:$head,command_kind:"push",command_hash:$hash,
+    owner:{pid:$pid,start_token:$token},lifecycle:{session_scope:$scope,prompt_epoch:$epoch}}' \
+  > "$R/.agents/state/last-audit-handoff.json"
+write_broken_preflight "$R" exit
+push_rc="$(push_agent "$R")"
+check_eq "pending push history prevents receipt bypass" \
+  "rc=$push_rc receipt=$(receipt_count "$R")" "rc=1 receipt=1"
 rm -rf "$R" "$B"
 
 # One-shot: the receipt authorized exactly one push and is gone afterwards.

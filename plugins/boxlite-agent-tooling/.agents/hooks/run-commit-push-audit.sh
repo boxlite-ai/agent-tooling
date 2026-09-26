@@ -63,6 +63,10 @@ active_audit_timeout_pid=0
 active_audit_limit_pid=0
 audit_group_launch_in_progress=0
 pending_audit_signal_status=0
+reflection_context=""
+reflection_pending=false
+history_id=""
+history_path=""
 
 if [[ ! -r "$verdict_state_lib" ]]; then
   printf 'run-commit-push-audit: verdict state library is unavailable.\n' >&2
@@ -86,6 +90,12 @@ fi
 cleanup_runner() {
   local original_status=$?
   trap - EXIT
+  if [[ "$reflection_pending" == true ]]; then
+    local terminal=error
+    (( original_status == 130 || original_status == 143 )) && terminal=cancel
+    audit_reflection_gate "$reflection_context" "$terminal" "$history_id" \
+      "\"Git auditor exited with status $original_status\"" >/dev/null || true
+  fi
   if declare -F quiesce_codex_group >/dev/null 2>&1; then
     quiesce_codex_group >/dev/null 2>&1 || true
   fi
@@ -782,6 +792,12 @@ build_prompt() {  # evidence file, evidence sha256
     printf 'Internal: .agents/prompts/commit-push-runner.md is missing or has an unfilled placeholder\n' >&2
     return 1
   fi
+  if [[ -n "$history_path" ]]; then
+    printf '\nHistory schema JSON: %s\nHistory input JSON: %s\n' \
+      "$(jq -nc --arg path "$schema_file" '{path:$path}')" \
+      "$(jq -nc --arg history "$history_path" '{history_path:$history}')"
+    subagent_prompt audit-reflection "$tooling_root" || return 1
+  fi
 }
 
 normalize_agentic_output() {
@@ -810,7 +826,7 @@ normalize_agentic_output() {
       type == "string" and length > 0 and utf8bytelength <= $bytes
       and (explode | all(. != 0 and . != 10 and . != 13));
     if length == 1 and (.[0] | type) == "object"
-       and (.[0] | (exact_keys(["branch", "head", "command_kind", "diff_hash",
+       and (.[0] | del(.history_review,.reflection_review) | (exact_keys(["branch", "head", "command_kind", "diff_hash",
               "command_hash", "commit_subject_hash", "verdict", "findings"])
               or exact_keys(["branch", "head", "command_kind", "diff_hash",
               "command_hash", "commit_subject_hash", "verdict", "findings", "advisories"])))
@@ -833,7 +849,8 @@ normalize_agentic_output() {
             or ((.[0].advisories | type) == "array"
                 and (.[0].advisories | length) <= 32
                 and all(.[0].advisories[]; bounded_line(1024))))
-    then .[0] | .advisories = (.advisories // []) else empty end
+    then .[0] | .advisories = (.advisories // [])
+      | with_entries(select(.value != null)) else empty end
   ' 2>/dev/null || true)"
   if [[ -z "$normalized_output" ]]; then
     write_fail "Internal: Codex audit returned malformed JSON"
@@ -867,13 +884,16 @@ normalize_agentic_output() {
   fi
 
   auditor_control_terminal="$audit_verdict"
+  if [[ "$reflection_pending" == true ]]; then
+    audit_reflection_gate "$reflection_context" record "$history_id" "$normalized_output" >/dev/null \
+      || write_fail "Internal: audit omitted or contradicted its history assessment"
+    reflection_pending=false
+  fi
 
-  # Whitelist: a field omitted here is dropped silently, which for `advisories` would
-  # look like the model never reported any.
+  # Exact schema validation above preserves optional history assessments for the gate.
   local identity
   identity="$(printf '%s' "$normalized_output" \
-    | jq -c '{branch, head, command_kind, diff_hash, command_hash,
-              commit_subject_hash, verdict, findings, advisories}' \
+    | jq -c . \
     | verdict_audit_write_atomic_identity "$audit_file")" \
     || write_fail "Internal: could not publish Codex audit state safely"
   published_audit_identity="$identity"
@@ -1125,11 +1145,6 @@ run_agentic_audit() {
     write_fail "Internal: Codex audit schema is missing at ${schema_file}"
   fi
 
-  local codex_bin
-  if ! codex_bin="$(find_codex_bin)"; then
-    write_fail "Internal: working Codex CLI not found; set CODEX_BIN to the Codex binary"
-  fi
-
   local raw_file log_file evidence_file evidence_hash
   # EXIT, not RETURN: write_fail and normalize_agentic_output call `exit`, and a
   # RETURN trap never fires on exit, so audit.json and the Codex stderr log
@@ -1161,6 +1176,30 @@ run_agentic_audit() {
   if ! evidence_hash="$(hash_file "$evidence_file")" \
       || [[ ! "$evidence_hash" =~ ^[0-9a-f]{64}$ ]]; then
     write_fail "Internal: could not hash the private sanitized evidence file"
+  fi
+  if [[ -n "${AUDITOR_SESSION_SCOPE:-}" && -n "${AUDITOR_PROMPT_EPOCH:-}" ]]; then
+    # shellcheck source=../lib/audit-reflection.sh
+    source "$tooling_root/.agents/lib/audit-reflection.sh" || exit 2
+    # shellcheck source=../lib/audit-reflection-gate.sh
+    source "$tooling_root/.agents/lib/audit-reflection-gate.sh" || exit 2
+    reflection_context="$(jq -nc --arg root "$(cd "$repo_root" && pwd -P)" \
+      --arg session "$AUDITOR_SESSION_SCOPE" --arg epoch "$AUDITOR_PROMPT_EPOCH" \
+      --arg branch "${branch:-HEAD}" --arg kind "$kind" \
+      '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:$kind}')"
+    local history_input history_request
+    history_input="$(jq -nc --arg branch "$branch" --arg head "$head" --arg kind "$kind" \
+      --arg diff "$diff_hash" --arg command "$command_hash" --arg subject "$bound_commit_subject_hash" \
+      --rawfile evidence "$evidence_file" '{binding:{branch:$branch,head:$head,command_kind:$kind,
+        diff_hash:$diff,command_hash:$command,commit_subject_hash:$subject},snapshot:{evidence:$evidence}}')"
+    history_id="$$-$(date +%s)-${RANDOM:-0}"
+    history_request="$(audit_reflection_gate "$reflection_context" prepare "$history_id" "$history_input")" \
+      || write_fail "Audit history requires recovery; inspect the reported state path and .agents/prompts/audit-reflection.md"
+    reflection_pending=true
+    history_path="$(jq -r .history_path <<<"$history_request")"
+  fi
+  local codex_bin
+  if ! codex_bin="$(find_codex_bin)"; then
+    write_fail "Internal: working Codex CLI not found; set CODEX_BIN to the Codex binary"
   fi
 
   # Built before the pipeline, not inside it: a failure here must reach write_fail in

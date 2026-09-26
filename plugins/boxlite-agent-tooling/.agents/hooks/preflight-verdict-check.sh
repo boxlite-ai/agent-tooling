@@ -179,6 +179,10 @@ if [[ ! -r "$audit_state_lib" || ! -r "$override_state_lib" ]]; then
 fi
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$audit_state_lib"
+# shellcheck source=../lib/audit-reflection.sh
+source "$tooling_root/.agents/lib/audit-reflection.sh"
+# shellcheck source=../lib/audit-reflection-gate.sh
+source "$tooling_root/.agents/lib/audit-reflection-gate.sh"
 # shellcheck source=../lib/auditor-override-state.sh
 source "$override_state_lib"
 if [[ "$has_session_id" == "true" ]]; then
@@ -716,6 +720,34 @@ if [[ "$session_scope" != "-" ]] \
   log_decision override overridden-allow
   allow_with_note "[verdict-gate] OVERRIDDEN BY USER for this prompt; auditor PASS was not asserted"
 fi
+reflection_context=""
+if [[ "$session_scope" != "-" ]]; then
+  reflection_epoch="$entry_prompt_epoch"
+  [[ "$reflection_epoch" != "-" ]] || reflection_epoch=0
+  reflection_context="$(jq -nc --arg root "$repo_root" --arg session "$session_scope" \
+    --arg epoch "$reflection_epoch" --arg branch "${branch:-HEAD}" \
+    '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"verdict"}')"
+fi
+
+inspect_audit_history() {
+  [[ -n "$reflection_context" ]] || { printf '{}'; return; }
+  audit_reflection_gate "$reflection_context" inspect
+}
+
+require_audit_reflection() {
+  local history
+  history="$(inspect_audit_history)" || block "Audit history is unreadable; verification remains incomplete."
+  if [[ "$(jq '.state.attempts[-1].outcome.verdict != "PASS" and ((.state.attempts | length) >= 16 or
+    ([.state.attempts[]? | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 8)' <<<"$history")" == true ]]; then
+    log_decision history exhausted-stop
+    jq -nc --arg path "$(jq -r .state_path <<<"$history")" '{continue:false,
+      stopReason:("## TL;DR\n\nVerification is INCOMPLETE because the audit retry budget is exhausted.\n\n## Recovery\n\nHuman direction is required; unresolved evidence remains in " + $path + ". No auditor PASS was recorded.")}'
+    exit 0
+  fi
+  if [[ "$(jq -r '.reflection_due // false' <<<"$history")" == true ]]; then
+    block "Repeated audits require reflection before retrying. Read $(jq -r .state_path <<<"$history") and ${tooling_root}/.agents/prompts/audit-reflection.md. Compare all failed runs, explain failed fixes and earlier audit misses, run a discriminating check, then submit a current reflection with scripts/audit-reflection.sh. Verification is incomplete."
+  fi
+}
 
 # ALL assistant text of the FINAL TURN — every text block emitted since the last
 # real user message — from the session transcript (JSONL). Turn-level, not
@@ -1686,6 +1718,7 @@ audit_before_stop() {  # trigger-reason
   local trigger_reason="$1" audit_transcript_path="$transcript_path"
   local runner="$tooling_root/.agents/hooks/run-verdict-audit.sh"
   local runner_status=0 runner_failure=""
+  require_audit_reflection
   if ! ensure_verdict_request; then
     block_audit_infrastructure_failure "${trigger_reason}
 
@@ -1704,10 +1737,11 @@ Verdict audit runner is unavailable at ${runner}."
   if (( runner_status != 0 )); then
     case "$runner_status" in
       1) runner_failure="the independent auditor did not produce a valid dossier" ;;
-      2) runner_failure="no independent auditor runner is available" ;;
+      2) runner_failure="the auditor could not launch or its history needs recovery" ;;
       130|143) runner_failure="the independent audit was canceled before completion" ;;
       *) runner_failure="the independent auditor exited with status ${runner_status}" ;;
     esac
+    require_audit_reflection
     block_audit_infrastructure_failure "${trigger_reason}
 
 Verdict audit could not complete: ${runner_failure}. Retry after restoring the auditor."
@@ -1935,6 +1969,16 @@ if [[ "$request_is_current" == true && -n "$dossier_observed_identity" ]] \
         [[ "$session_scope" == "-" ]] || request_is_current=false
       fi
     else
+      if [[ -n "$reflection_context" ]]; then
+        history_state="$(inspect_audit_history)" || block "Audit history is unreadable; verification remains incomplete."
+        if [[ "$(jq '.state.attempts | length' <<<"$history_state")" != 0 ]]; then
+          history_id="$(jq -r '.history_review.attempt_id // empty' <<<"$verdict_json")"
+          if ! audit_reflection_gate "$reflection_context" record "$history_id" "$verdict_json" >/dev/null; then
+            retire_selected_dossier || true
+            block "The audit did not reconcile current history; verification remains incomplete. Inspect the audit history and rerun the independent auditor."
+          fi
+        fi
+      fi
       case "$v_verdict" in
         PASS)
           pass_advisories="$(printf '%s' "$verdict_json" \
@@ -2100,6 +2144,18 @@ audit_in_flight() {
 if audit_in_flight; then
   log_decision audit inflight-allow
   allow
+fi
+if [[ -n "$reflection_context" ]]; then
+  history_state="$(inspect_audit_history)" || block "Audit history is unreadable; verification remains incomplete."
+  if [[ "$(jq -r '.pending' <<<"$history_state")" == true ]]; then
+    audit_reflection_gate "$reflection_context" error \
+      "$(jq -r '.state.attempts[-1].id' <<<"$history_state")" '"auditor lease ended without a result"' >/dev/null \
+      || block "Could not recover the interrupted audit history."
+    history_state="$(inspect_audit_history)" || block "Audit history is unreadable; verification remains incomplete."
+  fi
+  if [[ "$(jq -r .unresolved <<<"$history_state")" == true ]]; then
+    audit_before_stop "Earlier audit findings still require verification."
+  fi
 fi
 
 # ── No (usable) dossier → triage: does the turn assert a verdict? ───────────

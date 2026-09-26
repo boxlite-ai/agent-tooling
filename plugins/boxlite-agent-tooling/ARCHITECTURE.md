@@ -268,6 +268,27 @@ commit adds no new author acknowledgment. See the equivalent queue carry-forward
 
 ## State files
 
+Audit history components:
+
+| Entry point | Responsibility |
+| --- | --- |
+| `scripts/audit-reflection.sh` → `.agents/lib/audit-reflection.sh` → `.agents/lib/audit-reflection.jq` | Serialize bounded state transitions; deduplicate attempts; validate immutable bindings; atomically write regular files. |
+| `.agents/lib/audit-reconciliation.jq` | Stable finding IDs, dispositions, coverage, provenance, and reopening evidence; reject unresolved PASS. |
+| `.agents/lib/audit-reflection-contract.jq` | After two failures, require current reflection covering every failed ID and an independent sufficient assessment for PASS. Freeze active reflection; invalidate after failure. |
+| `scripts/audit-reflection-gate.sh` → `.agents/lib/audit-reflection-gate.sh` | Bind scoped verdict/Git audits before launch and acceptance; snapshot evidence; recheck prompt epoch; reconcile dossiers. |
+| `.agents/prompts/audit-reflection.md`, `.agents/prompts/git-audit-history.md` | Shared reconciliation contract and native Git prepare/record procedure. |
+
+Cycles bind a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`; cap at eight failures,
+sixteen attempts, and 1 MiB. PASS closes a cycle; the next operation starts another.
+Runner failures record ERROR; cancellation is separate. Retain at most four closed cycles per context,
+four retired contexts/session, and the latest immutable input/context. Identity-checked
+cleanup preserves current-epoch evidence. Snapshots retain bounded transcripts,
+sanitized headless diffs, or immutable native Git trees.
+
+Stop triage/summary shortcuts and push receipts must respect unresolved history.
+Exhausted Stop audits return `continue:false` and INCOMPLETE; Git remains denied without
+PASS. Unscoped callers retain legacy contracts with omitted/null history assessments.
+
 All under `.agents/state/`, gitignored, and suffixed by session scope wherever more
 than one session can share a checkout.
 
@@ -350,6 +371,7 @@ first.
 | --- | --- | --- | --- |
 | summary | restatement-allow | The previous Stop asked for the result, this answer is 120 words or fewer counting code, and no tool ran since the ask; it ends the turn and the verdict check does not run. | 137 |
 | override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 716 |
+| history | exhausted-stop | Eight failed runs or sixteen attempts terminate Stop with an INCOMPLETE reason; no further audit or summary continuation runs. | 742 |
 | extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1802 |
 | extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1809 |
 | extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1812 |

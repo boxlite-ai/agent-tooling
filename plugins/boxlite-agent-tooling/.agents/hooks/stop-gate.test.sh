@@ -68,7 +68,7 @@ classifier_ran() { [[ -e "$1/CLASSIFIER_RAN" ]] && echo yes || echo no; }
 # The independent auditor seam: writes a generation-bound dossier with the verdict in
 # TEST_AUDIT_VERDICT and marks that it ran.
 # shellcheck disable=SC2016 # a script body: its variables expand when the runner runs it
-export VERDICT_AUDITOR_CMD='cat >/dev/null
+export VERDICT_AUDITOR_CMD='prompt="$(cat)"
 mkdir -p "$CLAUDE_PROJECT_DIR/.agents/state"
 touch "$CLAUDE_PROJECT_DIR/.agents/state/SYNC_AUDIT_RAN"
 idx="$(mktemp)"
@@ -85,7 +85,10 @@ jq -nc --arg branch "$(git -C "$CLAUDE_PROJECT_DIR" branch --show-current)" \
   --argjson findings "$findings" \
   '\''{branch:$branch,head:$head,tree_hash:$tree,generation:$generation,
      verdict:$verdict,proof:[],findings:$findings}'\'' \
-  > "$VERDICT_AUDITOR_OUTPUT_FILE"'
+  > "$VERDICT_AUDITOR_OUTPUT_FILE"
+task="$(printf "%s\n" "$prompt" | sed -n "/^UNTRUSTED_TASK_INPUT_JSON:$/ { n; p; q; }")"
+bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$VERDICT_AUDITOR_OUTPUT_FILE"'
+export TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/scripts/fixtures/audit-history-result.sh"
 export TEST_AUDIT_VERDICT=FAIL
 
 # Session state paths use an opaque Git object hash, reproduced here independently.
