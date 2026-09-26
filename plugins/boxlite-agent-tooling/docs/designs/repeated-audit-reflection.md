@@ -145,18 +145,6 @@ Use scripted producers for state transitions and curated good/bad reflection cas
 
 For implementation, observe reproducer failures against fully reverted production code, then passes with each fix restored. Run focused suites, shell syntax/lint, architecture and host parity, then broader plugin checks as required by shell-engineering guidance.
 
-Delivery uses sequential native PR dependencies; sizes include tests and docs against the immediately preceding branch:
+Delivery combines the implementation into one PR against `main`, preserving the existing commits. Review the cycle history, finding registry, reflection contract, immutable gate inputs, shared auditor contracts, verdict/Git integrations, and lifecycle protections together.
 
-| Slice | Acceptance | Changed lines |
-| --- | --- | --- |
-| 1. Design | Publish the specification and research. | 156 |
-| 2. Cycle history | Deduplicate outcomes and preserve snapshots. | 220 |
-| 3. Finding registry | Validate stable identities, dispositions, provenance, and conflicts. | 181 |
-| 4. Reflection contract | Reject missing/stale submissions; assess auditor omissions. | 169 |
-| 5. Gate adapter | Bind immutable inputs and repeated result delivery. | 160 |
-| 6. Shared contracts | Expose the native CLI and bounded auditor instructions. | 172 |
-| 7. Verdict integration | Enforce reflection and terminate exhausted Stop loops. | 301 |
-| 8. Commit/push integration | Reconcile native/headless reviews and exact push bindings. | 275 |
-| 9. Lifecycle safety | Bound retention, reject revoked epochs, protect receipt shortcuts. | 200–230 |
-
-Track acceptance and PR links in [issue #123](https://github.com/boxlite-ai/agent-tooling/issues/123). All slices stay below 400 changed lines. Local validation does not establish release, consumer adoption, or live model behavior.
+Track the replacement PR, superseded drafts, publication requirements, and acceptance in [issue #123](https://github.com/boxlite-ai/agent-tooling/issues/123). Local validation does not establish release, consumer adoption, or live model behavior.
