@@ -501,7 +501,8 @@ The skill produces `diagram.md` and `evidence.json`, then validates rendering, f
 and source traceability into `validation.json` before visual inspection.
 
 The `boxlite-clean-code` skill keeps essential coding decisions, a reversible
-refactoring loop, and verification guidance in one self-contained `SKILL.md`.
-The existing `skills/` symlink exposes it to plugin hosts; its directory can also
-be copied independently. It preserves the receiving repository's workflow and
-permission boundaries and requires no supporting files or plugin scripts.
+refactoring loop, and verification guidance in a compact `SKILL.md`. Its example
+index loads topic addons under `references/` only when relevant. The existing
+`skills/` symlink exposes the complete directory to plugin hosts; standalone
+sharing copies that directory, including references. It preserves the receiving
+repository's workflow and permission boundaries and needs no plugin scripts.
