@@ -393,6 +393,49 @@ pr_watch_retire_attachment_claim() {  # claim-path now-epoch lease-seconds
   ' "$1" "$2" "$3"
 }
 
+# Start or reuse one generation; readiness is the only successful return value.
+# Caller owns dependency checks and supplies an existing private state directory.
+pr_watch_start() {  # watcher state-directory branch sha pr-number
+  local watcher="$1" directory="$2" branch="$3" sha="$4" pr="$5"
+  local identity key id ready_directory ready_fifo actual
+  [[ "${BOXLITE_PR_WATCH:-1}" != 0 ]] || return 0
+  identity="$(pr_watch_state_directory_identity "$directory")" || return 1
+  key="$(pr_watch_branch_key "$branch")" || return 1
+  id="$(pr_watch_new_id "$directory" "$key")" || return 1
+  ready_directory="$(mktemp -d "$directory/.watch-ready.XXXXXX")" || return 1
+  ready_fifo="$ready_directory/ready"
+  if ! mkfifo "$ready_fifo" || ! exec 9<> "$ready_fifo"; then
+    rm -f "$ready_fifo"; rmdir "$ready_directory"
+    return 1
+  fi
+  rm -f "$ready_fifo"; rmdir "$ready_directory"
+  # Fork guarantees setsid is not called by a process-group leader. Isolate the
+  # entire supervisor: its logger must survive the caller's group cleanup too.
+  perl -MPOSIX -e '
+    my $child = fork();
+    exit 125 unless defined $child;
+    exit 0 if $child;
+    POSIX::setsid() >= 0 or exit 125;
+    POSIX::close($_) for grep { $_ != 9 } 3..255;
+    exec @ARGV or exit 127;
+  ' bash -c '
+    source "$1" || exit 127
+    shift
+    pr_watch_exec_with_regular_log "$@"
+  ' -- "${BASH_SOURCE[0]}" "$directory/$key.daemon.log" "$identity" \
+    bash "$watcher" --branch "$branch" --sha "$sha" --pr "$pr" \
+    --watch-id "$id" --ready-fd 9 </dev/null >/dev/null 2>&1 || {
+      exec 9>&-; return 1;
+    }
+  IFS= read -r -t 3 -u 9 actual || actual=""
+  exec 9>&-
+  pr_watch_id_is_valid "$actual" || {
+    printf 'pr-watch: producer did not become ready for branch %s\n' "$branch" >&2
+    return 1
+  }
+  printf '%s\n' "$actual"
+}
+
 # Supervise one command behind a capped output pipe. The supervisor owns the log
 # flock; the command and anything it forks never inherit that generation lease.
 # A first helper takes the flock, truncates, and writes at most 2 MiB. A repeat
