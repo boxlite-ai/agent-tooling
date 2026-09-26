@@ -8,7 +8,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=5e2970607c78-dirty sha256=513a0505f81d -->
+<!-- agent-tooling:guidance:begin rev=383029e0d20b sha256=da0fddac797e -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -117,15 +117,9 @@ Public artifacts/delegates: public evidence or disclosure approval for exact con
 
 Walls of text are forbidden. Write minimally, including prompts. Preserve evidence, risks, failures, uncertainty.
 
-Internal agent instructions, automation prompts, tool payloads, and intentionally empty replies need no TL;DR.
-
-State the outcome in 5–12 words when possible; retain material caveats and required action.
-
 Every human-facing output: `## TL;DR` (one simple sentence; section <40 words); first in replies/designs.
 
-Prefer: visuals > tables > bullets > prose (under 40 words; 120 for complex topics);
-
-Always include a brief real example when it helps the user understand.
+Prefer: visuals > tables > bullets > prose (under 40 words; 120 for complex topics); Always include a brief real example when it helps the user understand.
 
 - Every PR description must explain how the change produces its intended result through the key steps or decisions. Listing modified files is not an explanation. State the problem, resulting behavior, and decisive verification once. Review the explanation against the diff, including for drafts and after description edits. Omit work logs and exhaustive test counts. Repository templates are starting points.
 

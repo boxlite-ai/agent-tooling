@@ -1,9 +1,9 @@
 ---
-name: boxlite-diagrams
+name: boxlite-visualize
 description: Draw and validate source-grounded BoxLite diagrams; split big topics into topic sections.
 ---
 
-# BoxLite Diagrams
+# BoxLite Visualize
 
 Smallest source-grounded view set that answers the question. Evidence and composition
 are separate gates; pass both.
@@ -73,7 +73,7 @@ overview → runner_fleet → boxlite_core   3 — → one part's mechanics; the
 ## Validate
 
 ```bash
-python3 .agents/skills/boxlite-diagrams/scripts/validate_diagrams.py \
+python3 .agents/skills/boxlite-visualize/scripts/validate_diagrams.py \
   --repo "$(git rev-parse --show-toplevel)" \
   --document "$TASK_DIR/diagram.md" \
   --evidence "$TASK_DIR/evidence.json" \
