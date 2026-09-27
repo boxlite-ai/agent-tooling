@@ -7,7 +7,7 @@ _pr_size_gh() {
 }
 
 _pr_size_snapshot() { # subcommand argv... -> {repo,branch,head,base,lines}
-  local operation="$1" branch head repository base="" selector="" head_option="" token value metadata response
+  local operation="$1" branch head repository base="" selector="" head_option="" token value metadata response filter
   shift
   branch="$(git branch --show-current)" && [[ -n "$branch" ]] || return 2
   head="$(git rev-parse HEAD)" || return 2
@@ -35,25 +35,18 @@ _pr_size_snapshot() { # subcommand argv... -> {repo,branch,head,base,lines}
     [[ -n "$base" ]] || base="$(jq -er '.defaultBranchRef.name | select(type == "string" and length > 0)' <<<"$metadata")" || return 2
     response="$(_pr_size_gh api "repos/$repository/commits/$(jq -rn --arg ref "$branch" '$ref|@uri')")" || return 2
     [[ "$(jq -er .sha <<<"$response")" == "$head" ]] || return 2
-    response="$(_pr_size_gh api "repos/$repository/compare/$(jq -rn --arg ref "$base" '$ref|@uri')...$head")" || return 2
-    # GitHub only returns the first 300 files. Refuse a possibly truncated total.
-    response="$(jq -ce --arg head "$head" '
-      def count: type == "number" and . >= 0 and . <= 1000000000 and floor == .;
-      if (.files | type) != "array" or (.files|length) >= 300
-        or any(.files[]; (.additions|count|not) or (.deletions|count|not))
-      then error("incomplete comparison")
-      else {base:.base_commit.sha,head:$head,lines:([.files[]|.additions+.deletions]|add//0)} end
-    ' <<<"$response")" || return 2
   else
-    response="$(_pr_size_gh pr view "${selector:-$branch}" --json baseRefOid,headRefOid,headRefName,additions,deletions)" || return 2
-    response="$(jq -ce --arg head "$head" --arg branch "$branch" '
-      def count: type == "number" and . >= 0 and . <= 1000000000 and floor == .;
-      if .headRefOid != $head or .headRefName != $branch
-        or (.additions|count|not) or (.deletions|count|not)
-      then error("PR does not match the checkout")
-      else {base:.baseRefOid,head:.headRefOid,lines:(.additions+.deletions)} end
+    response="$(_pr_size_gh pr view "${selector:-$branch}" --json baseRefOid,headRefOid,headRefName)" || return 2
+    base="$(jq -er --arg head "$head" --arg branch "$branch" '
+      select(.headRefOid == $head and .headRefName == $branch)
+      | .baseRefOid | select(type == "string" and test("^[0-9a-f]{40}$"))
     ' <<<"$response")" || return 2
   fi
+  # All publication paths use one file-level comparison and the same classifier.
+  # GitHub returns at most 300 files; the filter rejects possibly truncated input.
+  response="$(_pr_size_gh api "repos/$repository/compare/$(jq -rn --arg ref "$base" '$ref|@uri')...$head")" || return 2
+  filter="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pr-size.jq" || return 2
+  response="$(jq -ce --arg head "$head" --arg base "$base" -f "$filter" <<<"$response")" || return 2
   jq -ce --arg repo "$repository" --arg branch "$branch" '
     select(.base|type=="string" and test("^[0-9a-f]{40}$"))
     | select(.head|type=="string" and test("^[0-9a-f]{40}$"))

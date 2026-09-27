@@ -56,7 +56,7 @@ tool_id=native-2
 reject call_hook PreToolUse
 tool_id=native-1
 reject call_hook PostToolUse "$(reply 'Split work')"
-reason='pr-size-exception: The generated dependency lockfile must land with its manifest because either half leaves dependency resolution inconsistent.'
+reason='pr-size-exception: The generated protocol bindings must land with their schema because either half leaves the interfaces incompatible.'
 reject call_hook PostToolUse "$(reply "$reason" | jq '.afkTimeoutMs=300000')"
 reject call_hook PostToolUse "$(reply "$reason" | jq '.followUp=true')"
 reject bash "$cli" respond "$state" "$id" "$reason"
@@ -87,6 +87,9 @@ if [[ "$1" == repo ]]; then
 elif [[ "$*" == 'api --hostname github.com markdown -f mode=gfm -f text='* ]]; then
   [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2
   printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>'
+elif [[ "$*" == 'api repos/example/repo/compare/'* ]]; then
+  jq -nc --arg head "$(git rev-parse HEAD)" \
+    '{base_commit:{sha:$head},files:[{filename:"src/main.sh",additions:1,deletions:0}]}'
 elif [[ "$1" == api ]]; then
   printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}'
 else

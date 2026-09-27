@@ -21,7 +21,8 @@ case "$*" in
   'api repos/example/repo/commits/'*) jq -nc --arg sha "$SIZE_TEST_HEAD" '{sha:$sha}' ;;
   'api repos/example/repo/compare/'*)
     jq -nc --arg base "$SIZE_TEST_BASE" --argjson lines "$SIZE_TEST_LINES" \
-      '{base_commit:{sha:$base},files:[{additions:$lines,deletions:0}]}' ;;
+      --argjson files "${SIZE_TEST_FILES:-null}" \
+      '{base_commit:{sha:$base},files:($files // [{filename:"src/main.sh",additions:$lines,deletions:0}])}' ;;
   'pr view '*)
     jq -nc --arg base "$SIZE_TEST_BASE" --arg head "$SIZE_TEST_HEAD" --argjson lines "$SIZE_TEST_LINES" \
       '{baseRefOid:$base,headRefOid:$head,headRefName:"feature",additions:$lines,deletions:0,body:"## TL;DR\n\nFixture summary.\n\n## How it works\n\nRetry failed calls once.\n\nhttps://github.com/example/repo/issues/123"}' ;;
@@ -37,6 +38,68 @@ call_hook() {
   jq -nc --arg command "$1" '{tool_input:{command:$command}}' \
     | bash "$plugin/.agents/hooks/preflight-pr-review.sh"
 }
+code_failures=0
+check_code_size() { # label, files JSON, expected code lines or unknown
+  local label="$1" expected="$3" operation out command
+  SIZE_TEST_FILES="$(jq -nc "$2")"
+  export SIZE_TEST_FILES
+  for operation in create edit ready; do
+    case "$operation" in
+      create) command='gh pr create --draft --title wip --body "## TL;DR
+
+Fixture change.
+
+## How it works
+
+Retry failed calls once. https://github.com/example/repo/issues/123"' ;;
+      edit) command='gh pr edit --add-label documentation' ;;
+      ready) command='gh pr ready' ;;
+    esac
+    out="$(call_hook "$command")"
+    if { [[ "$expected" == unknown && "$out" == *'Cannot determine the exact PR size'* ]]; } \
+      || { [[ "$expected" != unknown && "$expected" -gt 400 && "$out" == *'pr-size-exception:'* ]] \
+        && [[ "$(jq -r .spec.binding.lines "$scratch/repo/.agents/state/pr-size-request.json")" == "$expected" ]]; } \
+      || { [[ "$expected" != unknown && "$expected" -le 400 ]] \
+        && { [[ "$operation" == create && -z "$out" ]] \
+          || [[ "$operation" != create && "$out" == *'reviewed:'* && "$out" != *'pr-size-exception:'* ]]; }; }; then
+      printf 'PASS: %s / %s\n' "$label" "$operation"
+    else
+      printf 'FAIL: %s / %s: expected code size %s\n%s\n' "$label" "$operation" "$expected" "$out" >&2
+      code_failures=$((code_failures + 1))
+    fi
+  done
+}
+check_code_size 'documentation-only comparison' \
+  '[{"filename":"README.md","additions":1000,"deletions":500}]' 0
+check_code_size 'mixed comparison at code boundary' \
+  '[{"filename":"src/main.sh","additions":180,"deletions":120},{"filename":"tests/main.test.sh","additions":40,"deletions":10},{"filename":"config.yml","additions":50,"deletions":0},{"filename":"docs/guide.rst","additions":2000,"deletions":0}]' 400
+check_code_size 'mixed comparison above code boundary' \
+  '[{"filename":"src/main.sh","additions":400,"deletions":1},{"filename":"README.md","additions":2000,"deletions":0}]' 401
+check_code_size 'assets, data, and lockfiles' \
+  '["LICENSE","notes.txt","image.svg","data.csv","package-lock.json","pnpm-lock.yaml","Cargo.lock"] | map({filename:.,additions:900,deletions:0})' 0
+check_code_size 'text build and dependency configuration' \
+  '["CMakeLists.txt","requirements.txt","requirements-dev.txt","constraints.txt"] | map({filename:.,additions:401,deletions:0}) + [{filename:"README.md",additions:900,deletions:0}]' 1604
+check_code_size 'source in documentation directory' \
+  '[{"filename":"docs/example.py","additions":401,"deletions":0}]' 401
+check_code_size 'extensionless script' \
+  '[{"filename":"bin/run","additions":401,"deletions":0}]' 401
+check_code_size 'configuration, generated source, MDX, and unfamiliar files' \
+  '["package.json","composer.json","config.yml","generated.pb.go","docs/component.mdx","new.lang"] | map({filename:.,additions:401,deletions:0})' 2406
+check_code_size 'rename from code to prose' \
+  '[{"filename":"guide.md","previous_filename":"main.sh","additions":401,"deletions":0}]' 401
+check_code_size 'rename between prose files' \
+  '[{"filename":"guide.md","previous_filename":"README.md","additions":900,"deletions":0}]' 0
+check_code_size 'missing filename fails closed' \
+  '[{"additions":1,"deletions":0}]' unknown
+check_code_size 'rename without original filename fails closed' \
+  '[{"filename":"README.md","status":"renamed","additions":1,"deletions":0}]' unknown
+check_code_size 'malformed excluded entry fails closed' \
+  '[{"filename":"README.md","additions":-1,"deletions":0}]' unknown
+check_code_size 'possibly truncated files fail closed' \
+  '[range(300) | {filename:("doc-"+tostring+".md"),additions:1,deletions:0}]' unknown
+unset SIZE_TEST_FILES
+[[ "$code_failures" == 0 ]] || exit 1
+rm -f "$scratch/repo/.agents/state/pr-size-request.json" "$scratch/repo/.agents/state/pr-review-request.json"
 long_body="$(printf 'word %.0s' {1..81})"
 out="$(call_hook "gh pr create --title 'feat: validate text first' --body '$long_body'")"
 [[ "$out" == *'paragraph'* && "$out" != *'401'* ]] \
@@ -75,7 +138,7 @@ Retry failed calls once. https://github.com/example/repo/issues/123"')"
 state="$scratch/repo/.agents/state/pr-size-request.json"
 id="$(jq -r .id "$state")"
 deadline="$(jq -r .deadline "$state")"
-reason='pr-size-exception: This dependency update regenerates 612 lockfile lines; splitting it from the manifest leaves the dependency graph inconsistent.'
+reason='pr-size-exception: This protocol update regenerates 612 binding-code lines; splitting the schema from generated bindings leaves incompatible interfaces.'
 "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" >/dev/null
 [[ -z "$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 

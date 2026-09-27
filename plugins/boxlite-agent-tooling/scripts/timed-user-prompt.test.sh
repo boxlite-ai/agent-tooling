@@ -51,7 +51,7 @@ request="$(run request "$state" "$size_spec")"
 id="$(jq -r .id <<<"$request")"
 reject respond "$state" "$next_id" 'reviewed: superseded'
 reject respond "$state" "$id" 'pr-size-exception: urgent'
-reason='pr-size-exception: This dependency update regenerates 612 lockfile lines; splitting it from the manifest leaves the dependency graph inconsistent.'
+reason='pr-size-exception: This protocol update regenerates 612 binding-code lines; splitting the schema from generated bindings leaves incompatible interfaces.'
 expect "$(run respond "$state" "$id" "$reason")" '.status == "accepted" and .spec.fallback == "split"'
 [[ "$(run status "$state" "$id" | jq -r .response)" == "$reason" ]]
 printf '1\n' > "$CONFIRMATION_TEST_CLOCK"

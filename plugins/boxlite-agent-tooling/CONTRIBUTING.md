@@ -69,6 +69,11 @@ Apply the workflow's **PR size and decomposition** requirements, including excep
 expiry and renewal. Use the [tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md)
 when splitting; see [size enforcement](ARCHITECTURE.md#pr-size-and-stacks) for hook coverage.
 
+The 400-line cap counts code additions plus deletions, including tests, scripts,
+configuration, and generated source. Recognized documentation, assets/data, and
+lockfiles are excluded; unfamiliar files count. A PR with 400 code lines and
+2,000 Markdown lines fits; 401 code lines require splitting or an exception.
+
 For managed native questions in local Claude sessions, launch with:
 
 ```sh
@@ -80,7 +85,7 @@ for supported modes, fallback questions, deadlines, and renewal behavior.
 
 Illustrative typed exception:
 
-> pr-size-exception: The dependency update regenerates 612 lockfile lines; splitting the proposed manifest and lockfile changes would leave the dependency graph inconsistent.
+> pr-size-exception: The protocol change regenerates 612 binding-code lines; splitting the schema and generated bindings would leave incompatible interfaces.
 
 Do not pre-fill this example as a developer response.
 
