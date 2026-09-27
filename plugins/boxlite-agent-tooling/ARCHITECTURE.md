@@ -365,7 +365,9 @@ than one session can share a checkout.
   timestamps and generation IDs. Publishing precedes detection deduplication;
   acknowledgment removes the exact pending record. Full capacity stops polling
   with an error instead of silently discarding unread events. Replays after an
-  interrupted acknowledgment are possible; delivery is not exactly once.
+  interrupted acknowledgment are accepted: delivery is at least once. Consumers
+  may replay retained events after a crash without a separate receipt ledger or
+  mandatory history reconciliation.
 - Producer launch: `pr_watch_start` in `.agents/lib/pr-watch-state.sh` starts the
   complete log supervisor in a new POSIX session before forking its children.
   Both `.githooks/pre-push` and `.agents/watch/pr-watch-start.sh` use this bounded
