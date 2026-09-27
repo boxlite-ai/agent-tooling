@@ -7,4 +7,4 @@ Walls of text are forbidden. Write minimally, including prompts. Preserve eviden
 
 Every human-facing output: `## TL;DR` (one simple sentence; section <40 words); first in replies/designs/artifacts; Optional for machine-only output.
 
-Prefer: visuals > structured message (tables; bullets) > short prose (under 40 words; 120 for complex topics); Always include a brief real example when it helps the user understand; Always reply with structured message when structure is better.
+Prefer: visuals > structured message (tables; bullets) > short prose (under 40 words; 120 for complex topics); Always include a brief real example when it helps the user understand; Always use structured messages.
