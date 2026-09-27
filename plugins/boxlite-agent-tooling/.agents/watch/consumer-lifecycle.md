@@ -1,24 +1,18 @@
 ## TL;DR
 
-Drain PR events without scheduling empty task turns.
+Keep watchers alive on schedule; deliver events during foreground turns.
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    Push["git push"] --> Launch["Hook launches background watcher"]
-    Launch --> Poll["Poll GitHub about every 30 seconds"]
-    GH["Checks, comments, reviews, PR state"] --> Poll
-    Poll --> Seen{"Already seen?"}
-    Seen -->|Yes| Quiet["Stay silent; continue polling"]
-    Quiet --> Poll
-    Seen -->|No| Queue["Save event in durable pending queue"]
-    Queue --> Record["Record deduplication key"]
-    Queue --> Consumer["Agent reads pending events"]
-    Consumer --> Action{"Needs attention?"}
-    Action -->|Yes| Report["Show task message"]
-    Report --> Ack["Acknowledge event; remove from queue"]
-    Action -->|Routine update| Ack
+    Push["git push"] --> Watcher["Background watcher"]
+    Push --> Hook["PostToolUse requests schedule setup"]
+    Hook --> Schedule["Agent creates/reuses ten-minute heartbeat"]
+    Schedule --> Library["Schedule library reconciles existing intent"]
+    Library --> Watcher
+    Watcher --> Queue["Save new GitHub events"]
+    Queue --> Foreground["Foreground turn reports and acknowledges"]
 ```
 
 ## Shared setup
@@ -32,11 +26,13 @@ Run `pr-watch-session.sh` beside this document from the validated worktree:
 | Operation | Arguments |
 | --- | --- |
 | Register a new watch | `--start --branch BRANCH [--pr NUMBER]` |
+| Keep producer alive; return status only | `--keepalive --branch BRANCH` |
 | Reconcile and read pending events | `--branch BRANCH` |
 | Acknowledge an event | `--branch BRANCH --ack EVENT_ID` |
 | Cancel that watch | `--cancel --branch BRANCH` |
 
-Save targets, PR links, returned generation/deadline, and policy path with the task.
+Register new watch intent before scheduling. Save targets, PR links, returned
+generation/deadline, and policy path with the task.
 Use `--start` only for new watch requests, never to renew cancellation/deadlines
 during drains. Execution-session IDs are not durable watch authority.
 
@@ -84,19 +80,24 @@ A watch_end is not PR closure. Keep unrelated watches.
 
 ## Codex
 
-- Use the exact initial consumer binding. Optional background streams support
-  low-latency reads; pending batches support reconnection.
-- Do not create or resume a heartbeat during PR setup. Filtering, empty replies,
-  and muting cannot prevent scheduled input rows. No scheduled tasks or cron workaround.
-- Without background support, report unavailable idle coverage. Polling and storage
-  may continue while idle; neither proves delivery. Keep GitHub polling at 30 seconds;
-  never emulate event-triggered delivery with a timer.
+Use [pr-watch-schedule.md](../prompts/watch/pr-watch-schedule.md) to create/reuse
+one 10-minute heartbeat per chat through the app. Its only job: keep watchers alive.
+The hook requests setup; the agent registers and verifies it.
 
-Before migration, inspect automation targets and saved repository/branch bindings.
-Pause only a confirmed PR watcher for this task; report ambiguous ownership without changes.
+- Reuse only a confirmed PR watcher for this chat; preserve unrelated automations.
+- Preserve an explicit user mute, pauses, cancellations, and original deadlines.
+  Resume only on explicit request. No direct automation-file writes or cron workaround.
+- Save verified worktree/branch/PR targets and the keepalive command path.
+- Without scheduling support, retain foreground delivery and reconciliation.
 
-Preserve unrelated automations and explicitly requested periodic status reports.
-Preserve an explicit user mute; never resume an opted-out watch.
+The command calls `pr_watch_schedule_tick` from `../lib/pr-watch-schedule.sh`.
+It validates 1–32 targets, invokes session `--keepalive`, and returns active/stopped
+counts. Dead producers use existing backoff; busy leases wait until the next tick.
+Errors fail visibly after attempting remaining targets. Pause when all targets stop.
+
+Scheduled runs neither deliver nor acknowledge events. Foreground turns own both;
+full queues can stop polling until drained. There are no idle PR reports or hook-health
+checks. Scheduled input rows still appear; silence cannot remove them.
 
 ## Claude Code
 
@@ -104,21 +105,8 @@ Use `Monitor` with the shared lifecycle. On each wake, drain pending events and
 stream output. Renew expired monitors with fresh validated generation bindings;
 report renewal failures.
 
-## Qualifying idle delivery
+## Qualifying scheduled keepalive
 
-Qualify the host connection before implementing or enabling a delivery adapter.
-The [app-server protocol](https://learn.chatgpt.com/docs/app-server) exposes
-`turn/start`; a usable connection to the existing task must also be established.
-[Background hooks](https://learn.chatgpt.com/docs/hooks#how-background-hooks-run)
-wait for the next user turn when idle and cannot supply that connection.
-
-| Required evidence | Acceptance |
-| --- | --- |
-| Destination binding | An authorized connection identifies the intended existing task and its owning host. |
-| Idle delivery | One new actionable event produces one visible report while the task is idle; unchanged input produces none. |
-| Acknowledgment and recovery | Acknowledge after reporting. After a crash, retry pending events on later foreground drains; duplicate reports are acceptable. |
-| Lifecycle | Closure, cancellation, and opt-outs stop delivery; connection loss is reported without discarding pending events. |
-
-Successful initialization or queued dispatch alone does not qualify delivery.
-If delivery fails or remains uncertain, retain pending events and foreground
-draining; record the failed stage and leave automatic idle delivery unavailable.
+After host adoption, verify one schedule across repeated pushes, dead-producer
+recovery, unchanged silence, opt-outs, and final-target retirement. Local shell and
+prompt tests do not prove app registration or execution.

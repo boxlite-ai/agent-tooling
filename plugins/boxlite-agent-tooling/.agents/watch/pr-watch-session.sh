@@ -8,7 +8,7 @@ source "$script_dir/../lib/pr-watch-state.sh" || exit 127
 source "$script_dir/../lib/verdict-audit-state.sh" || exit 127
 # shellcheck source=../lib/pr-watch-pending.sh
 source "$script_dir/../lib/pr-watch-pending.sh" || exit 127
-locked=0 start=0 cancel=0 branch="" pr="" acknowledgments=()
+locked=0 start=0 cancel=0 keepalive=0 branch="" pr="" acknowledgments=()
 result=0
 trap 'result=$?; if (( result != 0 && result != 75 )); then
   printf "pr-watch-session: branch %s reconciliation failed (exit %s)\n" "$branch" "$result" >&2
@@ -19,6 +19,7 @@ while (( $# )); do
     --locked) locked=1; shift ;;
     --start) start=1; shift ;;
     --cancel) cancel=1; shift ;;
+    --keepalive) keepalive=1; shift ;;
     --branch|--pr|--ack)
       [[ $# -ge 2 ]] || exit 2
       case "$1" in
@@ -30,6 +31,10 @@ while (( $# )); do
     *) printf 'pr-watch-session: unknown argument %s\n' "$1" >&2; exit 2 ;;
   esac
 done
+if (( keepalive && (start || cancel || ${#acknowledgments[@]} > 0) )); then
+  printf 'pr-watch-session: --keepalive cannot start, cancel, or acknowledge\n' >&2
+  exit 2
+fi
 [[ -z "$pr" || "$pr" =~ ^[1-9][0-9]*$ ]] || exit 2
 [[ -n "$branch" ]] || { printf 'pr-watch-session: --branch is required\n' >&2; exit 2; }
 for dependency in git jq perl shasum gh; do
@@ -169,6 +174,10 @@ else
 fi
 [[ "$(pr_watch_state_directory_identity "$directory")" == "$directory_identity" ]] || exit 1
 printf '%s\n' "$state" | verdict_audit_write_atomic "$record" || exit 1
+if (( keepalive )); then
+  jq -nc --arg status "$status" '{status:$status}'
+  exit $?
+fi
 events="$(pr_watch_pending read "$pending")" || exit 1
 jq -nc --arg status "$status" --argjson state "$state" --argjson events "$events" \
   '{status:$status,watch_id:$state.watch_id,deadline:$state.deadline,

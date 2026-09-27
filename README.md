@@ -156,9 +156,10 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 Workflow and writing reminders reference `boxlite-writing` by name; the host loads
 its instructions. Try: "Use boxlite-writing to shorten this PR description."
 
-After a push, the Git hook starts the PR watcher. Codex drains saved events during
-foreground turns without scheduling empty task turns; automatic idle delivery
-requires a verified event-triggered host connection. Claude uses Monitor.
+After a push, the Git hook starts the PR watcher. Codex setup requests one ten-minute
+schedule per chat solely to keep watchers alive. Foreground turns report saved events;
+there are no idle PR reports. Scheduled input rows remain visible. Pauses and opt-outs
+remain in force. Claude uses Monitor.
 See the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
 
 Monitoring intent and pending events survive execution-session replacement.
