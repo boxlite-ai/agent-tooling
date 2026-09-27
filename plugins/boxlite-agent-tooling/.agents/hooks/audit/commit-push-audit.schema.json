@@ -73,6 +73,7 @@
   },
   "$defs": {
     "text": {"type": "string", "maxLength": 2048},
+    "finding_id": {"type": "string", "pattern": "^F[1-9][0-9]{0,3}$"},
     "reason": {
       "type": "object", "additionalProperties": false,
       "required": ["reason", "evidence"],
@@ -87,7 +88,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["previous_id", "evidence", "check", "decision"],
       "properties": {
-        "previous_id": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"},
+        "previous_id": {"$ref": "#/$defs/finding_id"}, "evidence": {"$ref": "#/$defs/text"},
         "check": {"$ref": "#/$defs/text"}, "decision": {"$ref": "#/$defs/text"}
       }
     },
@@ -95,7 +96,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "invariant", "behavior", "criterion", "evidence", "origin", "origin_evidence", "review_gap", "review_change", "reopening", "conflict", "criterion_change"],
       "properties": {
-        "id": {"$ref": "#/$defs/text"}, "invariant": {"$ref": "#/$defs/text"},
+        "id": {"type": "string", "pattern": "^(NEW|F[1-9][0-9]{0,3})$"}, "invariant": {"$ref": "#/$defs/text"},
         "behavior": {"$ref": "#/$defs/text"}, "criterion": {"$ref": "#/$defs/text"},
         "evidence": {"$ref": "#/$defs/text"}, "origin_evidence": {"$ref": "#/$defs/text"},
         "review_gap": {"$ref": "#/$defs/text"}, "review_change": {"$ref": "#/$defs/text"},
@@ -116,7 +117,7 @@
             "type": "object", "additionalProperties": false,
             "required": ["id", "status", "evidence"],
             "properties": {
-              "id": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"},
+              "id": {"$ref": "#/$defs/finding_id"}, "evidence": {"$ref": "#/$defs/text"},
               "status": {"type": "string", "enum": ["open", "resolved", "retracted", "not_assessed"]}
             }
           }

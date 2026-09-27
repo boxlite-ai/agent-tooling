@@ -20,6 +20,14 @@ Keep file paths in link targets, tests, and diagnostics that locate a problem.
 Run `bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .` before
 submitting Markdown changes; the Writing ownership workflow runs the same gate.
 
+## Auditor test isolation
+
+The verdict runner suite builds a utility-only PATH and uses an explicit default
+auditor stub. Claude/Codex integration cases supply their own fake executables;
+no-runner cases omit them. An unavailable `CODEX_BIN` disables desktop discovery
+outside PATH, and sentinel commands fail the suite on unintended model calls.
+Add required utilities to the fixture list instead of restoring the host PATH.
+
 ## Release maintenance
 
 Bump the generic, Claude, and Codex plugin manifests together with both version
