@@ -157,9 +157,10 @@ Workflow and writing reminders reference `boxlite-writing` by name; the host loa
 its instructions. Try: "Use boxlite-writing to shorten this PR description."
 
 After a push, the Git hook starts the PR watcher. Codex setup requests one ten-minute
-schedule per chat solely to keep watchers alive. Foreground turns report saved events;
-there are no idle PR reports. Scheduled input rows remain visible. Pauses and opt-outs
-remain in force. Claude uses Monitor.
+schedule per chat to keep watchers alive and report new events. Scheduled and
+foreground turns acknowledge handled events; empty scheduled reads produce no reply.
+Scheduled input rows remain visible. Pauses, mutes, and opt-outs remain in force.
+Claude uses Monitor; desktop alerts require separate host verification.
 See the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
 
 Monitoring intent and pending events survive execution-session replacement.

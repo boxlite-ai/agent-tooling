@@ -472,16 +472,21 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   producer; a repeated start returns the live generation. This is not service
   supervision or reboot persistence.
 - PR delivery: `.agents/hooks/post-remote-write-watch.sh` requests one ten-minute
-  keepalive schedule per chat. `.agents/prompts/watch/pr-watch-schedule.md` owns setup
+  event-delivery schedule per chat. `.agents/prompts/watch/pr-watch-schedule.md` owns setup
   and the saved prompt; hook output supplies its absolute JSON path or policy-relative
   compact path. The agent registers through the app and verifies saved bindings.
   `.agents/watch/pr-watch-keepalive.sh` calls `pr_watch_schedule_tick` from
   `.agents/lib/pr-watch-schedule.sh`: validate targets, reconcile each worktree, return
-  active/stopped counts. Session `--keepalive` reuses the branch lease and recovery,
-  returns status only, and rejects start/cancel/ack flags. Pending events stay unread
-  for foreground delivery; terminal events still retire intent. Busy leases defer;
-  errors propagate after remaining targets run. Pause when all targets stop.
-  Claude uses Monitor. Scheduled runs do not deliver events or check hook health.
+  active/stopped counts by default. With `--events`, it uses normal session reads
+  and emits target-bound batches of up to 16 events for each of at most 32 targets;
+  empty reads return zero with no stdout. Errors/degraded coverage return nonzero
+  with stderr; independent targets still deliver. Busy event reads return 75,
+  deferring retirement without an alert. Session
+  `--keepalive` retains status-only recovery and rejects start/cancel/ack flags.
+  Scheduled and foreground turns report before acknowledging exact event IDs.
+  Before pausing all stopped targets, drain terminal events and recheck after the
+  final status query. Reused schedules update their prompt without changing pauses
+  or notification preferences. Claude retains Monitor; no hook-health checks.
   `.agents/watch/consumer-lifecycle.md` defines draining, cleanup, and
   failure reporting. `.agents/watch/pr-watch-session.sh` persists branch-bound
   intent, monitoring deadlines, and bounded recovery attempts outside execution
