@@ -20,7 +20,7 @@ Support Claude Code and Codex on macOS, Linux, and Windows. Test affected combin
 
 ## Agent-facing docs
 
-Apply `boxlite-writing` aggressively to prompts, skills, and all agent-facing docs; cut prose; preserve behavior and constraints.
+Prompts, skills, and all agent-facing docs MUST use minimum prose per `boxlite-writing`; preserve behavior and constraints.
 
 ## Change safely
 
