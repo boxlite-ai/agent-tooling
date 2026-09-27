@@ -13,7 +13,7 @@ Edit runtime instructions and questions in Markdown; code owns routing, serializ
 | Writing reminder | `.agents/prompts/reminders/` |
 | API and network recovery | `.agents/prompts/resume/` |
 | Subagent dispatch | `.agents/prompts/subagent/` |
-| Watcher attachment | `.agents/prompts/watch/` |
+| Watcher attachment and schedules | `.agents/prompts/watch/` |
 | Standalone reminder | `.agents/hooks/rule-recency.md`; copy beside its script |
 | Auditor procedures | `.claude/agents/*.md` |
 | Workflow and skills | `guidance/workflow.md`, `.agents/skills/` |

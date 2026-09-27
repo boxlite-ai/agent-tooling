@@ -131,7 +131,7 @@ fi
 
 echo
 echo "## PR resolution"
-# The full context names the tooling root twice, so the path of the checkout running
+# The full context repeats the tooling root, so the path of the checkout running
 # this suite decides whether it fits the hook's 1400-byte limit; from a Claude Code
 # worktree it did not, and the hook sent its fallback instead. These cases run the
 # hook through a short link to this checkout, so they judge the full context wherever
@@ -2286,12 +2286,12 @@ else
   fail=$((fail + 1)); printf '  FAIL  a Claude host is named only the Monitor route (got: %.160s)\n' "$claude_ctx"
 fi
 codex_ctx="$(ctx_as_host codex "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
-if [[ "$codex_ctx" == *"foreground turns"* && "$codex_ctx" == *"no automatic heartbeat"* \
-   && "$codex_ctx" == *"unavailable idle delivery"* && "$codex_ctx" != *"every 1 minute"* \
+if [[ "$codex_ctx" == *"Codex: read schedule setup at JSON path"* \
+   && "$codex_ctx" == *"pr-watch-schedule.md"* && "$codex_ctx" != *"every 1 minute"* \
    && "$codex_ctx" != *"Monitor({"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  a Codex host gets quiet foreground delivery with explicit idle limits\n'
+  pass=$((pass + 1)); printf '  PASS  a Codex host gets watcher schedule setup\n'
 else
-  fail=$((fail + 1)); printf '  FAIL  a Codex host gets quiet foreground delivery with explicit idle limits (got: %.160s)\n' "$codex_ctx"
+  fail=$((fail + 1)); printf '  FAIL  a Codex host gets watcher schedule setup (got: %.160s)\n' "$codex_ctx"
 fi
 
 # The stream script must be addressed in the TOOLING tree (the hook's own

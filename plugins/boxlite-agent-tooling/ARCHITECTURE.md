@@ -461,10 +461,17 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   readiness handshake. Caller process-group cleanup cannot kill the logger or
   producer; a repeated start returns the live generation. This is not service
   supervision or reboot persistence.
-- PR delivery: `.agents/hooks/post-remote-write-watch.sh` emits setup; Codex drains
-  bounded pending events in foreground turns without creating a heartbeat.
-  Automatic idle delivery is unavailable until a supported event-triggered host
-  connection is verified. Claude uses Monitor.
+- PR delivery: `.agents/hooks/post-remote-write-watch.sh` requests one ten-minute
+  keepalive schedule per chat. `.agents/prompts/watch/pr-watch-schedule.md` owns setup
+  and the saved prompt; hook output supplies its absolute JSON path or policy-relative
+  compact path. The agent registers through the app and verifies saved bindings.
+  `.agents/watch/pr-watch-keepalive.sh` calls `pr_watch_schedule_tick` from
+  `.agents/lib/pr-watch-schedule.sh`: validate targets, reconcile each worktree, return
+  active/stopped counts. Session `--keepalive` reuses the branch lease and recovery,
+  returns status only, and rejects start/cancel/ack flags. Pending events stay unread
+  for foreground delivery; terminal events still retire intent. Busy leases defer;
+  errors propagate after remaining targets run. Pause when all targets stop.
+  Claude uses Monitor. Scheduled runs do not deliver events or check hook health.
   `.agents/watch/consumer-lifecycle.md` defines draining, cleanup, and
   failure reporting. `.agents/watch/pr-watch-session.sh` persists branch-bound
   intent, monitoring deadlines, and bounded recovery attempts outside execution
@@ -474,11 +481,11 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   `command`/`stdout` or `cmd`/`output`; supplied nonzero/null exit codes cannot arm.
   Saved task context references that policy and saved worktree/branch targets.
   Unexpected stream endings reconcile durable intent; degraded coverage is
-  reported while bounded retries continue. Migration pauses only confirmed
-  task-local PR watcher automations; unrelated schedules and explicit periodic
-  status requests remain intact. Empty replies and alert muting do not prevent
-  scheduled task inputs. Preserve an explicit user mute; pending storage alone
-  does not prove delivery. New events get concise human-facing summaries.
+  reported while bounded retries continue. Reuse only confirmed task-local PR schedules;
+  preserve unrelated automations, explicit pauses, mutes, cancellations, and deadlines.
+  Missing scheduling support retains foreground delivery and reconciliation. Empty replies
+  and alert muting do not prevent scheduled task inputs. Registration and pending storage alone
+  do not prove delivery. New events get concise human-facing summaries.
   Text-contract tests guard required instructions, not model obedience or live delivery.
 - Watcher to commands: `.agents/watch/pr-watch.sh` owns the external command group
   and its timeout/output monitors. Monitor cancellation uses KILL and wait because

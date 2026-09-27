@@ -946,18 +946,23 @@ fi
 # shellcheck source=../lib/subagent.sh
 source "$tooling_root/.agents/lib/subagent.sh" || exit 1
 # Keep host-specific setup within the context budget.
-codex_attach_line="$(subagent_prompt watch/watch-attach-codex "$tooling_root")" || exit 1
-case "$(hook_host_kind)" in
+schedule_prompt_path_json="$(jq -Rn --arg path "$tooling_root/.agents/prompts/watch/pr-watch-schedule.md" '$path')"
+codex_attach_line="$(subagent_prompt watch/watch-attach-codex "$tooling_root" \
+  "schedule_prompt_path_json=$schedule_prompt_path_json")" || exit 1
+codex_compact_line="$(subagent_prompt watch/watch-attach-codex-compact "$tooling_root")" || exit 1
+host_kind="$(hook_host_kind)"
+case "$host_kind" in
   claude)
     attach_line="$(subagent_prompt watch/watch-attach-claude "$tooling_root")" || exit 1
     compact_attach_line="$(subagent_prompt watch/watch-attach-claude-compact "$tooling_root")" || exit 1 ;;
   codex)
     attach_line="$codex_attach_line"
-    compact_attach_line="$attach_line" ;;
+    compact_attach_line="$codex_compact_line" ;;
   *)
     attach_line="$(subagent_prompt watch/watch-attach-claude "$tooling_root")" || exit 1
     attach_line+=" ${codex_attach_line}"
-    compact_attach_line="$attach_line" ;;
+    compact_attach_line="$(subagent_prompt watch/watch-attach-claude-compact "$tooling_root")" || exit 1
+    compact_attach_line+=" ${codex_compact_line}" ;;
 esac
 
 context="$(subagent_prompt watch/watch-attach "$tooling_root" \
