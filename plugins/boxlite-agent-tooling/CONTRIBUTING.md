@@ -32,6 +32,19 @@ guidance, and installed plugin version separately. Preserve explicit holds and
 unrelated worktree changes. Existing sessions need a plugin reload or a new task
 to load the updated resources.
 
+### Verification boundaries
+
+In lifecycle tests, wait for the observed phase before injecting a signal. A
+watcher must publish `watch_start` before TERM; bounded startup failure is a
+fixture failure. For FIFO request metadata, retain the two-second replacement
+bound and allow the following audit its own completion deadline. Assert its
+published finding, so an auditor launch failure cannot substitute for completion.
+
+Prompt budgets cover complete documents, including metadata. Render composed
+messages too: a review recovery notice and its timer can each fit separately yet
+exceed the host's 1200-byte limit together. Preserve the required actions while
+shortening shared prose; run both `subagent.test.sh` and `claude-timed-prompts.test.sh`.
+
 ## Commit & PR messages
 
 The preflight hook's denials point here as `CONTRIBUTING.md #commit--pr-messages`; keep this heading so that anchor resolves.

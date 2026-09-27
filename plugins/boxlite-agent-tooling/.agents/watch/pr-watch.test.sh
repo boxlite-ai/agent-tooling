@@ -1231,15 +1231,24 @@ SIGNAL_ID="watch-eeeeeeeeeeeeeeeeeeeeeeee"
 SIGNAL_LOG="$REPO/.git/pr-watch/$(pr_watch_branch_key "$SIGNAL_BRANCH").jsonl"
 /bin/bash -c '
   cd "$1" || exit 1
+  # Startup may outlast the old two-second wait under CI load.
+  sleep 3
   exec env PR_WATCH_INTERVAL=1 PR_WATCH_IDLE_TIMEOUT=30 \
     PR_WATCH_MAX_LIFETIME=60 bash "$2" --branch "$3" --pr 42 --watch-id "$4"
 ' -- "$REPO" "$WATCHER" "$SIGNAL_BRANCH" "$SIGNAL_ID" \
   >"$TMP/signal-orphan-producer.out" 2>&1 &
 SIGNAL_PID=$!
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-  grep -q '"kind":"watch_start"' "$SIGNAL_LOG" 2>/dev/null && break
+signal_ready=no
+signal_start_deadline=$(( SECONDS + 10 ))
+while (( SECONDS < signal_start_deadline )); do
+  if grep -q '"kind":"watch_start"' "$SIGNAL_LOG" 2>/dev/null; then
+    signal_ready=yes
+    break
+  fi
+  kill -0 "$SIGNAL_PID" 2>/dev/null || break
   sleep 0.1
 done
+check "signal fixture reaches watch_start before termination" "$signal_ready" yes
 kill -TERM "$SIGNAL_PID" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 \
          21 22 23 24 25 26 27 28 29 30; do
@@ -1248,25 +1257,27 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 \
 done
 kill -KILL "$SIGNAL_PID" 2>/dev/null || true
 wait "$SIGNAL_PID" 2>/dev/null || true
-SIGNAL_STREAM_OUT="$(with_deadline 5 env PR_WATCH_STREAM_WAIT=2 \
-  bash "$STREAM" "$SIGNAL_LOG" 1 --watch-id "$SIGNAL_ID")"
-SIGNAL_STREAM_RC=$?
-SIGNAL_TERMINAL="$(printf '%s\n' "$SIGNAL_STREAM_OUT" | jq -sr '
-  ([.[] | select(.kind == "watch_end")] | length) as $ends
-  | [.[] | select(.kind == "stream_error")] as $errors
-  | if $ends == 1 then "watch_end"
-    elif (($errors | length) == 1
-          and ($errors[0].reason | ascii_downcase
-            | test("orphan|producer.*(gone|dead|missing|inactive|lost)|abandon")))
-    then "stream_error" else "missing" end')"
-if [[ "$SIGNAL_TERMINAL" == watch_end ]]; then
-  SIGNAL_TERMINAL_STATUS="$SIGNAL_STREAM_RC"
-else
-  SIGNAL_TERMINAL_STATUS="$(( SIGNAL_STREAM_RC != 0 ))"
+if [[ "$signal_ready" == yes ]]; then
+  SIGNAL_STREAM_OUT="$(with_deadline 5 env PR_WATCH_STREAM_WAIT=2 \
+    bash "$STREAM" "$SIGNAL_LOG" 1 --watch-id "$SIGNAL_ID")"
+  SIGNAL_STREAM_RC=$?
+  SIGNAL_TERMINAL="$(printf '%s\n' "$SIGNAL_STREAM_OUT" | jq -sr '
+    ([.[] | select(.kind == "watch_end")] | length) as $ends
+    | [.[] | select(.kind == "stream_error")] as $errors
+    | if $ends == 1 then "watch_end"
+      elif (($errors | length) == 1
+            and ($errors[0].reason | ascii_downcase
+              | test("orphan|producer.*(gone|dead|missing|inactive|lost)|abandon")))
+      then "stream_error" else "missing" end')"
+  if [[ "$SIGNAL_TERMINAL" == watch_end ]]; then
+    SIGNAL_TERMINAL_STATUS="$SIGNAL_STREAM_RC"
+  else
+    SIGNAL_TERMINAL_STATUS="$(( SIGNAL_STREAM_RC != 0 ))"
+  fi
+  check "signalled producer leaves a terminally detectable generation" \
+    "$SIGNAL_TERMINAL/$SIGNAL_TERMINAL_STATUS" \
+    "$(if [[ "$SIGNAL_TERMINAL" == watch_end ]]; then printf 'watch_end/0'; else printf 'stream_error/1'; fi)"
 fi
-check "signalled producer leaves a terminally detectable generation" \
-  "$SIGNAL_TERMINAL/$SIGNAL_TERMINAL_STATUS" \
-  "$(if [[ "$SIGNAL_TERMINAL" == watch_end ]]; then printf 'watch_end/0'; else printf 'stream_error/1'; fi)"
 
 # A consumer may be attached with the public one-hour poll ceiling. TERM must
 # tear down the in-flight timer too; otherwise the shell exits while `sleep`

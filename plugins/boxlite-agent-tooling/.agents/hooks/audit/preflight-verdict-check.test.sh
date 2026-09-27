@@ -2376,17 +2376,31 @@ request_path="$(session_state_path "$R" verdict-request session-a)"
 mkdir -p "$(dirname "$request_path")"; mkfifo "$request_path"
 fifo_payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
   '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')"
-fifo_out="$(printf '%s' "$fifo_payload" | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" \
+# Delay the audit beyond the metadata deadline: replacement must finish first,
+# while the final denial still waits for the independently produced dossier.
+( cd "$R" && CLAUDE_PROJECT_DIR="$R" \
   VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD='false' \
-  perl -e 'alarm 2; exec @ARGV' bash "$HOOK" ) 2>/dev/null)"; fifo_rc=$?
+  VERDICT_AUDITOR_CMD="sleep 3; $AUDITOR_STUB" VERDICT_AUDITOR_TIMEOUT=8 \
+  exec perl -e 'alarm 15; exec @ARGV' bash "$HOOK" \
+  <<< "$fifo_payload" ) > "$R/.agents/state/fifo-request.out" 2>/dev/null &
+fifo_request_job=$!
+fifo_replacement=bounded
+perl -e '
+  $SIG{ALRM} = sub { exit 1 }; alarm 2;
+  until (-f $ARGV[0]) { select undef, undef, undef, 0.02 }
+' "$request_path" || fifo_replacement=timeout
+wait "$fifo_request_job" 2>/dev/null; fifo_rc=$?
+fifo_out="$(cat "$R/.agents/state/fifo-request.out")"
 fresh_generation=MISSING
 [[ -f "$request_path" ]] \
   && fresh_generation="$(awk '{print $1}' "$request_path" 2>/dev/null || echo MISSING)"
-fifo_request_state="rc=$fifo_rc decision=$(decision_from_output "$fifo_out")"
+fifo_request_state="replacement=$fifo_replacement rc=$fifo_rc decision=$(decision_from_output "$fifo_out")"
 [[ "$fresh_generation" != MISSING ]] \
   && fifo_request_state="$fifo_request_state request=fresh" \
   || fifo_request_state="$fifo_request_state request=missing"
-if [[ "$fifo_request_state" == "rc=0 decision=block request=fresh" ]]; then
+[[ "$fifo_out" == *"independent audit finding"* ]] \
+  && fifo_request_state="$fifo_request_state audit=completed"
+if [[ "$fifo_request_state" == "replacement=bounded rc=0 decision=block request=fresh audit=completed" ]]; then
   pass=$((pass+1)); printf '  PASS  %s\n' "FIFO request metadata → bounded replacement"
 else
   fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
