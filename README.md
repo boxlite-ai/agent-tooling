@@ -243,6 +243,11 @@ A hold constrains repository tooling; it does not silently roll back host plugin
 
 Reusable implementation lives in [`plugins/boxlite-agent-tooling/`](plugins/boxlite-agent-tooling/). Consumer bootstrap files live in [`templates/`](templates/). Start with the [contributor guide](plugins/boxlite-agent-tooling/CONTRIBUTING.md) and [architecture map](plugins/boxlite-agent-tooling/ARCHITECTURE.md#code-map).
 
+Directory guides: [host hook wiring](plugins/boxlite-agent-tooling/hooks/README.md),
+[hook scripts](plugins/boxlite-agent-tooling/.agents/hooks/README.md),
+[Git hooks](plugins/boxlite-agent-tooling/.githooks/README.md), and
+[maintenance scripts](plugins/boxlite-agent-tooling/scripts/README.md).
+
 Run these repository checks, then the focused tests for the area you changed:
 
 ```sh

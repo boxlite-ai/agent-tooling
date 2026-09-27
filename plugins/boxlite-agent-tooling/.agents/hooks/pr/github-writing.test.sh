@@ -18,7 +18,7 @@ case "$*" in
   'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
   'api repos/example/repo/compare/'*)
-    jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[{additions:1,deletions:0}]}' ;;
+    jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[{filename:"src/main.sh",additions:1,deletions:0}]}' ;;
   *) exit 2 ;;
 esac
 GH
