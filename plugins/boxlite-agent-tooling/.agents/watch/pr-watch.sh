@@ -61,6 +61,8 @@ if [[ ! -r "$safe_state_helpers" ]]; then
 fi
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$safe_state_helpers" || exit 127
+# shellcheck source=../lib/pr-watch-pending.sh
+source "$script_dir/../lib/pr-watch-pending.sh" || exit 127
 
 readonly DEFAULT_INTERVAL=30
 # Time without a SUCCESSFUL poll — i.e. contact lost — not time without events.
@@ -936,6 +938,12 @@ emit() {
     printf 'pr-watch: generation journal capacity exhausted\n' >&2
     exit 1
   fi
+  # Persist delivery before detection is marked seen. Generation retirement must
+  # never erase the only copy of an event the consumer has not acknowledged.
+  if [[ "$kind" != watch_start && "$kind" != checks_done ]]; then
+    line="$(pr_watch_pending publish "$state_dir/$branch_key.pending" "$line")" || exit 1
+    line_bytes="$(LC_ALL=C printf '%s\n' "$line" | wc -c | tr -d ' ')"
+  fi
   [[ "$kind" == "watch_start" ]] && sync=1
   pr_watch_append_regular_line "$event_log" "$state_dir_identity" "$line" "$sync" || {
     printf 'pr-watch: cannot append %s event\n' "$kind" >&2
@@ -1119,7 +1127,7 @@ poll_conversation() {
   while IFS="$FS" read -r -d "$RS" id author body url; do
     [[ -z "$id" ]] && continue
     seen "comment:$id" && continue
-    emit comment author "$author" body "$(truncate_body "$body")" url "$url"
+    emit comment source_id "$id" author "$author" body "$(truncate_body "$body")" url "$url"
     mark_seen "comment:$id"
   done < <(printf '%s' "$view" \
             | rows '.comments[]? | [(.id|tostring), (.author.login // "?"), (.body // ""), (.url // "")]')
@@ -1127,7 +1135,7 @@ poll_conversation() {
   while IFS="$FS" read -r -d "$RS" id author review_state body; do
     [[ -z "$id" ]] && continue
     seen "review:$id" && continue
-    emit review author "$author" state "$review_state" \
+    emit review source_id "$id" author "$author" state "$review_state" \
                 body "$(truncate_body "$body")" \
                 url "https://github.com/$slug/pull/$pr_number"
     mark_seen "review:$id"
@@ -1162,7 +1170,7 @@ poll_inline_comments() {
   while IFS="$FS" read -r -d "$RS" id author path body url; do
     [[ -z "$id" ]] && continue
     seen "inline:$id" && continue
-    emit review_comment author "$author" path "$path" \
+    emit review_comment source_id "$id" author "$author" path "$path" \
                         body "$(truncate_body "$body")" url "$url"
     mark_seen "inline:$id"
   done < <(printf '%s' "$inline" \
@@ -1202,6 +1210,10 @@ while :; do
   pr_state=""
   if poll_conversation; then
     last_contact=$SECONDS
+    jq -nc --arg watch_id "$watch_id" --arg pr "$pr_number" --arg state "$pr_state" \
+      --argjson last_successful_poll "$(date +%s)" \
+      '{watch_id:$watch_id,pr:$pr,state:$state,last_successful_poll:$last_successful_poll}' \
+      | verdict_audit_write_atomic "$state_dir/$branch_key.health.json" || exit 1
   fi
 
   if [[ "$pr_state" == "MERGED" || "$pr_state" == "CLOSED" ]]; then

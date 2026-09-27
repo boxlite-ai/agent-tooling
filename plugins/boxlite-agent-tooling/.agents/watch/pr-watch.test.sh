@@ -81,6 +81,7 @@ cp -R "$REPO_ROOT/.githooks" "$REPO_ROOT/scripts" "$REPO_ROOT/guidance" \
 cp -R "$REPO_ROOT/.agents/watch" "$scratch/$plugin_rel/.agents/watch"
 mkdir -p "$scratch/$plugin_rel/.agents/lib"
 cp "$REPO_ROOT/.agents/lib/pr-watch-state.sh" \
+   "$REPO_ROOT/.agents/lib/pr-watch-pending.sh" \
    "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" "$scratch/$plugin_rel/.agents/lib/"
 mkdir -p "$scratch/$plugin_rel/.agents/hooks"
 cat > "$scratch/$plugin_rel/.agents/hooks/preflight-commit-push.sh" <<'EOF'
