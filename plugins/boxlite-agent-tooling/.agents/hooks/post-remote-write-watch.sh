@@ -35,7 +35,7 @@
 #   gh cases exist to re-attach a Monitor in a session that pushed earlier, or
 #   where the push happened outside this session.
 #
-# Tests: bash .agents/hooks/post-remote-write-watch.test.sh
+# Tests: bash .agents/hooks/watch/post-remote-write-watch.test.sh
 set -euo pipefail
 
 payload="$(cat)"
@@ -943,53 +943,42 @@ if (( branch_count > 1 || omitted_ref_count > 0 )); then
   pushed_ref_count=$((branch_count + omitted_ref_count))
   branch_line="Remote write succeeded for ${pushed_ref_count} pushed branches; ${branch_count} exact watcher generations attached, ${omitted_ref_count} omitted."
 fi
+# shellcheck source=../lib/subagent.sh
+source "$tooling_root/.agents/lib/subagent.sh" || exit 1
 # Keep host-specific setup within the context budget.
-codex_attach_line="Codex: drain bounded pending events in foreground turns; no automatic heartbeat. Report unavailable idle delivery."
+codex_attach_line="$(subagent_prompt watch/watch-attach-codex "$tooling_root")" || exit 1
 case "$(hook_host_kind)" in
   claude)
-    attach_line="Claude: Monitor({command: <stream command>, persistent: true})."
-    compact_attach_line="Claude: use Monitor with this command." ;;
+    attach_line="$(subagent_prompt watch/watch-attach-claude "$tooling_root")" || exit 1
+    compact_attach_line="$(subagent_prompt watch/watch-attach-claude-compact "$tooling_root")" || exit 1 ;;
   codex)
     attach_line="$codex_attach_line"
     compact_attach_line="$attach_line" ;;
   *)
-    attach_line="Claude: Monitor({command: <stream command>, persistent: true}). ${codex_attach_line}"
+    attach_line="$(subagent_prompt watch/watch-attach-claude "$tooling_root")" || exit 1
+    attach_line+=" ${codex_attach_line}"
     compact_attach_line="$attach_line" ;;
 esac
 
-context="${branch_line} ${pr_line}
-Attach exactly ONE consumer using the route below; do not poll gh pr checks.
-Read policy at JSON path ${policy_path_json} before attaching.
-Stream command:
-  ${stream_command}
-
-${attach_line}
-Bounded generation replay; ends at watch_end. Honor watch opt-outs.
-fail/cancel: gh run view <run-id> --log-failed; notify.
-kind 'conflict': report confirmed merge conflict; inspect both revisions.
-Report every new comment/review/thread including bots; routine passing checks stay silent."
+context="$(subagent_prompt watch/watch-attach "$tooling_root" \
+  "branch_line=$branch_line" "pr_line=$pr_line" "policy_path_json=$policy_path_json" \
+  "stream_command=$stream_command" "attach_line=$attach_line")" || exit 1
 
 context_max_bytes=1400
 context_bytes="$(LC_ALL=C printf '%s' "$context" | wc -c | tr -d ' ')"
 if (( context_bytes > context_max_bytes )); then
   # Preserve the exact command and resolved PR when paths exhaust the budget.
-  context="${branch_line} ${compact_pr_line}
-Attach exactly ONE consumer.
-Read policy at JSON path ${policy_path_json} before attaching.
-Stream command:
-  ${stream_command}
-${compact_attach_line}
-Report fail/cancel, confirmed merge conflict, and every new comment/review/thread
-including bots; routine passing checks stay silent."
+  context="$(subagent_prompt watch/watch-attach-compact "$tooling_root" \
+    "branch_line=$branch_line" "compact_pr_line=$compact_pr_line" \
+    "policy_path_json=$policy_path_json" "stream_command=$stream_command" \
+    "compact_attach_line=$compact_attach_line")" || exit 1
 fi
 
 # Recheck dynamic paths; raw replay cannot safely replace generation binding.
 context_bytes="$(LC_ALL=C printf '%s' "$context" | wc -c | tr -d ' ')"
 if (( context_bytes > context_max_bytes )); then
   [[ -z "$attachment_claim" ]] || discard_attachment_claim
-  context="Remote write succeeded; attachment exceeds 1400 bytes. No safe fallback was attached:
-raw replay can select a stale generation. Inspect bounded logs; ask before edits,
-conflict resolution, or history changes."
+  context="$(subagent_prompt watch/watch-attach-oversized "$tooling_root")" || exit 1
 fi
 
 # A later real prompt or replacement lease revokes this exact publisher. Recheck

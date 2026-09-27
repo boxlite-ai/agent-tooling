@@ -9,7 +9,7 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | PR size, splitting, stacks, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
 | Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
-| PR explanations | [Description guidance](.agents/prompts/pr-description-guidance.md) |
+| PR explanations | [Description guidance](.agents/prompts/pr/pr-description-guidance.md) |
 
 Reference skills by name; do not copy their rules into other
 documents or hook messages. Keep task-specific requirements with their tasks, and regenerate
@@ -45,7 +45,7 @@ The preflight hook's denials point here as `CONTRIBUTING.md #commit--pr-messages
 ### Pull request size
 
 Apply the workflow's **PR size and decomposition** requirements, including exception
-expiry and renewal. Use the [tracking-issue template](.agents/prompts/split-pr-tracking-issue.md)
+expiry and renewal. Use the [tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md)
 when splitting; see [size enforcement](ARCHITECTURE.md#pr-size-and-stacks) for hook coverage.
 
 For managed native questions in local Claude sessions, launch with:
@@ -78,7 +78,7 @@ Notion designs must keep their text in top-level blocks; unread child blocks are
 Use the full registered URL in the PR body as plain text or a Markdown link.
 See [design-document enforcement](ARCHITECTURE.md#design-documents) for validation and tool boundaries.
 
-- Apply the shared description guidance and [review question](.agents/prompts/pr-review-question.md)
+- Apply the shared description guidance and [review question](.agents/prompts/pr/pr-review-question.md)
   before publishing, including drafts and description edits.
 - The local PR gate requires a level-two **How it works** heading with content.
   Explain the causal path or rationale beneath it; a short sentence is sufficient

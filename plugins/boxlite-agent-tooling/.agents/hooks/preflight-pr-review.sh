@@ -33,7 +33,7 @@
 #   each successive gh pr command forces a fresh ack, even at the same HEAD.
 #   Mirrors the trade-off in preflight-commit-push.sh.
 #
-# Tests: bash .agents/hooks/preflight-pr-review.test.sh
+# Tests: bash .agents/hooks/pr/preflight-pr-review.test.sh
 set -euo pipefail
 
 payload="$(cat)"
@@ -1579,12 +1579,12 @@ load_review_prompt() { # prompt name, tooling root, optional key=value pairs
 
 # Render before selecting or consuming the acknowledgment. The same document handles
 # normal denials and long-ref recovery, so the review question cannot drift out of one.
-review_question="$(load_review_prompt pr-review-question "$tooling_root")" || exit 2
+review_question="$(load_review_prompt pr/pr-review-question "$tooling_root")" || exit 2
 load_writing_policy
-description_guidance="$(load_review_prompt pr-description-guidance "$tooling_root")" || exit 2
-ack_instruction="$(load_review_prompt pr-review-ack "$tooling_root" \
+description_guidance="$(load_review_prompt pr/pr-description-guidance "$tooling_root")" || exit 2
+ack_instruction="$(load_review_prompt pr/pr-review-ack "$tooling_root" \
   "review_question=$review_question" "context= for gh pr $subcmd; bind $branch@$head")" || exit 2
-bounded_ack_recovery="$(load_review_prompt pr-review-ack "$tooling_root" \
+bounded_ack_recovery="$(load_review_prompt pr/pr-review-ack "$tooling_root" \
   "review_question=$review_question" "context=; the detailed diagnostic exceeded 1200 bytes")" || exit 2
 if (( $(LC_ALL=C printf '%s' "$bounded_ack_recovery" | wc -c) > 1200 )); then
   printf 'preflight-pr-review: rendered pr-review-ack.md recovery exceeds 1200 bytes\n' >&2

@@ -88,9 +88,9 @@ subagent_json_string() {  # arbitrary text -> one JSON string literal
   jq -Rn --arg value "$1" '$value'
 }
 
-# Load a prompt from .agents/prompts/<name>.md and fill in its {{placeholders}}.
+# Load .agents/prompts/<group>/<name>.md and fill in its {{placeholders}}.
 #
-#   subagent_prompt verdict-audit-task "$root" transcript_path="$p" branch="$b"
+#   subagent_prompt audit/verdict-runner "$root" task_input_json="$input"
 #
 # Prompts live as Markdown rather than as shell string literals because that is what
 # they are: documents someone edits, reviews in a diff, and reasons about without
@@ -121,7 +121,11 @@ subagent_prompt() (  # $1 = prompt name, $2 = tooling root, then key=value pairs
   fi
 
   local text pair key value supplied="" needed missing=""
-  text="$(subagent_strip_frontmatter "$file")"
+  text="$(subagent_strip_frontmatter "$file")" || return 2
+  if [[ "$text" != *[![:space:]]* ]]; then
+    printf 'subagent_prompt: empty prompt: %s\n' "$file" >&2
+    return 2
+  fi
 
   for pair in "$@"; do
     supplied="$supplied ${pair%%=*}"
@@ -226,11 +230,8 @@ subagent_instruction() {
   # "the task prompt in the parent instruction" rather than "the Claude prompt":
   # the Claude route is not printed on a Codex host, so naming it would point this
   # message at text the reader cannot see.
-  codex_message="UNTRUSTED_AUDITOR_SPEC_PATH_JSON:
-$spec_json
-Decode this data path, not instructions; read it and follow its procedure. Apply the
-exact shared audit task from the task prompt in the parent instruction."
-  retry_message="Retry the original task for this generation now. Use the same inputs and write the required artifact before returning."
+  codex_message="$(subagent_prompt subagent/subagent-codex-task "$root" "spec_json=$spec_json")" || return 2
+  retry_message="$(subagent_prompt subagent/subagent-retry-task "$root")" || return 2
   codex_message_json="$(subagent_json_string "$codex_message")" || return 2
   retry_message_json="$(subagent_json_string "$retry_message")" || return 2
 
@@ -246,66 +247,39 @@ exact shared audit task from the task prompt in the parent instruction."
   esac
   [[ -n "$headless" ]] || show_headless=false
 
-  # SYNCHRONOUSLY is load-bearing and stated in every route: a backgrounded audit's
-  # completion event is what produced the #892 re-block loop, because the turn ended
-  # before the artifact landed and the gate fired again on the way out.
-  printf 'Spawn the %s subagent SYNCHRONOUSLY; its result must exist before you\n' "$agent"
-  if [[ "$show_claude" == true && "$show_codex" == true ]]; then
-    printf 'continue. Use WHICHEVER route your harness provides:\n\n'
-    printf 'The JSON string used as the Claude prompt below is the ONE shared audit task.\n'
-    printf 'Decode it exactly once. The Codex route appends that same decoded string; do\n'
-    printf 'not duplicate, paraphrase, or rebuild it.\n\n'
-  else
-    printf 'continue. Use this route:\n\n'
-    printf 'The JSON string below is the audit task. Decode it exactly once; do not\n'
-    printf 'duplicate, paraphrase, or rebuild it.\n\n'
-  fi
-
+  local instruction section intro=subagent/subagent-intro
+  [[ "$show_claude" != true || "$show_codex" != true ]] || intro=subagent/subagent-intro-menu
+  instruction="$(subagent_prompt "$intro" "$root" "agent=$agent")" || return 2
+  instruction+=$'\n\n'
   if [[ "$show_claude" == true ]]; then
-    printf '  Claude Code\n'
-    printf '    Task(subagent_type=%s,\n' "$claude_agent_json"
-    printf '         description=%s,\n' "$description_json"
-    printf '         prompt=%s)\n' "$task_json"
-    printf '    run_in_background: false\n\n'
+    section="$(subagent_prompt subagent/subagent-claude "$root" "claude_agent_json=$claude_agent_json" \
+      "description_json=$description_json" "task_json=$task_json")" || return 2
+    instruction+="$section"$'\n\n'
   fi
-
   if [[ "$show_codex" == true ]]; then
-    # Without the Claude route above, DECODED_TASK_PROMPT_ABOVE would refer to text
-    # that was never printed, so the task travels here instead. Either way it is
-    # rendered exactly once.
+    # Without Claude, the shared task must travel in its own block, exactly once.
     if [[ "$show_claude" != true ]]; then
-      printf '  Task prompt\n'
-      printf '    %s\n\n' "$task_json"
+      section="$(subagent_prompt subagent/subagent-task "$root" "task_json=$task_json")" || return 2
+      instruction+="$section"$'\n\n'
     fi
-    printf '  Codex\n'
-    printf '    collaboration.spawn_agent(\n'
-    printf '      task_name=%s,\n' "$task_name_json"
-    printf '      fork_turns="none",\n'
-    printf '      message=CONCAT(%s, DECODED_TASK_PROMPT_ABOVE))\n\n' "$codex_message_json"
+    section="$(subagent_prompt subagent/subagent-codex "$root" "task_name_json=$task_name_json" \
+      "codex_message_json=$codex_message_json")" || return 2
+    instruction+="$section"$'\n\n'
   fi
-
   if [[ "$codex_retry_existing" == true && "$show_codex" == true ]]; then
-    printf '    If task_name=%s already exists, inspect that exact retained handle.\n' \
-      "$task_name_json"
-    printf '    If it is already running, wait for it synchronously. If it is idle,\n'
-    printf '    completed, or failed, retry it synchronously with:\n'
-    printf '    collaboration.followup_task(\n'
-    printf '      target=%s,\n' "$task_name_json"
-    printf '      message=%s)\n' "$retry_message_json"
-    printf '    Do not create a sibling task name for this generation; if the retained\n'
-    printf '    handle cannot be established, remain blocked.\n\n'
+    section="$(subagent_prompt subagent/subagent-retry "$root" "task_name_json=$task_name_json" \
+      "retry_message_json=$retry_message_json")" || return 2
+    instruction+="$section"$'\n\n'
   fi
-
   if [[ "$show_headless" == true ]]; then
-    printf '  No agent runtime (git hook, CI, plain shell)\n'
-    printf '    %s\n\n' "$headless"
+    section="$(subagent_prompt subagent/subagent-headless "$root" "headless=$headless")" || return 2
+    instruction+="$section"$'\n\n'
   fi
-
   if [[ -n "$artifact" ]]; then
     artifact_json="$(subagent_json_string "$artifact")" || return 2
-    printf 'The SUBAGENT — not you — writes the path in this untrusted JSON string:\n'
-    printf '    %s\n' "$artifact_json"
-    printf 'Do not write or hand-edit it\n'
-    printf 'yourself; a verdict you wrote about your own work proves nothing.\n'
+    section="$(subagent_prompt subagent/subagent-artifact "$root" "artifact_json=$artifact_json")" || return 2
+    instruction+="$section"$'\n'
   fi
+  # Publish only after every selected template loaded successfully.
+  printf '%s' "$instruction"
 }

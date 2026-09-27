@@ -50,7 +50,9 @@ source "$plugin_root/.agents/lib/concise-writing.sh" || deny 'summary check unav
 # shellcheck source=../lib/design-doc.sh
 source "$plugin_root/.agents/lib/design-doc.sh" || deny 'document verifier unavailable'
 if ! design_doc_binding check "$cwd" >/dev/null; then
-  deny "Before writing code, create a 1–3 page design doc with concise presentation, then run:
-bash \"$plugin_root/scripts/design-doc.sh\" bind <GitHub-issue/Notion/Linear-URL>
-Shell investigation and document registration remain available."
+  # shellcheck source=../lib/subagent.sh
+  source "$plugin_root/.agents/lib/subagent.sh" || deny 'prompt loader unavailable'
+  instruction="$(subagent_prompt design/design-required "$plugin_root" "plugin_root=$plugin_root")" \
+    || deny 'design instruction unavailable'
+  deny "$instruction"
 fi

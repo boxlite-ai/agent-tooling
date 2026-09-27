@@ -27,7 +27,7 @@ export CODEX_BIN="$PWD/.agents/state/codex" CODEX_COMMIT_PUSH_AUDIT_MODE=agentic
 export TEST_HISTORY_RESULT_HELPER="$plugin/scripts/fixtures/audit-history-result.sh"
 command="git commit -m 'test: verify history'"
 kind=commit
-run() { bash "$plugin/.agents/hooks/run-commit-push-audit.sh" "$kind" "$command" >.agents/state/out 2>.agents/state/err; }
+run() { bash "$plugin/.agents/hooks/audit/run-commit-push-audit.sh" "$kind" "$command" >.agents/state/out 2>.agents/state/err; }
 for attempt in 1 2 3; do
   if run; then printf 'FAIL: failing auditor passed on attempt %s\n' "$attempt" >&2; exit 1; fi
 done

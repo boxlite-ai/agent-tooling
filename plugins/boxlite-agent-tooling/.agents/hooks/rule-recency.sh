@@ -3,7 +3,7 @@
 # wire it; consumers opt in through templates/{codex-hooks,claude-settings}.json.
 # Bare acknowledgements, answers, and controls add no reminder. Every substantive
 # prompt gets the same compact reminder. No counter, session state, model call,
-# plugin path, or sibling file.
+# plugin path, or runtime dependency. Copy rule-recency.md beside this script.
 # Best effort: this hook never blocks a prompt and always exits zero.
 
 payload="$(cat)"
@@ -30,8 +30,7 @@ if [[ "$prompt_has_escaped_quote" == false ]]; then
   esac
 fi
 
-cat <<'EOF'
-Apply the boxlite-writing skill.
-Non-trivial work: follow repository Workflow; research prior art before design.
-EOF
+reminder="$(dirname "${BASH_SOURCE[0]}")/rule-recency.md"
+[[ ! -f "$reminder" || ! -r "$reminder" ]] || cat "$reminder" 2>/dev/null
+
 exit 0

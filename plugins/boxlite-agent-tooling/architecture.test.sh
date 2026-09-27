@@ -20,7 +20,7 @@ PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$PLUGIN/../.." && pwd)"
 DOC="$PLUGIN/ARCHITECTURE.md"
 # stop-gate.sh logs the summary rungs around the verdict check it runs.
-STOP_GATE_SCRIPTS=("$PLUGIN/.agents/hooks/stop-gate.sh" "$PLUGIN/.agents/hooks/preflight-verdict-check.sh")
+STOP_GATE_SCRIPTS=("$PLUGIN/.agents/hooks/stop-gate.sh" "$PLUGIN/.agents/hooks/audit/preflight-verdict-check.sh")
 CLAUDE_HOOKS="$PLUGIN/hooks/hooks.json"
 CODEX_HOOKS="$PLUGIN/hooks/codex-hooks.json"
 
@@ -57,7 +57,7 @@ in_sources() {
 
 echo "== every path the map names exists =="
 # shellcheck disable=SC2016 # the backticks are literal: they delimit code spans in the map
-for rel in $(grep -oE '`(\.agents/(hooks|lib|watch|prompts)/[A-Za-z0-9_.-]+|\.githooks/[A-Za-z0-9_-]+|scripts/[A-Za-z0-9_.-]+|\.claude/agents/[A-Za-z0-9_.-]+|hooks/[A-Za-z0-9_.-]+\.json|guidance/[A-Za-z0-9_.-]+|templates/[A-Za-z0-9_.-]+|[a-z-]+\.test\.sh)`' "$DOC" | tr -d '`' | sort -u); do
+for rel in $(grep -oE '`(\.agents/(hooks|lib|watch|prompts)/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*|\.githooks/[A-Za-z0-9_-]+|scripts/[A-Za-z0-9_.-]+|\.claude/agents/[A-Za-z0-9_.-]+|hooks/[A-Za-z0-9_./-]+\.json|guidance/[A-Za-z0-9_.-]+|templates/[A-Za-z0-9_.-]+|[a-z-]+\.test\.sh)`' "$DOC" | tr -d '`' | sort -u); do
   case "$rel" in
     templates/*) abs="$REPO_ROOT/$rel" ;;
     *)           abs="$PLUGIN/$rel" ;;
@@ -67,8 +67,8 @@ done
 
 echo "== every wired or shipped hook script is on the map =="
 wired="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[]? | .command // empty' "$CLAUDE_HOOKS" "$CODEX_HOOKS" \
-  | grep -oE '\.agents/hooks/[A-Za-z0-9_.-]+' | sort -u)"
-shipped="$(cd "$PLUGIN" && find .agents/hooks -maxdepth 1 -name '*.sh' ! -name '*.test.sh' | sort -u)"
+  | grep -oE '\.agents/hooks/[A-Za-z0-9_./-]+' | sort -u)"
+shipped="$(cd "$PLUGIN" && find .agents/hooks -name '*.sh' ! -name '*.test.sh' | sort -u)"
 for script in $(printf '%s\n%s\n' "$wired" "$shipped" | sort -u); do
   if grep -qF "\`$script\`" "$DOC"; then ok "on the map: $script"; else bad "not on the map: $script"; fi
 done

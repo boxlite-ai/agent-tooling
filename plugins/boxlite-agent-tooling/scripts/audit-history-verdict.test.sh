@@ -18,7 +18,7 @@ export VERDICT_CLASSIFIER_CMD=false
 run() {
   jq -nc --arg text "All tests passed. Revision $1." \
     '{session_id:"history-session",last_assistant_message:$text,stop_hook_active:false}' \
-    | bash "$plugin/.agents/hooks/preflight-verdict-check.sh"
+    | bash "$plugin/.agents/hooks/audit/preflight-verdict-check.sh"
 }
 run 1 > first
 jq -e '.decision == "block" and (.reason | contains("proof absent"))' first >/dev/null

@@ -189,9 +189,12 @@ remain in `AGENTS.md`; the skill supplies focused engineering guidance.
 ### Optional prompt reminders
 
 For prompt-only reminders, copy [rule-recency.sh](plugins/boxlite-agent-tooling/.agents/hooks/rule-recency.sh)
+and its [Markdown companion](plugins/boxlite-agent-tooling/.agents/hooks/rule-recency.md)
 to the consumer's `.agent-tooling/` directory and use the [Codex](templates/codex-hooks.json)
 or [Claude](templates/claude-settings.json) template. The host must discover
 `boxlite-writing`; the copied hook references its name without embedding its rules.
+The companion is read on each invocation; missing files remain best effort and do
+not block prompts. Edit the companion to change the reminder.
 Set `consumer` to the destination repository before running the recipe below.
 
 Claude Code needs a **merge**, not a copy — `.claude/settings.json` also carries keys

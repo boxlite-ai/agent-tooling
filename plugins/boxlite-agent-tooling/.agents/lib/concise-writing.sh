@@ -72,5 +72,10 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
 }
 
 concise_writing_reminder() {
-  printf '%s' 'Use the boxlite-writing skill to shorten this response.'
+  local root reminder
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 2
+  # shellcheck source=subagent.sh
+  source "$root/.agents/lib/subagent.sh" || return 2
+  reminder="$(subagent_prompt reminders/concise-writing-reminder "$root")" || return 2
+  printf '%s' "$reminder"
 }

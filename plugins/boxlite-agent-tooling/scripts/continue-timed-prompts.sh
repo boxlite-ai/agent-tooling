@@ -31,13 +31,14 @@ for name in pr-size-request pr-review-request; do
   case "$status" in
     pending)
       reason="$(timed_user_prompt_instruction "$plugin" "$request")" || exit 2
-      reason="Continue the pending ${name%-request} confirmation. $reason" ;;
+      reason="$(subagent_prompt questions/timed-continue-pending "$plugin" \
+        "name=${name%-request}" "instruction=$reason")" || exit 2 ;;
     expired)
       [[ "$(jq -r .fallback_delivered <<<"$request")" == false ]] || continue
       if [[ "$(jq -r .spec.fallback <<<"$request")" == split ]]; then
-        reason='The PR size exception deadline expired. Continue now: reuse or create one tracking issue with a PR checklist and split the work into coherent tested PRs of at most 400 changed lines. Create separate issues only for work needing independent tracking. Only a new explicit human request permits renewal: remeasure through the guarded PR operation and follow its renewal instructions. Never renew autonomously or publish without a fresh exception.'
+        reason="$(subagent_prompt questions/timed-continue-expired-size "$plugin")" || exit 2
       else
-        reason='The reviewed acknowledgment deadline expired. Leave the PR draft or uncreated and report that review is still required. No review acknowledgment was granted; continue other authorized work.'
+        reason="$(subagent_prompt questions/timed-continue-expired-review "$plugin")" || exit 2
       fi
       timed_user_prompt fallback "$path" "$id" >/dev/null || exit 2 ;;
     *) continue ;;

@@ -161,12 +161,11 @@ setup() {
   git -C "$d" init -q
   git -C "$d" config user.email t@t.test
   git -C "$d" config user.name tester
-  mkdir -p "$d/.agents/hooks" "$d/.agents/state" "$d/.agents/lib" "$d/.agents/prompts"
+  mkdir -p "$d/.agents/hooks/audit" "$d/.agents/state" "$d/.agents/lib" "$d/.agents/prompts"
   cp "$REPO_ROOT/.agents/hooks/preflight-commit-push.sh" \
-     "$REPO_ROOT/.agents/hooks/run-commit-push-audit.sh" \
-     "$REPO_ROOT/.agents/hooks/auditor-control.sh" \
-     "$REPO_ROOT/.agents/hooks/commit-push-audit.schema.json" \
-     "$d/.agents/hooks/"
+     "$REPO_ROOT/.agents/hooks/auditor-control.sh" "$d/.agents/hooks/"
+  cp "$REPO_ROOT/.agents/hooks/audit/run-commit-push-audit.sh" \
+     "$REPO_ROOT/.agents/hooks/audit/commit-push-audit.schema.json" "$d/.agents/hooks/audit/"
   # The gate resolves its shared library and prompt documents from its own location,
   # and refuses to gate without them rather than waving the commit through. A fake
   # repo running a COPY of the hook therefore needs both staged beside it.
@@ -177,7 +176,7 @@ setup() {
      "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
      "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
-  cp "$REPO_ROOT/.agents/prompts/"*.md "$d/.agents/prompts/"
+  cp -R "$REPO_ROOT/.agents/prompts/." "$d/.agents/prompts/"
   cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$d/.agents/lib/"
   printf 'x\n' > "$d/f"
 
@@ -1252,7 +1251,7 @@ check_eq "PreToolUse defers without manufacturing an audit" \
 
 # Stand in for the subagent the agent would spawn.
 ( cd "$R" && CLAUDE_PROJECT_DIR="$R" CODEX_BIN="$R/bin/codex" \
-    bash "$R/.agents/hooks/run-commit-push-audit.sh" commit "$KEEP_CMD" ) >/dev/null 2>&1 || true
+    bash "$R/.agents/hooks/audit/run-commit-push-audit.sh" commit "$KEEP_CMD" ) >/dev/null 2>&1 || true
 
 out="$(printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$KEEP_CMD" | jq -Rs .)" \
       | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" CODEX_SANDBOX=seatbelt CODEX_BIN="$R/bin/codex" bash "$R/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null)"

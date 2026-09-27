@@ -256,12 +256,12 @@ case "$routing" in
   *) bad "codex auditors start without cloning parent history" ;;
 esac
 
-for prompt in "$PLUGIN"/.agents/prompts/*.md; do
+for prompt in "$PLUGIN"/.agents/prompts/*/*.md; do
   prompt_bytes="$(wc -c < "$prompt" | tr -d ' ')"
   [ "$prompt_bytes" -le 2048 ] && ok "agent prompt is compact: $(basename "$prompt") ($prompt_bytes bytes)" \
                                   || bad "agent prompt exceeds 2048 bytes: $(basename "$prompt") ($prompt_bytes bytes)"
 done
-grep -q 'Spawn subagents' "$PLUGIN/.agents/prompts/commit-push-runner.md" \
+grep -q 'Spawn subagents' "$PLUGIN/.agents/prompts/audit/commit-push-runner.md" \
   && bad "commit audit does not multiply into unconditional reviewers" \
   || ok "commit audit does not multiply into unconditional reviewers"
 case "$routing" in

@@ -480,11 +480,11 @@ for invalid in '{bad' '{}' '{"repository":{"full_name":"../repo"},"pull_request"
 done
 
 fixture_plugin="$TEST_DIR/prompt-plugin"
-mkdir -p "$fixture_plugin/scripts" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
+mkdir -p "$fixture_plugin/scripts" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts/pr"
 cp "$SCRIPT" "$fixture_plugin/scripts/"
 cp "$PLUGIN_ROOT/.agents/lib/"{pr-author-review,subagent,hook-host,reply-summary,concise-writing,github-writing}.sh "$fixture_plugin/.agents/lib/"
 SCRIPT="$fixture_plugin/scripts/pr-author-review.sh"
-cat > "$fixture_plugin/.agents/prompts/pr-author-review.md" <<'PROMPT'
+cat > "$fixture_plugin/.agents/prompts/pr/pr-author-review.md" <<'PROMPT'
 ---
 name: fixture
 ---
@@ -495,7 +495,7 @@ Review the current diff.
 Fixture author @{{author}} at {{sha}}: {{result}}
 {{review_question}}
 PROMPT
-printf 'First review question\n' > "$fixture_plugin/.agents/prompts/pr-review-question.md"
+printf 'First review question\n' > "$fixture_plugin/.agents/prompts/pr/pr-review-question.md"
 prompt_contains_fixture() {
   pending && jq -se --arg sha "$HEAD_SHA" --arg question "$expected_question" '
     any(.[]; .method == "POST" and (.endpoint | endswith("/comments")) and
@@ -509,12 +509,12 @@ run_gate
 report "author review renders the prompt document and shared question" prompt_contains_fixture
 # shellcheck disable=SC2016 # Prompt text must remain literal when loaded.
 expected_question='Reloaded question: $(printf injected) `printf injected`'
-printf '%s\n' "$expected_question" > "$fixture_plugin/.agents/prompts/pr-review-question.md"
+printf '%s\n' "$expected_question" > "$fixture_plugin/.agents/prompts/pr/pr-review-question.md"
 reset_case
 run_gate
 report "next author review reloads the shared question as literal text" prompt_contains_fixture
 
-for prompt_name in pr-author-review pr-review-question; do
+for prompt_name in pr/pr-author-review pr/pr-review-question; do
   prompt_file="$fixture_plugin/.agents/prompts/$prompt_name.md"
   cp "$prompt_file" "$TEST_DIR/prompt-backup"
   for invalid in missing empty unresolved; do
@@ -531,7 +531,7 @@ for prompt_name in pr-author-review pr-review-question; do
   cp "$TEST_DIR/prompt-backup" "$prompt_file"
 done
 
-printf 'Review the current diff.\n' > "$fixture_plugin/.agents/prompts/pr-author-review.md"
+printf 'Review the current diff.\n' > "$fixture_plugin/.agents/prompts/pr/pr-author-review.md"
 reset_case
 acknowledge
 run_gate
@@ -541,7 +541,7 @@ no_invalid_prompt() {
 }
 report "a generated comment without TL;DR cannot be published" no_invalid_prompt
 
-printf '## TL;DR\n\nPer our private conversation, PRIVATE_CANARY.\n' > "$fixture_plugin/.agents/prompts/pr-author-review.md"
+printf '## TL;DR\n\nPer our private conversation, PRIVATE_CANARY.\n' > "$fixture_plugin/.agents/prompts/pr/pr-author-review.md"
 reset_case
 acknowledge
 run_gate

@@ -2,7 +2,7 @@
 # Pure renderer for host-native interactive-question instructions.
 
 hook_interactive_prompt_render_claude() {  # prompt-spec JSON
-  local spec="$1" question header multi_select option_count index option
+  local spec="$1" question header multi_select option_count index option root payload commands
   spec="$(printf '%s' "$spec" | jq -ec '
     def single_line:
       type == "string" and length > 0
@@ -27,22 +27,28 @@ hook_interactive_prompt_render_claude() {  # prompt-spec JSON
   multi_select="$(printf '%s' "$spec" | jq -r '.multiSelect // false')"
   option_count="$(printf '%s' "$spec" | jq -r '.options | length')"
 
-  printf 'Invoke AskUserQuestion exactly once with this payload:\n'
-  printf '  question: %s\n' "$(printf '%s' "$question" | jq -Rs .)"
-  printf '  header: %s\n' "$(printf '%s' "$header" | jq -Rs .)"
-  printf '  options:\n'
-  for ((index = 0; index < option_count; index++)); do
-    option="$(printf '%s' "$spec" | jq -c --argjson index "$index" '.options[$index]')"
-    printf '    - label: %s\n' "$(printf '%s' "$option" | jq -c '.label')"
-    printf '      description: %s\n' "$(printf '%s' "$option" | jq -c '.description')"
-  done
-  printf '  multiSelect: %s\n\n' "$multi_select"
-  printf 'After AskUserQuestion returns, run exactly one matching command with Bash:\n'
-  for ((index = 0; index < option_count; index++)); do
-    option="$(printf '%s' "$spec" | jq -c --argjson index "$index" '.options[$index]')"
-    printf '  %s: %s\n' \
-      "$(printf '%s' "$option" | jq -c '
-        (.commandLabel // .label) | sub(" \\(Recommended\\)$"; "")')" \
-      "$(printf '%s' "$option" | jq -r '.command')"
-  done
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 2
+  # shellcheck source=subagent.sh
+  source "$root/.agents/lib/subagent.sh" || return 2
+  payload="$(
+    printf '  question: %s\n' "$(printf '%s' "$question" | jq -Rs .)"
+    printf '  header: %s\n' "$(printf '%s' "$header" | jq -Rs .)"
+    printf '  options:\n'
+    for ((index = 0; index < option_count; index++)); do
+      option="$(printf '%s' "$spec" | jq -c --argjson index "$index" '.options[$index]')"
+      printf '    - label: %s\n' "$(printf '%s' "$option" | jq -c '.label')"
+      printf '      description: %s\n' "$(printf '%s' "$option" | jq -c '.description')"
+    done
+    printf '  multiSelect: %s\n' "$multi_select"
+  )" || return 2
+  commands="$(
+    for ((index = 0; index < option_count; index++)); do
+      option="$(printf '%s' "$spec" | jq -c --argjson index "$index" '.options[$index]')"
+      printf '  %s: %s\n' \
+        "$(printf '%s' "$option" | jq -c '
+          (.commandLabel // .label) | sub(" \\(Recommended\\)$"; "")')" \
+        "$(printf '%s' "$option" | jq -r '.command')"
+    done
+  )" || return 2
+  subagent_prompt questions/interactive-question "$root" "payload=$payload" "commands=$commands"
 }
