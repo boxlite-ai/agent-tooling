@@ -38,7 +38,8 @@ The [state facade](../../.agents/lib/audit-reflection.sh) exposes `prepare`, `re
 `prepare` reserves an attempt and freezes history/reflection inputs. `record` validates the bound dossier and reconciles findings. `submit` accepts reflection only between audits. Native and headless auditors share the [prompt](../../.agents/prompts/audit/audit-reflection.md); completion shortcuts cannot bypass reconciliation.
 
 - Serialize transitions under one lock, released before model execution. Reuse bounded regular-file reads and atomic writes; recheck epoch, input hashes, and file identity before acceptance. Never execute commands from reflection text.
-- Limits: 8 FAIL/ERROR outcomes, 16 attempts, 64 KiB/dossier, 8 KiB/reflection, 1 MiB/cycle. Reflection failures count. Missing/corrupt evidence blocks; exhaustion requires human direction and reports INCOMPLETE, never PASS.
+- Limits: 8 FAIL/ERROR outcomes, 16 attempts, 64 KiB/dossier, 8 KiB/reflection, 10 MiB/cycle. Reflection failures count. Missing/corrupt evidence blocks; exhaustion requires human direction and reports INCOMPLETE, never PASS.
+- Before preparation, reserve 512 KiB for the next snapshot, binding, outcome, registry growth, and reflection metadata. Removable closed cycles do not consume this reservation. Pending audits can record their results; exhausted completed cycles cannot launch another audit. See [capacity design](https://github.com/boxlite-ai/agent-tooling/issues/184).
 - Exhausted Stop audits use `continue:false`; Git operations remain denied. Existing explicit overrides stay visible and never fabricate PASS.
 - Retain at most four closed cycles per context, four retired contexts/session, and only the latest immutable input/context. Identity-checked cleanup preserves active evidence. History remains local; no cross-request learning or automatic publication.
 

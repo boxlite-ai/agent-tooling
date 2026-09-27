@@ -739,8 +739,7 @@ inspect_audit_history() {
 require_audit_reflection() {
   local history
   history="$(inspect_audit_history)" || block "Audit history is unreadable; verification remains incomplete."
-  if [[ "$(jq '.state.attempts[-1].outcome.verdict != "PASS" and ((.state.attempts | length) >= 16 or
-    ([.state.attempts[]? | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 8)' <<<"$history")" == true ]]; then
+  if [[ "$(jq -r '.exhausted' <<<"$history")" == true ]]; then
     log_decision history exhausted-stop
     jq -nc --arg path "$(jq -r .state_path <<<"$history")" '{continue:false,
       stopReason:("## TL;DR\n\nVerification is INCOMPLETE because the audit retry budget is exhausted.\n\n## Recovery\n\nHuman direction is required; unresolved evidence remains in " + $path + ". No auditor PASS was recorded.")}'

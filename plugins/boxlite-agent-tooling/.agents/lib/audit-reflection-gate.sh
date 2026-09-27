@@ -5,7 +5,8 @@
 audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON payload]
   local context="$1" operation="$2" id="${3:-}" payload="${4:-}"
   local root key scope_key input_key directory path request state history_path snapshot binding current_id
-  local session epoch actual_epoch
+  local session epoch actual_epoch library
+  library="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 2
   local LC_ALL=C
   [[ -n "$payload" ]] || payload='{}'
   (( ${#context} <= 8192 && ${#payload} <= 1048576 )) || return 2
@@ -29,8 +30,10 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   request="$(jq -nc --argjson context "$context" '{context:$context}')" || return 2
   state="$(printf '%s' "$request" | audit_reflection status "$path")" || return 2
   if [[ "$operation" == inspect ]]; then
-    jq -c --arg path "$path" \
-      '. as $state | {state_path:$path,state:$state,pending:($state.attempts | any(.outcome == null)),
+    jq -c -L "$library" --arg path "$path" --argjson history_max_bytes "$(audit_reflection_history_limit)" \
+      'include "audit-reflection-contract";
+      . as $state | {state_path:$path,state:$state,pending:($state.attempts | any(.outcome == null)),
+        exhausted:audit_history_exhausted($history_max_bytes),
         unresolved:(($state.attempts[-1].outcome.verdict | IN("PASS","IN_PROGRESS") | not) and
           (any($state.attempts[]; .outcome.verdict | IN("FAIL","ERROR")) or
             any($state.registry[]; .status | IN("open","not_assessed")))),
@@ -115,7 +118,7 @@ _audit_reflection_prune() { # directory, session key, context key, epoch, active
   for file in "$directory/audit-history-$scope-"*.json; do
     [[ -e "$file" ]] || continue
     identity="$(verdict_audit_path_identity "$file")" || return 2
-    snapshot="$(verdict_audit_read_regular_state "$file" 1048576 json)" || return 2
+    snapshot="$(verdict_audit_read_regular_state "$file" "$(audit_reflection_history_limit)" json)" || return 2
     if [[ "$(jq -r .context.epoch <<<"${snapshot#*$'\n'}")" == "$epoch" ]]; then continue; fi
     record="$(jq -nc --arg path "$file" --arg identity "$identity" \
       --argjson time "${snapshot%%$'\n'*}" '{path:$path,identity:$identity,time:$time}')" || return 2

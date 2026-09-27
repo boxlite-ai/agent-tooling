@@ -579,6 +579,7 @@ invoke_instruction="$(subagent_instruction \
   --description 'CLAUDE.md audit' \
   --artifact "$audit_file" \
   --task "$audit_task" \
+  --timeout-seconds "${COMMIT_PUSH_AUDITOR_TIMEOUT:-900}" \
   --headless "$headless_command")" || exit 2
 invoke_instruction="$(subagent_prompt audit/commit-push-retry "$tooling_root" \
   "instruction=$invoke_instruction" "target_command_note=$target_command_note")" || exit 2

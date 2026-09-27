@@ -396,6 +396,22 @@ expect_fail "not JSON at all → FAIL"            "$(audit "$R" 'this is not jso
 expect_fail "valid JSON, wrong shape → FAIL"    "$(audit "$R" '{"verdict":"PASS"}')"      "malformed"
 expect_fail "verdict outside the enum → FAIL"   "$(audit "$R" "$(bound_output "$R" MAYBE '[]')")" "malformed"
 
+for deadline_case in 900:510 120:102 1200:510; do
+  timeout_seconds="${deadline_case%:*}"; expected_window="${deadline_case#*:}"
+  started_at="$(date +%s)"
+  reminder_output="$(COMMIT_PUSH_AUDITOR_TIMEOUT="$timeout_seconds" audit "$R" "$(bound_output "$R" PASS '[]')")"
+  finished_at="$(date +%s)"
+  finish_at="$(sed -n 's/^finish_at=\([0-9][0-9]*\)$/\1/p' "$R/prompt.txt")"
+  if [[ "${finish_at:-0}" -ge $(( started_at + expected_window )) && \
+        "${finish_at:-0}" -le $(( finished_at + expected_window )) && \
+        "$(verdict_of "$reminder_output")" == PASS && \
+        "$(grep -c SUBAGENT_FINISH_NOW "$R/prompt.txt")" == 1 ]]; then
+    ok "shared reminder reaches the ${timeout_seconds}s commit audit"
+  else
+    bad "shared reminder reaches the ${timeout_seconds}s commit audit (deadline=${finish_at:-missing})"
+  fi
+done
+
 echo
 echo "## Headless timing follows the actual auditor process"
 R_LIFECYCLE="$(setup)"; install_stub "$R_LIFECYCLE"

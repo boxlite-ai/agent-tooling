@@ -1367,6 +1367,34 @@ else
 fi
 rm -rf "$BOTH_REPO"
 
+# Inspect the real native launch instruction, including its rendered task text.
+rm -f "$TMP/.agents/state/last-audit.json"
+for timeout_seconds in 1 120 900; do
+  started_at="$(date +%s)"
+  out="$(jq -nc --arg command 'git commit -m "fix: reminder"' '{tool_input:{command:$command}}' \
+    | COMMIT_PUSH_AUDITOR_TIMEOUT="$timeout_seconds" hook_ungated)"
+  finished_at="$(date +%s)"
+  finish_at="$(printf '%s' "$out" | grep -oE 'finish_at=[0-9]+' | head -1 | cut -d= -f2)"
+  expected_window=510
+  [[ "$timeout_seconds" != 120 ]] || expected_window=102
+  [[ "$timeout_seconds" != 1 ]] || expected_window=0
+  if [[ "${finish_at:-0}" -ge $(( started_at + expected_window )) && \
+        "${finish_at:-0}" -le $(( finished_at + expected_window )) && \
+        "$out" == *SUBAGENT_FINISH_NOW* && "$out" == *TaskStop* ]]; then
+    pass=$((pass + 1)); printf '  PASS  native commit audit receives the %ss reminder\n' "$timeout_seconds"
+  else
+    fail=$((fail + 1)); printf '  FAIL  native commit audit lacks the %ss reminder\n' "$timeout_seconds"
+  fi
+done
+out="$(jq -nc --arg command 'git commit -m "fix: reminder"' '{tool_input:{command:$command}}' \
+  | COMMIT_PUSH_AUDITOR_TIMEOUT=invalid hook_ungated 2>/dev/null)"
+rc=$?
+if [[ "$rc" == 2 && -z "$out" ]]; then
+  pass=$((pass + 1)); printf '  PASS  native timer rejects an invalid timeout before emitting launch instructions\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  native timer accepts an invalid timeout (rc=%s)\n' "$rc"
+fi
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

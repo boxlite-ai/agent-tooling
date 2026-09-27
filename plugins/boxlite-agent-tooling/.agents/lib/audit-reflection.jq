@@ -50,8 +50,7 @@ if $operation == "prepare" then
     .attempts = [{id:$request.attempt.id,input:$request.attempt,outcome:null,reflection_hash:"",history_hash:""}] |
     .registry=[] | .reflection=null
   elif any(.attempts[]; .outcome == null) then error("another attempt is active")
-  elif (.attempts | length) >= 16
-    or ([.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 8
+  elif audit_history_exhausted($history_max_bytes)
   then error("audit history exhausted; report incomplete verification")
   elif (audit_reflection_ready | not) then error("reflection required before another audit; submit a current evidence-backed reflection")
   else .attempts += [{id:$request.attempt.id,input:$request.attempt,outcome:null,history_hash:"",

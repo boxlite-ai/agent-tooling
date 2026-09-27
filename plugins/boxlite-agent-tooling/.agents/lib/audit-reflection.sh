@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Source-only facade. Requires Bash, jq, perl; stdin/stdout are bounded JSON.
 
+audit_reflection_history_limit() { printf '%s\n' 10485760; }
+
 audit_reflection() { # operation state-path; request on stdin
   local library directory
   library="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 2
@@ -45,6 +47,8 @@ audit_reflection() { # operation state-path; request on stdin
 
 _audit_reflection_transition() { # library operation state-path; lease already held
   local library="$1" operation="$2" path="$3" request state=null snapshot next history_hash reflection_hash
+  local history_max_bytes
+  history_max_bytes="$(audit_reflection_history_limit)"
   local LC_ALL=C
   request="$(perl -e '
     my $body = "";
@@ -56,7 +60,7 @@ _audit_reflection_transition() { # library operation state-path; lease already h
     print $body;
   ')" || return 2
   if [[ -e "$path" || -L "$path" ]]; then
-    snapshot="$(verdict_audit_read_regular_state "$path" 1048576 json)" || return 2
+    snapshot="$(verdict_audit_read_regular_state "$path" "$history_max_bytes" json)" || return 2
     state="${snapshot#*$'\n'}"
     history_hash="$(_audit_reflection_history_hash "$state")" || return 2
     [[ "$(jq -r '.history_hash' <<<"$state")" == "$history_hash" ]] || {
@@ -68,7 +72,8 @@ _audit_reflection_transition() { # library operation state-path; lease already h
     fi
   fi
   next="$(printf '%s\n%s\n' "$state" "$request" \
-    | jq -ceSs -L "$library" --arg operation "$operation" -f "$library/audit-reflection.jq")" || return 2
+    | jq -ceSs -L "$library" --arg operation "$operation" --argjson history_max_bytes "$history_max_bytes" \
+      -f "$library/audit-reflection.jq")" || return 2
   history_hash="$(_audit_reflection_history_hash "$next")" || return 2
   next="$(jq -cS --arg hash "$history_hash" '.history_hash=$hash' <<<"$next")" || return 2
   if [[ "$operation" == prepare ]]; then
@@ -80,10 +85,10 @@ _audit_reflection_transition() { # library operation state-path; lease already h
     next="$(jq -cS --arg hash "$reflection_hash" '.reflection.hash=$hash' <<<"$next")" || return 2
   fi
   # Only closed diagnostic cycles may be evicted; active evidence is never trimmed.
-  while (( ${#next} > 1048576 )) && [[ "$(jq '.closed | length' <<<"$next")" != 0 ]]; do
+  while (( ${#next} > history_max_bytes )) && [[ "$(jq '.closed | length' <<<"$next")" != 0 ]]; do
     next="$(jq -cS '.closed |= .[1:]' <<<"$next")" || return 2
   done
-  (( ${#next} <= 1048576 )) || return 2
+  (( ${#next} <= history_max_bytes )) || return 2
   if [[ "$operation" != status ]]; then
     printf '%s\n' "$next" | verdict_audit_write_atomic "$path" || return 2
   fi
