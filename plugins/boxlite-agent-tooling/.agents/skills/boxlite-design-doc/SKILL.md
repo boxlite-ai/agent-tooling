@@ -1,40 +1,37 @@
 ---
 name: boxlite-design-doc
-description: Research best practices and write evidence-backed design docs before implementation.
+description: Research best practices; write design docs before coding.
 ---
-
-# BoxLite Design Doc
 
 Apply `boxlite-writing`.
 
-## Research before coding
+## Research
 
-- Finish research before implementation (tests/shell included); never backfill. Inspect code/callers/tests, official guidance, standards, and mature implementations.
-- Answer **What is the best practice for this work, and why?** Compare alternatives/counterevidence; explain local fit/deviations; never invent consensus.
-- Connect questions → sources → mechanisms/failures → constraint differences → adopt/adapt/reject reasons. Cite opened originals by exact section or `file:line`, preferably commit-pinned; distinguish observations/inferences. Snippets, memory, link lists, and generic claims are insufficient.
-- Scale to impact/uncertainty; no citation quotas. Revalidate reused research against current code/constraints; record unsuitable searches/reasons.
-- Before binding/coding, resolve approach/correctness gaps; record remaining unknowns/impact/next checks.
+Finish before implementation (tests/shell included); never backfill.
+**What is the best practice for this work, and why?**
 
-## Write the design
+- Inspect code/callers/tests → effects/failures/reuse; official guidance/standards/mature implementations.
+- Questions → sources → mechanisms/failures → constraint differences → adopt/adapt/reject reasons. Compare alternatives/counterevidence; justify local fit/deviations; never invent consensus.
+- Open originals; cite exact sections or `file:line` (prefer commit-pinned). Separate observations/inferences. Snippets/memory/link lists/generic claims insufficient.
+- Depth follows impact/uncertainty; no citation quotas. Revalidate reused research against current code/constraints; log unsuitable searches/reasons.
+- Resolve approach/correctness gaps before binding/coding; remaining unknowns → impact/next check.
 
-Create a 1–3 page design before coding. Prefer GitHub issue > Notion > Linear issue.
-Tracking issues may contain the design; no separate document is needed.
-Challenge assumptions; ask whether a layer needs to know what you're teaching it.
+## Design
 
-Replace the prompts below with findings:
+Before coding: 1–3 pages; prefer GitHub issue > Notion > Linear issue; tracking issue may hold design.
+Challenge assumptions and each layer's need for knowledge.
 
-| Section | Required content |
-| --- | --- |
-| TL;DR | Problem → outcome. |
-| Scope | Constraints, non-goals, acceptance. |
-| Related work and lessons | Questions; callers → implementation → effects; tests, failures, reuse; best-practice evidence; alternatives (including reuse/simplify/no change); recommendation and unknowns. |
-| How it works | Approach; mechanism → outcome; trade-offs. |
-| Validation | Claim/risk → check → expected result. Observed versus planned. |
+Write findings:
 
-Bind using the [registration workflow](../../../CONTRIBUTING.md#pull-request-descriptions).
-Every PR, including drafts, must link the design and keep it aligned with final scope.
+- **TL;DR:** problem → outcome.
+- **Scope:** constraints, non-goals, acceptance.
+- **Related work and lessons:** research above; alternatives include reuse/simplify/no change; recommendation.
+- **How it works:** approach/mechanism → outcome; trade-offs.
+- **Validation:** claim/risk → check → expected result; observed versus planned.
+
+[Bind](../../../CONTRIBUTING.md#pull-request-descriptions). Every PR (drafts included): link design; match final scope.
 
 ## Review
 
-Verify sources against the diff. Missing/unreadable/unsupported evidence blocks approval;
-name gaps and corrective checks. Binding alone proves no research.
+Verify sources against diff. Missing/unreadable/unsupported evidence blocks approval:
+gap → corrective check. Binding ≠ research.
