@@ -46,7 +46,7 @@ Use `--ack EVENT_ID` only after reporting the event in a visible task message.
 If this requires ending the turn, acknowledge it on the next turn after checking
 that message exists. Intentionally filtered routine events may be acknowledged
 immediately. Delivery is at least once: a crash before acknowledgment may repeat
-a report. Retry pending events with bounded backoff and the original deadline;
+a report. Retry pending events on later foreground drains;
 no separate receipt ledger or mandatory history reconciliation is required.
 Pending records survive generation changes; full capacity stops polling visibly
 until records are acknowledged. Never treat shell output as notification proof.
@@ -105,7 +105,7 @@ wait for the next user turn when idle and cannot supply that connection.
 | --- | --- |
 | Destination binding | An authorized connection identifies the intended existing task and its owning host. |
 | Idle delivery | One new actionable event produces one visible report while the task is idle; unchanged input produces none. |
-| Acknowledgment and recovery | Acknowledge after reporting. After a crash, retry pending events within the existing backoff and deadline; duplicate reports are acceptable. |
+| Acknowledgment and recovery | Acknowledge after reporting. After a crash, retry pending events on later foreground drains; duplicate reports are acceptable. |
 | Lifecycle | Closure, cancellation, and opt-outs stop delivery; connection loss is reported without discarding pending events. |
 
 Successful initialization or queued dispatch alone does not qualify delivery.
