@@ -1,13 +1,49 @@
 # Agent Tooling Development
 
-- Keep reusable implementation in `plugins/boxlite-agent-tooling/`.
+## Navigate
+
+Read [README](README.md), [Contributing](plugins/boxlite-agent-tooling/CONTRIBUTING.md),
+and [Architecture](plugins/boxlite-agent-tooling/ARCHITECTURE.md).
+
+Plugin paths are relative to `plugins/boxlite-agent-tooling/`.
+
+- Keep reusable implementation here; consumer bootstrap sources live in root `templates/`.
+- `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests use those aliases.
+
+## Compatibility
+
+All tooling must support:
+
+- **Agents:** Claude Code and Codex.
+- **Platforms:** macOS, Linux, and Windows.
+
+Test affected combinations; report unverified ones.
+
+## Change safely
+
 - Agents must not edit, rename, move, or delete the `boxlite-writing` skill or its supporting files unless the user explicitly requests that specific change. Using the skill, revising an output, or fixing a failed check does not authorize changing it.
-- For non-trivial Bash hooks, gates, or libraries, load the plugin's `.agents/skills/shell-engineering/SKILL.md` and preserve stdin/stdout/stderr/exit behavior.
-- Keep `plugins/boxlite-agent-tooling/ARCHITECTURE.md` in step with the code; `architecture.test.sh` fails on drift.
-- Keep consumer manifests declarative and secret-free; invalid profiles or missing dependencies fail closed with a clear stderr error.
-- Validate all three marketplaces and generic/Claude/Codex manifests before release. Copilot has no host-specific manifest and remains untested on a real install.
-- `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
-- Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
+- For non-trivial Bash hooks, gates, or libraries, load `shell-engineering`; preserve stdin/stdout/stderr/exit behavior.
+- In Claude Code, use plan mode before touching `.githooks/`: a broken gate blocks every consumer's commits.
+- Keep consumer manifests declarative and secret-free. Invalid profiles or missing dependencies fail closed with clear stderr errors.
+- Keep `ARCHITECTURE.md` aligned with code.
+
+## Validate
+
+Run from the repository root; also run focused tests:
+
+```sh
+bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .
+bash plugins/boxlite-agent-tooling/host-parity.test.sh
+bash plugins/boxlite-agent-tooling/architecture.test.sh
+```
+
+Run host parity after manifest, marketplace, symlink, or hook-JSON changes and before release; it validates all three marketplaces and generic/Claude/Codex manifests. Copilot: generic manifest only; real installs untested.
+
+## Maintain instructions
+
+Keep local rules above the block; `CLAUDE.md` stays import-only.
+In the plugin directory, edit `guidance/workflow.md`, then run
+`bash scripts/sync-guidance.sh <repo-root>` and `bash scripts/sync-guidance.test.sh`.
 
 <!-- agent-tooling:guidance:begin rev=1dddae6b7464 sha256=b4f2fd6d923b -->
 
