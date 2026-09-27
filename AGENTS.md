@@ -1,41 +1,38 @@
-# Agent Tooling Development
+# Agent Tooling
 
 ## Navigate
 
 Read [README](README.md), [Contributing](plugins/boxlite-agent-tooling/CONTRIBUTING.md),
-and [Architecture](plugins/boxlite-agent-tooling/ARCHITECTURE.md).
+[Architecture](plugins/boxlite-agent-tooling/ARCHITECTURE.md).
 
-Plugin paths are relative to `plugins/boxlite-agent-tooling/`.
-
-- Keep reusable implementation here; consumer bootstrap sources live in root `templates/`.
-- `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests use those aliases.
+Plugin/reusable code: `plugins/boxlite-agent-tooling/`; consumer bootstraps: `templates/`.
+Manifests use symlinks: `skills` → `.agents/skills`, `agents` → `.claude/agents`.
 
 ## Compatibility
 
-All tooling must support:
-
-- **Agents:** Claude Code and Codex.
-- **Platforms:** macOS, Linux, and Windows.
-
-Test affected combinations; report unverified ones.
+Support Claude Code and Codex on macOS, Linux, and Windows. Test affected combinations; report unverified ones.
 
 ## Tooling choices
 
-- **Common capabilities:** Prefer abilities shared by Claude Code and Codex, such as reading files, searching, editing, and running commands.
-- **Shell:** Prefer shell scripts when practical to minimize runtime and package dependencies.
-- **Exceptions:** Add specialized tools or runtimes only when they materially improve safety, portability, or maintainability.
+- **Capabilities:** Prefer shared agent abilities: read/search/edit files and run commands.
+- **Shell:** Prefer shell scripts when practical; minimize dependencies.
+- **Exceptions:** Add tools/runtimes only for material safety, portability, or maintainability gains.
+
+## Agent-facing docs
+
+Apply `boxlite-writing` aggressively to prompts, skills, and all agent-facing docs; cut prose; preserve behavior and constraints.
 
 ## Change safely
 
-- Agents must not edit, rename, move, or delete the `boxlite-writing` skill or its supporting files unless the user explicitly requests that specific change. Using the skill, revising an output, or fixing a failed check does not authorize changing it.
-- For non-trivial Bash hooks, gates, or libraries, load `shell-engineering`; preserve stdin/stdout/stderr/exit behavior.
-- In Claude Code, use plan mode before touching `.githooks/`: a broken gate blocks every consumer's commits.
-- Keep consumer manifests declarative and secret-free. Invalid profiles or missing dependencies fail closed with clear stderr errors.
-- Keep `ARCHITECTURE.md` aligned with code.
+- Edits, renames, moves, or deletions of `boxlite-writing` or supporting files require a specific, explicit user request. Skill use, output revisions, or check fixes grant none.
+- Non-trivial Bash: load `shell-engineering`; preserve stdin/stdout/stderr/exit behavior.
+- Claude Code: plan mode before touching `.githooks/`.
+- Consumer manifests: declarative, secret-free; invalid profiles/missing dependencies fail closed with clear stderr.
+- Align `ARCHITECTURE.md` with code.
 
 ## Validate
 
-Run from the repository root; also run focused tests:
+Run from repo root, plus focused tests:
 
 ```sh
 bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .
@@ -43,12 +40,12 @@ bash plugins/boxlite-agent-tooling/host-parity.test.sh
 bash plugins/boxlite-agent-tooling/architecture.test.sh
 ```
 
-Run host parity after manifest, marketplace, symlink, or hook-JSON changes and before release; it validates all three marketplaces and generic/Claude/Codex manifests. Copilot: generic manifest only; real installs untested.
+Host parity: after manifest/marketplace/symlink/hook-JSON changes and before release; covers all marketplaces/manifests. Copilot: generic only; installs untested.
 
 ## Maintain instructions
 
-Keep local rules above the block; `CLAUDE.md` stays import-only.
-In the plugin directory, edit `guidance/workflow.md`, then run
+Local rules above block; `CLAUDE.md` import-only.
+In plugin, edit `guidance/workflow.md`; run
 `bash scripts/sync-guidance.sh <repo-root>` and `bash scripts/sync-guidance.test.sh`.
 
 <!-- agent-tooling:guidance:begin rev=1dddae6b7464 sha256=b4f2fd6d923b -->
