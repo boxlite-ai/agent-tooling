@@ -25,6 +25,30 @@ STATE_LIB="$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
 source "$STATE_LIB"
 export TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/scripts/fixtures/audit-history-result.sh"
 
+# Keep installed model CLIs out of fixture subprocesses, including explicit
+# no-runner cases. Deliberate CLI tests prepend their own fake executables.
+test_tools="$(mktemp -d)"
+trap 'rm -rf "$test_tools"' EXIT
+test_path="$test_tools/bin"
+mkdir -p "$test_path" "$test_tools/models"
+for tool in awk basename bash cat chmod cksum cp cut date dirname env find git grep \
+  head id jq ln mkdir mkfifo mktemp mv paste perl ps rm rmdir sed sh shasum sleep sort \
+  stat tail touch tr wc; do
+  tool_path="$(command -v "$tool")" || { printf 'Missing test tool: %s\n' "$tool" >&2; exit 2; }
+  ln -s "$tool_path" "$test_path/$tool"
+done
+export AUDIT_MODEL_CALLS="$test_tools/model-calls"
+cat > "$test_tools/models/claude" <<'MODEL_SENTINEL'
+#!/bin/bash
+printf '%s\n' "${0##*/}" >> "$AUDIT_MODEL_CALLS"
+exit 97
+MODEL_SENTINEL
+chmod +x "$test_tools/models/claude"
+ln -s claude "$test_tools/models/codex"
+export PATH="$test_tools/models:$test_path"
+# An explicit unavailable path also disables desktop Codex discovery outside PATH.
+export CODEX_BIN="$test_tools/unavailable-codex" VERDICT_AUDITOR_CMD=false
+
 pass=0
 fail=0
 
@@ -1627,7 +1651,7 @@ late_lease_retry_rc=$?
 late_lease_retry_state="rc=$late_lease_retry_rc auditor=$([[ -e "$R/late-lease-retry-ran" ]] && echo ran || echo not-ran)"
 check_eq "cleanup-only lease loss cannot restart the canceled generation" \
   "$late_lease_retry_state" "rc=130 auditor=not-ran"
-if rg -q 'audit_lease_loss_file|\.lost' "$RUNNER"; then
+if grep -Eq 'audit_lease_loss_file|\.lost' "$RUNNER"; then
   late_lease_channel_state=workspace-marker
 else
   late_lease_channel_state=anonymous-channel
@@ -2221,7 +2245,7 @@ rm -rf "$R"
 # never comes. The state dir is removed first so its RE-creation proves the lock code
 # ran — otherwise "no lock" is equally true of a runner that never had it.
 R="$(setup)"; rm -rf "$R/.agents/state"
-( cd "$R" && CLAUDE_PROJECT_DIR="$R" PATH=/usr/bin:/bin VERDICT_AUDITOR_CMD='' bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
+( cd "$R" && CLAUDE_PROJECT_DIR="$R" PATH="$test_path" VERDICT_AUDITOR_CMD='' bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
 reached="no"; [[ -d "$R/.agents/state" ]] && reached="yes"
 gone="no";    [[ -e "$R/.agents/state/verdict-audit.lock" ]] || gone="yes"
 check_eq "no-runner exit 2 takes the lock then clears it" \
@@ -2531,7 +2555,7 @@ check_eq "VERDICT_AUDITOR_CMD is bounded by the configured audit timeout" \
 rm -rf "$R"
 
 R="$(setup)"
-out="$( cd "$R" && CLAUDE_PROJECT_DIR="$R" PATH=/usr/bin:/bin VERDICT_AUDITOR_CMD='' bash "$RUNNER" "$R/transcript.jsonl" 2>&1 )"
+out="$( cd "$R" && CLAUDE_PROJECT_DIR="$R" PATH="$test_path" VERDICT_AUDITOR_CMD='' bash "$RUNNER" "$R/transcript.jsonl" 2>&1 )"
 check_eq "no runner available → exit 2"                      "$?" 2
 names_seam="no"; printf '%s' "$out" | grep -q VERDICT_AUDITOR_CMD && names_seam="yes"
 check_eq "exit-2 message names VERDICT_AUDITOR_CMD"          "$names_seam" "yes"
@@ -2542,7 +2566,7 @@ rm -rf "$R"
 D="$(mktemp -d)"; mkdir -p "$D/.agents/state"
 printf '{"verdict":"PASS","branch":"b","tree_hash":"t"}' > "$D/.agents/state/last-verdict.json"
 printf 'x' > "$D/t.jsonl"
-( cd "$D" && env -u VERDICT_AUDITOR_CMD CLAUDE_PROJECT_DIR="$D" PATH=/usr/bin:/bin \
+( cd "$D" && env -u VERDICT_AUDITOR_CMD CLAUDE_PROJECT_DIR="$D" PATH="$test_path" \
     bash "$RUNNER" "$D/t.jsonl" >/dev/null 2>&1 )
 if [[ -f "$D/.agents/state/last-verdict.json" ]]; then
   pass=$((pass + 1)); printf '  PASS  a no-runner invocation leaves an existing dossier intact\n'
@@ -2748,7 +2772,7 @@ FAKE_CODEX
 chmod +x "$BIN/codex"
 ( cd "$R" && env -u VERDICT_AUDITOR_CMD CLAUDE_PROJECT_DIR="$R" \
     CODEX_BIN="$BIN/codex" CODEX_ARGS_CAPTURE="$ARGS" CODEX_PROMPT_CAPTURE="$CAP" \
-    PATH="/opt/homebrew/bin:/usr/bin:/bin" bash "$RUNNER" "$R/transcript.jsonl" \
+    PATH="$test_path" bash "$RUNNER" "$R/transcript.jsonl" \
       >/dev/null 2>&1 )
 codex_fallback_rc=$?
 codex_fallback_contract="rc=$codex_fallback_rc hooks=no config=no readonly=no capture=no ephemeral=no approval=no body=no frontmatter=no delivery=no"
@@ -2789,7 +2813,7 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"tests p
   > "$D/transcript.jsonl"
 ( cd "$D" && env -u VERDICT_AUDITOR_CMD CLAUDE_PROJECT_DIR="$D" \
     CODEX_BIN="$BIN/codex" CODEX_ARGS_CAPTURE="$ARGS" CODEX_PROMPT_CAPTURE="$CAP" \
-    PATH="/opt/homebrew/bin:/usr/bin:/bin" bash "$RUNNER" "$D/transcript.jsonl" \
+    PATH="$test_path" bash "$RUNNER" "$D/transcript.jsonl" \
       >/dev/null 2>"$D/error" )
 codex_missing_head_rc=$?
 codex_missing_head_error=no
@@ -2800,6 +2824,8 @@ check_eq "Codex fallback fails closed when the parent cannot bind the working tr
 rm -rf "$D"
 rm -rf "$R" "$BIN"
 
+check_eq "fixtures never invoke an ambient model CLI" \
+  "$([[ -s "$AUDIT_MODEL_CALLS" ]] && cat "$AUDIT_MODEL_CALLS" || printf none)" none
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

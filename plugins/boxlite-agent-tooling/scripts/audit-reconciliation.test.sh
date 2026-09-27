@@ -36,7 +36,42 @@ expect() { jq -e "$1" "$state" >/dev/null || { printf 'FAIL: %s\n' "$1" >&2; exi
 prepare a1
 record "$(result a1 FAIL '[]' "[$finding]")" >/dev/null
 expect '.registry[0].id == "F1" and .registry[0].status == "open"'
+# Compare the schema's ID leaves with the production predicates. Include the ID
+# allocated by record, not only IDs invented by this test.
+schema="$plugin/.agents/hooks/audit/commit-push-audit.schema.json"
+jq -ne -L "$plugin/.agents/lib" --slurpfile schema "$schema" --slurpfile cycle "$state" \
+  --argjson finding "$finding" '
+  include "audit-reconciliation";
+  def accepts($rule; $id):
+    (if $rule["$ref"] then
+      $schema[0] | getpath($rule["$ref"] | ltrimstr("#/") | split("/"))
+     else $rule end) as $leaf |
+    ($id | type) == $leaf.type and
+    ($id | test($leaf.pattern // ".*"));
+  $schema[0]["$defs"] as $defs |
+  [$cycle[0].registry[0].id, "NEW", "F9", "F10", "F9999", "F0", "F01",
+   "F10000", "F1-detail", "prefixF1", "", " ", "NEW-detail"] as $ids |
+  [$ids[] as $id |
+    {id:$id, field:"finding",
+     schema:accepts($defs.finding.properties.id; $id),
+     runtime:($finding | .id=$id | ar_finding)},
+    {id:$id, field:"disposition",
+     schema:accepts($defs.history.properties.dispositions.items.properties.id; $id),
+     runtime:({id:$id,status:"open",evidence:"test"} | ar_disposition)},
+    {id:$id, field:"conflict",
+     schema:accepts($defs.conflict.properties.previous_id; $id),
+     runtime:($finding | .conflict={previous_id:$id,evidence:"test",check:"test",decision:"test"} | ar_finding)} |
+    select(.schema != .runtime)] as $mismatches |
+  if $mismatches == [] then true
+  else error("schema/runtime ID mismatch: " + ($mismatches | tojson)) end
+' >/dev/null
 prepare a2
+coverage="$(jq -c '.attempts[-1].input.snapshot | keys' "$state")"
+valid="$(result a2 PASS "$(disposition F1 resolved)" '[]' \
+  | jq --argjson keys "$coverage" '.outcome.history_review.coverage={reviewed:$keys,unread:[]}')"
+reject "$(jq '.outcome.history_review.coverage.reviewed=[]' <<<"$valid")"
+reject "$(jq '.outcome.history_review.coverage.unread=.outcome.history_review.coverage.reviewed' <<<"$valid")"
+reject "$(jq '.outcome.history_review.coverage.reviewed += ["invented"]' <<<"$valid")"
 reject "$(result a2 PASS '[]' '[]')"
 reject "$(result a2 PASS "$(disposition F1 not_assessed)" '[]')"
 reject "$(result a2 PASS "$(disposition F1 resolved)" '[]' | jq '.outcome.history_review.history_hash=("0"*64)')"

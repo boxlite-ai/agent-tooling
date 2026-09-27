@@ -407,6 +407,13 @@ four retired contexts/session, and the latest immutable input/context. Identity-
 cleanup preserves current-epoch evidence. Snapshots retain bounded transcripts,
 sanitized headless diffs, or immutable native Git trees.
 
+The output schema and reconciliation share finding IDs: `F1` through `F9999`;
+only a new finding accepts `NEW`. Dispositions and conflicts name existing registry
+IDs. Coverage partitions the current attempt's snapshot keys exactly once across
+`reviewed` and `unread`; for a snapshot containing only `diff`, use `["diff"]` in
+one array. Runtime rejects omitted, invented, or duplicated keys and any unread
+evidence on PASS. The static schema cannot enumerate per-attempt snapshot keys.
+
 Preparation reserves 512 KiB beyond the active cycle for the next snapshot/binding,
 outcome, registry growth, and reflection metadata. Closed cycles remain removable.
 Inspection and preparation share this capacity check; exhausted completed cycles
