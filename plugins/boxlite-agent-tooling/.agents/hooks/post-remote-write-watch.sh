@@ -12,7 +12,7 @@
 # .codex-plugin/plugin.json: the vendor manifests register, .agents/ implements.
 #
 # The context names the attach route this host has — Monitor for Claude Code, a
-# background shell plus a native task heartbeat for Codex — and names all of them
+# bounded foreground draining for Codex — and names all of them
 # when hook_host_kind answers
 # `unknown`. That accessor is the only sanctioned way to ask; .agents/lib/hook-host.sh
 # carries which signals are trustworthy and which look right but are not.
@@ -944,7 +944,7 @@ if (( branch_count > 1 || omitted_ref_count > 0 )); then
   branch_line="Remote write succeeded for ${pushed_ref_count} pushed branches; ${branch_count} exact watcher generations attached, ${omitted_ref_count} omitted."
 fi
 # Keep host-specific setup within the context budget.
-codex_attach_line="Codex: background shell; create/reuse ONE native heartbeat for this task every 1 minute."
+codex_attach_line="Codex: drain bounded pending events in foreground turns; no automatic heartbeat. Report unavailable idle delivery."
 case "$(hook_host_kind)" in
   claude)
     attach_line="Claude: Monitor({command: <stream command>, persistent: true})."
