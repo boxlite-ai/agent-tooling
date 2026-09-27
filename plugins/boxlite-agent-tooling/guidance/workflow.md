@@ -11,17 +11,9 @@ Apply the `boxlite-clean-code` skill for design, implementation, refactoring, an
 - Reproduce-before-fix: when fixing a bug, write the failing test first, observe it fail, then fix.
 - If docs and code disagree, record the conflict and ask before assuming the architecture.
 
-**Research**
+**Research and design**
 
-- Before choosing an approach, examine relevant code and comparable projects. Cite `file:line` (prefer commit-pinned links) or exact documentation sections.
-- Every design must include **Related work and lessons**: sources, approaches, differing constraints, and what it adopts, adapts, or rejects—and why. Check that evidence supports the decisions.
-- Scale research to uncertainty and impact, without citation quotas. If no comparison is useful, record the search and reasons. Link reused research and explain its applicability.
-
-**Design**
-
-- Before coding, create a 1–3 page design: problem, related work and lessons, approach, alternatives, trade-offs, and validation. Prefer GitHub issue > Notion > Linear issue. Every PR, including drafts, must link it and keep it aligned with final scope.
-- Apply Communication rules to designs.
-- Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
+Apply the `boxlite-design-doc` skill before implementation.
 
 **Documentation (every PR)**
 

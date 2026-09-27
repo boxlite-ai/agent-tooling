@@ -5,12 +5,13 @@ Follow these shared sources; this guide adds contributor commands and examples:
 
 | Required guidance | Canonical source |
 | --- | --- |
-| Research, design docs, PR size, splitting, stacks, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
+| Research and design docs | [boxlite-design-doc](.agents/skills/boxlite-design-doc/SKILL.md) |
+| PR size, splitting, stacks, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
 | Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
 | PR explanations | [Description guidance](.agents/prompts/pr-description-guidance.md) |
 
-Reference the writing and coding skills by name; do not copy their rules into other
+Reference skills by name; do not copy their rules into other
 documents or hook messages. Keep task-specific requirements with their tasks, and regenerate
 consumer instructions instead of editing their generated copies.
 
@@ -64,9 +65,7 @@ Do not pre-fill this example as a developer response.
 
 ### Pull request descriptions
 
-Apply the workflow's **Documentation (every PR)** requirement.
-Create the design required by the workflow's **Research** and **Design** rules, then
-register its canonical URL before implementation:
+Apply `boxlite-design-doc`, then bind before coding:
 
 ```sh
 bash <plugin-root>/scripts/design-doc.sh bind <URL>

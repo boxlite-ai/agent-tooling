@@ -76,7 +76,7 @@ fi
 # other line must be free of repo-, path-, and toolchain-specific residue.
 # These exact shared skill identifiers are portable across consumer repositories.
 # shellcheck disable=SC2016 # Match literal Markdown backticks.
-leaks="$(tail -n +2 "$CANON" | sed -e 's/`boxlite-writing`//g' -e 's/`boxlite-clean-code`//g' | grep -inE 'boxlite|imagemanager|jailer' || true)"
+leaks="$(tail -n +2 "$CANON" | sed -e 's/`boxlite-writing`//g' -e 's/`boxlite-clean-code`//g' -e 's/`boxlite-design-doc`//g' | grep -inE 'boxlite|imagemanager|jailer' || true)"
 [[ -z "$leaks" ]] && ok "no domain names leak past the notice line" \
                   || bad "domain names leak past the notice line: $leaks"
 leaks="$(tail -n +2 "$CANON" | grep -nE '\]\(\./|/codex:|src/|`make [a-z]' || true)"
