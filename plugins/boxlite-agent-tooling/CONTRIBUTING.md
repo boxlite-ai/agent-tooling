@@ -64,9 +64,8 @@ Do not pre-fill this example as a developer response.
 
 ### Pull request descriptions
 
-Apply the workflow's **Documentation (every PR)** requirement.
-Create the design required by the workflow's **Research** and **Design** rules, then
-register its canonical URL before implementation:
+Complete the [design template](.agents/prompts/design-doc.md) under the workflow's
+**Documentation**, **Research**, and **Design** rules. Resolve material gaps; bind before coding:
 
 ```sh
 bash <plugin-root>/scripts/design-doc.sh bind <URL>

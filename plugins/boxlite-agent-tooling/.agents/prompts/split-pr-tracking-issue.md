@@ -15,11 +15,9 @@ State the problem, scope, and acceptance criteria for closing this issue.
 
 ## Related work and lessons
 
-Cite precise sources for relevant existing code and comparable projects. Explain
-observed approaches, differences in constraints, and what the design adopts,
-adapts, or rejects—and why. Scale depth to the change's uncertainty and impact.
-If no useful comparison exists, record what was searched and why it was unsuitable.
-Link reusable research when available and explain its applicability to this outcome.
+Read [design-doc.md](design-doc.md); complete its **Related work and lessons** here:
+questions, current behavior, best-practice evidence, comparisons, and conclusion.
+Resolve material gaps before coding; linking alone is insufficient.
 
 ## Design
 

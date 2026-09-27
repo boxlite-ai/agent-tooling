@@ -39,7 +39,11 @@ Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` a
 match its canonical root and branch (or detached HEAD). State reads and replacement
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
 Notion child blocks fail closed; list items and code retain their density semantics.
-Page length, related-work completeness, and design quality remain review criteria.
+Workflow research requirements use `.agents/prompts/design-doc.md`, including tracking
+issues. `.agents/prompts/commit-push-criteria.md` and the PR question require native/headless
+reviewers to verify sources against the diff and report blocking gaps/corrective checks.
+Pre-edit validation covers access/structure; research completeness, page length,
+and design quality remain review criteria.
 Every PR requires substantive project docs; reviewers assess their quality.
 The design-doc gate does not inspect documentation diffs.
 The pre-edit gate covers native editor, notebook, and patch tools on both hosts.
