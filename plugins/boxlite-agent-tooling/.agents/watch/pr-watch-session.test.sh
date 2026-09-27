@@ -34,6 +34,15 @@ export PR_WATCH_INTERVAL=1 PR_WATCH_MAX_LIFETIME=1200 PR_WATCH_COMMAND_TIMEOUT=3
 cd "$scratch/repo"
 run() { bash "$watch_dir/pr-watch-session.sh" --branch fixture --pr 42 "$@"; }
 tick() { bash "$watch_dir/pr-watch-keepalive.sh" "$targets"; }
+deliver() { bash "$watch_dir/pr-watch-keepalive.sh" --events "$targets"; }
+drain() {
+  local batch event_id
+  while :; do
+    batch="$(deliver)" || exit 1
+    [[ -n "$batch" ]] || break
+    while IFS= read -r event_id; do run --ack "$event_id" >/dev/null; done < <(jq -r '.events[].event_id' <<< "$batch")
+  done
+}
 expect_tick() {
   local actual
   actual="$(tick)" || { printf 'FAIL: scheduled reconciliation failed\n' >&2; exit 1; }
@@ -55,7 +64,7 @@ while :; do
 done
 [[ "$(jq -r .watch_id <<< "$batch")" == "$first_id" ]]
 printf 'PASS: stateless consumer reconnects to the same producer and unread conflict\n'
-# Schedule output carries liveness only; delivery stays pending for foreground turns.
+# Default keepalive returns liveness only and leaves delivery pending.
 expect_tick '{"active":1,"stopped":0}'
 [[ "$(jq -r .pid "$owner")" == "$producer_pid" ]] || exit 1
 [[ "$(run --keepalive | jq 'has("events")')" == false ]] || { printf 'FAIL: keepalive exposed events\n'; exit 1; }
@@ -71,11 +80,22 @@ for invalid in '[]' '[{}]' '[{"worktree":"relative","branch":"fixture"}]' \
   [[ "$result" == 2 && ! -s "$scratch/out" && -s "$scratch/err" ]] || exit 1
 done
 printf 'PASS: schedule reuses producers, retains events, and rejects invalid inputs\n'
+scheduled="$(deliver)"
+jq -e --arg worktree "$PWD" '.target.worktree == $worktree and .target.branch == "fixture"
+  and any(.events[]; .kind == "conflict") and (.events | length) <= 16' <<< "$scheduled" >/dev/null || {
+  printf 'FAIL: scheduled read omitted producer conflict or target binding\n' >&2; exit 1;
+}
+[[ "$(jq -c '.events | map(.event_id)' <<< "$scheduled")" == "$(deliver | jq -c '.events | map(.event_id)')" ]]
+printf 'PASS: scheduled reads deliver producer events without acknowledging them\n'
 
 event_id="$(jq -r '.events[] | select(.kind == "conflict") | .event_id' <<< "$batch")"
 batch="$(run --ack "$event_id")"
 [[ "$(jq '[.events[] | select(.kind == "conflict")] | length' <<< "$batch")" == 0 ]]
 printf 'PASS: batch acknowledgment survives a new consumer invocation\n'
+drain
+deliver > "$scratch/quiet.out" 2> "$scratch/quiet.err"
+[[ ! -s "$scratch/quiet.out" && ! -s "$scratch/quiet.err" ]]
+printf 'PASS: acknowledged events yield empty scheduled stdout and stderr\n'
 for contender in 1 2; do
   (
     if run > "$scratch/contender-$contender.json"; then result=0; else result=$?; fi
@@ -142,8 +162,12 @@ while [[ -z "$terminal_id" ]]; do
   [[ -n "$terminal_id" ]] || sleep 0.1
 done
 expect_tick '{"active":0,"stopped":1}'
+scheduled="$(deliver)"
+jq -e --arg id "$terminal_id" '.status == "stopped" and any(.events[]; .event_id == $id)' <<< "$scheduled" >/dev/null
 [[ "$(run --ack "$terminal_id" | jq -r .status)" == stopped ]]
 [[ "$(run | jq -r .status)" == stopped ]]
+drain
+[[ -z "$(deliver)" ]]
 printf 'PASS: acknowledging closure cannot resurrect monitoring\n'
 producer_pid=""
 jq '.state="OPEN"' "$scratch/view.json" > "$scratch/view.next"
@@ -173,6 +197,12 @@ producer_pid="$(jq -r .pid "$owner")"
 BOXLITE_PR_WATCH=0 expect_tick '{"active":0,"stopped":1}'
 expect_tick '{"active":0,"stopped":1}'
 printf 'PASS: scheduled opt-out persists without renewing intent\n'
+pending="$(find .git/pr-watch -type d -name '*.pending')"
+printf '{broken\n' > "$pending/event-$(printf '%064d' 0).json"
+if deliver > "$scratch/out" 2> "$scratch/err"; then exit 1; else result=$?; fi
+[[ "$result" == 1 && ! -s "$scratch/out" && -s "$scratch/err" ]]
+rm "$pending/event-$(printf '%064d' 0).json"
+printf 'PASS: unreadable pending records report lost scheduled coverage\n'
 # Keep a foreign inode intact instead of following a forged persisted state.
 mv "$monitor" "$scratch/monitor.backup"
 ln -s "$scratch/monitor.backup" "$monitor"

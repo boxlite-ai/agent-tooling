@@ -1,6 +1,6 @@
 ## TL;DR
 
-Keep watchers alive on schedule; deliver events during foreground turns.
+Keep watchers alive and report pending events on scheduled and foreground turns.
 
 ## How it works
 
@@ -13,6 +13,8 @@ flowchart TD
     Library --> Watcher
     Watcher --> Queue["Save new GitHub events"]
     Queue --> Foreground["Foreground turn reports and acknowledges"]
+    Queue --> Library
+    Library --> Delivery["Scheduled turn reports and acknowledges"]
 ```
 
 ## Shared setup
@@ -38,7 +40,7 @@ during drains. Execution-session IDs are not durable watch authority.
 
 ## Reporting and acknowledgment
 
-Before each foreground turn ends, reconcile saved targets and drain bounded pending
+During scheduled runs and before each foreground turn ends, reconcile saved targets and drain bounded pending
 batches. Report new actionable events; otherwise stay silent.
 
 | Event | Consumer action |
@@ -57,7 +59,7 @@ acknowledge next turn after checking the message exists. Suppress known repeats
 by event ID during normal operation.
 
 Delivery is at least once: a crash before acknowledgment may repeat a report.
-Retry pending events on later foreground drains; no separate receipt ledger or
+Retry pending events on later scheduled or foreground drains; no separate receipt ledger or
 mandatory history reconciliation is required. Shell output is not notification proof.
 
 ## Recovery and retirement
@@ -67,7 +69,7 @@ Producer recovery and pending delivery have separate lifecycles:
 | Boundary | Behavior |
 | --- | --- |
 | Producer recovery | Serialized reconciliation reuses live producers. Backoff applies to consecutive failures; three attempts trigger a 15-minute cooldown. Healthy polling for at least a minute resets failures. A deadline or `--cancel` stops recovery. |
-| Pending delivery | Records survive generation changes for later foreground drains. Full capacity stops polling visibly until acknowledgment. |
+| Pending delivery | Records survive generation changes for later drains. Full capacity stops polling visibly until acknowledgment. |
 | Reconciliation lease | Exit 75 means another reconciliation owns the lease; retry on the next drain. |
 
 A watch_end is not PR closure. Keep unrelated watches.
@@ -81,7 +83,7 @@ A watch_end is not PR closure. Keep unrelated watches.
 ## Codex
 
 Use [pr-watch-schedule.md](../prompts/watch/pr-watch-schedule.md) to create/reuse
-one 10-minute heartbeat per chat through the app. Its only job: keep watchers alive.
+one 10-minute heartbeat per chat through the app to keep watchers alive and deliver events.
 The hook requests setup; the agent registers and verifies it.
 
 - Reuse only a confirmed PR watcher for this chat; preserve unrelated automations.
@@ -90,14 +92,26 @@ The hook requests setup; the agent registers and verifies it.
 - Save verified worktree/branch/PR targets and the keepalive command path.
 - Without scheduling support, retain foreground delivery and reconciliation.
 
-The command calls `pr_watch_schedule_tick` from `../lib/pr-watch-schedule.sh`.
-It validates 1–32 targets, invokes session `--keepalive`, and returns active/stopped
-counts. Dead producers use existing backoff; busy leases wait until the next tick.
-Errors fail visibly after attempting remaining targets. Pause when all targets stop.
+Update older keepalive-only prompts when reusing a schedule; preserve status and
+notification preferences. The command calls `pr_watch_schedule_tick` from
+`../lib/pr-watch-schedule.sh`. Default mode still returns active/stopped counts.
 
-Scheduled runs neither deliver nor acknowledge events. Foreground turns own both;
-full queues can stop polling until drained. There are no idle PR reports or hook-health
-checks. Scheduled input rows still appear; silence cannot remove them.
+`pr-watch-keepalive.sh --events TARGETS_JSON` reconciles 1–32 targets and emits JSON
+lines containing `target`, `status`, and up to 16 events per target. Each stored
+event is below 16 KiB. Reads never acknowledge. Empty reads exit zero without stdout.
+Exit 75 defers busy reads without alerting or retiring targets. Errors/degraded coverage return nonzero with stderr while
+independent targets still deliver. Report new coverage failures; retain the schedule.
+
+Report then acknowledge exact IDs with the session CLI. Drain to empty, run the
+same script without `--events` for active/stopped counts, and recheck events before
+pausing the final stopped target. Both reads must exit zero with empty stdout.
+For example, a merged PR returns `status: stopped` with its merge event; report
+and acknowledge it before retirement. Recovery and deadlines retain their existing owner.
+
+No new actionable events means no reply, including acknowledgment text. Scheduled
+input rows remain visible; empty replies cannot hide runs. Desktop alerts depend
+on [app and OS settings](https://learn.chatgpt.com/docs/notifications#configure-desktop-notifications)
+and must be verified separately from visible chat reports.
 
 ## Claude Code
 
@@ -105,8 +119,10 @@ Use `Monitor` with the shared lifecycle. On each wake, drain pending events and
 stream output. Renew expired monitors with fresh validated generation bindings;
 report renewal failures.
 
-## Qualifying scheduled keepalive
+## Qualifying scheduled delivery
 
-After host adoption, verify one schedule across repeated pushes, dead-producer
-recovery, unchanged silence, opt-outs, and final-target retirement. Local shell and
-prompt tests do not prove app registration or execution.
+After host adoption, verify one schedule across repeated pushes, a new event and
+its visible report/acknowledgment, empty-run silence, read failures, recovery,
+opt-outs, and final-target draining. Record scheduled rows and desktop alerts as
+separate observations. Local shell and prompt tests do not prove live delivery;
+follow the [scheduled-task testing guidance](https://learn.chatgpt.com/docs/automations#test-scheduled-tasks).
