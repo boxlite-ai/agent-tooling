@@ -52,7 +52,7 @@ source "$plugin_root/.agents/lib/design-doc.sh" || deny 'document verifier unava
 if ! design_doc_binding check "$cwd" >/dev/null; then
   # shellcheck source=../lib/subagent.sh
   source "$plugin_root/.agents/lib/subagent.sh" || deny 'prompt loader unavailable'
-  instruction="$(subagent_prompt design-required "$plugin_root" "plugin_root=$plugin_root")" \
+  instruction="$(subagent_prompt design/design-required "$plugin_root" "plugin_root=$plugin_root")" \
     || deny 'design instruction unavailable'
   deny "$instruction"
 fi

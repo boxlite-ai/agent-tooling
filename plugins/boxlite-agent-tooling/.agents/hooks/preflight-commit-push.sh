@@ -30,7 +30,7 @@
 #   commit-then-push of the same HEAD must re-audit; the user has accepted
 #   this trade-off to avoid stale-audit-passes-new-content failure modes.
 #
-# Tests: bash .agents/hooks/preflight-commit-push.test.sh
+# Tests: bash .agents/hooks/audit/preflight-commit-push.test.sh
 set -euo pipefail
 
 payload="$(cat)"
@@ -376,7 +376,7 @@ deny() {
   if (( reason_bytes > deny_max_bytes )); then
     # The exact command and dossier findings are caller-controlled. Keep the model
     # response bounded without opening the gate or silently dropping the recovery path.
-    reason="$(subagent_prompt commit-push-oversized "$tooling_root")" || exit 2
+    reason="$(subagent_prompt audit/commit-push-oversized "$tooling_root")" || exit 2
   fi
   jq -nc --arg r "$reason" '{
     hookSpecificOutput: {
@@ -533,7 +533,7 @@ if [[ -n "${GITHOOK_DELEGATED:-}" && "$kind" == "commit" ]]; then
   if recovered_command="$(recover_handoff_command 2>/dev/null)"; then
     audit_target_command="$recovered_command"
   else
-    target_command_note="$(subagent_prompt commit-push-target-note "$tooling_root")" || exit 2
+    target_command_note="$(subagent_prompt audit/commit-push-target-note "$tooling_root")" || exit 2
     target_command_note=$'\n\n'"$target_command_note"
   fi
 fi
@@ -564,14 +564,14 @@ fi
 printf -v headless_command \
   'AUDITOR_SESSION_SCOPE=%q AUDITOR_PROMPT_EPOCH=%q CODEX_COMMIT_PUSH_AUDIT_MODE=agentic bash %q %q %q' \
   "$hook_session_scope" "$hook_prompt_epoch" \
-  "$tooling_root/.agents/hooks/run-commit-push-audit.sh" "$kind" '<target command>'
+  "$tooling_root/.agents/hooks/audit/run-commit-push-audit.sh" "$kind" '<target command>'
 headless_command+=$'\n    (set CODEX_BIN if the default codex command is not usable)'
-if ! audit_criteria="$(subagent_prompt commit-push-criteria "$tooling_root")" \
+if ! audit_criteria="$(subagent_prompt audit/commit-push-criteria "$tooling_root")" \
    || [[ "$audit_criteria" != *[![:space:]]* ]]; then
   printf 'preflight-commit-push: cannot load nonempty commit-push-criteria prompt\n' >&2
   exit 2
 fi
-audit_task="$(subagent_prompt commit-push-task "$tooling_root" \
+audit_task="$(subagent_prompt audit/commit-push-task "$tooling_root" \
   "audit_criteria=${audit_criteria}" "task_input_json=${task_input_json}")" || exit 2
 invoke_instruction="$(subagent_instruction \
   --agent commit-push-auditor \
@@ -580,7 +580,7 @@ invoke_instruction="$(subagent_instruction \
   --artifact "$audit_file" \
   --task "$audit_task" \
   --headless "$headless_command")" || exit 2
-invoke_instruction="$(subagent_prompt commit-push-retry "$tooling_root" \
+invoke_instruction="$(subagent_prompt audit/commit-push-retry "$tooling_root" \
   "instruction=$invoke_instruction" "target_command_note=$target_command_note")" || exit 2
 
 validate_audit() {
@@ -834,7 +834,7 @@ if [[ -n "$reflection_context" ]]; then
     deny "Audit retry budget exhausted. Verification is incomplete; report unresolved findings from $(jq -r .state_path <<<"$history") and await human direction."
   fi
   if [[ "$(jq -r .reflection_due <<<"$history")" == true ]]; then
-    reflection_instruction="$(subagent_prompt commit-push-reflection-required "$tooling_root" \
+    reflection_instruction="$(subagent_prompt audit/commit-push-reflection-required "$tooling_root" \
       "history_path=$(jq -r .state_path <<<"$history")" "tooling_root=$tooling_root")" || exit 2
     deny "$reflection_instruction"
   fi
@@ -847,7 +847,7 @@ fi
 # it to bind to data that no longer exists, so the producer runs at the one moment the
 # exact ref update is known.
 if [[ -n "${CODEX_SANDBOX:-}" && -n "${GITHOOK_DELEGATED:-}" && "$kind" == "push" ]]; then
-  headless_auditor="$tooling_root/.agents/hooks/run-commit-push-audit.sh"
+  headless_auditor="$tooling_root/.agents/hooks/audit/run-commit-push-audit.sh"
   if [[ -r "$headless_auditor" ]]; then
     AUDITOR_SESSION_SCOPE="$hook_session_scope" \
       AUDITOR_PROMPT_EPOCH="$hook_prompt_epoch" \

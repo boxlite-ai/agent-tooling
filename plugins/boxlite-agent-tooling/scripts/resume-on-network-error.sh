@@ -104,7 +104,7 @@ done
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" || exit 2
 # shellcheck source=../.agents/lib/subagent.sh
 source "$tooling_root/.agents/lib/subagent.sh" || exit 2
-resume_prompt="$(subagent_prompt resume-after-network-error "$tooling_root")" || exit 2
+resume_prompt="$(subagent_prompt resume/resume-after-network-error "$tooling_root")" || exit 2
 
 # ── Arguments ────────────────────────────────────────────────────────────────
 # Each value-taking option asserts its value is present before consuming it: a bare

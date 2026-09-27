@@ -16,12 +16,12 @@
 # stderr and the exit status are the verdict check's, except that step 1 ends silently
 # and step 3 replaces an allow with the ask. Missing dependencies fail closed.
 #
-# Tests: bash .agents/hooks/stop-gate.test.sh
+# Tests: bash .agents/hooks/session/stop-gate.test.sh
 set -uo pipefail
 
 hooks_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tooling_root="$(cd "$hooks_dir/../.." && pwd)"
-verdict_check="$hooks_dir/preflight-verdict-check.sh"
+verdict_check="$tooling_root/.agents/hooks/audit/preflight-verdict-check.sh"
 raw_payload="$(cat)"
 
 run_verdict_check_alone() {

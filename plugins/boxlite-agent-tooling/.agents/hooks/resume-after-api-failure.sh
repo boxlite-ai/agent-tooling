@@ -2,7 +2,7 @@
 # shellcheck source-path=SCRIPTDIR
 # StopFailure hook, Claude Code only, wired with asyncRewake: resume a turn an API error
 # cut off, instead of leaving the session idle until someone types "continue".
-# Tests: bash .agents/hooks/resume-after-api-failure.test.sh
+# Tests: bash .agents/hooks/resume/resume-after-api-failure.test.sh
 #
 # Why a hook can do this at all
 # -----------------------------
@@ -124,7 +124,7 @@ api_resume_on_failure() {  # payload -> status 2 to resume, 0 to leave the turn 
   # Load before recording a wake; a missing instruction must not spend its budget.
   # shellcheck source=../lib/subagent.sh
   source "$tooling_root/.agents/lib/subagent.sh" || return 1
-  instruction="$(subagent_prompt resume-after-api-failure "$tooling_root" "kind=$kind")" || return 1
+  instruction="$(subagent_prompt resume/resume-after-api-failure "$tooling_root" "kind=$kind")" || return 1
   mkdir -p "$state_dir" 2>/dev/null || return 0
   # Record the resume before announcing it: an unrecorded resume is an unbounded one.
   printf '%s' "$kept" | jq -c --argjson now "$now" \

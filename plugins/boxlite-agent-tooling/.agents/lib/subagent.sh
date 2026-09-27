@@ -88,9 +88,9 @@ subagent_json_string() {  # arbitrary text -> one JSON string literal
   jq -Rn --arg value "$1" '$value'
 }
 
-# Load a prompt from .agents/prompts/<name>.md and fill in its {{placeholders}}.
+# Load .agents/prompts/<group>/<name>.md and fill in its {{placeholders}}.
 #
-#   subagent_prompt verdict-audit-task "$root" transcript_path="$p" branch="$b"
+#   subagent_prompt audit/verdict-runner "$root" task_input_json="$input"
 #
 # Prompts live as Markdown rather than as shell string literals because that is what
 # they are: documents someone edits, reviews in a diff, and reasons about without
@@ -230,8 +230,8 @@ subagent_instruction() {
   # "the task prompt in the parent instruction" rather than "the Claude prompt":
   # the Claude route is not printed on a Codex host, so naming it would point this
   # message at text the reader cannot see.
-  codex_message="$(subagent_prompt subagent-codex-task "$root" "spec_json=$spec_json")" || return 2
-  retry_message="$(subagent_prompt subagent-retry-task "$root")" || return 2
+  codex_message="$(subagent_prompt subagent/subagent-codex-task "$root" "spec_json=$spec_json")" || return 2
+  retry_message="$(subagent_prompt subagent/subagent-retry-task "$root")" || return 2
   codex_message_json="$(subagent_json_string "$codex_message")" || return 2
   retry_message_json="$(subagent_json_string "$retry_message")" || return 2
 
@@ -247,37 +247,37 @@ subagent_instruction() {
   esac
   [[ -n "$headless" ]] || show_headless=false
 
-  local instruction section intro=subagent-intro
-  [[ "$show_claude" != true || "$show_codex" != true ]] || intro=subagent-intro-menu
+  local instruction section intro=subagent/subagent-intro
+  [[ "$show_claude" != true || "$show_codex" != true ]] || intro=subagent/subagent-intro-menu
   instruction="$(subagent_prompt "$intro" "$root" "agent=$agent")" || return 2
   instruction+=$'\n\n'
   if [[ "$show_claude" == true ]]; then
-    section="$(subagent_prompt subagent-claude "$root" "claude_agent_json=$claude_agent_json" \
+    section="$(subagent_prompt subagent/subagent-claude "$root" "claude_agent_json=$claude_agent_json" \
       "description_json=$description_json" "task_json=$task_json")" || return 2
     instruction+="$section"$'\n\n'
   fi
   if [[ "$show_codex" == true ]]; then
     # Without Claude, the shared task must travel in its own block, exactly once.
     if [[ "$show_claude" != true ]]; then
-      section="$(subagent_prompt subagent-task "$root" "task_json=$task_json")" || return 2
+      section="$(subagent_prompt subagent/subagent-task "$root" "task_json=$task_json")" || return 2
       instruction+="$section"$'\n\n'
     fi
-    section="$(subagent_prompt subagent-codex "$root" "task_name_json=$task_name_json" \
+    section="$(subagent_prompt subagent/subagent-codex "$root" "task_name_json=$task_name_json" \
       "codex_message_json=$codex_message_json")" || return 2
     instruction+="$section"$'\n\n'
   fi
   if [[ "$codex_retry_existing" == true && "$show_codex" == true ]]; then
-    section="$(subagent_prompt subagent-retry "$root" "task_name_json=$task_name_json" \
+    section="$(subagent_prompt subagent/subagent-retry "$root" "task_name_json=$task_name_json" \
       "retry_message_json=$retry_message_json")" || return 2
     instruction+="$section"$'\n\n'
   fi
   if [[ "$show_headless" == true ]]; then
-    section="$(subagent_prompt subagent-headless "$root" "headless=$headless")" || return 2
+    section="$(subagent_prompt subagent/subagent-headless "$root" "headless=$headless")" || return 2
     instruction+="$section"$'\n\n'
   fi
   if [[ -n "$artifact" ]]; then
     artifact_json="$(subagent_json_string "$artifact")" || return 2
-    section="$(subagent_prompt subagent-artifact "$root" "artifact_json=$artifact_json")" || return 2
+    section="$(subagent_prompt subagent/subagent-artifact "$root" "artifact_json=$artifact_json")" || return 2
     instruction+="$section"$'\n'
   fi
   # Publish only after every selected template loaded successfully.

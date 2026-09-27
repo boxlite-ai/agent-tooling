@@ -146,12 +146,12 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
 }
 
 _timed_user_prompt_question() {
-  local root template=timed-question-review prefix id rendered
+  local root template=questions/timed-question-review prefix id rendered
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 2
   # The locked transition runs in a fresh shell; load its renderer locally.
   # shellcheck source=subagent.sh
   source "$root/.agents/lib/subagent.sh" || return 2
-  [[ "$(jq -r .spec.fallback <<<"$1")" != split ]] || template=timed-question-size
+  [[ "$(jq -r .spec.fallback <<<"$1")" != split ]] || template=questions/timed-question-size
   # Insert JSON string contents, never raw data, into the structured question.
   prefix="$(jq -er '.spec.prefix | tojson | .[1:-1]' <<<"$1")" || return 2
   id="$(jq -er '.id | tojson | .[1:-1]' <<<"$1")" || return 2
@@ -170,20 +170,20 @@ timed_user_prompt_instruction() { # tooling-root request-json
   # shellcheck source=hook-host.sh
   source "$1/.agents/lib/hook-host.sh" || return 2
   host="$(hook_host_kind)"
-  route="$(subagent_prompt timed-route-async "$1")" || return 2
+  route="$(subagent_prompt questions/timed-route-async "$1")" || return 2
   if [[ "$host" == claude ]]; then
     if [[ "$(jq -r '.question_tool_id // ""' <<<"$2")" != "" ]]; then
-      route="$(subagent_prompt timed-route-shown "$1")" || return 2
+      route="$(subagent_prompt questions/timed-route-shown "$1")" || return 2
     elif timed_user_prompt_native_available; then
       question="$(_timed_user_prompt_question "$2")" || return 2
-      route="$(subagent_prompt timed-route-native "$1" "question=$question")" || return 2
+      route="$(subagent_prompt questions/timed-route-native "$1" "question=$question")" || return 2
     else
-      route="$(subagent_prompt timed-route-fallback "$1")" || return 2
+      route="$(subagent_prompt questions/timed-route-fallback "$1")" || return 2
     fi
   fi
   deadline="$(jq -er .deadline <<<"$2")" || return 2
   fallback="$(jq -er .spec.fallback <<<"$2")" || return 2
-  instruction="$(subagent_prompt timed-user-prompt "$1" "deadline=$deadline" "fallback=$fallback" "route=$route")" || return 2
+  instruction="$(subagent_prompt questions/timed-user-prompt "$1" "deadline=$deadline" "fallback=$fallback" "route=$route")" || return 2
   [[ "$instruction" == *[![:space:]]* ]] || return 2
   printf '%s\n' "$instruction"
 }

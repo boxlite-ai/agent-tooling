@@ -31,8 +31,8 @@ Apply the `boxlite-design-doc` skill before implementation.
 #### PR size and decomposition
 
 - Target 100–200 lines; cap 400 additions + deletions, everything included. Estimate before coding; measure against the intended base before every PR creation/update.
-- Split into tested PRs under one tracking issue; use native GitHub stacks for dependencies. Follow the installed plugin's `.agents/prompts/split-pr-tracking-issue.md`.
-- Exceptions: human justification within **5 minutes**, otherwise split. Diff changes invalidate approval. Follow the installed plugin's `.agents/prompts/pr-size-exception.md` and `.agents/prompts/pr-size-expired.md`.
+- Split into tested PRs under one tracking issue; use native GitHub stacks for dependencies. Follow the installed plugin's `.agents/prompts/pr/split-pr-tracking-issue.md`.
+- Exceptions: human justification within **5 minutes**, otherwise split. Diff changes invalidate approval. Follow the installed plugin's `.agents/prompts/pr/pr-size-exception.md` and `.agents/prompts/pr/pr-size-expired.md`.
 
 ### Test
 

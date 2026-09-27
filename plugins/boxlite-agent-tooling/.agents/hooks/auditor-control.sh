@@ -680,7 +680,7 @@ case "${1:-}" in
       jq -nc '{continue:true,systemMessage:"[auditor-control] override ignored: the audit generation already completed or no 30-second escalation is open"}'
       exit 0
     fi
-    override_context="$(subagent_prompt auditor-override "$tooling_root")" || exit 2
+    override_context="$(subagent_prompt audit/auditor-override "$tooling_root")" || exit 2
     auditor_control_write_override_grant "$scope" "$new_epoch" "$reason_hash" || exit 1
     auditor_control_close_scope_state overridden-by-user || { rm -f "$grant_file"; exit 1; }
     rm -f "$repo/.agents/state/last-audit.json" "$repo/.agents/state/last-audit-handoff.json" \
@@ -853,18 +853,18 @@ case "$event" in
         printf -v control_q '%q' "$control_script"
         keep_command="/usr/bin/printf '%s' '$keep_payload_b64' | /usr/bin/perl -MMIME::Base64 -0777 -ne 'print decode_base64(\$_)' | CLAUDE_PROJECT_DIR=$project_q /usr/bin/env bash $control_q select"
         override_command="/usr/bin/printf '%s' '$override_payload_b64' | /usr/bin/perl -MMIME::Base64 -0777 -ne 'print decode_base64(\$_)' | CLAUDE_PROJECT_DIR=$project_q /usr/bin/env bash $control_q select"
-        prompt_spec="$(subagent_prompt auditor-question "$tooling_root" \
+        prompt_spec="$(subagent_prompt audit/auditor-question "$tooling_root" \
           "auditor=$(jq -nr --arg value "$auditor" '$value | tojson | .[1:-1]')" \
           "keep_command_json=$(subagent_json_string "$keep_command")" \
           "override_command_json=$(subagent_json_string "$override_command")")" || exit 2
         native_instruction="$(hook_interactive_prompt_render_claude "$prompt_spec")" || exit 2
-        followup_instruction="$(subagent_prompt auditor-question-followup "$tooling_root")" || exit 2
+        followup_instruction="$(subagent_prompt audit/auditor-question-followup "$tooling_root")" || exit 2
         printf '[auditor-control] %s is still running after 30 seconds. [auditor-wake:%s]\n' \
           "$auditor" "$wake_nonce" >&2
         printf '%s\n%s\n' "$native_instruction" "$followup_instruction" >&2
         exit 2
       fi
-      message="$(subagent_prompt auditor-wait-status "$tooling_root" "auditor=$auditor")" || exit 2
+      message="$(subagent_prompt audit/auditor-wait-status "$tooling_root" "auditor=$auditor")" || exit 2
       jq -nc --arg message "$message" '{continue:true,systemMessage:$message}'
     fi
     ;;

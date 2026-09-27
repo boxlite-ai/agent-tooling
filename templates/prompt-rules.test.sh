@@ -6,11 +6,8 @@
 #   templates/claude-settings.json -> $consumer/.claude/settings.json    (merge "hooks")
 #
 # Neither reads the pinned checkout. The consumer commits its own copy of
-# rule-recency.sh, which names a skill the host must discover separately. The hook
-# must still emit that reference once it is no longer inside the
-# plugin tree. If it ever grows a sibling dependency, a ${PLUGIN_ROOT}, or a relative
-# source, every consumer copy breaks at once and nothing upstream notices — the copies
-# are invisible from here.
+# rule-recency.sh and its Markdown companion. The hook names a skill the host must
+# discover separately, and must emit that reference outside the plugin tree.
 #
 # The rest guards the two JSON files. Both hosts validate strictly and reject an
 # unknown key by loading no hooks at all. Codex does it WITHOUT LOGGING ANYTHING — that
@@ -43,11 +40,11 @@ bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
 command -v jq >/dev/null 2>&1 || { printf 'jq is required to run these tests\n' >&2; exit 2; }
 
 echo "## The hook survives being copied out of the plugin tree"
-# Copy it ALONE into an empty directory — no plugin tree, no sibling hooks, no repo.
-# This is exactly the consumer's situation, and the only thing that makes this wiring
-# viable. Run it from a directory unrelated to both, so a hidden cwd assumption shows up.
+# Copy the documented standalone pair without plugin libraries or a repository.
+# Run elsewhere so a hidden cwd assumption shows up.
 mkdir -p "$TMP/lonely" "$TMP/elsewhere"
 cp "$CANONICAL" "$TMP/lonely/rule-recency.sh"
+cp "${CANONICAL%.sh}.md" "$TMP/lonely/rule-recency.md"
 out="$( cd "$TMP/elsewhere" && printf '{"session_id":"iso","prompt":"explain the pull path"}' \
           | TMPDIR="$TMP" bash "$TMP/lonely/rule-recency.sh" 2>"$TMP/err" )"
 case "$out" in

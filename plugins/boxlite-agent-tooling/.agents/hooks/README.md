@@ -4,6 +4,23 @@ The original transcript records the conversation, the snapshot supplies audit in
 
 ## End-to-end flow
 
+Registered hook entry points stay in this directory. Supporting files are grouped
+by purpose:
+
+| Directory | Responsibility |
+| --- | --- |
+| `audit/` | Audit runners, verdict checker, schema, and audit tests |
+| `design/` | Design-document preflight tests |
+| `pr/` | PR publication tests and rendering fixtures |
+| `resume/` | API failure and recovery tests |
+| `session/` | Stop and standalone-reminder tests |
+| `watch/` | Remote-write watcher tests |
+
+Host manifests keep their existing paths. Scripts resolve grouped helpers and
+shared libraries from the plugin root. Keep fixture copies at the same depth.
+Copy the standalone reminder and its Markdown companion together when installing
+it outside the plugin.
+
 ```mermaid
 flowchart TD
     H["Agent host: Codex or Claude"]
@@ -40,7 +57,7 @@ flowchart TD
 | **Incomplete snapshot** | Gate | Evidence could not be captured completely |
 | **Dossier** | Auditor | Its assessment: PASS, FAIL, or IN_PROGRESS, with findings |
 
-The runner gives the auditor a [private copy of the snapshot](run-verdict-audit.sh#L709).
+The runner gives the auditor a [private copy of the snapshot](audit/run-verdict-audit.sh).
 Re-entry means running the gate again to validate the returned dossier against the
 current session, audit generation, and repository state.
 

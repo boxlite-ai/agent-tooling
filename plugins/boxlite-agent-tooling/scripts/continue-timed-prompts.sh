@@ -31,14 +31,14 @@ for name in pr-size-request pr-review-request; do
   case "$status" in
     pending)
       reason="$(timed_user_prompt_instruction "$plugin" "$request")" || exit 2
-      reason="$(subagent_prompt timed-continue-pending "$plugin" \
+      reason="$(subagent_prompt questions/timed-continue-pending "$plugin" \
         "name=${name%-request}" "instruction=$reason")" || exit 2 ;;
     expired)
       [[ "$(jq -r .fallback_delivered <<<"$request")" == false ]] || continue
       if [[ "$(jq -r .spec.fallback <<<"$request")" == split ]]; then
-        reason="$(subagent_prompt timed-continue-expired-size "$plugin")" || exit 2
+        reason="$(subagent_prompt questions/timed-continue-expired-size "$plugin")" || exit 2
       else
-        reason="$(subagent_prompt timed-continue-expired-review "$plugin")" || exit 2
+        reason="$(subagent_prompt questions/timed-continue-expired-review "$plugin")" || exit 2
       fi
       timed_user_prompt fallback "$path" "$id" >/dev/null || exit 2 ;;
     *) continue ;;

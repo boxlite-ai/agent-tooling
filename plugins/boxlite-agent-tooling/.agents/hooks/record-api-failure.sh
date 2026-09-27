@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck source-path=SCRIPTDIR
 # StopFailure hook: record WHY a turn died on the API.
-# Tests: bash .agents/hooks/record-api-failure.test.sh
+# Tests: bash .agents/hooks/resume/record-api-failure.test.sh
 #
 # Claude Code fires StopFailure INSTEAD OF Stop when an API error ended the turn, and
 # the host documents the event as fire-and-forget: "hook output and exit codes are

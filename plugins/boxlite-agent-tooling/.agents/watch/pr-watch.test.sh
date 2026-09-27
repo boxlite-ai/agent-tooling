@@ -22,7 +22,7 @@ set -uo pipefail
 unset BOXLITE_PR_WATCH
 
 # Resolve from THIS script's location, not the caller's cwd. Same reasoning as
-# .agents/hooks/post-remote-write-watch.test.sh: cwd-derived paths make a
+# .agents/hooks/watch/post-remote-write-watch.test.sh: cwd-derived paths make a
 # two-side check silently exercise a different checkout's copy and report a pass.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WATCHER="$REPO_ROOT/.agents/watch/pr-watch.sh"

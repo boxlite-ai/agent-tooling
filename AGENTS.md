@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 In plugin, edit `guidance/workflow.md`; run
 `bash scripts/sync-guidance.sh <repo-root>` and `bash scripts/sync-guidance.test.sh`.
 
-<!-- agent-tooling:guidance:begin rev=7bf5c511ca7f-dirty sha256=5685ef8134ea -->
+<!-- agent-tooling:guidance:begin rev=a5f496057970-dirty sha256=922002b97221 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -83,8 +83,8 @@ Apply the `boxlite-design-doc` skill before implementation.
 #### PR size and decomposition
 
 - Target 100–200 lines; cap 400 additions + deletions, everything included. Estimate before coding; measure against the intended base before every PR creation/update.
-- Split into tested PRs under one tracking issue; use native GitHub stacks for dependencies. Follow the installed plugin's `.agents/prompts/split-pr-tracking-issue.md`.
-- Exceptions: human justification within **5 minutes**, otherwise split. Diff changes invalidate approval. Follow the installed plugin's `.agents/prompts/pr-size-exception.md` and `.agents/prompts/pr-size-expired.md`.
+- Split into tested PRs under one tracking issue; use native GitHub stacks for dependencies. Follow the installed plugin's `.agents/prompts/pr/split-pr-tracking-issue.md`.
+- Exceptions: human justification within **5 minutes**, otherwise split. Diff changes invalidate approval. Follow the installed plugin's `.agents/prompts/pr/pr-size-exception.md` and `.agents/prompts/pr/pr-size-expired.md`.
 
 ### Test
 

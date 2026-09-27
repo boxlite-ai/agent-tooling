@@ -35,7 +35,7 @@
 #   gh cases exist to re-attach a Monitor in a session that pushed earlier, or
 #   where the push happened outside this session.
 #
-# Tests: bash .agents/hooks/post-remote-write-watch.test.sh
+# Tests: bash .agents/hooks/watch/post-remote-write-watch.test.sh
 set -euo pipefail
 
 payload="$(cat)"
@@ -946,21 +946,21 @@ fi
 # shellcheck source=../lib/subagent.sh
 source "$tooling_root/.agents/lib/subagent.sh" || exit 1
 # Keep host-specific setup within the context budget.
-codex_attach_line="$(subagent_prompt watch-attach-codex "$tooling_root")" || exit 1
+codex_attach_line="$(subagent_prompt watch/watch-attach-codex "$tooling_root")" || exit 1
 case "$(hook_host_kind)" in
   claude)
-    attach_line="$(subagent_prompt watch-attach-claude "$tooling_root")" || exit 1
-    compact_attach_line="$(subagent_prompt watch-attach-claude-compact "$tooling_root")" || exit 1 ;;
+    attach_line="$(subagent_prompt watch/watch-attach-claude "$tooling_root")" || exit 1
+    compact_attach_line="$(subagent_prompt watch/watch-attach-claude-compact "$tooling_root")" || exit 1 ;;
   codex)
     attach_line="$codex_attach_line"
     compact_attach_line="$attach_line" ;;
   *)
-    attach_line="$(subagent_prompt watch-attach-claude "$tooling_root")" || exit 1
+    attach_line="$(subagent_prompt watch/watch-attach-claude "$tooling_root")" || exit 1
     attach_line+=" ${codex_attach_line}"
     compact_attach_line="$attach_line" ;;
 esac
 
-context="$(subagent_prompt watch-attach "$tooling_root" \
+context="$(subagent_prompt watch/watch-attach "$tooling_root" \
   "branch_line=$branch_line" "pr_line=$pr_line" "policy_path_json=$policy_path_json" \
   "stream_command=$stream_command" "attach_line=$attach_line")" || exit 1
 
@@ -968,7 +968,7 @@ context_max_bytes=1400
 context_bytes="$(LC_ALL=C printf '%s' "$context" | wc -c | tr -d ' ')"
 if (( context_bytes > context_max_bytes )); then
   # Preserve the exact command and resolved PR when paths exhaust the budget.
-  context="$(subagent_prompt watch-attach-compact "$tooling_root" \
+  context="$(subagent_prompt watch/watch-attach-compact "$tooling_root" \
     "branch_line=$branch_line" "compact_pr_line=$compact_pr_line" \
     "policy_path_json=$policy_path_json" "stream_command=$stream_command" \
     "compact_attach_line=$compact_attach_line")" || exit 1
@@ -978,7 +978,7 @@ fi
 context_bytes="$(LC_ALL=C printf '%s' "$context" | wc -c | tr -d ' ')"
 if (( context_bytes > context_max_bytes )); then
   [[ -z "$attachment_claim" ]] || discard_attachment_claim
-  context="$(subagent_prompt watch-attach-oversized "$tooling_root")" || exit 1
+  context="$(subagent_prompt watch/watch-attach-oversized "$tooling_root")" || exit 1
 fi
 
 # A later real prompt or replacement lease revokes this exact publisher. Recheck

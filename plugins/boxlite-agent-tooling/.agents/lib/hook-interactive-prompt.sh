@@ -50,5 +50,5 @@ hook_interactive_prompt_render_claude() {  # prompt-spec JSON
         "$(printf '%s' "$option" | jq -r '.command')"
     done
   )" || return 2
-  subagent_prompt interactive-question "$root" "payload=$payload" "commands=$commands"
+  subagent_prompt questions/interactive-question "$root" "payload=$payload" "commands=$commands"
 }

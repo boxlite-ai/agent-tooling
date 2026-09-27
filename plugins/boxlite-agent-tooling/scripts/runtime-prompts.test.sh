@@ -12,11 +12,11 @@ request='{"id":"quote\" and newline\n", "spec":{"prefix":"reviewed:","fallback":
 question="$(_timed_user_prompt_question "$request")"
 jq -e '.questions[0].question | contains("quote\" and newline\n")' <<<"$question" >/dev/null
 # Change the shipped question, then call the same production renderer again.
-sed 's/Keep draft/Edited choice/' "$plugin/.agents/prompts/timed-question-review.md" \
-  > "$scratch/plugin/.agents/prompts/timed-question-review.md"
+sed 's/Keep draft/Edited choice/' "$plugin/.agents/prompts/questions/timed-question-review.md" \
+  > "$scratch/plugin/.agents/prompts/questions/timed-question-review.md"
 question="$(_timed_user_prompt_question "$request")"
 jq -e '.questions[0].options[0].label == "Edited choice"' <<<"$question" >/dev/null
-rm "$scratch/plugin/.agents/prompts/timed-question-review.md"
+rm "$scratch/plugin/.agents/prompts/questions/timed-question-review.md"
 status=0
 question="$(_timed_user_prompt_question "$request" 2>/dev/null)" || status=$?
 [[ "$status" == 2 && -z "$question" ]]
@@ -29,10 +29,10 @@ spec='{"question":"Wait?","header":"Audit","options":[{"label":"Wait","descripti
 out="$(hook_interactive_prompt_render_claude "$spec")"
 [[ "$out" == *'"Wait": true'* && "$out" == *'"Stop": false'* ]]
 printf '%s\n' '{{payload}}' '{{commands}}' 'edited $(literal)' \
-  > "$scratch/plugin/.agents/prompts/interactive-question.md"
+  > "$scratch/plugin/.agents/prompts/questions/interactive-question.md"
 out="$(hook_interactive_prompt_render_claude "$spec")"
 [[ "$out" == *'edited $(literal)'* ]]
-rm "$scratch/plugin/.agents/prompts/interactive-question.md"
+rm "$scratch/plugin/.agents/prompts/questions/interactive-question.md"
 status=0
 out="$(hook_interactive_prompt_render_claude "$spec" 2>/dev/null)" || status=$?
 [[ "$status" == 2 && -z "$out" ]]
