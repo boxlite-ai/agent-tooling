@@ -70,6 +70,8 @@ transcript_turn_max_bytes=262144
 previous_dossier_max_bytes=65536
 previous_dossier_input_path=""
 previous_dossier_snapshot_path=""
+retry_dossier_identity=""
+retry_dossier_json=""
 reflection_context=""
 reflection_pending=false
 history_path=""
@@ -789,6 +791,36 @@ snapshot_previous_dossier() {
   previous_dossier_input_path="$previous_dossier_snapshot_path"
 }
 
+# A generation identifies the request, not the file occupying its publication path.
+# Capture the prior FAIL before launch; never adopt a competing result seen later.
+snapshot_retry_dossier() {
+  [[ "$session_scope" != "-" ]] || return 0
+  local identity snapshot normalized
+  identity="$(verdict_audit_path_identity "$verdict_file" 2>/dev/null)" || return 0
+  snapshot="$(verdict_audit_read_regular_state \
+    "$verdict_file" "$previous_dossier_max_bytes" json "$identity" 2>/dev/null)" || return 0
+  normalized="$(printf '%s' "${snapshot#*$'\n'}" \
+    | verdict_audit_normalize_dossier 2>/dev/null)" || return 0
+  if jq -e --arg generation "$audit_generation" \
+      '.generation == $generation and .verdict == "FAIL"' <<< "$normalized" >/dev/null; then
+    retry_dossier_identity="$identity"
+    retry_dossier_json="$normalized"
+  fi
+}
+
+retire_retry_dossier() {
+  [[ -n "$retry_dossier_identity" ]] || return 0
+  local snapshot normalized
+  snapshot="$(verdict_audit_read_regular_state \
+    "$verdict_file" "$previous_dossier_max_bytes" json "$retry_dossier_identity" 2>/dev/null)" \
+    || return 1
+  normalized="$(printf '%s' "${snapshot#*$'\n'}" \
+    | verdict_audit_normalize_dossier 2>/dev/null)" || return 1
+  [[ "$normalized" == "$retry_dossier_json" ]] || return 1
+  audit_request_is_current || return 1
+  verdict_audit_unlink_if_identity "$verdict_file" "$retry_dossier_identity"
+}
+
 take_audit_lock() {
   local status
   trap cleanup_audit_lock EXIT
@@ -815,6 +847,7 @@ take_audit_lock
 if ! audit_request_is_current; then
   cancel_audit 130 "the audit generation was revoked before launch"
 fi
+snapshot_retry_dossier
 if ! snapshot_transcript; then
   exit 2
 fi
@@ -945,13 +978,13 @@ if [[ -n "$history_path" ]]; then
   audit_prompt+=$'\nHistory schema JSON: '"$(jq -nc --arg path "$tooling_root/.agents/hooks/audit/commit-push-audit.schema.json" '{path:$path}')"
   audit_prompt+=$'\n\n'"$reflection_prompt"
 fi
+timed_prompt="$(subagent_timed_prompt "$tooling_root" "$audit_timeout_seconds")" || exit 2
+audit_prompt="$timed_prompt"$'\n\n'"$audit_prompt"
 
-# The audit must be attributable to a fresh run, not a leftover dossier, so each
-# runner removes any existing one first and EXISTENCE alone then proves freshness.
-# Comparing mtimes instead cannot: they are whole seconds, so an auditor that
-# rewrites the dossier within the same second looks unchanged and a genuine run is
-# rejected. The removal sits inside each branch, not above them: the no-runner path
-# below exits 2 without auditing, and must not destroy a dossier on its way out.
+# Each launch clears its output path to establish freshness without second-resolution
+# mtime comparisons. Legacy runs use the shared path; session runs use a unique stage
+# and hand off the captured prior FAIL only after validating the replacement. Clearing
+# stays inside the selected runner branch so no-runner exits preserve existing state.
 start_request_monitor() {
   local runner_pid="$$"
   [[ "$session_scope" != "-" ]] || return 0
@@ -1172,13 +1205,13 @@ elif command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
   spec_body="$(strip_frontmatter "$spec_file")"
   # Safe mode retains OAuth/keychain auth while dropping project/plugin/memory/hook
   # context. Replace the coding-agent prompt with the stripped auditor procedure and
-  # expose only its three required tools; --name suppresses a separate title request.
+  # expose its audit and timer tools; --name suppresses a separate title request.
   # perl alarm remains the portable outer timeout for the complete agent/tool loop.
   if ! run_in_audit_group \
       "$audit_prompt" \
       perl -e 'alarm shift; exec @ARGV' "$audit_timeout_seconds" \
         claude -p --safe-mode --system-prompt "$spec_body" \
-          --tools Read Bash Write --effort xhigh --name verdict-auditor \
+          --tools Read Bash Write Monitor TaskStop --effort xhigh --name verdict-auditor \
           --no-session-persistence --model "$auditor_model"; then
     rm -f "$audit_output_file"
     remove_owned_verdict while-current
@@ -1286,6 +1319,10 @@ if [[ "$generation_matches" == true && "$audit_json_is_valid" == true ]]; then
     fail_audit_publication "verified stage changed before publication"
   fi
   published_identity=""
+  if ! retire_retry_dossier; then
+    remove_verified_publication
+    fail_audit_publication "prior audit dossier changed before retry publication"
+  fi
   if [[ -d "$verdict_file" ]] \
      || ! published_identity="$(verdict_audit_link_no_clobber_identity \
           "$audit_verified_file" "$verdict_file" 2>/dev/null)"; then

@@ -1,5 +1,11 @@
 include "audit-reconciliation";
 def audit_failure_ids: [.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR")) | .id];
+# Reserve snapshot/binding, outcome, registry growth, and reflection/metadata.
+# Closed cycles are removable; pending results must remain recordable.
+def audit_history_exhausted($max_bytes):
+  .attempts[-1].outcome != null and .attempts[-1].outcome.verdict != "PASS"
+  and ((.attempts | length) >= 16 or (audit_failure_ids | length) >= 8
+    or ((del(.closed) | tojson | utf8bytelength) + 524288 > $max_bytes));
 def audit_reflection_body:
   ar_keys(["history_hash","failure_ids","diagnosis","previous_fixes_failed_because",
     "changed_approach","checks","auditor_gaps"])

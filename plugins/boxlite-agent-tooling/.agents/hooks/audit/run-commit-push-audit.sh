@@ -786,6 +786,7 @@ build_prompt() {  # evidence file, evidence sha256
     printf 'Internal: cannot load nonempty commit-push-criteria prompt\n' >&2
     return 1
   fi
+  subagent_timed_prompt "$tooling_root" "$audit_timeout_seconds" || return 1
   if ! subagent_prompt audit/commit-push-runner "$tooling_root" \
          "audit_criteria=${audit_criteria}" \
          "command_json=${command_json}" \

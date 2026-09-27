@@ -2701,7 +2701,21 @@ headless_budget="$headless_budget safe=$(jq -r '.safe_mode' "$REQUEST_CAP") mode
 headless_budget="$headless_budget persist=$(jq -r '.no_session_persistence' "$REQUEST_CAP") effort=$(jq -r '.effort' "$REQUEST_CAP")"
 check_eq "headless Claude request replaces ambient context within a hard budget" \
   "$headless_budget" \
-  "bytes=bounded system=bounded tools=3:Read,Bash,Write calls=1 safe=true mode=replace persist=true effort=xhigh"
+  "bytes=bounded system=bounded tools=5:Read,Bash,Write,Monitor,TaskStop calls=1 safe=true mode=replace persist=true effort=xhigh"
+for deadline_case in 600:510 120:102 1200:510; do
+  timeout_seconds="${deadline_case%:*}"; expected_window="${deadline_case#*:}"
+  started_at="$(date +%s)"
+  ( cd "$R" && CLAUDE_PROJECT_DIR="$R" SPEC_CAPTURE="$CAP" REQUEST_CAPTURE="$REQUEST_CAP" \
+      PATH="$BIN:$PATH" VERDICT_AUDITOR_TIMEOUT="$timeout_seconds" \
+      env -u VERDICT_AUDITOR_CMD bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
+  finished_at="$(date +%s)"
+  finish_at="$(jq -r 'try (.messages[0].content | capture("(?m)^finish_at=(?<time>[0-9]+)$").time) catch "0"' "$REQUEST_CAP")"
+  check_eq "shared reminder deadline for a ${timeout_seconds}s verdict audit" \
+    "$([[ "$finish_at" -ge $(( started_at + expected_window )) && \
+          "$finish_at" -le $(( finished_at + expected_window )) ]] && echo bounded || echo missing)" bounded
+  check_eq "verdict runner supplies one native Monitor procedure" \
+    "$(jq -r '[.messages[0].content | scan("SUBAGENT_FINISH_NOW")] | length' "$REQUEST_CAP")" 1
+done
 rm -rf "$R" "$BIN"
 
 echo

@@ -281,7 +281,7 @@ Producers for callers with no agent runtime.
 
 | Who needs a verdict | Producer | What it does |
 | --- | --- | --- |
-| The Stop gate, synchronously | `.agents/hooks/audit/run-verdict-audit.sh` | Feeds `.claude/agents/verdict-auditor.md` to a model CLI with Read, Bash and Write, which writes the turn's dossier. |
+| The Stop gate, synchronously | `.agents/hooks/audit/run-verdict-audit.sh` | Feeds `.claude/agents/verdict-auditor.md` to a model CLI with audit and native timer tools, which writes the turn's dossier. |
 | A Git gate, CI or a plain shell | `.agents/hooks/audit/run-commit-push-audit.sh` | Runs `codex exec` read-only with hooks disabled and writes the same `last-audit.json` the `commit-push-auditor` subagent writes. |
 
 An agent with a built-in spawns the auditor itself, `Task` on Claude Code and
@@ -296,6 +296,26 @@ Runner delivery overrides, evidence-reading instructions, verdict triage, and au
 recovery tasks also load from `.agents/prompts/`. The hooks retain protocol errors,
 classifier dispatch, verdict validation, and output limits; prompt edits do not
 change those controls.
+
+### Shared finish reminders
+
+`subagent_timed_prompt` in `.agents/lib/subagent.sh` renders
+`.agents/prompts/subagent/timed-subagent.md` with an absolute deadline: 85 percent of the
+timeout, capped at 510 seconds after rendering. Both headless audit runners use it;
+native commit/push dispatch opts in through `subagent_instruction --timeout-seconds`.
+Verdict and commit/push defaults remain 600 and 900 seconds respectively. Both
+therefore request a report by 510 seconds; a 120-second audit requests one by 102.
+
+The agent starts one native Monitor, stops new checks on its notice, and cancels an
+unused timer with TaskStop. Each auditor owns its result schema and treats unchecked
+required evidence as FAIL. Existing hard timeouts and publication checks remain in
+their runners; native dispatch gains only a cooperative reminder. Hosts without
+Monitor skip it, including the current isolated Codex CLI route. No scheduler or
+polling fallback is installed. See [design #174](https://github.com/boxlite-ai/agent-tooling/issues/174)
+and [Monitor limits](https://code.claude.com/docs/en/tools-reference#monitor-tool).
+
+The procedure is embedded literally into each task. Agent specs reference the supplied
+procedure instead of duplicating it; prompt tests verify delivery, not live model compliance.
 
 Both commit/push paths render `.agents/prompts/audit/commit-push-criteria.md` into their
 task through `subagent_prompt`; missing, empty, or unresolved criteria block dispatch.
@@ -378,11 +398,18 @@ Audit history components:
 | `.agents/prompts/audit/audit-reflection.md`, `.agents/prompts/audit/git-audit-history.md` | Shared reconciliation contract and native Git prepare/record procedure. |
 
 Cycles bind a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`; cap at eight failures,
-sixteen attempts, and 1 MiB. PASS closes a cycle; the next operation starts another.
+sixteen attempts, and 10 MiB. PASS closes a cycle; the next operation starts another.
 Runner failures record ERROR; cancellation is separate. Retain at most four closed cycles per context,
 four retired contexts/session, and the latest immutable input/context. Identity-checked
 cleanup preserves current-epoch evidence. Snapshots retain bounded transcripts,
 sanitized headless diffs, or immutable native Git trees.
+
+Preparation reserves 512 KiB beyond the active cycle for the next snapshot/binding,
+outcome, registry growth, and reflection metadata. Closed cycles remain removable.
+Inspection and preparation share this capacity check; exhausted completed cycles
+stop before model launch, while pending results can still be recorded. Storage and
+retention readers share the 10 MiB limit. Auditors read relevant history in bounded
+chunks; individual requests, dossiers, and transcript/tree reads keep their own bounds.
 
 Stop triage/summary shortcuts and push receipts must respect unresolved history.
 Exhausted Stop audits return `continue:false` and INCOMPLETE; Git remains denied without
@@ -406,6 +433,17 @@ than one session can share a checkout.
 - `auditor-control`: a directory of escalation, completion, grant and event records for running auditors and overrides.
 - `last-api-failure.json`: the kind of API error that ended a turn.
 - `api-resume`: the recent resumes and the unspent wake hashes of the API-failure resume.
+
+### Verdict retry handoff
+
+A session retry captures the prior same-generation FAIL's normalized JSON and inode
+under the runner's leases before launching the auditor. To publish a replacement,
+the new result must pass history reconciliation and stage validation. The runner rechecks the
+captured JSON, inode, and request before retiring that exact file. Publication remains
+no-clobber: a competing file, even with the same generation, is preserved and blocks
+the retry. Prompt revocation and final lease checks still cancel publication.
+For example, an unchanged-tree retry can resolve F1 and publish PASS while retaining
+both attempts in history. See the [design](https://github.com/boxlite-ai/agent-tooling/issues/171).
 
 ## Boundaries
 
@@ -503,7 +541,7 @@ first.
 | --- | --- | --- | --- |
 | summary | restatement-allow | The previous Stop asked for the result, this answer is 120 words or fewer counting code, and no tool ran since the ask; it ends the turn and the verdict check does not run. | 137 |
 | override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 716 |
-| history | exhausted-stop | Eight failed runs or sixteen attempts terminate Stop with an INCOMPLETE reason; no further audit or summary continuation runs. | 742 |
+| history | exhausted-stop | Failure, attempt, or remaining-capacity exhaustion terminates Stop with INCOMPLETE; no further audit or summary continuation runs. | 741 |
 | extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1802 |
 | extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1809 |
 | extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1812 |
