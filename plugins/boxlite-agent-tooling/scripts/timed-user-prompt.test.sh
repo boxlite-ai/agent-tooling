@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test the public CLI with a deterministic clock; no real three-minute sleeps.
+# Test the public CLI with a deterministic clock; no real five-minute sleeps.
 set -euo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cli="$plugin/scripts/timed-user-prompt.sh"
@@ -22,16 +22,17 @@ reject() { if run "$@" >"$scratch/out" 2>"$scratch/err"; then printf 'FAIL: acce
 
 request="$(run request "$state" "$spec")"
 id="$(jq -r .id <<<"$request")"
-expect "$request" '.status == "pending" and .deadline == 1180'
+expect "$request" '.status == "pending" and .deadline == 1300'
 printf '1100\n' > "$CONFIRMATION_TEST_CLOCK"
-expect "$(run request "$state" "$spec")" ".id == \"$id\" and .deadline == 1180"
+expect "$(run request "$state" "$spec")" ".id == \"$id\" and .deadline == 1300"
 reject respond "$state" "$id" 'yes'
 reject respond "$state" "$id" 'reviewed: '
 reject respond "$state" "$id" $'reviewed: text\nextra'
-expect "$(run status "$state" "$id")" '.status == "pending" and .deadline == 1180'
-printf '1179\n' > "$CONFIRMATION_TEST_CLOCK"
-expect "$(run respond "$state" "$id" 'reviewed: verified the size boundary')" '.status == "accepted"'
 printf '1181\n' > "$CONFIRMATION_TEST_CLOCK"
+expect "$(run status "$state" "$id")" '.status == "pending" and .deadline == 1300'
+printf '1299\n' > "$CONFIRMATION_TEST_CLOCK"
+expect "$(run respond "$state" "$id" 'reviewed: verified the size boundary')" '.status == "accepted"'
+printf '1301\n' > "$CONFIRMATION_TEST_CLOCK"
 expect "$(run status "$state" "$id")" '.status == "accepted"'
 expect "$(run consume "$state" "$id")" '.status == "consumed"'
 reject consume "$state" "$id"
@@ -39,11 +40,11 @@ request="$(run request "$state" "$spec")"
 next_id="$(jq -r .id <<<"$request")"
 [[ "$next_id" != "$id" ]]
 reject respond "$state" "$id" 'reviewed: stale reply'
-printf '1361\n' > "$CONFIRMATION_TEST_CLOCK"
+printf '1601\n' > "$CONFIRMATION_TEST_CLOCK"
 reject respond "$state" "$next_id" 'reviewed: at the deadline'
-expect "$(run request "$state" "$spec")" '.status == "expired" and .deadline == 1361'
+expect "$(run request "$state" "$spec")" '.status == "expired" and .deadline == 1601'
 expect "$(run fallback "$state" "$next_id")" '.fallback_delivered and .spec.fallback == "keep-draft"'
-expect "$(run request "$state" "$spec")" '.status == "expired" and .deadline == 1361'
+expect "$(run request "$state" "$spec")" '.status == "expired" and .deadline == 1601'
 
 size_spec='{"binding":{"head":"second"},"prefix":"pr-size-exception:","fallback":"split","minimum_words":12}'
 request="$(run request "$state" "$size_spec")"
@@ -69,7 +70,7 @@ for type in symlink fifo directory malformed; do
 done
 reject request "$scratch/state with spaces/invalid" '{}'
 request="$(run request "$scratch/state with spaces/valid-record" "$spec")"
-for mutation in '.status="accepted"' '.fallback_delivered=true' '.extra="unexpected"'; do
+for mutation in '.status="accepted"' '.fallback_delivered=true' '.extra="unexpected"' '.deadline += 1'; do
   jq "$mutation" <<<"$request" > "$scratch/state with spaces/bad-record"
   reject request "$scratch/state with spaces/bad-record" "$spec"
 done
@@ -78,9 +79,9 @@ for index in 1 2 3 4; do
 done
 wait
 [[ "$(jq -sr '[.[].id] | unique | length' "$scratch/"[1-4].json)" == 1 ]]
-expect "$(cat "$scratch/1.json")" '.deadline == 2180'
-printf '2200\n' > "$CONFIRMATION_TEST_CLOCK"
-expect "$(run request "$scratch/state with spaces/concurrent" "$spec")" '.status == "expired" and .deadline == 2180'
+expect "$(cat "$scratch/1.json")" '.deadline == 2300'
+printf '2400\n' > "$CONFIRMATION_TEST_CLOCK"
+expect "$(run request "$scratch/state with spaces/concurrent" "$spec")" '.status == "expired" and .deadline == 2300'
 reject renew "$scratch/state with spaces/concurrent" "$(jq -r .id "$scratch/1.json")" 'Please request the exception again.'
 
 state="$scratch/state with spaces/renewal.json"
@@ -89,9 +90,9 @@ id="$(jq -r .id <<<"$request")"
 instruction='Please request the size exception again.'
 reject renew "$state" "$id" "$instruction"
 run present "$state" "$id" native-question >/dev/null
-printf '2380\n' > "$CONFIRMATION_TEST_CLOCK"
+printf '2700\n' > "$CONFIRMATION_TEST_CLOCK"
 expired="$(run fallback "$state" "$id")"
-expect "$(run request "$state" "$size_spec")" ".id == \"$id\" and .status == \"expired\" and .deadline == 2380"
+expect "$(run request "$state" "$size_spec")" ".id == \"$id\" and .status == \"expired\" and .deadline == 2700"
 reject renew "$state" "$id" ''
 reject renew "$state" "$id" '   '
 reject renew "$state" "$id" $'request again\nextra'
@@ -101,17 +102,17 @@ if ! renewed="$(run renew "$state" "$id" "$instruction")"; then
 fi
 next_id="$(jq -r .id <<<"$renewed")"
 [[ "$next_id" != "$id" ]]
-expect "$renewed" '.status == "pending" and .created_at == 2380 and .deadline == 2560
+expect "$renewed" '.status == "pending" and .created_at == 2700 and .deadline == 3000
   and .response == "" and .question_tool_id == "" and (.fallback_delivered | not)'
 [[ "$(jq -c .spec <<<"$renewed")" == "$(jq -c .spec <<<"$expired")" ]]
 archive="$state.expired-$id.json"
 expect "$(cat "$archive")" ".request.id == \"$id\" and .request.status == \"expired\"
-  and .user_request == \"$instruction\" and .successor_id == \"$next_id\" and .renewed_at == 2380"
+  and .user_request == \"$instruction\" and .successor_id == \"$next_id\" and .renewed_at == 2700"
 [[ "$(jq -c .request "$archive")" == "$expired" ]]
 reject respond "$state" "$id" "$reason"
 reject native-reply "$state" "$id" '{"tool_use_id":"native-question","answer":"stale"}'
 reject renew "$state" "$id" "$instruction"
-expect "$(run request "$state" "$size_spec")" ".id == \"$next_id\" and .deadline == 2560"
+expect "$(run request "$state" "$size_spec")" ".id == \"$next_id\" and .deadline == 3000"
 expect "$(run respond "$state" "$next_id" "$reason")" '.status == "accepted"'
 reject renew "$state" "$next_id" "$instruction"
 
@@ -119,7 +120,7 @@ for type in symlink fifo directory regular; do
   state="$scratch/state with spaces/renew-$type.json"
   request="$(run request "$state" "$size_spec")"
   id="$(jq -r .id <<<"$request")"
-  jq '.created_at -= 181 | .deadline -= 181' "$state" > "$scratch/expired"
+  jq '.created_at -= 301 | .deadline -= 301' "$state" > "$scratch/expired"
   mv "$scratch/expired" "$state"
   archive="$state.expired-$id.json"
   case "$type" in
@@ -136,14 +137,14 @@ done
 state="$scratch/state with spaces/renew-concurrent.json"
 request="$(run request "$state" "$size_spec")"
 id="$(jq -r .id <<<"$request")"
-printf '2560\n' > "$CONFIRMATION_TEST_CLOCK"
+printf '3000\n' > "$CONFIRMATION_TEST_CLOCK"
 for index in 1 2 3 4; do
   (if run renew "$state" "$id" "$instruction" >"$scratch/renew-$index.json" 2>"$scratch/renew-$index.err";
     then printf 'accepted\n'; else printf 'rejected\n'; fi) >"$scratch/result-$index" &
 done
 wait
 [[ "$(cat "$scratch/"result-* | grep -c '^accepted$')" == 1 ]]
-expect "$(cat "$state")" '.status == "pending" and .deadline == 2740'
+expect "$(cat "$state")" '.status == "pending" and .deadline == 3300'
 
 # Inject storage faults through a fixture copy of the public CLI and its library.
 fault_plugin="$scratch/fault-plugin"
@@ -161,7 +162,7 @@ for phase in before after; do
   state="$scratch/state with spaces/fault-$phase.json"
   request="$(run request "$state" "$size_spec")"
   id="$(jq -r .id <<<"$request")"
-  jq '.created_at -= 181 | .deadline -= 181' "$state" > "$scratch/expired"
+  jq '.created_at -= 301 | .deadline -= 301' "$state" > "$scratch/expired"
   mv "$scratch/expired" "$state"
   if CONFIRMATION_WRITE_FAULT="$phase" bash "$fault_plugin/scripts/timed-user-prompt.sh" \
       renew "$state" "$id" "$instruction" >"$scratch/out" 2>"$scratch/err"; then
@@ -173,7 +174,7 @@ for phase in before after; do
     expect "$(cat "$state")" ".id == \"$id\""
   else
     successor="$(jq -r .successor_id "$archive")"
-    expect "$(cat "$state")" ".id == \"$successor\" and .deadline == 2740 and .status == \"pending\" and .response == \"\""
+    expect "$(cat "$state")" ".id == \"$successor\" and .deadline == 3300 and .status == \"pending\" and .response == \"\""
   fi
   before="$(cat "$state")"
   archived="$(cat "$archive")"
@@ -183,4 +184,23 @@ for phase in before after; do
   fi
   [[ "$(cat "$state")" == "$before" && "$(cat "$archive")" == "$archived" ]]
 done
-printf 'timed-user-prompt: all lifecycle, deadline, unsafe-state, and concurrency checks passed\n'
+
+# Existing three-minute records retain their original window across an upgrade.
+printf '4000\n' > "$CONFIRMATION_TEST_CLOCK"
+for legacy_spec in "$spec" "$size_spec"; do
+  state="$scratch/state with spaces/legacy-$(jq -r .fallback <<<"$legacy_spec").json"
+  run request "$state" "$legacy_spec" | jq '.deadline = .created_at + 180 | del(.question_tool_id)' > "$scratch/legacy"
+  mv "$scratch/legacy" "$state"
+  id="$(jq -r .id "$state")"
+  expect "$(run request "$state" "$legacy_spec")" ".id == \"$id\" and .deadline == 4180 and .status == \"pending\""
+done
+printf '4179\n' > "$CONFIRMATION_TEST_CLOCK"
+state="$scratch/state with spaces/legacy-keep-draft.json"
+expect "$(run respond "$state" "$(jq -r .id "$state")" 'reviewed: existing request')" '.status == "accepted"'
+printf '4180\n' > "$CONFIRMATION_TEST_CLOCK"
+state="$scratch/state with spaces/legacy-split.json"
+id="$(jq -r .id "$state")"
+reject respond "$state" "$id" "$reason"
+expect "$(run request "$state" "$size_spec")" ".id == \"$id\" and .deadline == 4180 and .status == \"expired\""
+expect "$(run renew "$state" "$id" "$instruction")" '.created_at == 4180 and .deadline == 4480 and .status == "pending"'
+printf 'timed-user-prompt: all lifecycle, deadline, legacy-state, unsafe-state, and concurrency checks passed\n'

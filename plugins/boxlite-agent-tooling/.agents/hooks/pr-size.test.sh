@@ -96,7 +96,7 @@ Retry failed calls once. https://github.com/example/repo/issues/123"')"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]]
 [[ "$(jq -r .id "$state")" != "$id" ]]
 id="$(jq -r .id "$state")"
-jq '.created_at -= 181 | .deadline -= 181' "$state" > "$scratch/expired"
+jq '.created_at -= 301 | .deadline -= 301' "$state" > "$scratch/expired"
 mv "$scratch/expired" "$state"
 out="$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 

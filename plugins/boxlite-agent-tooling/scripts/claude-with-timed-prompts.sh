@@ -9,7 +9,7 @@ if [[ ! "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]] \
   printf 'claude-with-timed-prompts: Claude Code 2.1.198 or later is required\n' >&2
   exit 2
 fi
-export CLAUDE_AFK_TIMEOUT_MS=180000
+export CLAUDE_AFK_TIMEOUT_MS=300000
 unset BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS
 can_use_native_questions=true
 for argument in "$@"; do

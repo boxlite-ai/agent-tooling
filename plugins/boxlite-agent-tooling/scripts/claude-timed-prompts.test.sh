@@ -8,7 +8,7 @@ git init -q -b feature "$scratch/repo"
 git -C "$scratch/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m fixture
 cd "$scratch/repo"
 repo="$(pwd -P)"
-export CLAUDE_PROJECT_DIR="$repo" CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_AFK_TIMEOUT_MS=180000
+export CLAUDE_PROJECT_DIR="$repo" CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_AFK_TIMEOUT_MS=300000
 export BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1
 unset PLUGIN_ROOT
 mkdir -p .agents/state "$scratch/bin"
@@ -57,7 +57,7 @@ reject call_hook PreToolUse
 tool_id=native-1
 reject call_hook PostToolUse "$(reply 'Split work')"
 reason='pr-size-exception: The generated dependency lockfile must land with its manifest because either half leaves dependency resolution inconsistent.'
-reject call_hook PostToolUse "$(reply "$reason" | jq '.afkTimeoutMs=180000')"
+reject call_hook PostToolUse "$(reply "$reason" | jq '.afkTimeoutMs=300000')"
 reject call_hook PostToolUse "$(reply "$reason" | jq '.followUp=true')"
 reject bash "$cli" respond "$state" "$id" "$reason"
 [[ "$(jq -r .status "$state")" == pending ]]
@@ -104,7 +104,7 @@ id="$(jq -r .id "$state")"
 question="$(bash "$cli" question "$state" "$id")"
 key="$(jq -r '.questions[0].question' <<<"$question")"
 call_hook PreToolUse
-jq '.created_at-=181 | .deadline-=181' "$state" > "$scratch/expired"
+jq '.created_at-=301 | .deadline-=301' "$state" > "$scratch/expired"
 mv "$scratch/expired" "$state"
 reject call_hook PostToolUse "$(reply 'reviewed: late response')"
 [[ "$(jq -r .id "$state")" == "$id" ]]
@@ -130,6 +130,6 @@ printf '%s\n' "$CLAUDE_AFK_TIMEOUT_MS" "$@"
 CLAUDE
 chmod +x "$scratch/bin/claude"
 out="$(PATH="$scratch/bin:$PATH" bash "$plugin/scripts/claude-with-timed-prompts.sh" --resume 'session with spaces')"
-[[ "$out" == $'180000\n--settings\n{"remoteControlAtStartup":false,"disableRemoteControl":true}\n--resume\nsession with spaces\n--plugin-dir\n'"$plugin" ]]
+[[ "$out" == $'300000\n--settings\n{"remoteControlAtStartup":false,"disableRemoteControl":true}\n--resume\nsession with spaces\n--plugin-dir\n'"$plugin" ]]
 reject env PATH="$scratch/bin:$PATH" CLAUDE_TEST_VERSION=2.1.197 bash "$plugin/scripts/claude-with-timed-prompts.sh"
 printf 'Claude timed prompts: host route, native reply, timeout, replay, review marker, and launcher passed\n'
