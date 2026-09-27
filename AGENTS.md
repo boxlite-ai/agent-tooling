@@ -9,7 +9,7 @@
 - `skills` and `agents` symlink to `.agents/skills` and `.claude/agents`; manifests point there instead of copying assets.
 - Run `plugins/boxlite-agent-tooling/host-parity.test.sh` after manifest, marketplace, symlink, or hook-JSON changes.
 
-<!-- agent-tooling:guidance:begin rev=1c46dd123a61-dirty sha256=b4f2fd6d923b -->
+<!-- agent-tooling:guidance:begin rev=1dddae6b7464 sha256=b4f2fd6d923b -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 

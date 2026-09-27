@@ -368,21 +368,24 @@ than one session can share a checkout.
   readiness handshake. Caller process-group cleanup cannot kill the logger or
   producer; a repeated start returns the live generation. This is not service
   supervision or reboot persistence.
-- Idle PR delivery: `.agents/hooks/post-remote-write-watch.sh` emits setup; the
-  agent registers/verifies one native one-minute Codex heartbeat. Claude uses
-  Monitor. `.agents/watch/consumer-lifecycle.md` defines draining, cleanup, and
+- PR delivery: `.agents/hooks/post-remote-write-watch.sh` emits setup; Codex drains
+  bounded pending events in foreground turns without creating a heartbeat.
+  Automatic idle delivery is unavailable until a supported event-triggered host
+  connection is verified. Claude uses Monitor.
+  `.agents/watch/consumer-lifecycle.md` defines draining, cleanup, and
   failure reporting. `.agents/watch/pr-watch-session.sh` persists branch-bound
   intent, monitoring deadlines, and bounded recovery attempts outside execution
   sessions. A per-target descriptor lease serializes reconciliation. Healthy
   polling resets consecutive failures; cancellation and deadlines prevent
   automatic resurrection. Pending delivery survives host restarts. The hook accepts
   `command`/`stdout` or `cmd`/`output`; supplied nonzero/null exit codes cannot arm.
-  Saved prompts reference that policy and saved worktree/branch targets.
+  Saved task context references that policy and saved worktree/branch targets.
   Unexpected stream endings reconcile durable intent; degraded coverage is
-  reported while bounded retries continue. Requested alerts use the default
-  notification policy, preserving an explicit user mute. Quiet runs
-  emit no message; new events get concise human-facing summaries. Internal
-  automation instructions need no TL;DR.
+  reported while bounded retries continue. Migration pauses only confirmed
+  task-local PR watcher automations; unrelated schedules and explicit periodic
+  status requests remain intact. Empty replies and alert muting do not prevent
+  scheduled task inputs. Preserve an explicit user mute; pending storage alone
+  does not prove delivery. New events get concise human-facing summaries.
   Text-contract tests guard required instructions, not model obedience or live delivery.
 - Watcher to commands: `.agents/watch/pr-watch.sh` owns the external command group
   and its timeout/output monitors. Monitor cancellation uses KILL and wait because

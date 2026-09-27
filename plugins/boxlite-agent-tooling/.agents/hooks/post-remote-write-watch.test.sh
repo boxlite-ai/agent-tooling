@@ -2286,11 +2286,12 @@ else
   fail=$((fail + 1)); printf '  FAIL  a Claude host is named only the Monitor route (got: %.160s)\n' "$claude_ctx"
 fi
 codex_ctx="$(ctx_as_host codex "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
-if [[ "$codex_ctx" == *"background shell"* && "$codex_ctx" == *"native heartbeat"* \
-   && "$codex_ctx" == *"every 1 minute"* && "$codex_ctx" != *"Monitor({"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  a Codex host gets a background consumer and one-minute heartbeat\n'
+if [[ "$codex_ctx" == *"foreground turns"* && "$codex_ctx" == *"no automatic heartbeat"* \
+   && "$codex_ctx" == *"unavailable idle delivery"* && "$codex_ctx" != *"every 1 minute"* \
+   && "$codex_ctx" != *"Monitor({"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  a Codex host gets quiet foreground delivery with explicit idle limits\n'
 else
-  fail=$((fail + 1)); printf '  FAIL  a Codex host gets a background consumer and one-minute heartbeat (got: %.160s)\n' "$codex_ctx"
+  fail=$((fail + 1)); printf '  FAIL  a Codex host gets quiet foreground delivery with explicit idle limits (got: %.160s)\n' "$codex_ctx"
 fi
 
 # The stream script must be addressed in the TOOLING tree (the hook's own

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercise host scheduling instructions at the real PostToolUse boundary.
+# Exercise quiet host delivery instructions at the real PostToolUse boundary.
 set -euo pipefail
 
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -11,7 +11,7 @@ mkdir -p "$scratch/bin"
 printf '#!/bin/sh\nprintf "42\\n"\n' > "$scratch/bin/gh"
 chmod +x "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH"
-git init -q -b heartbeat-test "$scratch/repo"
+git init -q -b delivery-test "$scratch/repo"
 git -C "$scratch/repo" remote add origin https://github.com/example/repo.git
 git -C "$scratch/repo" -c user.name=test -c user.email=test@example.com \
   -c core.hooksPath=/dev/null commit -q --allow-empty -m fixture
@@ -33,16 +33,22 @@ context() { # host plugin-path [command-field] [response]
   esac | jq -er '.hookSpecificOutput.additionalContext'
 }
 
+fail=0
 require_text() {
-  [[ "$1" == *"$2"* ]] || { printf 'FAIL: missing %s\n' "$2" >&2; exit 1; }
+  [[ "$1" == *"$2"* ]] || { printf 'FAIL: missing %s\n' "$2" >&2; fail=$((fail + 1)); }
 }
 
-check_heartbeat() {
+reject_text() {
+  [[ "$1" != *"$2"* ]] || { printf 'FAIL: unexpected %s\n' "$2" >&2; fail=$((fail + 1)); }
+}
+
+check_foreground() {
   local rendered="$1"
-  require_text "$rendered" 'native heartbeat'
-  require_text "$rendered" 'every 1 minute'
-  require_text "$rendered" 'this task'
-  require_text "$rendered" 'reuse'
+  require_text "$rendered" 'foreground turns'
+  require_text "$rendered" 'no automatic heartbeat'
+  require_text "$rendered" 'unavailable idle delivery'
+  reject_text "$rendered" 'every 1 minute'
+  reject_text "$rendered" 'create/reuse ONE native heartbeat'
   require_text "$rendered" 'escalation-policy.md'
   require_text "$rendered" 'Stream command:'
   [[ "${rendered%%Stream command:*}" == *'Read policy'* ]] || {
@@ -57,7 +63,7 @@ native_context="$(context codex "$plugin" cmd \
   printf 'FAIL: native cmd input did not reach the watcher route\n' >&2
   exit 1
 }
-check_heartbeat "$native_context"
+check_foreground "$native_context"
 require_text "$native_context" 'PR #77'
 for failed_response in \
   '{"output":"permission check failed","exit_code":1}' \
@@ -68,43 +74,42 @@ for failed_response in \
 done
 
 codex_context="$(context codex "$plugin")"
-check_heartbeat "$codex_context"
+check_foreground "$codex_context"
 [[ "$codex_context" != *'Monitor({'* ]]
 claude_context="$(context claude "$plugin")"
 require_text "$claude_context" 'Monitor({'
 [[ "$claude_context" != *'native heartbeat'* ]]
 unknown_context="$(context unknown "$plugin")"
-check_heartbeat "$unknown_context"
+check_foreground "$unknown_context"
 require_text "$unknown_context" 'Monitor({'
 
-# The compact rendering must retain scheduling, not silently lose idle delivery.
+# The compact rendering must retain the quiet default and coverage limitation.
 long_parent="$scratch/$(printf '%0150d' 0 | tr 0 p)"
 mkdir -p "$long_parent"
 ln -s "$plugin" "$long_parent/plugin"
 compact_context="$(context codex "$long_parent/plugin")"
-check_heartbeat "$compact_context"
+check_foreground "$compact_context"
 [[ "$compact_context" != *'using the route below'* ]]
 
 # Contract guards catch omissions; they do not prove model compliance.
 lifecycle="$(cat "$plugin/.agents/watch/consumer-lifecycle.md")"
-saved_prompt="$(sed -n 's/^> //p' "$plugin/.agents/watch/consumer-lifecycle.md")"
 policy="$(cat "$plugin/.agents/watch/escalation-policy.md")"
 require_text "$lifecycle" 'One active consumer per generation'
 require_text "$lifecycle" 'pr-watch-session.sh'
 require_text "$lifecycle" 'consecutive failures'
 require_text "$lifecycle" 'after reporting'
 require_text "$lifecycle" 'watch_end is not PR closure'
-require_text "$lifecycle" 'absolute policy path'
-require_text "$saved_prompt" 'If unreadable, report and pause'
-require_text "$saved_prompt" 'Read POLICY'
-require_text "$saved_prompt" 'cancelled checks'
-require_text "$saved_prompt" 'bots/threads'
-require_text "$saved_prompt" 'PR links'
-require_text "$lifecycle" 'notificationPolicy: null'
+require_text "$lifecycle" 'Do not create or resume a heartbeat'
+require_text "$lifecycle" 'confirmed PR watcher'
+require_text "$lifecycle" 'unrelated automations'
+require_text "$lifecycle" 'cancelled checks'
+require_text "$lifecycle" 'bots/threads'
+require_text "$lifecycle" 'PR links'
 require_text "$lifecycle" 'Preserve an explicit user mute'
-require_text "$lifecycle" 'successful-run alerts'
-require_text "$saved_prompt" 'otherwise stay silent'
-require_text "$saved_prompt" 'Visible reports need TL;DR'
+require_text "$lifecycle" 'otherwise stay silent'
+require_text "$lifecycle" 'Visible reports need TL;DR'
+reject_text "$lifecycle" 'Create/reuse one **active, one-minute** heartbeat'
+reject_text "$lifecycle" 'for the next heartbeat'
 require_text "$lifecycle" 'inspect both revisions'
 require_text "$lifecycle" 'Without background support'
 require_text "$lifecycle" 'report unavailable idle coverage'
@@ -115,4 +120,5 @@ require_text "$policy" 'depends on product intent'
 require_text "$policy" 'what changed and why'
 require_text "$policy" 'pre-existing findings in the PR'
 require_text "$unknown_context" 'inspect both revisions'
-printf 'PASS: normal, compact, and unknown routes retain one-minute heartbeats; Claude retains Monitor\n'
+[[ "$fail" == 0 ]] || { printf '%d failures\n' "$fail" >&2; exit 1; }
+printf 'PASS: normal, compact, and unknown routes use foreground delivery; Claude retains Monitor\n'
