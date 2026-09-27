@@ -14,7 +14,7 @@ jq -nc --arg marker "${BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS:-}" --arg timeout "${C
   --args '{marker:$marker,timeout:$timeout,argv:$ARGS.positional}' -- "$@"
 CLAUDE
 chmod +x "$scratch/bin/claude"
-export PATH="$scratch/bin:$PATH" CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_AFK_TIMEOUT_MS=180000
+export PATH="$scratch/bin:$PATH" CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_AFK_TIMEOUT_MS=300000
 unset PLUGIN_ROOT BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS
 launcher="$plugin/scripts/claude-with-timed-prompts.sh"
 failures=0
@@ -34,7 +34,7 @@ check test "${out#*plain text}" != "$out"
 check test "${out#*Call AskUserQuestion}" = "$out"
 
 out="$(bash "$launcher" --resume 'session with spaces')"
-check jq -e --arg plugin "$plugin" '.marker=="1" and .timeout=="180000" and
+check jq -e --arg plugin "$plugin" '.marker=="1" and .timeout=="300000" and
   .argv==["--settings","{\"remoteControlAtStartup\":false,\"disableRemoteControl\":true}",
     "--resume","session with spaces","--plugin-dir",$plugin]' <<<"$out"
 native_route="$(BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS="$(jq -r .marker <<<"$out")" route)"
@@ -59,7 +59,7 @@ printf '{"model":"keep-file"}\n' > "$scratch/custom settings.json"
 fallback --settings "$scratch/custom settings.json"
 check test "$(cat "$scratch/custom settings.json")" = '{"model":"keep-file"}'
 
-for timeout in '' 0 180001 invalid; do
+for timeout in '' 0 300001 invalid; do
   out="$(CLAUDE_AFK_TIMEOUT_MS="$timeout" BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1 route)"
   check test "${out#*plain text}" != "$out"
 done

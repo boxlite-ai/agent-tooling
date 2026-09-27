@@ -68,7 +68,8 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       and (keys == ["created_at","deadline","fallback_delivered","id","question_tool_id","response","spec","status","version"])
       and (.id | type == "string" and test("^[0-9a-f]{32}$"))
       and (.created_at | type == "number" and . >= 0 and floor == .)
-      and .deadline == .created_at + 180
+      # Keep legacy deadlines valid without extending existing attempts.
+      and (.deadline == .created_at + 180 or .deadline == .created_at + 300)
       and (.status | IN("pending","accepted","expired","consumed"))
       and (.question_tool_id | type == "string" and test("^[A-Za-z0-9_-]{0,200}$"))
       and (.fallback_delivered | type == "boolean");
@@ -88,7 +89,7 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       ($arg | fromjson) as $spec |
       if ($spec | spec | not) then error("invalid confirmation specification")
       elif . == null or .spec != $spec or .status == "consumed" then
-        {version:1,id:$id,spec:$spec,created_at:$now,deadline:($now+180),
+        {version:1,id:$id,spec:$spec,created_at:$now,deadline:($now+300),
          status:"pending",response:"",fallback_delivered:false,question_tool_id:""}
       else . end
     elif . == null or .id != $arg then error("unknown or superseded confirmation")
@@ -96,7 +97,7 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       if .status != "expired" or .spec.prefix != "pr-size-exception:"
         or ($reply | line and test("\\S") | not)
       then error("renewal requires an expired PR-size request and the explicit human instruction")
-      else .id = $id | .created_at = $now | .deadline = ($now+180)
+      else .id = $id | .created_at = $now | .deadline = ($now+300)
         | .status = "pending" | .response = "" | .fallback_delivered = false
         | .question_tool_id = "" end
     elif $op == "present" then
@@ -155,7 +156,7 @@ _timed_user_prompt_question() {
 timed_user_prompt_native_available() {
   [[ "${BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS:-}" == 1 \
     && "${CLAUDE_AFK_TIMEOUT_MS:-}" =~ ^[1-9][0-9]{0,5}$ ]] \
-    && (( CLAUDE_AFK_TIMEOUT_MS <= 180000 ))
+    && (( CLAUDE_AFK_TIMEOUT_MS <= 300000 ))
 }
 
 timed_user_prompt_instruction() { # tooling-root request-json

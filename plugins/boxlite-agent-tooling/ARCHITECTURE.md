@@ -147,13 +147,16 @@ existing PR URLs and matching bases. This is workflow guidance, not a new hook b
 
 ### Timed confirmations
 
-`.agents/lib/timed-user-prompt.sh` provides the reusable three-minute confirmation
+`.agents/lib/timed-user-prompt.sh` provides the reusable five-minute confirmation
 lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-supplied
 context and a random ID; retries preserve the deadline, late replies are rejected,
 and acceptance can be consumed once. Callers select `split` or `keep-draft` as the
 timeout fallback for `pr-size-exception:` or `reviewed:` respectively. The library
 serializes state transitions; its prompt renderer describes an agent-opened,
 non-blocking question. It never waits or opens a host dialog inside the state lock.
+
+New requests and explicit renewals receive 300 seconds. Existing 180-second records
+remain readable and keep their original deadlines; retries cannot extend them.
 
 Size exceptions bind to repository, base/head, measured size, and session. A reason
 needs at least 12 words; the agent must judge whether it names a concrete constraint.
@@ -188,7 +191,7 @@ jobs. `.agents/prompts/pr-size-exception.md` carries the size-specific wording;
 `.agents/prompts/pr-size-expired.md` describes splitting and human-requested renewal.
 
 Local interactive sessions launched through `scripts/claude-with-timed-prompts.sh`
-load this plugin with `--plugin-dir`, enable 180-second native idle dismissal, and
+load this plugin with `--plugin-dir`, enable 300-second native idle dismissal, and
 disable Remote Control for that session through `--settings` (`remoteControlAtStartup:false`
 and `disableRemoteControl:true`). No settings files are edited. The launcher exports
 `BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1`; routing and PreToolUse require that marker plus
