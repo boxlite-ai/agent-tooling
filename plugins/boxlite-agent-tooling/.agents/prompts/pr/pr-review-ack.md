@@ -6,8 +6,8 @@ description: Human review acknowledgment and bounded recovery instructions.
 ---
 
 Review required{{context}}. {{review_question}}
-Require human-typed reviewed: <what changed>; no AI narrative, logs, or secrets.
-Never infer or fabricate replies; never pre-fill. Abort and Show me the diff do not approve.
-Claude's native hook records replies. Otherwise write .agents/state/pr-reviewed.json:
+Human must type reviewed: <what changed>; no AI narrative, logs, or secrets.
+Never infer, fabricate, or pre-fill replies. Abort/Show me the diff aren't approval.
+Claude records native replies; otherwise write .agents/state/pr-reviewed.json:
 {"branch":"<current branch>","head":"<current HEAD>","message":"<verbatim response>","request":"<id>"}
 Read id from .agents/state/pr-review-request.json. Then retry the same command.

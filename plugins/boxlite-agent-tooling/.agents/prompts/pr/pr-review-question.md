@@ -5,6 +5,6 @@ placeholders:
 description: Shared explanation check for local and GitHub PR review.
 ---
 
-Apply the boxlite-writing skill to the PR description. Does the How it works section accurately explain the mechanism or rationale shown in the diff?
+Apply boxlite-writing. Does How it works explain the diff's mechanism or rationale?
 
 Verify design research against sources; evidence gaps block approval.

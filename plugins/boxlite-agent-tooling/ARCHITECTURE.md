@@ -316,6 +316,9 @@ and [Monitor limits](https://code.claude.com/docs/en/tools-reference#monitor-too
 
 The procedure is embedded literally into each task. Agent specs reference the supplied
 procedure instead of duplicating it; prompt tests verify delivery, not live model compliance.
+The reminder is cooperative: a shorter runner timeout also reduces the reporting
+margin. A live smoke test must distinguish early completion with TaskStop from
+notice-triggered reporting before the hard cutoff; neither proves the other.
 
 Both commit/push paths render `.agents/prompts/audit/commit-push-criteria.md` into their
 task through `subagent_prompt`; missing, empty, or unresolved criteria block dispatch.
