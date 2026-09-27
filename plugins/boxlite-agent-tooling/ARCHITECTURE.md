@@ -29,7 +29,7 @@ Host hook events, wired for both hosts in `hooks/hooks.json` and
 
 ### Design documents
 
-Policy lives in the [shared workflow](guidance/workflow.md#workflow); registration
+Research and design policy lives in `boxlite-design-doc`; registration
 and publishing steps live in [CONTRIBUTING.md](CONTRIBUTING.md#pull-request-descriptions).
 
 `scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
@@ -39,8 +39,8 @@ Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` a
 match its canonical root and branch (or detached HEAD). State reads and replacement
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
 Notion child blocks fail closed; list items and code retain their density semantics.
-Workflow research requirements use `.agents/prompts/design-doc.md`, including tracking
-issues. `.agents/prompts/commit-push-criteria.md` and the PR question require native/headless
+Workflow and tracking issues invoke `boxlite-design-doc` by name.
+`.agents/prompts/commit-push-criteria.md` and the PR question require native/headless
 reviewers to verify sources against the diff and report blocking gaps/corrective checks.
 Pre-edit validation covers access/structure; research completeness, page length,
 and design quality remain review criteria.
@@ -512,11 +512,11 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         boxlite-clean-code, shell-engineering, boxlite-visualize, boxlite-examples, adversarial-iteration, boxlite-writing
+.agents/skills/         boxlite-design-doc, boxlite-clean-code, shell-engineering, boxlite-visualize, boxlite-examples, adversarial-iteration, boxlite-writing
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
-guidance/workflow.md    workflow naming boxlite-writing and boxlite-clean-code for consumers
+guidance/workflow.md    workflow naming shared skills for consumers
 host-parity.test.sh     what keeps the three hosts loading the same assets
 architecture.test.sh    what keeps this map honest
 ```
@@ -535,5 +535,6 @@ repository's workflow and permission boundaries and needs no plugin scripts.
 Shared workflow, shell guidance, fixer prompts, and audit criteria reference it by
 name for general coding and test quality. Their own instructions retain repository
 gates, Bash contracts, iteration receipts, and audit evidence requirements.
-The full Research and Test sections remain inline in workflow guidance, together
-with reproduce-before-fix and challenge-assumptions instructions.
+`boxlite-design-doc` owns research requirements, the design outline, and design review.
+Hosts discover it through the same `skills/` alias; consumers name the skill without
+copying its rules. The full Test section and reproduce-before-fix remain in workflow guidance.

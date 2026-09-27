@@ -11,19 +11,9 @@ Apply the `boxlite-clean-code` skill for design, implementation, refactoring, an
 - Reproduce-before-fix: when fixing a bug, write the failing test first, observe it fail, then fix.
 - If docs and code disagree, record the conflict and ask before assuming the architecture.
 
-**Research**
+**Research and design**
 
-- Finish research before implementation (tests/shell included); never backfill. Inspect code/callers/tests, official guidance, standards, and mature implementations. Answer **What is the best practice for this work, and why?** Compare alternatives/counterevidence; explain local fit/deviations; never invent consensus.
-- **Related work and lessons**: questions → sources → mechanisms/failures → constraint differences → adopt/adapt/reject reasons. Cite opened originals by exact section or `file:line`, preferably commit-pinned; distinguish observations/inferences. Snippets, memory, link lists, and generic claims are insufficient.
-- Scale to impact/uncertainty; no citation quotas. Revalidate reused research against current code/constraints; record unsuitable searches/reasons. Before binding/coding, resolve approach/correctness gaps; record remaining unknowns/impact/next checks.
-- Reviewers verify sources against the diff. Missing/unreadable/unsupported evidence blocks approval; name gaps and corrective checks. Binding alone proves no research.
-
-**Design**
-
-- Before coding, create a 1–3 page design: problem, completed related-work research, approach, alternatives, trade-offs, and validation. Prefer GitHub issue > Notion > Linear issue. Every PR, including drafts, must link it and keep it aligned with final scope.
-- Use the plugin's `.agents/prompts/design-doc.md` template for every design; tracking issues may contain the same sections without a separate document.
-- Apply Communication rules to designs.
-- Don't be yes-man — challenge assumptions (yours too); ask whether a layer needs to know what you're about to teach it.
+Apply the `boxlite-design-doc` skill before implementation.
 
 **Documentation (every PR)**
 

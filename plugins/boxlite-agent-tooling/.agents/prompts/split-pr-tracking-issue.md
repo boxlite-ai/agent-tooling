@@ -15,9 +15,7 @@ State the problem, scope, and acceptance criteria for closing this issue.
 
 ## Related work and lessons
 
-Read [design-doc.md](design-doc.md); complete its **Related work and lessons** here:
-questions, current behavior, best-practice evidence, comparisons, and conclusion.
-Resolve material gaps before coding; linking alone is insufficient.
+Apply `boxlite-design-doc`; include its research findings here, not just a link.
 
 ## Design
 
