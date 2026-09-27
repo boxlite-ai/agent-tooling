@@ -100,7 +100,7 @@ api_resume_read_state() {  # state-path
 }
 
 api_resume_on_failure() {  # payload -> status 2 to resume, 0 to leave the turn ended
-  local payload="$1" kind scope state_path state now kept count nonce nonce_hash
+  local payload="$1" kind scope state_path state now kept count nonce nonce_hash instruction
   kind="$(printf '%s' "$payload" | jq -r '
     if type == "object" and .hook_event_name == "StopFailure"
        and (.agent_id // "") == "" and (.error | type) == "string"
@@ -121,14 +121,18 @@ api_resume_on_failure() {  # payload -> status 2 to resume, 0 to leave the turn 
   (( count < api_resume_max_resumes )) || return 0
   nonce="$(hook_wake_new_nonce)" || return 0
   nonce_hash="$(hook_wake_nonce_hash "$nonce")" || return 0
+  # Load before recording a wake; a missing instruction must not spend its budget.
+  # shellcheck source=../lib/subagent.sh
+  source "$tooling_root/.agents/lib/subagent.sh" || return 1
+  instruction="$(subagent_prompt resume-after-api-failure "$tooling_root" "kind=$kind")" || return 1
   mkdir -p "$state_dir" 2>/dev/null || return 0
   # Record the resume before announcing it: an unrecorded resume is an unbounded one.
   printf '%s' "$kept" | jq -c --argjson now "$now" \
     --argjson ttl "$api_resume_wake_ttl_seconds" --arg hash "$nonce_hash" '
     .resumes += [$now] | .wakes += [{hash: $hash, expires: ($now + $ttl)}]
   ' | verdict_audit_write_atomic "$state_path" 2>/dev/null || return 0
-  printf '[api-resume] Your response above was cut off by an API error (%s). Resume directly from where it stops — no apology, no recap. A tool call you were writing was discarded and did not run. Auto-resume %d of %d. [api-resume-wake:%s]\n' \
-    "$kind" "$(( count + 1 ))" "$api_resume_max_resumes" "$nonce" >&2
+  printf '[api-resume] %s Auto-resume %d of %d. [api-resume-wake:%s]\n' \
+    "$instruction" "$(( count + 1 ))" "$api_resume_max_resumes" "$nonce" >&2
   return 2
 }
 

@@ -918,7 +918,7 @@ cp "$HOOK" "$fixture_plugin/.agents/hooks/"
 cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
 mkdir -p "$fixture_plugin/.agents/skills/boxlite-writing"
 cp "$REPO_ROOT/.agents/skills/boxlite-writing/SKILL.md" "$fixture_plugin/.agents/skills/boxlite-writing/"
-cp "$REPO_ROOT/.agents/prompts/timed-user-prompt.md" "$fixture_plugin/.agents/prompts/"
+cp "$REPO_ROOT/.agents/prompts/"*.md "$fixture_plugin/.agents/prompts/"
 HOOK="$fixture_plugin/.agents/hooks/preflight-pr-review.sh"
 cat > "$fixture_plugin/.agents/prompts/pr-review-ack.md" <<'PROMPT'
 ---

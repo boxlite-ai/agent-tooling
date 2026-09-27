@@ -31,6 +31,8 @@ source "$control_state_lib"
 source "$interactive_prompt_lib"
 # shellcheck source=../lib/hook-host.sh
 source "$host_lib"
+# shellcheck source=../lib/subagent.sh
+source "$tooling_root/.agents/lib/subagent.sh" || exit 2
 
 # Module context is populated once repository identity has been validated below.
 auditor_control_state_dir=
@@ -678,14 +680,15 @@ case "${1:-}" in
       jq -nc '{continue:true,systemMessage:"[auditor-control] override ignored: the audit generation already completed or no 30-second escalation is open"}'
       exit 0
     fi
+    override_context="$(subagent_prompt auditor-override "$tooling_root")" || exit 2
     auditor_control_write_override_grant "$scope" "$new_epoch" "$reason_hash" || exit 1
     auditor_control_close_scope_state overridden-by-user || { rm -f "$grant_file"; exit 1; }
     rm -f "$repo/.agents/state/last-audit.json" "$repo/.agents/state/last-audit-handoff.json" \
       "$repo/.claude/.last-audit.json" "$repo/.claude/.last-audit-handoff.json"
     auditor_control_append_event "$(jq -nc --arg event overridden --arg epoch "$new_epoch" \
       '{event:$event,prompt_epoch:$epoch,outcome:"OVERRIDDEN BY USER"}')"
-    jq -nc '{continue:true,hookSpecificOutput:{hookEventName:"UserPromptSubmit",
-      additionalContext:"OVERRIDDEN BY USER: all auditor gates are bypassed for this prompt only. Preserve installation, guidance, PR-review, chained-hook, and remote protections. Never describe an auditor as PASS."}}'
+    jq -nc --arg context "$override_context" \
+      '{continue:true,hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$context}}'
     exit 0
     ;;
   --locked-select)
@@ -850,24 +853,18 @@ case "$event" in
         printf -v control_q '%q' "$control_script"
         keep_command="/usr/bin/printf '%s' '$keep_payload_b64' | /usr/bin/perl -MMIME::Base64 -0777 -ne 'print decode_base64(\$_)' | CLAUDE_PROJECT_DIR=$project_q /usr/bin/env bash $control_q select"
         override_command="/usr/bin/printf '%s' '$override_payload_b64' | /usr/bin/perl -MMIME::Base64 -0777 -ne 'print decode_base64(\$_)' | CLAUDE_PROJECT_DIR=$project_q /usr/bin/env bash $control_q select"
-        prompt_spec="$(jq -nc --arg auditor "$auditor" \
-          --arg keep_command "$keep_command" --arg override_command "$override_command" '
-          {question:($auditor + " is still running. What should I do?"),header:"Auditor",
-           options:[
-             {label:"Keep waiting (Recommended)",
-              description:"Leave every auditor running and dismiss this one-shot escalation.",
-              command:$keep_command},
-             {label:"Force pass — auditor is taking too long",
-              commandLabel:"Force pass",
-              description:"Override commit-push-auditor and verdict-auditor for this prompt only; record OVERRIDDEN BY USER, never PASS.",
-              command:$override_command}],multiSelect:false}')" || exit 2
+        prompt_spec="$(subagent_prompt auditor-question "$tooling_root" \
+          "auditor=$(jq -nr --arg value "$auditor" '$value | tojson | .[1:-1]')" \
+          "keep_command_json=$(subagent_json_string "$keep_command")" \
+          "override_command_json=$(subagent_json_string "$override_command")")" || exit 2
+        native_instruction="$(hook_interactive_prompt_render_claude "$prompt_spec")" || exit 2
+        followup_instruction="$(subagent_prompt auditor-question-followup "$tooling_root")" || exit 2
         printf '[auditor-control] %s is still running after 30 seconds. [auditor-wake:%s]\n' \
           "$auditor" "$wake_nonce" >&2
-        hook_interactive_prompt_render_claude "$prompt_spec" >&2 || exit 2
-        printf 'If Other is selected, re-open the same card; do not infer a choice. A terminal audit may leave this card stale; still run the selected command, which safely rejects terminal or superseded generations.\n' >&2
+        printf '%s\n%s\n' "$native_instruction" "$followup_instruction" >&2
         exit 2
       fi
-      message="[auditor-control] $auditor is still running after 30 seconds. Publish one short, non-blocking assistant status: \"Auditor is still running. Reply with force-pass-auditors: <reason> to override both auditor gates for this prompt, or do nothing to keep waiting.\" Keep the auditor running. If its completion is already visible, suppress this stale status."
+      message="$(subagent_prompt auditor-wait-status "$tooling_root" "auditor=$auditor")" || exit 2
       jq -nc --arg message "$message" '{continue:true,systemMessage:$message}'
     fi
     ;;

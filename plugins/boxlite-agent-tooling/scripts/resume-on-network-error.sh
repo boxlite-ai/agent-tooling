@@ -48,7 +48,7 @@ probe_url="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
 # warning: a turn cut off mid-edit can leave the model's belief about the tree stale, and
 # nothing here corrects that. Put the warning in the run's own prompt or in CLAUDE.md if
 # the task edits files.
-resume_prompt='Continue.'
+resume_prompt=""
 
 # Host enum (StopFailure `error`). Retryable faults are the ones another attempt can
 # plausibly clear; everything else repeats identically no matter how often it is tried.
@@ -100,6 +100,11 @@ for required in claude jq curl; do
     exit 2
   }
 done
+
+tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" || exit 2
+# shellcheck source=../.agents/lib/subagent.sh
+source "$tooling_root/.agents/lib/subagent.sh" || exit 2
+resume_prompt="$(subagent_prompt resume-after-network-error "$tooling_root")" || exit 2
 
 # ── Arguments ────────────────────────────────────────────────────────────────
 # Each value-taking option asserts its value is present before consuming it: a bare

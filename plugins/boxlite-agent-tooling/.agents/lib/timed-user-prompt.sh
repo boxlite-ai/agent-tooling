@@ -146,11 +146,17 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
 }
 
 _timed_user_prompt_question() {
-  jq -ce '(.spec.fallback == "split") as $split |
-    {questions:[{question:(.spec.prefix + (if $split then " <why one PR is necessary> [" else " <what changed> [" end) + .id + "]"),
-      header:(if $split then "PR size" else "Review" end),multiSelect:false,
-      options:[{label:(if $split then "Split work" else "Keep draft" end),description:"Do not approve."},
-               {label:"Show diff",description:"Inspect changes."}]}]}' <<<"$1"
+  local root template=timed-question-review prefix id rendered
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 2
+  # The locked transition runs in a fresh shell; load its renderer locally.
+  # shellcheck source=subagent.sh
+  source "$root/.agents/lib/subagent.sh" || return 2
+  [[ "$(jq -r .spec.fallback <<<"$1")" != split ]] || template=timed-question-size
+  # Insert JSON string contents, never raw data, into the structured question.
+  prefix="$(jq -er '.spec.prefix | tojson | .[1:-1]' <<<"$1")" || return 2
+  id="$(jq -er '.id | tojson | .[1:-1]' <<<"$1")" || return 2
+  rendered="$(subagent_prompt "$template" "$root" "prefix=$prefix" "id=$id")" || return 2
+  jq -ce . <<<"$rendered"
 }
 
 timed_user_prompt_native_available() {
@@ -160,18 +166,19 @@ timed_user_prompt_native_available() {
 }
 
 timed_user_prompt_instruction() { # tooling-root request-json
-  local deadline fallback instruction route host
+  local deadline fallback instruction route host question
   # shellcheck source=hook-host.sh
   source "$1/.agents/lib/hook-host.sh" || return 2
   host="$(hook_host_kind)"
-  route='Ask once through non-blocking input (Codex: request_user_input_async); avoid blocking modals.'
+  route="$(subagent_prompt timed-route-async "$1")" || return 2
   if [[ "$host" == claude ]]; then
     if [[ "$(jq -r '.question_tool_id // ""' <<<"$2")" != "" ]]; then
-      route='The native question was already shown. Do not reopen it or extend its deadline. Follow any explicit user instruction; never infer approval.'
+      route="$(subagent_prompt timed-route-shown "$1")" || return 2
     elif timed_user_prompt_native_available; then
-      route="Call AskUserQuestion once: $(_timed_user_prompt_question "$2"). The hook records typed replies."
+      question="$(_timed_user_prompt_question "$2")" || return 2
+      route="$(subagent_prompt timed-route-native "$1" "question=$question")" || return 2
     else
-      route='Ask once in plain text and continue waiting without a modal. Native timed questions require a local session from scripts/claude-with-timed-prompts.sh; Remote Control or custom settings use this fallback.'
+      route="$(subagent_prompt timed-route-fallback "$1")" || return 2
     fi
   fi
   deadline="$(jq -er .deadline <<<"$2")" || return 2

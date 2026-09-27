@@ -185,6 +185,8 @@ source "$tooling_root/.agents/lib/audit-reflection.sh"
 source "$tooling_root/.agents/lib/audit-reflection-gate.sh"
 # shellcheck source=../lib/auditor-override-state.sh
 source "$override_state_lib"
+# shellcheck source=../lib/subagent.sh
+source "$tooling_root/.agents/lib/subagent.sh" || exit 2
 if [[ "$has_session_id" == "true" ]]; then
   if ! session_scope="$(verdict_audit_scope_from_hook_payload \
       "$payload" "$project_dir" 2>/dev/null)"; then
@@ -667,7 +669,7 @@ block() {
   prompt_epoch_is_current || allow
   reason_bytes="$(LC_ALL=C printf '%s' "$reason" | wc -c | tr -d ' ')"
   if (( reason_bytes > verdict_output_max_bytes )); then
-    reason="Verdict gate remains blocked: the rendered proof instruction exceeded the 8192-byte safety limit. Inspect the session-scoped .agents/state/last-verdict*.json dossier locally; do not paste its oversized findings or the transcript into chat. Run verdict-auditor synchronously against the current transcript (or use run-verdict-audit.sh headlessly), let the auditor write the dossier, then retry the ending. On PASS repeat the blocked answer; on FAIL revise it and re-audit."
+    reason="$(subagent_prompt verdict-oversized "$tooling_root")" || exit 2
   fi
   # Default HARD, matching the two doc sites above. Defaulting to soft meant only
   # Claude Code was gated: it is the sole caller that sets this, via settings.json
@@ -745,7 +747,9 @@ require_audit_reflection() {
     exit 0
   fi
   if [[ "$(jq -r '.reflection_due // false' <<<"$history")" == true ]]; then
-    block "Repeated audits require reflection before retrying. Read $(jq -r .state_path <<<"$history") and ${tooling_root}/.agents/prompts/audit-reflection.md. Compare all failed runs, explain failed fixes and earlier audit misses, run a discriminating check, then submit a current reflection with scripts/audit-reflection.sh. Verification is incomplete."
+    reflection_instruction="$(subagent_prompt verdict-reflection-required "$tooling_root" \
+      "history_path=$(jq -r .state_path <<<"$history")" "tooling_root=$tooling_root")" || exit 2
+    block "$reflection_instruction"
   fi
 }
 
@@ -965,12 +969,7 @@ assertion_patterns+='|^[[:space:]]*(verified|confirmed)[[:space:]]+[a-z]'
 # Echoes YES / NO / UNKNOWN. UNKNOWN (no CLI, timeout, garbage) → regex fallback.
 # VERDICT_CLASSIFIER_CMD overrides the whole classifier invocation (stdin = turn
 # text, stdout = YES/NO); tests stub it, `false` forces UNKNOWN.
-triage_prompt='Reply YES or NO only.
-
-YES when the text declares a fix, root cause, no issues, done/ready/healthy state, or
-similar conclusion without showing what proved it. NO for questions, plans,
-narration, corrections, status, or claims supported inline by quoted output,
-produced counts, a file:line citation, or a named commit.'
+triage_prompt="$(subagent_prompt verdict-triage "$tooling_root")" || exit 2
 # The old parse was `tail -n1 | tr -dc 'A-Za-z'`, which turns any explanatory answer
 # into a nonsense token — silently UNKNOWN, silently the regex fallback. That fired on
 # real turns under the previous prompt too. Prefer the first token (a compliant model
@@ -2029,12 +2028,9 @@ ${remaining}"
               # would poison every later Stop, including unrelated chat. Session-scoped
               # callers keep the dossier so unchanged retries do not buy a new audit.
               [[ "$session_scope" != "-" ]] || rm -f "$verdict_file"
-              block "Verdict proof check FAILED on branch '${branch}':
-
-${findings}
-
-Revise the user-facing answer to address each finding, then end the turn again; the
-Stop gate will re-audit the revised answer automatically."
+              revision_instruction="$(subagent_prompt verdict-revise-answer "$tooling_root" \
+                "branch=$branch" "findings=$findings")" || exit 2
+              block "$revision_instruction"
             else
               discard_matching_json_generation \
                 "$verdict_file" "$audit_generation" >/dev/null 2>&1 || true
