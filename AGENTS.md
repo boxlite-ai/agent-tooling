@@ -19,6 +19,12 @@ All tooling must support:
 
 Test affected combinations; report unverified ones.
 
+## Tooling choices
+
+- **Common capabilities:** Prefer abilities shared by Claude Code and Codex, such as reading files, searching, editing, and running commands.
+- **Shell:** Prefer shell scripts when practical to minimize runtime and package dependencies.
+- **Exceptions:** Add specialized tools or runtimes only when they materially improve safety, portability, or maintainability.
+
 ## Change safely
 
 - Agents must not edit, rename, move, or delete the `boxlite-writing` skill or its supporting files unless the user explicitly requests that specific change. Using the skill, revising an output, or fixing a failed check does not authorize changing it.
