@@ -19,6 +19,7 @@ case "$*" in
   'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
   'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api repos/example/repo/commits/'*) jq -nc --arg sha "$SIZE_TEST_HEAD" '{sha:$sha}' ;;
+  'api repos/fork-owner/repo/commits/'*) jq -nc --arg sha "${SIZE_TEST_FORK_HEAD:-$SIZE_TEST_HEAD}" '{sha:$sha}' ;;
   'api repos/example/repo/compare/'*)
     jq -nc --arg base "$SIZE_TEST_BASE" --argjson lines "$SIZE_TEST_LINES" \
       --argjson files "${SIZE_TEST_FILES:-null}" \
@@ -99,6 +100,23 @@ check_code_size 'possibly truncated files fail closed' \
   '[range(300) | {filename:("doc-"+tostring+".md"),additions:1,deletions:0}]' unknown
 unset SIZE_TEST_FILES
 [[ "$code_failures" == 0 ]] || exit 1
+# A fork PR names the upstream with --repo and its pushed head as owner:branch.
+export SIZE_TEST_FILES='[{"filename":"src/main.sh","additions":10,"deletions":0}]'
+fork_create='gh pr create --draft --repo example/repo --base main --head fork-owner:feature --title wip --body "## TL;DR
+
+Fixture change.
+
+## How it works
+
+Retry failed calls once. https://github.com/example/repo/issues/123"'
+out="$(call_hook "$fork_create")"
+[[ -z "$out" ]] || { printf 'FAIL: a measurable fork PR was denied\n%s\n' "$out" >&2; exit 1; }
+# The upstream still reports the local head, so only a lookup in the fork catches this.
+export SIZE_TEST_FORK_HEAD=1111111111111111111111111111111111111111
+[[ "$(call_hook "$fork_create")" == *'Cannot determine the exact PR size'* ]] \
+  || { printf 'FAIL: a stale fork head was measured\n' >&2; exit 1; }
+unset SIZE_TEST_FORK_HEAD SIZE_TEST_FILES
+printf 'pr-size: fork pull requests passed\n'
 rm -f "$scratch/repo/.agents/state/pr-size-request.json" "$scratch/repo/.agents/state/pr-review-request.json"
 long_body="$(printf 'word %.0s' {1..81})"
 out="$(call_hook "gh pr create --title 'feat: validate text first' --body '$long_body'")"

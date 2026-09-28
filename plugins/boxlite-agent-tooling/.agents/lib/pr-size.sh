@@ -8,6 +8,7 @@ _pr_size_gh() {
 
 _pr_size_snapshot() { # subcommand argv... -> {repo,branch,head,base,lines}
   local operation="$1" branch head repository base="" selector="" head_option="" token value metadata response filter
+  local repo_option="" head_owner="" head_repository
   shift
   branch="$(git branch --show-current)" && [[ -n "$branch" ]] || return 2
   head="$(git rev-parse HEAD)" || return 2
@@ -16,24 +17,41 @@ _pr_size_snapshot() { # subcommand argv... -> {repo,branch,head,base,lines}
     case "$token" in
       --undo) [[ "$operation" == ready ]] && return 3; return 2 ;;
       --draft|-d|--draft=true|-d=true|--fill|--fill-first|--fill-verbose|--dry-run|--no-maintainer-edit|--remove-milestone) ;;
-      --base|-B|--head|-H|--title|-t|--body|-b|--body-file|-F|--assignee|-a|--label|-l|--milestone|-m|--project|-p|--reviewer|-r|--add-assignee|--add-label|--add-project|--add-reviewer|--remove-assignee|--remove-label|--remove-project|--remove-reviewer)
+      --base|-B|--head|-H|--repo|-R|--title|-t|--body|-b|--body-file|-F|--assignee|-a|--label|-l|--milestone|-m|--project|-p|--reviewer|-r|--add-assignee|--add-label|--add-project|--add-reviewer|--remove-assignee|--remove-label|--remove-project|--remove-reviewer)
         (( $# )) || return 2
         value="$1"; shift
-        case "$token" in --base|-B) base="$value" ;; --head|-H) head_option="$value" ;; esac ;;
+        case "$token" in
+          --base|-B) base="$value" ;; --head|-H) head_option="$value" ;; --repo|-R) repo_option="$value" ;;
+        esac ;;
       --base=*) base="${token#*=}" ;;
       --head=*) head_option="${token#*=}" ;;
+      --repo=*) repo_option="${token#*=}" ;;
+      -R?*) repo_option="${token#-R}" ;;
       --title=*|--body=*|--body-file=*|--assignee=*|--label=*|--milestone=*|--project=*|--reviewer=*|--add-*=*|--remove-*=*|-t?*|-b?*|-F?*|-a?*|-l?*|-m?*|-p?*|-r?*) ;;
       -*) return 2 ;;
       *) [[ "$operation" != create && -z "$selector" ]] || return 2; selector="$token" ;;
     esac
   done
+  # A fork head is owner:branch; its branch must still be this checkout's.
+  if [[ "$head_option" == *:* ]]; then
+    head_owner="${head_option%%:*}"
+    head_option="${head_option#*:}"
+    [[ "$head_owner" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || return 2
+  fi
   [[ -z "$head_option" || "$head_option" == "$branch" ]] || return 2
-  metadata="$(_pr_size_gh repo view --json nameWithOwner,defaultBranchRef)" || return 2
+  # The review gate refuses repository overrides on edit and ready, so only create
+  # measures one; any other caller would mix repositories.
+  [[ -z "$repo_option" || "$operation" == create ]] || return 2
+  [[ -z "$repo_option" || "$repo_option" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 2
+  metadata="$(_pr_size_gh repo view ${repo_option:+"$repo_option"} --json nameWithOwner,defaultBranchRef)" || return 2
   repository="$(jq -er '.nameWithOwner | select(test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))' <<<"$metadata")" || return 2
   if [[ "$operation" == create ]]; then
     [[ -n "$base" ]] || base="$(git config --get "branch.$branch.gh-merge-base" || true)"
     [[ -n "$base" ]] || base="$(jq -er '.defaultBranchRef.name | select(type == "string" and length > 0)' <<<"$metadata")" || return 2
-    response="$(_pr_size_gh api "repos/$repository/commits/$(jq -rn --arg ref "$branch" '$ref|@uri')")" || return 2
+    # Only the pushed-head check reads the fork: the upstream compare below resolves a
+    # fork commit through the shared object network. A renamed fork fails closed here.
+    head_repository="${head_owner:+$head_owner/${repository#*/}}"
+    response="$(_pr_size_gh api "repos/${head_repository:-$repository}/commits/$(jq -rn --arg ref "$branch" '$ref|@uri')")" || return 2
     [[ "$(jq -er .sha <<<"$response")" == "$head" ]] || return 2
   else
     response="$(_pr_size_gh pr view "${selector:-$branch}" --json baseRefOid,headRefOid,headRefName)" || return 2

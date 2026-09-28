@@ -164,8 +164,11 @@ The size policy in [the shared workflow](guidance/workflow.md#workflow) is enfor
 published comparison for creation, editing, and readiness, summing code additions
 and deletions through `.agents/lib/pr-size.jq`. Source, tests, scripts, configuration,
 and generated code count, including comments and blank lines within those files.
-Creation requires a published branch;
-Base-changing edits, fork creation, and opaque invocations are unsupported.
+Creation requires a published branch. A fork PR passes `--repo <upstream>` and
+`--head <owner>:<branch>`: the pushed head is checked in `<owner>/<upstream-name>`, and the
+comparison runs in the upstream, which resolves fork commits. A renamed fork fails closed.
+Base-changing edits, repository overrides on edit and ready, and opaque invocations are
+unsupported.
 Git pushes, direct API calls, and browser writes are outside this size check;
 it is not a repository-wide enforcement boundary.
 
