@@ -312,8 +312,9 @@ before_marketplace_updates="$(command_count '^plugin marketplace update ')"
 before_plugin_updates="$(command_count '^plugin update ')"
 FAKE_CLAUDE_MARKETPLACE_VERSION=0.1.6 \
 FAKE_CLAUDE_FALSE_SUCCESS_PLUGIN_UPDATE=1 \
+FAKE_CLAUDE_FALSE_SUCCESS_PLUGIN_INSTALL=1 \
 run_hook > "$TMP/out" 2> "$TMP/err"
-check_eq "false-success plugin update is rejected" "$?" 1
+check_eq "false-success plugin update and reinstall are rejected" "$?" 1
 check_eq "false-success path runs the exact marketplace update command" \
   "$(command_count '^plugin marketplace update boxlite-agent-tooling$')" \
   "$((before_marketplace_updates + 1))"
@@ -322,6 +323,7 @@ check_eq "false-success path runs the exact project plugin update command" \
   "$((before_plugin_updates + 1))"
 check_eq "false-success update cannot advance installed plugin metadata" \
   "$(head -n1 "$FAKE_STATE/plugin-version")" "0.1.5"
+touch "$FAKE_STATE/plugin-installed" "$FAKE_STATE/plugin-installed-here"
 
 before_plugin_reads="$(command_count '^plugin list --json$')"
 FAKE_CLAUDE_MARKETPLACE_VERSION=0.1.6 run_hook > "$TMP/out" 2> "$TMP/err"
@@ -459,6 +461,45 @@ check_eq "linked worktree receives its own project installation" \
 jq -e '.systemMessage | test("/reload-plugins")' "$TMP/out" >/dev/null 2>&1 \
   && ok "linked worktree installation requests a plugin reload" \
   || bad "linked worktree installation requests a plugin reload (stdout=$(cat "$TMP/out"))"
+
+echo "## A linked worktree reinstalls when update resolves the main checkout"
+# Claude Code's project-scoped update reports the main checkout's record as
+# current, so it exits 0 without advancing this worktree's record.
+cp "$WORKTREE/.claude/settings.json" "$TMP/worktree-settings"
+adopt_tooling_release "cccccccccccccccccccccccccccccccccccccccc" "0.1.7"
+before_uninstalls="$(command_count '^plugin uninstall ')"
+FAKE_CLAUDE_MARKETPLACE_VERSION=0.1.7 \
+FAKE_CLAUDE_FALSE_SUCCESS_PLUGIN_UPDATE=1 \
+  run_hook_at "$WORKTREE" > "$TMP/out" 2> "$TMP/err"
+check_eq "stale worktree record is repaired" "$?" 0
+check_eq "repair keeps shared plugin data" \
+  "$(command_count '^plugin uninstall boxlite-agent-tooling@boxlite-agent-tooling --scope project --keep-data$')" \
+  "$((before_uninstalls + 1))"
+check_eq "repaired worktree reports the adopted release" \
+  "$(head -n1 "$FAKE_STATE/plugin-version")" "0.1.7"
+cmp -s "$TMP/worktree-settings" "$WORKTREE/.claude/settings.json" \
+  && ok "repair leaves tracked settings byte-identical" \
+  || bad "repair leaves tracked settings byte-identical"
+jq -e '.systemMessage | test("/reload-plugins")' "$TMP/out" >/dev/null 2>&1 \
+  && ok "repaired worktree requests a plugin reload" \
+  || bad "repaired worktree requests a plugin reload (stdout=$(cat "$TMP/out"))"
+
+adopt_tooling_release "dddddddddddddddddddddddddddddddddddddddd" "0.1.8"
+FAKE_CLAUDE_MARKETPLACE_VERSION=0.1.8 \
+FAKE_CLAUDE_FALSE_SUCCESS_PLUGIN_UPDATE=1 \
+FAKE_CLAUDE_FAIL_PLUGIN_INSTALL=1 \
+  run_hook_at "$WORKTREE" > "$TMP/out" 2> "$TMP/err"
+check_eq "failed reinstall is rejected" "$?" 1
+grep -q 'could not reinstall Claude plugin' "$TMP/err" \
+  && ok "failed reinstall has actionable stderr" \
+  || bad "failed reinstall has actionable stderr (stderr=$(cat "$TMP/err"))"
+cmp -s "$TMP/worktree-settings" "$WORKTREE/.claude/settings.json" \
+  && ok "failed reinstall restores tracked settings" \
+  || bad "failed reinstall restores tracked settings"
+FAKE_CLAUDE_MARKETPLACE_VERSION=0.1.8 run_hook_at "$WORKTREE" > "$TMP/out" 2> "$TMP/err"
+check_eq "next session installs the removed record" "$?" 0
+check_eq "recovered worktree reports the adopted release" \
+  "$(head -n1 "$FAKE_STATE/plugin-version")" "0.1.8"
 
 echo
 echo "## A project installation from another repository is not a false positive"

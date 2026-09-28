@@ -542,6 +542,13 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   `templates/claude-plugin-bootstrap.sh` keep the initial validity probe quiet, but
   report verifier and installer diagnostics if repair or pre-upgrade refresh fails.
 
+- Linked-worktree plugin repair: Claude Code's project-scoped `plugin update` resolves
+  the main checkout's record, so in a linked worktree it can succeed while this
+  checkout's record stays stale. `templates/claude-plugin-bootstrap.sh` then runs
+  `plugin uninstall --keep-data` and `plugin install`, which resolve this checkout, and
+  restores the tracked `.claude/settings.json` byte-for-byte because uninstall edits it.
+  A plugin still stale after the reinstall fails closed.
+
 ## Invariants
 
 Often stated as an absence. Each names the line that states or enforces it.
