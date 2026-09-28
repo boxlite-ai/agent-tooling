@@ -781,7 +781,7 @@ build_prompt() {  # evidence file, evidence sha256
   # shellcheck source=../../lib/subagent.sh
   source "$subagent_lib"
   audit_context="$(build_audit_summary "$evidence_file" "$evidence_hash")" || return 1
-  if ! audit_criteria="$(subagent_prompt audit/commit-push-criteria "$tooling_root")" \
+  if ! audit_criteria="$(subagent_prompt audit/commit-push-criteria "$tooling_root" "plugin_root=$tooling_root")" \
      || [[ "$audit_criteria" != *[![:space:]]* ]]; then
     printf 'Internal: cannot load nonempty commit-push-criteria prompt\n' >&2
     return 1

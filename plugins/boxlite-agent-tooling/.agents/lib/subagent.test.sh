@@ -438,7 +438,7 @@ static_precedes_dynamic() {  # description, rendered prompt, static probe, dynam
 }
 # Host-fixture subshells above do not change this suite's plugin root.
 # shellcheck disable=SC2031
-audit_criteria="$(subagent_prompt audit/commit-push-criteria "$PLUGIN_ROOT")"
+audit_criteria="$(subagent_prompt audit/commit-push-criteria "$PLUGIN_ROOT" "plugin_root=$PLUGIN_ROOT")"
 commit_runner_rendered="$(subagent_prompt audit/commit-push-runner "$PLUGIN_ROOT" \
   "audit_criteria=$audit_criteria" \
   'command_json={"marker":"DYNAMIC_COMMIT_RUNNER"}' head=h diff_hash=d \
