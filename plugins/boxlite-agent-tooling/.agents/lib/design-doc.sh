@@ -128,3 +128,12 @@ design_doc_binding() { # bind|check, working directory, URL for bind -> verified
   esac
   printf '%s\n' "$url"
 }
+
+design_doc_show() { # working directory -> content of the verified binding
+  local url
+  # Auditors read through the binder's authenticated reader; provider pages need a login.
+  url="$(design_doc_binding check "$1")" || return 1
+  _design_doc_content "$url" || {
+    _design_doc_error 'cannot read document (check URL, provider access, and credentials)'; return 1;
+  }
+}

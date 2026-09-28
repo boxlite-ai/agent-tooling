@@ -566,7 +566,7 @@ printf -v headless_command \
   "$hook_session_scope" "$hook_prompt_epoch" \
   "$tooling_root/.agents/hooks/audit/run-commit-push-audit.sh" "$kind" '<target command>'
 headless_command+=$'\n    (set CODEX_BIN if the default codex command is not usable)'
-if ! audit_criteria="$(subagent_prompt audit/commit-push-criteria "$tooling_root")" \
+if ! audit_criteria="$(subagent_prompt audit/commit-push-criteria "$tooling_root" "plugin_root=$tooling_root")" \
    || [[ "$audit_criteria" != *[![:space:]]* ]]; then
   printf 'preflight-commit-push: cannot load nonempty commit-push-criteria prompt\n' >&2
   exit 2

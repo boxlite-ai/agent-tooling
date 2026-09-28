@@ -47,13 +47,17 @@ github_doc() {
   jq -nc --arg url "$url" --arg body "$1" '{html_url:$url,body:$body}' > "$DOC_FIXTURE"
 }
 expect 'missing binding blocks' 1 check
+expect 'missing binding has nothing to show' 1 show
 github_doc $'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
 expect 'GitHub doc can be registered' 0 bind "$url"
 expect 'matching branch verifies again' 0 check
 [[ "$(cat "$scratch/out")" == "$url" ]] || fail=$((fail+1))
 [[ "$(wc -l < "$DOC_CALLS")" -ge 2 ]] || fail=$((fail+1))
+expect 'show prints the bound GitHub design' 0 show
+[[ "$(cat "$scratch/out")" == *'Verify designs before edits.'* ]] || fail=$((fail+1))
 git checkout -qb different
 expect 'another branch cannot reuse binding' 1 check
+expect 'another branch cannot show the binding' 1 show
 git checkout -q feature
 export DOC_ERROR=1
 expect 'network failures never use previous success' 1 check
@@ -128,6 +132,8 @@ expect 'Linear needs credentials' 1 bind "$linear"
 export LINEAR_API_KEY=fixture-only
 jq -nc --arg url "$linear" '{data:{issue:{url:$url,description:"## TL;DR\n\nDesign and validation.",archivedAt:null}}}' > "$DOC_FIXTURE"
 expect 'Linear document verifies' 0 bind "$linear"
+expect 'show reads a Linear design through its API' 0 show
+[[ "$(cat "$scratch/out")" == *'Design and validation.'* ]] || fail=$((fail+1))
 cp "$DOC_FIXTURE" "$scratch/linear-valid"
 jq -nc --arg url "$linear" --arg body "$design word" \
   '{data:{issue:{url:$url,description:$body,archivedAt:null}}}' > "$DOC_FIXTURE"

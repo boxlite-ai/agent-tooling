@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Register or verify the design doc for the current worktree and branch.
+# Register, verify, or print the design doc for the current worktree and branch.
 set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 for dependency in jq perl git curl; do
@@ -18,5 +18,6 @@ source "$plugin_root/.agents/lib/design-doc.sh" || exit 2
 case "${1:-}:$#" in
   bind:2) design_doc_binding bind "$PWD" "$2" ;;
   check:1) design_doc_binding check "$PWD" ;;
-  *) printf 'usage: design-doc.sh bind <URL> | check\n' >&2; exit 2 ;;
+  show:1) design_doc_show "$PWD" ;;
+  *) printf 'usage: design-doc.sh bind <URL> | check | show\n' >&2; exit 2 ;;
 esac

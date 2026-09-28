@@ -71,6 +71,9 @@ Notion child blocks fail closed; list items and code retain their density semant
 Workflow and tracking issues invoke `boxlite-design-doc` by name.
 `.agents/prompts/audit/commit-push-criteria.md` and the PR question require native/headless
 reviewers to verify sources against the diff and report blocking gaps/corrective checks.
+Commit-push auditors read the bound design through `design-doc.sh show`, which rechecks
+the binding and prints the same authenticated provider read, so Linear and Notion
+designs need no browser login.
 Pre-edit validation covers access/structure; research completeness, page length,
 and design quality remain review criteria.
 Every PR requires substantive project docs; reviewers assess their quality.
