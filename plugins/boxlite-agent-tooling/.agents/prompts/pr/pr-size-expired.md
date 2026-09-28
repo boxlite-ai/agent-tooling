@@ -5,9 +5,9 @@ placeholders: lines, base, head, request_id, state, tooling
 description: Expiry preserves splitting unless a human explicitly requests a new attempt.
 ---
 
-PR size {{lines}} exceeds 400 code lines. The exception deadline expired.
+PR size {{lines}} exceeds 400 added code lines. The exception deadline expired.
 Current base {{base}}, head {{head}}. Reuse or create one tracking issue with a PR
-checklist and split into coherent tested PRs of at most 400 code lines. Create separate
+checklist and split into coherent tested PRs of at most 400 added code lines. Create separate
 issues only for work needing independent tracking.
 
 Only a new explicit human instruction to request the exception again permits renewal.

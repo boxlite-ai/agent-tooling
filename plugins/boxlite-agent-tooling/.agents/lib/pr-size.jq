@@ -11,6 +11,11 @@ def non_code:
   or test("\\A(package-lock\\.json|npm-shrinkwrap\\.json|pnpm-lock\\.yaml|go\\.sum)\\z")
   end;
 
+def test_file:
+  ascii_downcase | split("/") |
+  ((.[-1] | test("(\\.spec\\.ts|_test\\.go)$"))
+   or (.[0:-1] | index("tests") != null));
+
 def count: type == "number" and . >= 0 and . <= 1000000000 and floor == .;
 def path: type == "string" and length > 0 and (test("[\u0000\r\n]") | not);
 
@@ -25,7 +30,10 @@ then error("incomplete comparison")
 else {
   base: .base_commit.sha, head: $head,
   lines: ([.files[] | select(
-    (.filename | non_code | not)
-    or (has("previous_filename") and (.previous_filename | non_code | not)))
-    | .additions + .deletions] | add // 0)
+    (.filename | test_file | not)
+    and ((.filename | non_code | not)
+         or (has("previous_filename")
+             and (.previous_filename | test_file | not)
+             and (.previous_filename | non_code | not))))
+    | .additions] | add // 0)
 } end
