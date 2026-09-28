@@ -25,7 +25,7 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
-| Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. PRs over 400 changed code lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
+| Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. PRs over 400 added code lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely typed answer; idle expiry and selected options never authorize a PR. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
 | Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | At most one writing reminder per turn, for TL;DR or dense text. Continued replies still reach timed confirmations and verdict checks. See the decision table below. |
@@ -165,26 +165,28 @@ creation before tests; Stop fixtures require the hook's process containment.
 The size policy in [the shared workflow](guidance/workflow.md#workflow) is enforced for supported direct
 `gh pr create/edit/ready` commands by `.agents/lib/pr-size.sh`. It reads GitHub's
 published comparison for creation, editing, and readiness, summing code additions
-and deletions through `.agents/lib/pr-size.jq`. Source, tests, scripts, configuration,
-and generated code count, including comments and blank lines within those files.
+through `.agents/lib/pr-size.jq`. Source, scripts, configuration, and generated
+code count, including comments and blank lines within those files.
 Creation requires a published branch;
 Base-changing edits, fork creation, and opaque invocations are unsupported.
 Git pushes, direct API calls, and browser writes are outside this size check;
 it is not a repository-wide enforcement boundary.
 
-The classifier excludes recognized prose names/formats, assets, tabular/log data,
-and dependency lockfiles. It classifies filenames, not directories: `docs/example.py`
-counts, and JSON/YAML configuration and unfamiliar extensions count conservatively.
+The classifier excludes `*.spec.ts`, `*_test.go`, files under `tests` directories,
+recognized prose names/formats, assets, tabular/log data, and dependency lockfiles.
+Other paths are classified by filename: `docs/example.py` counts, and JSON/YAML
+configuration and unfamiliar extensions count conservatively.
 Build/dependency text manifests (`CMakeLists.txt`, `requirements*.txt`, and
 `constraints*.txt`) also count.
-Executable Markdown variants such as MDX count. A rename counts if either name is
-code. The filter owns the exact exclusion list; repository attributes cannot override it.
+Executable Markdown variants such as MDX count. A rename into a test path is excluded;
+otherwise it counts if either name is code. The filter owns the exact exclusion list;
+repository attributes cannot override it.
 
 All filenames and statistics are validated before filtering. Comparisons with 300
 or more returned files fail closed because GitHub may truncate the list, including
 documentation-only comparisons. Exceptions retain the exact base/head binding;
 excluded file changes still move HEAD and invalidate approval. For example, 400
-code lines plus 2,000 Markdown lines pass the size check; 401 code lines do not.
+added code lines plus 2,000 Markdown lines pass the size check; 401 do not.
 
 The workflow owns decomposition and stack requirements; the
 [tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md) supplies the plan structure.

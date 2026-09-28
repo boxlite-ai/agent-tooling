@@ -75,10 +75,11 @@ Apply the workflow's **PR size and decomposition** requirements, including excep
 expiry and renewal. Use the [tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md)
 when splitting; see [size enforcement](ARCHITECTURE.md#pr-size-and-stacks) for hook coverage.
 
-The 400-line cap counts code additions plus deletions, including tests, scripts,
-configuration, and generated source. Recognized documentation, assets/data, and
-lockfiles are excluded; unfamiliar files count. A PR with 400 code lines and
-2,000 Markdown lines fits; 401 code lines require splitting or an exception.
+The 400-line cap counts added code, including scripts, configuration, and generated
+source. Deletions, `*.spec.ts`, `*_test.go`, files under `tests` directories,
+recognized documentation, assets/data, and lockfiles are excluded; unfamiliar
+files count. A PR with 400 added code lines and 2,000 Markdown lines fits;
+401 added code lines require splitting or an exception.
 
 For managed native questions in local Claude sessions, launch with:
 

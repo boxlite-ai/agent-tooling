@@ -71,10 +71,22 @@ Retry failed calls once. https://github.com/example/repo/issues/123"' ;;
 }
 check_code_size 'documentation-only comparison' \
   '[{"filename":"README.md","additions":1000,"deletions":500}]' 0
+check_code_size 'deletions do not count' \
+  '[{"filename":"src/main.sh","additions":400,"deletions":900}]' 400
+check_code_size 'test files and tests directories do not count' \
+  '["src/main.spec.ts","pkg/main_test.go","tests/main.ts","src/tests/nested/main.go"] | map({filename:.,additions:401,deletions:0})' 0
+check_code_size 'similar names remain code' \
+  '["src/main.spec.tsx","pkg/main_test.gox","src/mytests/main.go"] | map({filename:.,additions:401,deletions:0})' 1203
+check_code_size 'renamed code into tests does not count' \
+  '[{"filename":"tests/main.go","previous_filename":"src/main.go","status":"renamed","additions":401,"deletions":0}]' 0
+check_code_size 'renamed test into code counts' \
+  '[{"filename":"src/main.go","previous_filename":"tests/main.go","status":"renamed","additions":401,"deletions":0}]' 401
+check_code_size 'renamed test into prose does not count' \
+  '[{"filename":"README.md","previous_filename":"tests/main.go","status":"renamed","additions":401,"deletions":0}]' 0
 check_code_size 'mixed comparison at code boundary' \
-  '[{"filename":"src/main.sh","additions":180,"deletions":120},{"filename":"tests/main.test.sh","additions":40,"deletions":10},{"filename":"config.yml","additions":50,"deletions":0},{"filename":"docs/guide.rst","additions":2000,"deletions":0}]' 400
+  '[{"filename":"src/main.sh","additions":180,"deletions":120},{"filename":"tests/main.test.sh","additions":40,"deletions":10},{"filename":"config.yml","additions":220,"deletions":0},{"filename":"docs/guide.rst","additions":2000,"deletions":0}]' 400
 check_code_size 'mixed comparison above code boundary' \
-  '[{"filename":"src/main.sh","additions":400,"deletions":1},{"filename":"README.md","additions":2000,"deletions":0}]' 401
+  '[{"filename":"src/main.sh","additions":401,"deletions":900},{"filename":"README.md","additions":2000,"deletions":0}]' 401
 check_code_size 'assets, data, and lockfiles' \
   '["LICENSE","notes.txt","image.svg","data.csv","package-lock.json","pnpm-lock.yaml","Cargo.lock"] | map({filename:.,additions:900,deletions:0})' 0
 check_code_size 'text build and dependency configuration' \

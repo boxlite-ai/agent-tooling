@@ -28,7 +28,7 @@ issue solely to hold the design.
 Repeat this todo for each coherent PR within the size limit. Replace the instructions
 and placeholders with the actual plan; add PR links when available.
 
-- [ ] Slice title — PR: pending; depends on: none; estimate: code additions + deletions.
+- [ ] Slice title — PR: pending; depends on: none; estimate: added code lines.
   - Scope: the behavior this slice changes.
   - Done when: the acceptance criteria and relevant checks pass and the PR lands.
 

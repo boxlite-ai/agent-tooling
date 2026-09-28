@@ -5,7 +5,7 @@ placeholders: lines, base, head, request_id, state, tooling
 description: A measured oversized PR needs a concrete human reason or splitting.
 ---
 
-PR size: {{lines}} code lines; maximum 400. Base {{base}}, head {{head}}.
+PR size: {{lines}} added code lines; maximum 400. Base {{base}}, head {{head}}.
 Show this diff and a concrete split plan. Request human-typed
 pr-size-exception: <change, concrete constraint, and why that split is unsafe or impractical>.
 Reject generic urgency or convenience. The reason needs at least 12 words; length alone
