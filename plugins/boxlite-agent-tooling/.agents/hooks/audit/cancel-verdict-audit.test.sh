@@ -377,6 +377,30 @@ auditor_run other-plugin:commit-push-auditor foreign-audit
 check_eq "another plugin's same-named agent is not an auditor" \
   "$(epoch_after "$(handback foreign-audit)")" changed
 
+echo "## A hand-back that arrives before SubagentStop stays internal"
+# Observed in Claude Code: the agent-message hand-back is submitted while the
+# auditor is still recorded as running, and SubagentStop fires only afterwards.
+auditor_event() {  # event, agent type, agent id
+  jq -nc --arg event "$1" --arg type "$2" --arg id "$3" \
+    '{hook_event_name:$event,session_id:"session-a",agent_id:$id,agent_type:$type,last_assistant_message:"PASS"}' \
+    | (cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+        AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL") >/dev/null 2>&1
+}
+auditor_event SubagentStart boxlite-agent-tooling:commit-push-auditor early-audit
+early_handback="$(epoch_after "$(handback early-audit)")"
+auditor_event SubagentStop boxlite-agent-tooling:commit-push-auditor early-audit
+check_eq "a hand-back before the stop and the notification after it both stay internal" \
+  "handback=$early_handback notification=$(epoch_after $'<task-notification>\n<task-id>early-audit</task-id>\n<status>completed</status>\n</task-notification>')" \
+  "handback=same notification=same"
+check_eq "the early hand-back spends the stop's second credit" \
+  "$(epoch_after "$(handback early-audit)")" changed
+auditor_event SubagentStart boxlite-agent-tooling:commit-push-auditor early-twice
+early_first="$(epoch_after "$(handback early-twice)")"
+check_eq "only one early delivery per running generation is internal" \
+  "first=$early_first second=$(epoch_after "$(handback early-twice)")" \
+  "first=same second=changed"
+auditor_event SubagentStop boxlite-agent-tooling:commit-push-auditor early-twice
+
 control_scope="$(session_scope_of "$R" session-a)"
 malformed_active="$R/.agents/state/auditor-control/active.$control_scope.verdict-auditor.json"
 printf '{not-json\n' > "$malformed_active"

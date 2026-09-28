@@ -604,6 +604,28 @@ case "${1:-}" in
         '{event:$event,auditor:$auditor,generation:$generation}')"
       exit 0
     done
+    # Claude submits the agent-message hand-back before it runs SubagentStop, so the
+    # first delivery can find the auditor still running and no credit minted yet.
+    # Accept one such delivery for that exact running generation, and note it so the
+    # stop mints one credit fewer.
+    for active_file in "$auditor_control_state_dir"/active."$scope".*.json; do
+      [[ -e "$active_file" || -L "$active_file" ]] || continue
+      active_json="$(verdict_audit_read_single_record "$active_file" 2>/dev/null)" || continue
+      auditor="$(printf '%s' "$active_json" | jq -r '.auditor // ""')"
+      auditor_control_active_record_is_bound "$active_json" "$scope" "$auditor" "$active_file" \
+        || continue
+      [[ "$(printf '%s' "$active_json" | jq -r '.generation')" == "$generation" ]] || continue
+      early_file="$auditor_control_state_dir/early-completion.$scope.$auditor.$generation.json"
+      [[ ! -e "$early_file" && ! -L "$early_file" ]] || exit 3
+      jq -nc --arg auditor "$auditor" --arg generation "$generation" \
+        --arg scope "$scope" --argjson now "$(date +%s)" \
+        '{auditor:$auditor,generation:$generation,session_scope:$scope,created_at:$now}' \
+        | auditor_control_write_json_atomic "$early_file" || exit 1
+      auditor_control_append_event "$(jq -nc --arg event completion-consumed-early \
+        --arg auditor "$auditor" --arg generation "$generation" \
+        '{event:$event,auditor:$auditor,generation:$generation}')"
+      exit 0
+    done
     exit 3
     ;;
   --locked-stop)
@@ -670,8 +692,12 @@ case "${1:-}" in
     fi
     auditor_control_add_completion_receipt "$scope" "$auditor" "$generation" || exit 1
     # Claude submits a finished subagent twice, as an agent-message hand-back and as a
-    # task-notification; each is a UserPromptSubmit that needs its own credit.
-    if [[ "$(hook_host_kind)" == claude ]]; then
+    # task-notification; each is a UserPromptSubmit that needs its own credit, unless
+    # the hand-back already arrived while the auditor was running.
+    early_file="$auditor_control_state_dir/early-completion.$scope.$auditor.$generation.json"
+    if [[ -e "$early_file" || -L "$early_file" ]]; then
+      auditor_control_state_retire_cache_entry "$early_file" || exit 1
+    elif [[ "$(hook_host_kind)" == claude ]]; then
       auditor_control_add_completion_receipt "$scope" "$auditor" "$generation" || exit 1
     fi
     exit 0
