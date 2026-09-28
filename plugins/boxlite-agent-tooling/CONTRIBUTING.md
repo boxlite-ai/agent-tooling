@@ -40,6 +40,12 @@ guidance, and installed plugin version separately. Preserve explicit holds and
 unrelated worktree changes. Existing sessions need a plugin reload or a new task
 to load the updated resources.
 
+Consumer bootstrap scripts are committed snapshots; installation does not rewrite
+them. Compare `.agent-tooling/install.sh`, `claude-plugin-bootstrap.sh`, and
+`codex-plugin-bootstrap.sh` with the released templates. Propagate applicable
+changes while preserving consumer customizations. Verify Claude records by exact
+`projectPath`: a successful update in one linked worktree can leave another stale.
+
 ### Verification boundaries
 
 In lifecycle tests, wait for the observed phase before injecting a signal. A
