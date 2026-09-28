@@ -47,6 +47,12 @@ check_input() { # tool, tool_input JSON, wanted allow|deny
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' deny
 done
+# Agents copy this command, and Claude Code refuses any command naming a Bash builtin.
+if grep -qF 'design-doc.sh" register <' "$scratch/err"; then
+  printf 'PASS the denial prints the register command\n'; pass=$((pass+1))
+else
+  printf 'FAIL the denial does not print the register command\n'; cat "$scratch/err"; fail=$((fail+1))
+fi
 check Read README.md allow
 check Bash "gcloud logging read 'severity>=ERROR' --limit=20" allow
 check Bash 'kubectl logs deployment/example --tail=20 | tail -n 10' allow
