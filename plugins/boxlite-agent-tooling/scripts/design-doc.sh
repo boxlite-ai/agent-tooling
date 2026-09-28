@@ -15,8 +15,10 @@ source "$plugin_root/.agents/lib/reply-summary.sh" || exit 2
 source "$plugin_root/.agents/lib/concise-writing.sh" || exit 2
 # shellcheck source=../.agents/lib/design-doc.sh
 source "$plugin_root/.agents/lib/design-doc.sh" || exit 2
+# register is the printed verb: Claude Code refuses any command naming a Bash builtin,
+# which bind is. bind stays accepted for existing callers.
 case "${1:-}:$#" in
-  bind:2) design_doc_binding bind "$PWD" "$2" ;;
+  bind:2|register:2) design_doc_binding bind "$PWD" "$2" ;;
   check:1) design_doc_binding check "$PWD" ;;
-  *) printf 'usage: design-doc.sh bind <URL> | check\n' >&2; exit 2 ;;
+  *) printf 'usage: design-doc.sh register <URL> | check\n' >&2; exit 2 ;;
 esac

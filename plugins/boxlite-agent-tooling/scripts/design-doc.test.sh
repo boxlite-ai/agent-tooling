@@ -49,6 +49,8 @@ github_doc() {
 expect 'missing binding blocks' 1 check
 github_doc $'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
 expect 'GitHub doc can be registered' 0 bind "$url"
+# The gate prints register: Claude Code refuses commands that name a Bash builtin.
+expect 'register is an equivalent verb' 0 register "$url"
 expect 'matching branch verifies again' 0 check
 [[ "$(cat "$scratch/out")" == "$url" ]] || fail=$((fail+1))
 [[ "$(wc -l < "$DOC_CALLS")" -ge 2 ]] || fail=$((fail+1))

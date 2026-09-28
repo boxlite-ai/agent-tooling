@@ -66,11 +66,11 @@ pr_description_check() { # root, create|edit|ready, validated gh PR arguments
         body="$1"; shift; count=$((count+1)) ;;
       --body=*|-b=*) body="${token#*=}"; count=$((count+1)) ;;
       -b?*) body="${token#-b}"; count=$((count+1)) ;;
-      --title|-t|--base|-B|--head|-H|--assignee|-a|--label|-l|--milestone|-m|--project|-p|--reviewer|-r|--add-assignee|--add-label|--add-project|--add-reviewer|--remove-assignee|--remove-label|--remove-project|--remove-reviewer)
+      --title|-t|--base|-B|--head|-H|--repo|-R|--assignee|-a|--label|-l|--milestone|-m|--project|-p|--reviewer|-r|--add-assignee|--add-label|--add-project|--add-reviewer|--remove-assignee|--remove-label|--remove-project|--remove-reviewer)
         (( $# )) || return 1
         shift ;;
       --draft|-d|--draft=true|-d=true|--dry-run|--no-maintainer-edit|--remove-milestone|--undo) ;;
-      --title=*|--base=*|--head=*|--assignee=*|--label=*|--milestone=*|--project=*|--reviewer=*|--add-*=*|--remove-*=*|-t?*|-B?*|-H?*|-a?*|-l?*|-m?*|-p?*|-r?*) ;;
+      --title=*|--base=*|--head=*|--repo=*|--assignee=*|--label=*|--milestone=*|--project=*|--reviewer=*|--add-*=*|--remove-*=*|-t?*|-B?*|-H?*|-R?*|-a?*|-l?*|-m?*|-p?*|-r?*) ;;
       -*) printf 'The design doc check requires literal inline PR text.'; return 1 ;;
       *) [[ "$operation" != create && -z "$selector" ]] || return 1; selector="$token" ;;
     esac

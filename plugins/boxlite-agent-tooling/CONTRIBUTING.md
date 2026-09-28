@@ -91,11 +91,14 @@ Do not pre-fill this example as a developer response.
 
 ### Pull request descriptions
 
-Apply `boxlite-design-doc`, then bind before coding:
+Apply `boxlite-design-doc`, then register it before coding:
 
 ```sh
-bash <plugin-root>/scripts/design-doc.sh bind <URL>
+bash <plugin-root>/scripts/design-doc.sh register <URL>
 ```
+
+`bind` remains an alias. Prefer `register`: in worktree-isolated sessions Claude Code
+refuses any command that names a Bash builtin, and `bind` is one.
 
 GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
 `LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.
