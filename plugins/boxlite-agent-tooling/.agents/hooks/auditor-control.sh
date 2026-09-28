@@ -42,9 +42,13 @@ auditor_control_known_auditors() {
 }
 
 auditor_control_canonical_auditor() {  # host agent type/name
+  # Claude reports plugin agents under this plugin's namespace; other plugins' agents
+  # of the same name are not auditors.
   case "$1" in
-    commit-push-auditor|commit_push_auditor) printf 'commit-push-auditor' ;;
-    verdict-auditor|verdict_auditor) printf 'verdict-auditor' ;;
+    commit-push-auditor|commit_push_auditor|boxlite-agent-tooling:commit-push-auditor)
+      printf 'commit-push-auditor' ;;
+    verdict-auditor|verdict_auditor|boxlite-agent-tooling:verdict-auditor)
+      printf 'verdict-auditor' ;;
     *) return 1 ;;
   esac
 }
@@ -665,6 +669,11 @@ case "${1:-}" in
         '{event:$event,auditor:$auditor,generation:$generation,terminal:$terminal}')"
     fi
     auditor_control_add_completion_receipt "$scope" "$auditor" "$generation" || exit 1
+    # Claude submits a finished subagent twice, as an agent-message hand-back and as a
+    # task-notification; each is a UserPromptSubmit that needs its own credit.
+    if [[ "$(hook_host_kind)" == claude ]]; then
+      auditor_control_add_completion_receipt "$scope" "$auditor" "$generation" || exit 1
+    fi
     exit 0
     ;;
   --locked-handle-prompt)
