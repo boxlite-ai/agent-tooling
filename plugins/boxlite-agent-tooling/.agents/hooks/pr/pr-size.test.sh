@@ -57,6 +57,35 @@ context_hook() {
        bash "$plugin/.agents/hooks/preflight-pr-review.sh")
 }
 export SIZE_TEST_LINES=400
+plain_context_command="$context_command"
+for directory_option in "-C '$target_root'" "--chdir '$target_root'" "--chdir='$target_root'"; do
+  context_command="env $directory_option $plain_context_command"
+  out="$(context_hook '{}')"
+  [[ -z "$out" ]] || {
+    printf 'FAIL: literal env directory did not bind the target checkout\n%s\n' "$out" >&2; exit 1;
+  }
+done
+for directory_option in "-C relative" "-C '\$TARGET'" "-C $target_root/*" \
+    "-C '$target_root' -C '$target_root'" "-C '$scratch'"; do
+  context_command="env $directory_option $plain_context_command"
+  out="$(context_hook '{}')"
+  [[ "$(jq -r .hookSpecificOutput.permissionDecision <<<"$out")" == deny ]] || {
+    printf 'FAIL: unsafe env directory was accepted\n%s\n' "$out" >&2; exit 1;
+  }
+done
+context_command="env -C '$target_root' $plain_context_command"
+export SIZE_TEST_LINES=401
+out="$(context_hook '{}')"
+[[ "$out" == *'pr-size-exception:'* ]]
+[[ "$(jq -r .spec.binding.root .agents/state/pr-size-request.json)" == "$target_root" ]]
+rm .agents/state/pr-size-request.json
+context_command="env -C '$target_root' gh pr ready"
+export SIZE_TEST_LINES=400
+out="$(context_hook '{}')"
+[[ "$out" == *'reviewed:'* ]]
+[[ "$(jq -r .spec.binding.repo .agents/state/pr-review-request.json)" == "$target_root" ]]
+rm .agents/state/pr-review-request.json
+context_command="$plain_context_command"
 for directory_field in workdir cwd event_cwd; do
   context="$(jq -nc --arg field "$directory_field" --arg root "$target_root" '
     if $field == "event_cwd" then {cwd:$root}

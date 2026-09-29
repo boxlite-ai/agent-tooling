@@ -167,6 +167,10 @@ PR preflight resolves the shell checkout from `tool_input.workdir`,
 metadata binds GitHub comparisons, design lookup, and review state to that
 checkout; invalid or unavailable directories fail closed. Without metadata,
 the existing `CLAUDE_PROJECT_DIR` review-state location remains supported.
+Hosts without tool directory metadata can use `env -C /absolute/checkout gh pr …`
+(`--chdir` also works where supported). The guard binds that literal directory
+to the same checks. Relative, dynamic, repeated, and other environment overrides
+remain unsupported; the wrapper does not waive size, design, or review checks.
 
 The size policy in [the shared workflow](guidance/workflow.md#workflow) is enforced for supported direct
 `gh pr create/edit/ready` commands by `.agents/lib/pr-size.sh`. It reads GitHub's
