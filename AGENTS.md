@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 In plugin, edit `guidance/workflow.md`; run
 `bash scripts/sync-guidance.sh <repo-root>` and `bash scripts/sync-guidance.test.sh`.
 
-<!-- agent-tooling:guidance:begin rev=271aad280c0d-dirty sha256=c3ed8d66f7e1 -->
+<!-- agent-tooling:guidance:begin rev=74c8ddc3fdf8 sha256=c3ed8d66f7e1 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -114,4 +114,5 @@ Public artifacts/delegates: public evidence or disclosure approval for exact con
 Apply the `boxlite-writing` skill.
 
 - Check PR explanations against the diff, including drafts and description edits. State the problem, resulting behavior, and decisive verification once; file lists alone do not explain a change. Omit work logs and exhaustive test counts. Adapt repository templates.
+
 <!-- agent-tooling:guidance:end -->
