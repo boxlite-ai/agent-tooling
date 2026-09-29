@@ -137,16 +137,17 @@ set_target_mode() {  # $1 = temp file, $2 = destination (need not exist yet)
   }
 }
 
-# Presentation is separate from content. The blank line after the begin marker is
+# Presentation is separate from content. The blank lines around the guidance are
 # required by Markdown composition, not by us: a formatter treats an HTML comment
-# butted against the following block as a mistake, and being formatter-clean is
-# what keeps the block out of a consumer's CI failures. Integrity ignores these
-# separators — classify_target trims the body's blank edges before hashing — so
-# the recorded sha256 stays the hash of the rendered guidance itself.
+# butted against the following block as a mistake, and one right after a list
+# item as a lazy continuation of that item. Being formatter-clean is what keeps
+# the block out of a consumer's CI failures. Integrity ignores these separators —
+# classify_target trims the body's blank edges before hashing — so the recorded
+# sha256 stays the hash of the rendered guidance itself.
 render_block() {  # $1 = revision to stamp; emits the full marker-wrapped block
   printf '%srev=%s sha256=%s -->\n\n' "$BEGIN_PREFIX" "$1" "$canonical_sha12"
   cat "$canonical"
-  printf '%s\n' "$END_MARKER"
+  printf '\n%s\n' "$END_MARKER"
 }
 
 write_block() {  # the block as it should be written now

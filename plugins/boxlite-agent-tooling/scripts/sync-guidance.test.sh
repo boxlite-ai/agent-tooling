@@ -43,9 +43,12 @@ mkrepo() {  # $1 = directory
 
 marker_sha() { head -n1 "$1" | sed -E 's/.* sha256=([0-9a-f]{12}) -->$/\1/'; }
 canon_sha12() { shasum -a 256 "$1" | awk '{print substr($1, 1, 12)}'; }
+# The guidance between the markers, without the blank separator line on each side.
 block_content() {
   awk '/^<!-- agent-tooling:guidance:begin / { getline; body=1; next }
-       /^<!-- agent-tooling:guidance:end -->$/ { exit } body { print }' "$1"
+       /^<!-- agent-tooling:guidance:end -->$/ { exit }
+       body { if (n++) print held; held = $0 }
+       END { if (held != "") print held }' "$1"
 }
 
 # Lint the delivered workflow, including its skill reference.
@@ -144,8 +147,10 @@ echo "## The rendered block composes with Markdown formatters"
 # formatting error. Consumers whose formatter covers root markdown fail CI on it.
 check_eq "a blank line follows the begin marker" \
   "$(awk '/^<!-- agent-tooling:guidance:begin /{getline; print ($0 == "" ? "yes" : "no"); exit}' "$R/AGENTS.md")" "yes"
-check_eq "the end marker follows content directly" \
-  "$(awk '/^<!-- agent-tooling:guidance:end -->$/{print (prev == "" ? "blank" : "text"); exit} {prev = $0}' "$R/AGENTS.md")" "text"
+# The end marker needs one too: when the guidance ends with a list item, a marker
+# on the next line is read as part of that item, and a formatter reports it.
+check_eq "a blank line precedes the end marker" \
+  "$(awk '/^<!-- agent-tooling:guidance:end -->$/{print (prev == "" ? "blank" : "text"); exit} {prev = $0}' "$R/AGENTS.md")" "blank"
 # Layout drift must be repairable even though the content already matches —
 # otherwise byte-stability would freeze every block ever written in the old shape.
 OLD="$TMP/old-layout"; mkrepo "$OLD"
@@ -161,6 +166,18 @@ check_eq "sync repairs the layout" \
 run_sync "$SYNC" --check "$OLD" >/dev/null 2> "$TMP/err"
 check_eq "the repaired block checks clean" "$?" 0
 [[ ! -s "$TMP/err" ]] && ok "and silently" || bad "and silently"
+# A block written before the end marker had its blank line is repaired the same way.
+OLD_END="$TMP/old-end-layout"; mkrepo "$OLD_END"
+run_sync "$SYNC" "$OLD_END" >/dev/null 2>&1
+awk '{line[NR] = $0} END {for (i = 1; i <= NR; i++) if (!(line[i] == "" && line[i + 1] == "<!-- agent-tooling:guidance:end -->")) print line[i]}' \
+  "$OLD_END/AGENTS.md" > "$OLD_END/tmp" && mv "$OLD_END/tmp" "$OLD_END/AGENTS.md"
+check_eq "the old end layout is detectably different" \
+  "$(awk '/^<!-- agent-tooling:guidance:end -->$/{print (prev == "" ? "blank" : "text"); exit} {prev = $0}' "$OLD_END/AGENTS.md")" "text"
+run_sync "$SYNC" --check "$OLD_END" >/dev/null 2>&1
+check_eq "check does not call an old end layout hand-edited" "$?" 0
+run_sync "$SYNC" "$OLD_END" >/dev/null 2>&1
+check_eq "sync repairs the end layout" \
+  "$(awk '/^<!-- agent-tooling:guidance:end -->$/{print (prev == "" ? "blank" : "text"); exit} {prev = $0}' "$OLD_END/AGENTS.md")" "blank"
 
 echo
 echo "## Re-running is a byte-stable no-op"
