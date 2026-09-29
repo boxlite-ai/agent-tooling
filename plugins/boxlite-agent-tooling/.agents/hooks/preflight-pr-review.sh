@@ -108,6 +108,8 @@ invalid_create_contract_count=0
 invalid_edit_contract_count=0
 invalid_ready_contract_count=0
 unsafe_authorization_context_count=0
+command_directory=""
+command_directory_count=0
 opaque_protected_count=0
 parsed_simple_count=0
 ambiguous_execution_context=0
@@ -237,7 +239,8 @@ inspect_simple_command() {
   # This is deliberately a narrow recognizer, not a Bash interpreter. A single
   # literal command may contain assignment prefixes and command/exec/env. The
   # prefixes are scanned to find protected operations, but an authorizable PR
-  # command cannot mutate its executable, checkout, host, or repository context.
+  # command cannot mutate its executable, host, or repository context. One
+  # literal absolute env directory is bound to all checkout checks below.
   while (( command_index < word_count )); do
     if [[ "${shell_words[$command_index]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
       record_literal_assignment "${shell_words[$command_index]}" \
@@ -423,12 +426,32 @@ inspect_simple_command() {
           unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
           command_index=$((command_index + 1))
           ;;
-        -u|-C|-P|--unset|--chdir)
+        -C|--chdir|--chdir=*)
+          if [[ "$token" == --chdir=* ]]; then
+            next_value="${token#*=}"
+          else
+            (( command_index + 1 < word_count )) || return 0
+            command_index=$((command_index + 1))
+            next_value="${shell_words[$command_index]}"
+          fi
+          command_directory_count=$((command_directory_count + 1))
+          if [[ "$next_value" == /* ]] \
+             && (( command_directory_count == 1 \
+               && shell_word_dynamics[command_index] == 0 \
+               && shell_word_unquoted_globs[command_index] == 0 \
+               && shell_word_redirections[command_index] == 0 )); then
+            command_directory="$next_value"
+          else
+            unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+          fi
+          command_index=$((command_index + 1))
+          ;;
+        -u|-P|--unset)
           (( command_index + 1 < word_count )) || return 0
           unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
           command_index=$((command_index + 2))
           ;;
-        --unset=*|--chdir=*)
+        --unset=*)
           unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
           command_index=$((command_index + 1))
           ;;
@@ -1535,8 +1558,26 @@ if [[ -z "$subcmd" ]]; then
   fi
 fi
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Hosts may run hooks in the chat directory while the command targets another
+# checkout. Resolve once so GitHub lookup, design, and review state agree.
+working_directory="$(jq -er --arg fallback "$PWD" '
+  first((.tool_input.workdir, .tool_input.cwd, .cwd, $fallback) | select(. != null))
+  | strings | select(length > 0 and (index("\u0000") == null))
+' <<<"$payload")" || deny_writing 'The shell working directory is invalid.'
+cd -- "$working_directory" 2>/dev/null \
+  || deny_writing 'The shell working directory is unavailable.'
+if [[ -n "$command_directory" ]]; then
+  cd -- "$command_directory" 2>/dev/null \
+    || deny_writing 'The explicit env working directory is unavailable.'
+fi
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+  || deny_writing 'The shell working directory is not a Git checkout.'
 project_dir="${CLAUDE_PROJECT_DIR:-$repo_root}"
+if [[ -n "$command_directory" ]] \
+    || jq -e '[.tool_input.workdir, .tool_input.cwd, .cwd] | any(. != null)' \
+    <<<"$payload" >/dev/null; then
+  project_dir="$repo_root"
+fi
 branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
 marker_file="$project_dir/.agents/state/pr-reviewed.json"
@@ -1631,7 +1672,7 @@ if (( unsafe_authorization_context_count > 0 )) \
    || [[ -n "${GH_REPO:-}" || -n "${GH_HOST:-}" \
       || -n "${GIT_DIR:-}" || -n "${GIT_WORK_TREE:-}" ]]; then
   deny "A protected gh pr command changes or inherits execution/target context that is not bound to the review acknowledgment.
-Run it from the reviewed checkout with no inline environment assignments, env options,
+Run it from the reviewed checkout with no inline assignments, unsupported env options,
 gh --repo/--hostname flags, or inherited GH_REPO, GH_HOST, GIT_DIR, or GIT_WORK_TREE."
 fi
 

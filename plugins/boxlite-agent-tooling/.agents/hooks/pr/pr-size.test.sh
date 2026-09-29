@@ -38,6 +38,99 @@ call_hook() {
   jq -nc --arg command "$1" '{tool_input:{command:$command}}' \
     | bash "$plugin/.agents/hooks/preflight-pr-review.sh"
 }
+
+# Shell commands can target a checkout other than the hook process directory.
+git init -q -b elsewhere "$scratch/other"
+git -C "$scratch/other" -c user.email=t@t -c user.name=t commit -q --allow-empty -m other
+target_root="$(pwd -P)"
+context_command='gh pr create --draft --title "fix: retry calls" --body "## TL;DR
+
+Retry a failed call once.
+
+## How it works
+
+Retry failed calls once. https://github.com/example/repo/issues/123"'
+context_hook() {
+  jq -nc --arg command "$context_command" --argjson context "$1" \
+    '$context | .tool_input.command=$command' \
+    | (cd "$scratch/other" && CLAUDE_PROJECT_DIR="$scratch/other" \
+       bash "$plugin/.agents/hooks/preflight-pr-review.sh")
+}
+export SIZE_TEST_LINES=400
+plain_context_command="$context_command"
+for directory_option in "-C '$target_root'" "--chdir '$target_root'" "--chdir='$target_root'"; do
+  context_command="env $directory_option $plain_context_command"
+  out="$(context_hook '{}')"
+  [[ -z "$out" ]] || {
+    printf 'FAIL: literal env directory did not bind the target checkout\n%s\n' "$out" >&2; exit 1;
+  }
+done
+for directory_option in "-C relative" "-C '\$TARGET'" "-C $target_root/*" \
+    "-C '$target_root' -C '$target_root'" "-C '$scratch'"; do
+  context_command="env $directory_option $plain_context_command"
+  out="$(context_hook '{}')"
+  [[ "$(jq -r .hookSpecificOutput.permissionDecision <<<"$out")" == deny ]] || {
+    printf 'FAIL: unsafe env directory was accepted\n%s\n' "$out" >&2; exit 1;
+  }
+done
+context_command="env -C '$target_root' $plain_context_command"
+export SIZE_TEST_LINES=401
+out="$(context_hook '{}')"
+[[ "$out" == *'pr-size-exception:'* ]]
+[[ "$(jq -r .spec.binding.root .agents/state/pr-size-request.json)" == "$target_root" ]]
+rm .agents/state/pr-size-request.json
+context_command="env -C '$target_root' gh pr ready"
+export SIZE_TEST_LINES=400
+out="$(context_hook '{}')"
+[[ "$out" == *'reviewed:'* ]]
+[[ "$(jq -r .spec.binding.repo .agents/state/pr-review-request.json)" == "$target_root" ]]
+rm .agents/state/pr-review-request.json
+context_command="$plain_context_command"
+for directory_field in workdir cwd event_cwd; do
+  context="$(jq -nc --arg field "$directory_field" --arg root "$target_root" '
+    if $field == "event_cwd" then {cwd:$root}
+    else {tool_input:{($field):$root}} end')"
+  out="$(context_hook "$context")"
+  [[ -z "$out" ]] || {
+    printf 'FAIL: %s did not select the command checkout\n%s\n' "$directory_field" "$out" >&2
+    exit 1
+  }
+done
+context="$(jq -nc --arg root "$target_root" --arg other "$scratch/other" \
+  '{cwd:$other,tool_input:{workdir:$root,cwd:$other}}')"
+export SIZE_TEST_LINES=401
+out="$(context_hook "$context")"
+[[ "$out" == *'pr-size-exception:'* ]] || {
+  printf 'FAIL: the target checkout escaped size enforcement\n%s\n' "$out" >&2; exit 1;
+}
+[[ "$(jq -r .spec.binding.root .agents/state/pr-size-request.json)" == "$target_root" ]]
+[[ ! -e "$scratch/other/.agents/state/pr-size-request.json" ]]
+rm .agents/state/pr-size-request.json
+export SIZE_TEST_LINES=400
+context_command='gh pr ready'
+out="$(context_hook "$context")"
+[[ "$out" == *'reviewed:'* ]] || {
+  printf 'FAIL: the target checkout escaped review enforcement\n%s\n' "$out" >&2; exit 1;
+}
+[[ "$(jq -r .spec.binding.repo .agents/state/pr-review-request.json)" == "$target_root" ]]
+[[ ! -e "$scratch/other/.agents/state/pr-review-request.json" ]]
+rm .agents/state/pr-review-request.json
+for invalid in '""' 'false' '42' '[]' '"/nonexistent-pr-checkout"'; do
+  context="$(jq -nc --argjson invalid "$invalid" --arg root "$target_root" \
+    '{cwd:$root,tool_input:{workdir:$invalid}}')"
+  out="$(context_hook "$context")"
+  [[ "$out" == *'working directory'* ]] || {
+    printf 'FAIL: invalid working directory did not fail closed\n%s\n' "$out" >&2; exit 1;
+  }
+done
+context="$(jq -nc --arg root "$scratch" '{tool_input:{workdir:$root}}')"
+out="$(context_hook "$context")"
+[[ "$out" == *'working directory is not a Git checkout'* ]] || {
+  printf 'FAIL: directory outside Git was accepted\n%s\n' "$out" >&2; exit 1;
+}
+printf 'pr-size: command checkout selection and enforcement passed\n'
+export SIZE_TEST_LINES=401
+
 code_failures=0
 check_code_size() { # label, files JSON, expected code lines or unknown
   local label="$1" expected="$3" operation out command
