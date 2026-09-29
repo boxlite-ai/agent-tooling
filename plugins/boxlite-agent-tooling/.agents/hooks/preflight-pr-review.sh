@@ -1535,8 +1535,21 @@ if [[ -z "$subcmd" ]]; then
   fi
 fi
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Hosts may run hooks in the chat directory while the command targets another
+# checkout. Resolve once so GitHub lookup, design, and review state agree.
+working_directory="$(jq -er --arg fallback "$PWD" '
+  first((.tool_input.workdir, .tool_input.cwd, .cwd, $fallback) | select(. != null))
+  | strings | select(length > 0 and (index("\u0000") == null))
+' <<<"$payload")" || deny_writing 'The shell working directory is invalid.'
+cd -- "$working_directory" 2>/dev/null \
+  || deny_writing 'The shell working directory is unavailable.'
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+  || deny_writing 'The shell working directory is not a Git checkout.'
 project_dir="${CLAUDE_PROJECT_DIR:-$repo_root}"
+if jq -e '[.tool_input.workdir, .tool_input.cwd, .cwd] | any(. != null)' \
+    <<<"$payload" >/dev/null; then
+  project_dir="$repo_root"
+fi
 branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
 marker_file="$project_dir/.agents/state/pr-reviewed.json"
