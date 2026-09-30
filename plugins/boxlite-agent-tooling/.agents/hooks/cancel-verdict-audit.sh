@@ -91,18 +91,28 @@ fi
 prompt_text="$(printf '%s' "$payload" | jq -r '
   if (.prompt | type) == "string" then .prompt else "" end
 ')"
+# Spend one completion credit for a generation; status 0 means the prompt is internal.
+spend_completion() {  # generation
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+  CLAUDE_PROJECT_DIR="$project_dir" bash "$tooling_root/.agents/hooks/auditor-control.sh" \
+    consume-completion "$session_scope" "$1" >/dev/null 2>&1
+}
 if [[ "$prompt_text" == '<task-notification>'$'\n'*$'\n</task-notification>' ]]; then
   completion_generation="$(printf '%s' "$prompt_text" | jq -Rer '
     capture("<task-id>(?<generation>[A-Za-z0-9][A-Za-z0-9._-]{0,127})</task-id>").generation
   ' 2>/dev/null || true)"
-  if [[ "$completion_generation" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] \
-     && CLAUDE_PROJECT_DIR="$project_dir" bash \
-       "$tooling_root/.agents/hooks/auditor-control.sh" \
-       consume-completion "$session_scope" "$completion_generation" \
-       >/dev/null 2>&1; then
-    exit 0
-  fi
+  spend_completion "$completion_generation" && exit 0
 fi
+# Claude also hands a finished subagent back as an agent-message frame. The harness
+# indents the report, so a column-zero frame line inside it makes the prompt real.
+handback_sender="$(printf '%s' "$prompt_text" | perl -e '
+  local $/; my @lines = split /\n/, <STDIN>, -1;
+  exit 1 unless @lines > 2 && $lines[-1] eq "</agent-message>"
+    && $lines[0] =~ /\A<agent-message from="([A-Za-z0-9][A-Za-z0-9._-]{0,127})">\z/;
+  my $sender = $1;
+  exit 1 if grep { m{\A</?agent-message[\s>]} } @lines[1 .. $#lines - 1];
+  print $sender;
+' 2>/dev/null)" && spend_completion "$handback_sender" && exit 0
 # Spend a wake's nonce with the hook that minted it; status 0 means the prompt is internal.
 spend_wake() {  # marker-name owner-hook
   local nonce nonce_hash

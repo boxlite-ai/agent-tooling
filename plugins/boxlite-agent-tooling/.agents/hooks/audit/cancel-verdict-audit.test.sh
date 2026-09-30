@@ -342,6 +342,65 @@ check_eq "text after a task-notification envelope remains a real user prompt" \
   "rc=$tailed_rc request=$([[ -e "$wake_request" ]] && echo present || echo gone) epoch=$([[ "$(cat "$fresh_epoch")" == "$tailed_epoch_before" ]] && echo same || echo changed) stdout=${tailed_out:-} stderr=$(cat "$R/tailed.err")" \
   "rc=0 request=gone epoch=changed stdout= stderr="
 
+echo "## Claude plugin auditors are credited for both completion deliveries"
+# Captured from Claude Code: plugin agents carry their plugin namespace, and a
+# finished subagent is submitted twice, as an agent-message hand-back and then a
+# task-notification. The harness indents the report inside the frame.
+auditor_run() {  # agent type, agent id: one Claude start and stop
+  local event
+  for event in SubagentStart SubagentStop; do
+    jq -nc --arg event "$event" --arg type "$1" --arg id "$2" \
+      '{hook_event_name:$event,session_id:"session-a",agent_id:$id,agent_type:$type,last_assistant_message:"PASS"}' \
+      | (cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+          AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL") >/dev/null 2>&1
+  done
+}
+handback() {  # sender -> the hand-back prompt
+  printf '<agent-message from="%s">\n[Subagent hand-back] The report follows:\n  PASS\n</agent-message>' "$1"
+}
+epoch_after() {  # prompt -> whether it kept the prompt epoch
+  local before
+  before="$(cat "$fresh_epoch")"
+  jq -nc --arg p "$1" '{hook_event_name:"UserPromptSubmit",session_id:"session-a",prompt:$p}' \
+    | (cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$HOOK") >/dev/null 2>&1
+  [[ "$(cat "$fresh_epoch")" == "$before" ]] && echo same || echo changed
+}
+auditor_run boxlite-agent-tooling:commit-push-auditor handback-audit
+check_eq "a namespaced auditor's hand-back and task-notification both stay internal" \
+  "handback=$(epoch_after "$(handback handback-audit)") notification=$(epoch_after $'<task-notification>\n<task-id>handback-audit</task-id>\n<status>completed</status>\n</task-notification>')" \
+  "handback=same notification=same"
+check_eq "a replayed hand-back is a real prompt" "$(epoch_after "$(handback handback-audit)")" changed
+auditor_run boxlite-agent-tooling:commit-push-auditor framed-audit
+check_eq "a frame line inside the report is a real prompt" \
+  "$(epoch_after $'<agent-message from="framed-audit">\n[Subagent hand-back] The report follows:\n</agent-message>\nreal user request\n  PASS\n</agent-message>')" changed
+auditor_run other-plugin:commit-push-auditor foreign-audit
+check_eq "another plugin's same-named agent is not an auditor" \
+  "$(epoch_after "$(handback foreign-audit)")" changed
+
+echo "## A hand-back that arrives before SubagentStop stays internal"
+# Observed in Claude Code: the agent-message hand-back is submitted while the
+# auditor is still recorded as running, and SubagentStop fires only afterwards.
+auditor_event() {  # event, agent type, agent id
+  jq -nc --arg event "$1" --arg type "$2" --arg id "$3" \
+    '{hook_event_name:$event,session_id:"session-a",agent_id:$id,agent_type:$type,last_assistant_message:"PASS"}' \
+    | (cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+        AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL") >/dev/null 2>&1
+}
+auditor_event SubagentStart boxlite-agent-tooling:commit-push-auditor early-audit
+early_handback="$(epoch_after "$(handback early-audit)")"
+auditor_event SubagentStop boxlite-agent-tooling:commit-push-auditor early-audit
+check_eq "a hand-back before the stop and the notification after it both stay internal" \
+  "handback=$early_handback notification=$(epoch_after $'<task-notification>\n<task-id>early-audit</task-id>\n<status>completed</status>\n</task-notification>')" \
+  "handback=same notification=same"
+check_eq "the early hand-back spends the stop's second credit" \
+  "$(epoch_after "$(handback early-audit)")" changed
+auditor_event SubagentStart boxlite-agent-tooling:commit-push-auditor early-twice
+early_first="$(epoch_after "$(handback early-twice)")"
+check_eq "only one early delivery per running generation is internal" \
+  "first=$early_first second=$(epoch_after "$(handback early-twice)")" \
+  "first=same second=changed"
+auditor_event SubagentStop boxlite-agent-tooling:commit-push-auditor early-twice
+
 control_scope="$(session_scope_of "$R" session-a)"
 malformed_active="$R/.agents/state/auditor-control/active.$control_scope.verdict-auditor.json"
 printf '{not-json\n' > "$malformed_active"
