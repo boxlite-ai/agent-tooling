@@ -688,6 +688,13 @@ repository's workflow and permission boundaries and needs no plugin scripts.
 Shared workflow, shell guidance, fixer prompts, and audit criteria reference it by
 name for general coding and test quality. Their own instructions retain repository
 gates, Bash contracts, iteration receipts, and audit evidence requirements.
+
+`boxlite-reading-highlights` selects exact source phrases and reviews their meaning
+independently of rendering. Its optional browser reference covers reversible page
+highlighting and verification; the shared `skills/` alias exposes both. Codex UI
+metadata uses the same skill name. No browser tool or runtime dependency is required
+for text selection.
+
 `boxlite-design-doc` owns research requirements, the design outline, and design review.
 Hosts discover it through the same `skills/` alias; consumers name the skill without
 copying its rules. The full Test section and reproduce-before-fix remain in workflow guidance.

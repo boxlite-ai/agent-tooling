@@ -148,6 +148,7 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 | Shorten a reply, document, or PR description | [boxlite-writing](plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md) |
 | Explain a subsystem with a concrete example | “Use `boxlite-examples` to explain how this subsystem works.” |
 | Draw a diagram grounded in source | [boxlite-visualize](plugins/boxlite-agent-tooling/.agents/skills/boxlite-visualize/SKILL.md) |
+| Highlight essential phrases while preserving meaning | [boxlite-reading-highlights](plugins/boxlite-agent-tooling/.agents/skills/boxlite-reading-highlights/SKILL.md) |
 | Implement a Bash hook or gate | [shell-engineering](plugins/boxlite-agent-tooling/.agents/skills/shell-engineering/SKILL.md) |
 | Iterate on design-review findings | [adversarial-iteration](plugins/boxlite-agent-tooling/.agents/skills/adversarial-iteration/SKILL.md) |
 | Register a design before implementation | [Design registration](plugins/boxlite-agent-tooling/CONTRIBUTING.md#pull-request-descriptions) |
@@ -187,6 +188,17 @@ keeps essential principles and verification guidance; the
 routes concrete coding concerns to focused addons. Load only the relevant topics.
 There are no helper scripts or plugin dependencies. Repository workflow rules
 remain in `AGENTS.md`; the skill supplies focused engineering guidance.
+
+### Reading highlights
+
+Use `boxlite-reading-highlights` to select short source phrases across a text.
+It aims for five highlighted words per sentence, expanding when meaning requires
+it; an explicitly requested hard limit takes precedence. Selections preserve
+conditions and negation, with skip reasons when meaningful partial selection fails.
+
+Try: “Use boxlite-reading-highlights on this article; return the selected phrases.”
+Plain-text selection needs no browser. Applying yellow highlights to a page uses
+the optional browser reference and verifies actual coverage and text preservation.
 
 ### Optional prompt reminders
 
