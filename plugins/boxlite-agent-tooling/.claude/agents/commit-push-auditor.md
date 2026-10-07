@@ -53,6 +53,13 @@ unchecked required checks are FAIL findings.
 4. Apply every applicable repository workflow rule to the diff. Judge each in context;
    do not require runtime or concurrency work for docs-only changes.
 
+   For test rules, read up to 50 newest receipts in `test-runs/` beside `dossier_path`.
+   The host writes one per plain `make test...` command: `command`, `status`,
+   `exit_code`, `head`, `tree`. A receipt whose `tree` equals `git write-tree` of the
+   index observed the staged change. Otherwise `git diff-tree -r --name-only <tree>
+   <index tree>` lists what differed; if only non-test files differ, it observed a
+   revert-first run. A test claim without a receipt is unobserved.
+
 5. Judge commit subjects against CONTRIBUTING.md. Commit subjects come from the exact
    command; push subjects come only from `commit-subject ` lines in the verified push
    context. Block invalid `type(scope): summary`, subjects over 72 characters,

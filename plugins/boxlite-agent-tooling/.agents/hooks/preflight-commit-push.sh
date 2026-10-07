@@ -370,6 +370,18 @@ if [[ -z "$hook_session_scope" && -z "${GITHOOK_DELEGATED:-}" ]]; then
   fi
 fi
 
+# Receipts that record-test-run.sh wrote after `since` (epoch seconds); their names
+# start with the epoch they were recorded at.
+test_runs_after() {  # since -> 0 when a newer receipt exists
+  local since="$1" receipt_dir="$project_dir/.agents/state/test-runs" name
+  [[ "$since" =~ ^[0-9]+$ && -d "$receipt_dir" && ! -L "$receipt_dir" ]] || return 1
+  while IFS= read -r name; do
+    [[ "$name" =~ ^([0-9]+)-[0-9]+-[0-9]+\.json$ ]] || continue
+    (( BASH_REMATCH[1] > since )) && return 0
+  done < <(ls -1 "$receipt_dir" 2>/dev/null)
+  return 1
+}
+
 deny() {
   local reason="$1" reason_bytes
   reason_bytes="$(LC_ALL=C printf '%s' "$reason" | wc -c | tr -d ' ')"
@@ -730,6 +742,13 @@ ${invoke_instruction}"
     | jq -r '.advisories[]? | "  ~ " + .' 2>/dev/null || echo '')"
 
   if [[ "$audit_verdict" != "PASS" ]]; then
+    # Tests run after this audit are evidence it never saw. A missing-evidence finding
+    # has no diff to change, so new receipts earn a fresh audit, not the old verdict.
+    if test_runs_after "$audit_mtime"; then
+      rm -f "$audit_selection"
+      deny "Tests ran after this audit; re-audit is required.
+${invoke_instruction}"
+    fi
     findings="$(printf '%s' "$audit_document" \
       | jq -r '.findings[]? | "  - " + .' 2>/dev/null || echo '')"
     rm -f "$audit_selection"
