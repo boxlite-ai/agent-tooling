@@ -692,7 +692,11 @@ gates, Bash contracts, iteration receipts, and audit evidence requirements.
 
 `boxlite-reading-highlights` selects exact source phrases and reviews their meaning
 independently of rendering. Its optional browser reference covers reversible page
-highlighting and verification; the shared `skills/` alias exposes both. Codex UI
+highlighting, guarded batch application, and reviewed-plan caching. Long scopes can
+use authorized text-only workers; one owner controls the destination. Cached plans
+require matching live text, sentence fingerprints, scope, and selection settings;
+they contain data and do not automatically restore marks after reload.
+The shared `skills/` alias exposes both. Codex UI
 metadata uses the same skill name. No browser tool or runtime dependency is required
 for text selection.
 
