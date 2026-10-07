@@ -185,6 +185,45 @@ check_eq "a queued wake remains internal after terminal state and a newer human 
   "start_rc=$late_wake_rc marker=$([[ "$late_wake_marker" =~ ^\[auditor-wake:[0-9a-f]{64}\]$ ]] && echo valid || echo invalid) cancel_rc=$late_wake_cancel_rc request=$([[ -e "$wake_request" ]] && echo present || echo gone) epoch=$([[ "$(cat "$fresh_epoch")" == "$late_wake_epoch_before" ]] && echo same || echo changed) stdout=${late_wake_out:-} stderr=$(cat "$R/late-wake-cancel.err")" \
   "start_rc=2 marker=valid cancel_rc=0 request=present epoch=same stdout= stderr="
 
+echo "## A foreground auditor's wake, delivered after its stop, stays internal"
+# A foreground auditor blocks the parent turn, so the host delivers its 30-second wake
+# only after the auditor stops, however long the audit took.
+fg_scope="$(session_scope_of "$R" session-a)"
+foreground_wake() {  # generation -> wake prompt payload; leaves the escalation closed
+  local generation="$1" start stop
+  start="$(jq -nc --arg s session-a --arg id "$generation" \
+    '{hook_event_name:"SubagentStart",session_id:$s,agent_id:$id,agent_type:"verdict-auditor"}')"
+  printf '%s' "$start" | (
+    cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" \
+      CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
+  ) > /dev/null 2> "$R/$generation.err"
+  stop="$(jq -nc --arg s session-a --arg id "$generation" \
+    '{hook_event_name:"SubagentStop",session_id:$s,agent_id:$id,agent_type:"verdict-auditor",last_assistant_message:"PASS"}')"
+  printf '%s' "$stop" | (cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$CONTROL") >/dev/null
+  jq -nc --arg s session-a \
+    --arg p "$(rewake_prompt SubagentStart:verdict-auditor "$(cat "$R/$generation.err")")" \
+    '{hook_event_name:"UserPromptSubmit",session_id:$s,prompt:$p}'
+}
+age_escalation() {  # generation opened-seconds-ago closed-seconds-ago
+  local file="$R/.agents/state/auditor-control/escalation.$fg_scope.verdict-auditor.$1.json" now
+  now="$(date +%s)"
+  jq -c --argjson opened "$((now - $2))" --argjson closed "$((now - $3))" \
+    '.opened_at=$opened | .closed_at=$closed' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+deliver_wake() {  # payload -> epoch=same|changed
+  local before; before="$(cat "$fresh_epoch")"
+  printf '%s' "$1" | (cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$HOOK") >/dev/null 2>&1
+  [[ "$(cat "$fresh_epoch")" == "$before" ]] && printf 'epoch=same' || printf 'epoch=changed'
+}
+long_wake="$(foreground_wake long-foreground-audit)"
+age_escalation long-foreground-audit 400 10
+check_eq "a wake 400 seconds after its escalation but 10 after the stop is internal" \
+  "$(deliver_wake "$long_wake")" "epoch=same"
+stale_wake="$(foreground_wake stale-foreground-audit)"
+age_escalation stale-foreground-audit 700 400
+check_eq "a wake 400 seconds after the stop is a new prompt" \
+  "$(deliver_wake "$stale_wake")" "epoch=changed"
+
 late_completion_start="$(jq -nc --arg s session-a --arg id late-completion-audit \
   '{hook_event_name:"SubagentStart",session_id:$s,agent_id:$id,agent_type:"verdict-auditor"}')"
 printf '%s' "$late_completion_start" \

@@ -813,6 +813,16 @@ if [[ -z "${GITHOOK_DELEGATED:-}" ]]; then
   if [[ "$hooks_path" == *".githooks" ]]; then
     [[ "$hooks_path" != /* ]] && hooks_path="$repo_root/$hooks_path"
     if [[ -x "$hooks_path/pre-$kind" ]]; then
+      # A session keeps the plugin it loaded. Tooling installed mid-session moves the
+      # git hooks ahead of it, and the loaded auditors then reject the newer gate's
+      # audit tasks as invalid input.
+      loaded_version="$(jq -r '.version // ""' "$tooling_root/plugin.json" 2>/dev/null || true)"
+      adopted_version="$(jq -r '.version // ""' "${hooks_path%/.githooks}/plugin.json" \
+        2>/dev/null || true)"
+      if [[ -n "$loaded_version" && -n "$adopted_version" \
+            && "$loaded_version" != "$adopted_version" ]]; then
+        deny "This session loaded agent-tooling $loaded_version, but this repository's git hooks run $adopted_version. Run /reload-plugins in Claude Code, or start a new session, then retry."
+      fi
       # No validation here: the git-level gate runs this same script with
       # GITHOOK_DELEGATED set, and that pass is the single consumer of the artifact.
       write_command_handoff
