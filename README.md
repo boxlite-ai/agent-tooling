@@ -200,6 +200,12 @@ Try: “Use boxlite-reading-highlights on this article; return the selected phra
 Plain-text selection needs no browser. Applying yellow highlights to a page uses
 the optional browser reference and verifies actual coverage and text preservation.
 
+For long pages or multiple chapters, the skill prepares reviewed plans from one
+extraction and supports bounded text-only workers when authorized. Browser
+application checks live text and sentence fingerprints before applying ranges in
+batches. Cached plans can be reused after validation; refreshing clears temporary
+marks, and cache data does not automatically restore them.
+
 ### Optional prompt reminders
 
 For prompt-only reminders, copy [rule-recency.sh](plugins/boxlite-agent-tooling/.agents/hooks/rule-recency.sh)

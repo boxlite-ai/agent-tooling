@@ -14,6 +14,12 @@ Highlight each sentence’s essential meaning in short yellow phrases, aiming fo
 - Output: sentence identifiers and exact source spans, with offsets or anchors to distinguish repeated text.
 - Apply highlights only to the requested destination; otherwise return selections. Keep selection separate from rendering.
 
+## Long scopes
+
+- Extract once into ordered paragraphs and sentences with stable identifiers and original offsets; retain source context.
+- When delegation is available and authorized, use bounded text-only workers, e.g. three, on disjoint scopes. Each performs the meaning review below and returns selections and skips; one owner controls the destination.
+- Merge only reviewed plans. Require exactly one selection or reasoned skip per scoped sentence. Reuse reviewed plans only while source, scope, and selection settings still match.
+
 ## Select
 
 - Read the full scope. Cover every substantive sentence where possible, rather than only a few key sentences.
