@@ -1,0 +1,4 @@
+interface:
+  display_name: "BoxLite Reading Highlights"
+  short_description: "Meaningful yellow cues with a flexible word target"
+  default_prompt: "Use $boxlite-reading-highlights on this text: concise phrases, aiming for five words per sentence and expanding when meaning requires it."
