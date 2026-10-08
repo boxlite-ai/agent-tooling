@@ -448,6 +448,35 @@ if [[ "$got" == "passthrough" ]]; then
 else
   fail=$((fail + 1)); printf '  FAIL  hooksPath set with the delegate present defers  (got=%s)\n' "$got"
 fi
+
+# Tooling installed mid-session: the git hooks run a newer plugin than the session
+# loaded, so the loaded auditors would reject the delegated gate's audit task.
+ADOPTED="$(mktemp -d)"
+mkdir -p "$ADOPTED/plugin/.githooks"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$ADOPTED/plugin/.githooks/pre-commit"
+chmod +x "$ADOPTED/plugin/.githooks/pre-commit"
+printf '{"version":"0.1.27"}\n' > "$DELEG_REPO/plugin.json"
+printf '{"version":"0.1.28"}\n' > "$ADOPTED/plugin/plugin.json"
+git -C "$DELEG_REPO" config core.hooksPath "$ADOPTED/plugin/.githooks"
+skew_reason="$(printf 'git commit -m x' | jq -Rs '{tool_input:{command:.}}' \
+  | ( cd "$DELEG_REPO" && CLAUDE_PROJECT_DIR="$DELEG_REPO" \
+      bash "$DELEG_REPO/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null \
+  | jq -r 'select(.hookSpecificOutput.permissionDecision == "deny")
+           | .hookSpecificOutput.permissionDecisionReason' 2>/dev/null)"
+if [[ "$skew_reason" == *"loaded agent-tooling 0.1.27"*"run 0.1.28"*"/reload-plugins"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  a plugin older than the git hooks is told to reload\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  a plugin older than the git hooks is told to reload  (got=%s)\n' "$skew_reason"
+fi
+
+printf '{"version":"0.1.28"}\n' > "$DELEG_REPO/plugin.json"
+got="$(deleg_decision)"
+if [[ "$got" == "passthrough" ]]; then
+  pass=$((pass + 1)); printf '  PASS  matching plugin and git-hook versions still defer\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  matching plugin and git-hook versions still defer  (got=%s)\n' "$got"
+fi
+rm -rf "$ADOPTED"
 rm -rf "$DELEG_REPO"
 
 echo

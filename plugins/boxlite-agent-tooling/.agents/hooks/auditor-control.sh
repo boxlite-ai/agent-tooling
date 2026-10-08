@@ -560,7 +560,16 @@ case "${1:-}" in
          && "$(printf '%s' "$escalation_json" | jq -r '.wake_nonce_hash // ""')" == "$wake_nonce_hash" ]] \
         || continue
       [[ "$opened_at" =~ ^[1-9][0-9]*$ && ${#opened_at} -le 18 ]] || continue
-      (( opened_at <= now && now <= opened_at + 300 )) || continue
+      # A foreground auditor blocks the parent turn, so the host queues its wake until
+      # the auditor stops. Time a closed escalation's window from that stop, or every
+      # audit that outlasts the window turns its own wake into a new prompt.
+      window_start="$opened_at"
+      closed_at="$(printf '%s' "$escalation_json" | jq -r '.closed_at // ""')"
+      if [[ "$escalation_state" == closed && "$closed_at" =~ ^[1-9][0-9]*$ \
+            && ${#closed_at} -le 18 ]] && (( opened_at < closed_at && closed_at <= now )); then
+        window_start="$closed_at"
+      fi
+      (( opened_at <= now && now <= window_start + 300 )) || continue
       printf '%s' "$escalation_json" | jq -c --argjson now "$(date +%s)" \
         'del(.wake_nonce_hash) | .wake_consumed_at=$now' \
         | auditor_control_write_json_atomic "$escalation_file" || exit 1

@@ -3,4 +3,4 @@ name: auditor-question-followup
 used-by: .agents/hooks/auditor-control.sh
 placeholders:
 ---
-If Other is selected, re-open the same card; do not infer a choice. A terminal audit may leave this card stale; still run the selected command, which safely rejects terminal or superseded generations.
+If the auditor's report has already reached you, the card is stale: skip it and run nothing. If Other is selected, re-open the same card; do not infer a choice.
