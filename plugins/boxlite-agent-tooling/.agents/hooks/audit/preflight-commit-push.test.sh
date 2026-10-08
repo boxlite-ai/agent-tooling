@@ -256,6 +256,25 @@ fi
 write_audit "FAIL" '["Test: missing"]' "commit"
 run "FAIL verdict → deny"               "$GC -m foo"                  "deny"
 
+# A test run recorded after a FAIL is evidence that audit never saw: the gate hands out
+# a fresh audit task instead of repeating the old findings.
+write_audit "FAIL" '["test: no run observed"]' "commit"
+perl -e 'utime($ARGV[0], $ARGV[0], $ARGV[1]) or exit 1' "$(( $(date +%s) - 120 ))" \
+  "$TMP/.agents/state/last-audit.json"
+mkdir -p "$TMP/.agents/state/test-runs"
+printf '{}\n' > "$TMP/.agents/state/test-runs/$(date +%s)-1-1.json"
+reaudit_reason="$(hook_raw "$GC -m foo" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')"
+check_raw "a test run after a FAIL earns a fresh audit task" \
+  "$([[ "$reaudit_reason" == "Tests ran after this audit; re-audit is required."* \
+        && "$reaudit_reason" == *"commit-push-auditor"* ]] && echo fresh || echo "$reaudit_reason")" \
+  fresh
+rm -f "$TMP/.agents/state/test-runs/"*.json
+rmdir "$TMP/.agents/state/test-runs"
+stale_reason="$(hook_raw "$GC -m foo" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')"
+check_raw "without a newer test run the FAIL stands" \
+  "$([[ "$stale_reason" == "CLAUDE.md audit FAILED"* ]] && echo failed || echo "$stale_reason")" \
+  failed
+
 # A dossier is untrusted state, including when a native auditor wrote it. PASS may not
 # launder findings, and unsafe path types must fail closed quickly instead of blocking
 # the hook or following state outside the repository.

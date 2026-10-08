@@ -6,7 +6,7 @@ These manifests connect Claude Code and Codex lifecycle events to the shared hoo
 
 | File | Loaded by | Host differences |
 | --- | --- | --- |
-| [hooks.json](hooks.json) | Claude Code convention | Uses `asyncRewake`; includes `StopFailure` and managed `AskUserQuestion` hooks. |
+| [hooks.json](hooks.json) | Claude Code convention | Uses `asyncRewake`; includes `StopFailure`, `PostToolUseFailure` and managed `AskUserQuestion` hooks. |
 | [codex-hooks.json](codex-hooks.json) | Generic and Codex plugin manifests | Uses `async`; omits Claude-only events and questions. |
 
 Commands resolve the plugin directory through `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`.
@@ -45,7 +45,8 @@ matcher alone does not distinguish `git commit` from an unrelated command.
 | `PreToolUse` / editor or patch tools | [preflight-design-doc.sh](../.agents/hooks/preflight-design-doc.sh) |
 | `PreToolUse` / `Bash` | [preflight-commit-push.sh](../.agents/hooks/preflight-commit-push.sh), [preflight-pr-review.sh](../.agents/hooks/preflight-pr-review.sh) |
 | `PreToolUse`, `PostToolUse` / `AskUserQuestion` (Claude) | [claude-timed-question.sh](../.agents/hooks/claude-timed-question.sh) |
-| `PostToolUse` / `Bash` | [post-remote-write-watch.sh](../.agents/hooks/post-remote-write-watch.sh) |
+| `PostToolUse` / `Bash` | [post-remote-write-watch.sh](../.agents/hooks/post-remote-write-watch.sh), [record-test-run.sh](../.agents/hooks/record-test-run.sh) |
+| `PostToolUseFailure` / `Bash` (Claude) | [record-test-run.sh](../.agents/hooks/record-test-run.sh) |
 | `Stop` | [stop-gate.sh](../.agents/hooks/stop-gate.sh) |
 | `StopFailure` (Claude) | [record-api-failure.sh](../.agents/hooks/record-api-failure.sh), [resume-after-api-failure.sh](../.agents/hooks/resume-after-api-failure.sh) |
 

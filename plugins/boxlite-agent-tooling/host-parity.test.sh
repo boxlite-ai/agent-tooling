@@ -309,7 +309,7 @@ done
 CODEX_EVENTS='PreToolUse PermissionRequest PostToolUse PreCompact PostCompact
 SessionStart SessionEnd UserPromptSubmit SubagentStart SubagentStop Stop Interrupt'
 # Events Claude Code has and Codex does not. Wired only in hooks/hooks.json.
-CLAUDE_ONLY_EVENTS='StopFailure'
+CLAUDE_ONLY_EVENTS='StopFailure PostToolUseFailure'
 
 for event in $CLAUDE_ONLY_EVENTS; do
   case " $(echo $CODEX_EVENTS) " in
