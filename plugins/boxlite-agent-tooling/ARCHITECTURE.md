@@ -335,8 +335,11 @@ change those controls.
 `.agents/prompts/subagent/timed-subagent.md` with an absolute deadline: 85 percent of the
 timeout, capped at 510 seconds after rendering. Both headless audit runners use it;
 native commit/push dispatch opts in through `subagent_instruction --timeout-seconds`.
-Verdict and commit/push defaults remain 600 and 900 seconds respectively. Both
-therefore request a report by 510 seconds; a 120-second audit requests one by 102.
+Verdict and commit/push audits both default to 900 seconds, so each requests a report
+by 510 seconds and keeps 390 seconds to write it; a 120-second audit requests one by
+102. A 600-second verdict default left 90 seconds, too few for a retry's history and
+reflection reviews: every reflection retry hit the hard timeout
+([#234](https://github.com/boxlite-ai/agent-tooling/issues/234)).
 
 The agent starts one native Monitor, stops new checks on its notice, and cancels an
 unused timer with TaskStop. Each auditor owns its result schema and treats unchecked

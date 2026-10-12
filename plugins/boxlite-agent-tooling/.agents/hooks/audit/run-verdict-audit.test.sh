@@ -2694,6 +2694,8 @@ jq -nc --arg system "$system_prompt" --arg message "$audit_prompt" \
     calls:$calls,safe_mode:$safe,no_session_persistence:$persistence,
     effort:$effort,system_mode:$system_mode}' > "$REQUEST_CAPTURE"
 mkdir -p "$CLAUDE_PROJECT_DIR/.agents/state"
+[[ -z "${LOCK_CAPTURE:-}" ]] \
+  || cp "$CLAUDE_PROJECT_DIR/.agents/state/verdict-audit.lock" "$LOCK_CAPTURE"
 printf '{"branch":"main","head":"h","tree_hash":"t","verdict":"PASS","proof":[],"findings":[]}' \
   > "$CLAUDE_PROJECT_DIR/.agents/state/last-verdict.json"
 FAKE
@@ -2740,6 +2742,22 @@ for deadline_case in 600:510 120:102 1200:510; do
   check_eq "verdict runner supplies one native Monitor procedure" \
     "$(jq -r '[.messages[0].content | scan("SUBAGENT_FINISH_NOW")] | length' "$REQUEST_CAP")" 1
 done
+# The hard alarm, not the notice, ends a slow audit. A reflection retry still has to
+# write its history and reflection reviews after the notice, so the default budget
+# must leave minutes for that report, not seconds.
+LOCK_CAP="$R/captured-lock.txt"
+( cd "$R" && CLAUDE_PROJECT_DIR="$R" SPEC_CAPTURE="$CAP" REQUEST_CAPTURE="$REQUEST_CAP" \
+    LOCK_CAPTURE="$LOCK_CAP" PATH="$BIN:$PATH" \
+    env -u VERDICT_AUDITOR_CMD -u VERDICT_AUDITOR_TIMEOUT \
+      bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
+lock_deadline="$(awk '{print $2}' "$LOCK_CAP" 2>/dev/null || true)"
+finish_at="$(jq -r 'try (.messages[0].content | capture("(?m)^finish_at=(?<time>[0-9]+)$").time) catch "0"' "$REQUEST_CAP")"
+report_window=missing
+[[ "$lock_deadline" =~ ^[0-9]+$ && "$finish_at" =~ ^[1-9][0-9]*$ ]] \
+  && report_window="$(( lock_deadline - verdict_audit_deadline_slack_seconds - finish_at ))"
+check_eq "default verdict budget leaves five minutes to report after the notice" \
+  "$([[ "$report_window" =~ ^[0-9]+$ && "$report_window" -ge 300 ]] \
+      && echo enough || echo "short:$report_window")" enough
 rm -rf "$R" "$BIN"
 
 echo

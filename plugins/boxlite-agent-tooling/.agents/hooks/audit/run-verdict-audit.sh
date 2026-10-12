@@ -15,7 +15,7 @@
 #   1. VERDICT_AUDITOR_CMD — full override; invoked with the audit prompt on stdin;
 #      must leave a dossier behind. Per-harness config, tests stub it.
 #   2. claude CLI — headless with the auditor spec as system prompt, tools
-#      whitelisted, hooks disabled (no nested gates), 10-minute cap.
+#      whitelisted, hooks disabled (no nested gates), 15-minute cap.
 #   3. Codex CLI — read-only, hooks disabled, ephemeral, same timeout. Codex writes
 #      only its final response through the host-owned --output-last-message channel;
 #      the parent runner validates and publishes those bytes.
@@ -41,7 +41,7 @@ repo_root="$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null \
 project_dir="$(cd "$repo_root" && pwd -P)"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 spec_file="$tooling_root/.claude/agents/verdict-auditor.md"
-audit_timeout_seconds="${VERDICT_AUDITOR_TIMEOUT:-600}"
+audit_timeout_seconds="${VERDICT_AUDITOR_TIMEOUT:-900}"
 auditor_model="${VERDICT_AUDITOR_MODEL:-claude-sonnet-5}"
 audit_pgid=0
 audit_group_identity_owned=false
