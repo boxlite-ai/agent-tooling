@@ -89,7 +89,7 @@ A zone boundary adds `scope` and its palette class:
 ```
 
 ```text
-classDef scope_execution fill:#ffedd5,stroke:#ea580c,color:#1f2933
+classDef scope_execution fill:#140f03,stroke:#bc8f1b,color:#fbbf24,stroke-width:1.5px
 class runner_fleet scope_execution
 ```
 
@@ -156,6 +156,8 @@ CHANGED REMOVED`; a diff annotation's target must intersect the base/head hunk.
 ## Artifacts
 
 `.mmd`, `.svg`, `.png` per block; the SVG is measured against 1600×900. A pass proves
-syntax, fit, and traceability — not composition; inspect the PNG. The palette is the only
-permitted styling and stays legible on light/dark hosts; `style`, `linkStyle`, themes,
-and other `classDef`s are rejected.
+syntax, fit, and traceability — not composition; inspect the PNG. The house palette —
+`scope_*` zone classes plus `default`, `accent`, `accent_zone`, and one `linkStyle default`
+— is the only permitted styling and stays legible on light/dark hosts; `style`, other
+`linkStyle`s, themes, and other `classDef`s are rejected. Publication figures for blogs,
+slides, or social posts follow [figure-contract.md](figure-contract.md).

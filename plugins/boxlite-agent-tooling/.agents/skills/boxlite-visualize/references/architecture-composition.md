@@ -36,7 +36,7 @@ representative EC2 labelled `× N`, every step modelled:
 
 ```mermaid
 flowchart TB
-classDef scope_execution fill:#ffedd5,stroke:#ea580c,color:#1f2933
+classDef scope_execution fill:#140f03,stroke:#bc8f1b,color:#fbbf24,stroke-width:1.5px
 subgraph runner_fleet["Runner fleet · × N"]
   subgraph ec2_runner["EC2 instance · representative"]
     subgraph runner_process["Runner daemon"]
@@ -103,31 +103,43 @@ altitude or split the topic — never shrink labels or drop real boundaries.
 - Sibling zones disjoint; no edge through a zone it does not touch; edges in main-path
   order.
 - Short labels — a second line only for domain, port, protocol, implementation, scale,
-  or constraint. Rounded actors, rectangle services, cylinder state, distinct microVMs.
+  or constraint. Pill actors `id(["…"])`, rounded services `id("…")`, cylinder state
+  `id[("…")]`, distinct microVMs.
 - Apply the [topic node limits](../SKILL.md#split-a-big-topic);
   boundaries that replace ownership arrows are free.
-- No logos, icons, or legends. The render — not `direction` or indentation — is the
-  truth.
+- No logos or icons. Zone titles name each scope, so colour is never the only cue. The
+  render — not `direction` or indentation — is the truth.
 
 ## Palette
 
 The only permitted styling; the validator rejects any other `classDef`, altered
-definition, `style`, `linkStyle`, or theme.
+definition, `style`, other `linkStyle`, or theme.
 
 | Scope | Meaning | Exact `classDef` |
 | --- | --- | --- |
-| `external` | users, SDKs, third parties | `classDef scope_external fill:#eceff1,stroke:#607d8b,color:#1f2933` |
-| `edge` | public ingress and routing | `classDef scope_edge fill:#dbeafe,stroke:#2563eb,color:#1f2933` |
-| `compute` | private services, internal tools | `classDef scope_compute fill:#dcfce7,stroke:#16a34a,color:#1f2933` |
-| `execution` | runners and box execution | `classDef scope_execution fill:#ffedd5,stroke:#ea580c,color:#1f2933` |
-| `state` | durable state and caches | `classDef scope_state fill:#ede9fe,stroke:#7c3aed,color:#1f2933` |
-| `observability` | telemetry, logs, metrics | `classDef scope_observability fill:#fef3c7,stroke:#d97706,color:#1f2933` |
+| `external` | users, SDKs, third parties | `classDef scope_external fill:#0b0c0d,stroke:#686f76,color:#8b949e,stroke-width:1.5px` |
+| `edge` | public ingress and routing | `classDef scope_edge fill:#101111,stroke:#979da3,color:#c9d1d9,stroke-width:1.5px` |
+| `compute` | private services, internal tools | `classDef scope_compute fill:#04110c,stroke:#279e73,color:#34d399,stroke-width:1.5px` |
+| `execution` | runners and box execution | `classDef scope_execution fill:#140f03,stroke:#bc8f1b,color:#fbbf24,stroke-width:1.5px` |
+| `state` | durable state and caches | `classDef scope_state fill:#12080d,stroke:#a4497a,color:#db61a2,stroke-width:1.5px` |
+| `observability` | telemetry, logs, metrics | `classDef scope_observability fill:#110703,stroke:#a3431c,color:#d95926,stroke-width:1.5px` |
 
-Copy the line verbatim and assign with `class <zone_id> scope_<name>`. Color zone
-subgraphs only — nodes and physical boundaries stay plain so the distinction survives —
-and the title still names the scope. Sequence and call graphs take no styling. Muted
-fills with dark text stay legible on light/dark hosts; the live Mermaid is the source of
-truth and the PNG a preview — check both themes when contrast matters.
+House lines, copied verbatim when used:
+
+| Line | Use |
+| --- | --- |
+| `classDef default fill:#111418,stroke:#8b949e,color:#ffffff` | every node becomes a dark card |
+| `classDef accent fill:#002330,stroke:#00b0f0,color:#ffffff,stroke-width:2.5px` | the diagram's subject, `class <node_id> accent` |
+| `classDef accent_zone fill:#000c11,stroke:#00b0f0,color:#00b0f0,stroke-width:2px` | the subject's boundary, in place of its scope class; its declared scope still holds |
+| `linkStyle default stroke:#8b949e,stroke-width:1.5px` | grey edges |
+
+Assign scopes with `class <zone_id> scope_<name>`. At most two elements carry the cyan
+accent, and only the subject does. Zones are dark cards whose border and title carry the
+role colour, and edges stay grey, so the diagram reads on light/dark hosts; physical
+boundaries stay plain. The hues come from one role palette, validated for colour-blind and
+normal vision, shared with [publication figures](figure-contract.md). Sequence and call
+graphs take no styling. The live Mermaid is the source of truth and the PNG a preview —
+check both themes when contrast matters.
 
 ## Visual QA
 
@@ -138,7 +150,8 @@ Open every PNG at fit-to-page:
 3. each parent visibly surrounds each declared member;
 4. external / AWS / VPC / subnet / host / process / runtime / state / telemetry
    boundaries truthful and disjoint;
-5. each scope one contiguous tinted zone; physical boundaries visibly plain;
+5. each scope one contiguous tinted zone; physical boundaries visibly plain; cyan only
+   on the subject;
 6. labels legible and unclipped;
 7. no arrow crosses an unrelated node or zone or implies false ownership;
 8. no empty region or long return edge distorts the layout;

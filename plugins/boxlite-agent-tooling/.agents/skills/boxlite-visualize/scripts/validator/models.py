@@ -7,14 +7,25 @@ from typing import Any, Literal
 Status = Literal["pass", "fail", "error"]
 
 SCOPE_NAMES = ("external", "edge", "compute", "execution", "state", "observability")
+# Dark zone cards: the fill is 8% of the role hue over black and the title wears the hue,
+# so zones read as cards on both GitHub themes. Hues match figure.style.ROLE_HUES.
 SCOPE_PALETTE = {
-    "scope_external": "fill:#eceff1,stroke:#607d8b,color:#1f2933",
-    "scope_edge": "fill:#dbeafe,stroke:#2563eb,color:#1f2933",
-    "scope_compute": "fill:#dcfce7,stroke:#16a34a,color:#1f2933",
-    "scope_execution": "fill:#ffedd5,stroke:#ea580c,color:#1f2933",
-    "scope_state": "fill:#ede9fe,stroke:#7c3aed,color:#1f2933",
-    "scope_observability": "fill:#fef3c7,stroke:#d97706,color:#1f2933",
+    "scope_external": "fill:#0b0c0d,stroke:#686f76,color:#8b949e,stroke-width:1.5px",
+    "scope_edge": "fill:#101111,stroke:#979da3,color:#c9d1d9,stroke-width:1.5px",
+    "scope_compute": "fill:#04110c,stroke:#279e73,color:#34d399,stroke-width:1.5px",
+    "scope_execution": "fill:#140f03,stroke:#bc8f1b,color:#fbbf24,stroke-width:1.5px",
+    "scope_state": "fill:#12080d,stroke:#a4497a,color:#db61a2,stroke-width:1.5px",
+    "scope_observability": "fill:#110703,stroke:#a3431c,color:#d95926,stroke-width:1.5px",
 }
+# Every node is a dark card; cyan marks the diagram's subject on at most two elements.
+HOUSE_CLASSES = {
+    "default": "fill:#111418,stroke:#8b949e,color:#ffffff",
+    "accent": "fill:#002330,stroke:#00b0f0,color:#ffffff,stroke-width:2.5px",
+    "accent_zone": "fill:#000c11,stroke:#00b0f0,color:#00b0f0,stroke-width:2px",
+}
+# Grey edges stay visible on white pages and on dark zone cards alike.
+HOUSE_LINK_STYLE = "stroke:#8b949e,stroke-width:1.5px"
+MAX_ACCENTS = 2
 
 
 @dataclass(frozen=True)
@@ -54,6 +65,7 @@ class ParsedDocument:
     architecture_boundaries: dict[tuple[str, str], str] = field(default_factory=dict)
     architecture_parents: dict[tuple[str, str], str] = field(default_factory=dict)
     architecture_scopes: dict[tuple[str, str], str] = field(default_factory=dict)
+    architecture_accent_zones: set[tuple[str, str]] = field(default_factory=set)
     sequence_nodes: dict[tuple[str, str], str] = field(default_factory=dict)
     sequence_edges: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
     sequence_edge_labels: dict[tuple[str, str], str] = field(default_factory=dict)

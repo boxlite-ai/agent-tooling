@@ -23,10 +23,12 @@ are separate gates; pass both.
    | source mechanics, function path | call graph, + sequence only if time matters |
    | issue, before/after | smallest unambiguous set |
    | named views | exactly those |
+   | blog, slide, or social figure | validated views, then a hand-placed figure |
 
 4. Read [output-contract.md](references/output-contract.md) before any artifact, and
    [architecture-composition.md](references/architecture-composition.md) before any
-   architecture, deployment, topology, overview, or picture work.
+   architecture, deployment, topology, overview, or picture work. For a figure published
+   outside the repository, also read [figure-contract.md](references/figure-contract.md).
 
 Never edit production code for a diagram request; save into the repository only when
 asked.
@@ -81,7 +83,8 @@ python3 .agents/skills/boxlite-visualize/scripts/validate_diagrams.py \
 ```
 
 Exit `0` pass, `1` invalid, `2` missing tool; checks are prefixed per topic. Passing
-proves render, fit, and traceability — not composition or completeness.
+proves render, fit, and traceability — not composition or completeness. A publication
+figure must also pass `check_figure.py`; see [figure-contract.md](references/figure-contract.md).
 
 ## Respond
 

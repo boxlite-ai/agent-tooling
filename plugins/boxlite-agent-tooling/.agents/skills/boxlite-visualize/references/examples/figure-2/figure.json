@@ -1,0 +1,98 @@
+{
+  "canvas": {"width": 1200, "height": 1160},
+  "title": "Figure 2 · Inside one machine",
+  "alt": "BoxliteRuntime in the host process spawns a jailed boxlite-shim whose VMM runs a micro-VM; inside it, boxlite-guest starts your OCI container. Disks, the box database and the image cache live in ~/.boxlite.",
+  "version": "boxlite main 5b3321c",
+  "brand": "BoxLite · VMM series #0",
+  "zones": [
+    {"id": "boundary:callers", "role": "external", "x": 420, "y": 90, "w": 740, "h": 140, "title": "External"},
+    {"id": "boundary:host_process", "role": "compute", "x": 40, "y": 280, "w": 1120, "h": 160,
+     "title": "Host process", "sub": "your app, CLI or serve"},
+    {"id": "boundary:shim_process", "role": "execution", "x": 40, "y": 520, "w": 720, "h": 460,
+     "title": "boxlite-shim × N", "caption": "jailed: bwrap + seccomp, or sandbox-exec", "wall": 2},
+    {"id": "boundary:micro_vm", "role": "subject", "x": 70, "y": 600, "w": 330, "h": 310,
+     "title": "micro-VM", "sub": "libkrunfw", "accent": true, "wall": 1},
+    {"id": "boundary:boxlite_home", "role": "state", "x": 820, "y": 520, "w": 340, "h": 460,
+     "title": "State", "sub": "~/.boxlite"}
+  ],
+  "nodes": [
+    {"id": "node:registry", "role": "external", "shape": "pill", "x": 450, "y": 150, "w": 200, "h": 60, "title": "OCI registry"},
+    {"id": "node:http_client", "role": "external", "shape": "pill", "x": 820, "y": 140, "w": 300, "h": 80,
+     "title": "HTTP client", "sub": ["SDKs · CLI · curl"]},
+    {"id": "node:sdk", "role": "compute", "shape": "box", "x": 50, "y": 340, "w": 280, "h": 80,
+     "title": "SDK bindings", "sub": ["Python, Node, Go, C"]},
+    {"id": "node:runtime", "role": "compute", "shape": "box", "x": 470, "y": 346, "w": 260, "h": 68,
+     "title": "BoxliteRuntime", "mono": true},
+    {"id": "node:rest", "role": "compute", "shape": "box", "x": 870, "y": 340, "w": 270, "h": 80,
+     "title": "REST server", "sub": ["boxlite serve :8100"]},
+    {"id": "node:vmm", "role": "subject", "shape": "box", "x": 430, "y": 590, "w": 320, "h": 180,
+     "title": "VMM · libkrun", "sub": ["KVM on Linux", "Hypervisor.framework"], "accent": true,
+     "tag": "→ our own VMM · #1512"},
+    {"id": "node:gvproxy", "role": "execution", "shape": "box", "x": 480, "y": 840, "w": 220, "h": 80,
+     "title": "gvproxy", "sub": ["networking"]},
+    {"id": "node:agent", "role": "execution", "shape": "box", "x": 100, "y": 660, "w": 270, "h": 80,
+     "title": "boxlite-guest", "sub": ["gRPC server"]},
+    {"id": "node:container", "role": "execution", "shape": "box", "x": 100, "y": 800, "w": 270, "h": 80,
+     "title": "OCI container", "sub": ["your workload"]},
+    {"id": "node:box_files", "role": "state", "shape": "cylinder", "x": 900, "y": 600, "w": 220, "h": 90,
+     "title": "QCOW2 disks", "sub": ["shared dirs"]},
+    {"id": "node:db", "role": "state", "shape": "cylinder", "x": 900, "y": 730, "w": 220, "h": 90,
+     "title": "Box database", "sub": ["SQLite"]},
+    {"id": "node:images", "role": "state", "shape": "cylinder", "x": 900, "y": 860, "w": 220, "h": 90,
+     "title": "Image cache"}
+  ],
+  "edges": [
+    {"id": "edge:e_pull", "points": [[550, 210], [550, 346]], "label": ["image layers"], "at": [550, 255]},
+    {"id": "edge:e_client_rest", "points": [[970, 220], [970, 340]], "label": ["HTTP /v1/boxes"], "at": [970, 255]},
+    {"id": "edge:e_sdk_runtime", "points": [[330, 380], [470, 380]], "label": ["Rust API"], "at": [400, 380]},
+    {"id": "edge:e_rest_runtime", "points": [[870, 380], [730, 380]], "label": ["Rust API"], "at": [800, 380]},
+    {"id": "edge:e_spawn_shim", "points": [[640, 414], [640, 590]], "label": ["spawns shim"], "at": [640, 555]},
+    {"id": "edge:e_grpc", "points": [[500, 414], [500, 480], [360, 480], [360, 660]], "label": ["gRPC over vsock"],
+     "at": [430, 480], "dash": true},
+    {"id": "edge:e_run_container", "points": [[235, 740], [235, 800]], "label": ["runs"], "at": [235, 770]},
+    {"id": "edge:e_net", "points": [[590, 770], [590, 840]], "label": ["virtio-net"], "at": [590, 805]},
+    {"id": "edge:e_block", "points": [[750, 645], [900, 645]], "label": ["virtio-blk", "virtio-fs"], "at": [825, 645]},
+    {"id": "edge:e_disks", "also": ["edge:e_db", "edge:e_cache"], "points": [[710, 414], [710, 480], [1080, 480], [1080, 520]],
+     "label": ["disks, state,", "image cache"], "at": [895, 480]}
+  ],
+  "key": {"x": 40, "y": 1000, "columns": 4, "roles": ["external", "compute", "execution", "state", "subject"],
+          "shapes": ["pill", "cylinder"], "lines": ["dashed"]},
+  "iso": {
+    "view": {"scale": 0.58, "origin": [600, 300]},
+    "layers": [
+      {"id": "boundary:shim_process", "role": "execution", "box": [0, 600, 0, 560], "z": 0, "t": 20,
+       "title": "boxlite-shim × N", "caption": "jailed process", "label_at": [330, 520]},
+      {"id": "boundary:micro_vm", "role": "subject", "box": [30, 470, 30, 470], "z": 200, "t": 20, "accent": true,
+       "title": "micro-VM", "caption": "KVM or Hypervisor.framework", "label_at": [330, 330]},
+      {"id": "boundary:host_process", "role": "compute", "box": [760, 1160, 0, 300], "z": 0, "t": 12,
+       "title": "Host process", "caption": "your app, CLI or serve", "label_at": [1180, 860]},
+      {"id": "boundary:boxlite_home", "role": "state", "box": [760, 1160, 420, 760], "z": 0, "t": 12,
+       "title": "State", "caption": "~/.boxlite", "label_at": [560, 900]}
+    ],
+    "blocks": [
+      {"id": "node:runtime", "also": ["node:sdk", "node:rest"], "role": "compute", "box": [800, 1120, 40, 260], "z": 12,
+       "h": 44, "title": "BoxliteRuntime", "sub": "SDK · REST :8100"},
+      {"id": "node:vmm", "role": "subject", "box": [470, 600, 40, 320], "z": 20, "h": 56, "accent": true,
+       "title": "VMM · libkrun", "tag": "→ our own VMM · #1512"},
+      {"id": "node:gvproxy", "role": "execution", "box": [480, 590, 380, 540], "z": 20, "h": 30, "title": "gvproxy"},
+      {"id": "node:container", "role": "execution", "box": [80, 340, 40, 200], "z": 220, "h": 40,
+       "title": "OCI container", "sub": "your workload"},
+      {"id": "node:agent", "role": "execution", "box": [60, 360, 330, 400], "z": 220, "h": 30,
+       "title": "boxlite-guest", "sub": "gRPC server"}
+    ],
+    "cylinders": [
+      {"id": "node:box_files", "role": "state", "center": [840, 480], "r": 42, "z": 12, "h": 46, "title": "QCOW2 disks"},
+      {"id": "node:db", "role": "state", "center": [950, 560], "r": 42, "z": 12, "h": 46, "title": "Box database"},
+      {"id": "node:images", "role": "state", "center": [1060, 640], "r": 42, "z": 12, "h": 46, "title": "Image cache"}
+    ],
+    "arrows": [
+      {"id": "edge:e_spawn_shim", "from": [800, 200, 30], "to": [600, 180, 20], "bend": 0.2,
+       "label": ["spawns shim"], "at": [1010, 520]},
+      {"id": "edge:e_grpc", "from": [880, 60, 56], "to": [360, 365, 240], "bend": 0.25, "dash": true,
+       "label": ["gRPC over vsock"], "at": [960, 410]},
+      {"id": "edge:e_run_container", "from": [210, 330, 250], "to": [210, 200, 240], "bend": 0.0},
+      {"id": "edge:e_block", "from": [600, 200, 50], "to": [840, 480, 58], "bend": -0.1,
+       "label": ["virtio-blk", "virtio-fs"], "at": [650, 735]}
+    ]
+  }
+}

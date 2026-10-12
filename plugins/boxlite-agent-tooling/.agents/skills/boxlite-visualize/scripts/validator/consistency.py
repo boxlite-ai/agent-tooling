@@ -147,7 +147,8 @@ def _check_boundaries(ctx: ValidationContext, state: str, errors: list[str]) -> 
 def _check_scopes(ctx: ValidationContext, state: str, errors: list[str]) -> None:
     expected_scopes: dict[str, str] = {}
     for item in ctx.manifest.get("boundaries", []):
-        if state not in item.get("states", []):
+        # The accent replaces the subject zone's scope colour, not its declared scope.
+        if state not in item.get("states", []) or (state, item["id"]) in ctx.parsed.architecture_accent_zones:
             continue
         scope = item.get("scope")
         if isinstance(scope, str):

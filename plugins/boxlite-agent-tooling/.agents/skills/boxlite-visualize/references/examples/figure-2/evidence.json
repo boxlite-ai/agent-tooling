@@ -1,0 +1,2313 @@
+{
+ "schema_version": 1,
+ "context": {
+  "kind": "overview",
+  "change_kind": "none",
+  "sources": {
+   "repository": "boxlite-ai/boxlite",
+   "head_revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e"
+  }
+ },
+ "views": [
+  "architecture"
+ ],
+ "topics": [
+  {
+   "id": "overview",
+   "question": "How one BoxLite engine runs boxes on your machine and in your own cloud"
+  },
+  {
+   "id": "local_machine",
+   "question": "How the BoxLite engine on your machine turns a call into a container in its own micro-VM",
+   "parent": "overview"
+  }
+ ],
+ "states": [
+  {
+   "id": "current",
+   "label": "Current",
+   "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+   "proposed": false
+  }
+ ],
+ "nodes": [
+  {
+   "id": "clients",
+   "label": "Browser, SDK or CLI",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 21,
+     "line_end": 22,
+     "symbol": "Browser",
+     "tokens": [
+      "browser([\"Browser\"])",
+      "sdk([\"SDK / CLI\"])"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "idp",
+   "label": "OIDC identity provider",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 23,
+     "line_end": 23,
+     "symbol": "idp",
+     "tokens": [
+      "OIDC identity provider"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "local_runtime",
+   "label": "Embedded BoxLite runtime",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 31,
+     "line_end": 31,
+     "symbol": "Daemonless",
+     "tokens": [
+      "embed as a library"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 116,
+     "line_end": 116,
+     "symbol": "runtime",
+     "tokens": [
+      "runtime embedded"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 124,
+     "line_end": 124,
+     "symbol": "serve",
+     "tokens": [
+      "boxlite serve"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "local_boxes",
+   "label": "Box micro-VMs",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 163,
+     "line_end": 163,
+     "symbol": "VM",
+     "tokens": [
+      "a hardware-virtualized VM per box (KVM / Hypervisor.framework)"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "edge_lb",
+   "label": "Load balancers",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/edge.ts",
+     "line_start": 13,
+     "line_end": 13,
+     "symbol": "balancer",
+     "tokens": [
+      "TLS terminates at the *balancer* on both clouds"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 27,
+     "line_end": 28,
+     "symbol": "alb",
+     "tokens": [
+      "Application Load Balancer",
+      "Network Load Balancer"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "api",
+   "label": "API + dashboard",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/api.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "workload",
+     "tokens": [
+      "The control plane: the one workload that answers a request from outside."
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 31,
+     "line_end": 31,
+     "symbol": "api",
+     "tokens": [
+      "API + bundled dashboard"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "proxy",
+   "label": "Box proxy",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/edge.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "proxy",
+     "tokens": [
+      "The box proxy: how a port inside a box becomes a hostname on the internet."
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/proxy/README.md",
+     "line_start": 3,
+     "line_end": 3,
+     "symbol": "proxy",
+     "tokens": [
+      "authorizes box access through the control plane",
+      "tunnels traffic"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "runner",
+   "label": "Runner",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/runner/README.md",
+     "line_start": 13,
+     "line_end": 13,
+     "symbol": "KVM",
+     "tokens": [
+      "Cloud deployment runs on Compute Engine or EC2 with nested KVM"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/runner/README.md",
+     "line_start": 25,
+     "line_end": 25,
+     "symbol": "runtime",
+     "tokens": [
+      "the embedded BoxLite runtime"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "cloud_boxes",
+   "label": "Box micro-VMs",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/runners.ts",
+     "line_start": 6,
+     "line_end": 6,
+     "symbol": "microVM",
+     "tokens": [
+      "box is a microVM under KVM"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "cloud_state",
+   "label": "PostgreSQL · Redis",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/database.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "PostgreSQL",
+     "tokens": [
+      "managed PostgreSQL"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/cache.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "cache",
+     "tokens": [
+      "The transient cache the control plane keeps its queues and sessions in."
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 36,
+     "line_end": 36,
+     "symbol": "redis",
+     "tokens": [
+      "ElastiCache Redis"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/storage.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "store",
+     "tokens": [
+      "The object store boxes keep their volumes in."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "http_client",
+   "label": "HTTP client",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 134,
+     "line_end": 135,
+     "symbol": "boxlite",
+     "tokens": [
+      "boxlite --url http://localhost:8100 list"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/cli/src/commands/serve/mod.rs",
+     "line_start": 4,
+     "line_end": 4,
+     "symbol": "Boxlite.rest",
+     "tokens": [
+      "clients can connect"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "registry",
+   "label": "OCI registry",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview",
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 166,
+     "line_end": 166,
+     "symbol": "Images",
+     "tokens": [
+      "pull + cache any OCI image",
+      "registries"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sdk",
+   "label": "SDK bindings",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 168,
+     "line_end": 168,
+     "symbol": "Interfaces",
+     "tokens": [
+      "Python · Node.js · Go · Rust · C SDKs"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "rest",
+   "label": "REST server",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/cli/src/commands/serve/mod.rs",
+     "line_start": 1,
+     "line_end": 3,
+     "symbol": "BoxliteRuntime",
+     "tokens": [
+      "long-running REST API server",
+      "Holds a single BoxliteRuntime"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 124,
+     "line_end": 125,
+     "symbol": "serve",
+     "tokens": [
+      "boxlite serve",
+      "Listening on 127.0.0.1:8100"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "runtime",
+   "label": "BoxliteRuntime",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/runtime/core.rs",
+     "line_start": 59,
+     "line_end": 60,
+     "symbol": "boxlite::runtime::core::BoxliteRuntime",
+     "tokens": [
+      "pub struct BoxliteRuntime"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "vmm",
+   "label": "VMM · libkrun",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/litebox/init/tasks/vmm_spawn.rs",
+     "line_start": 238,
+     "line_end": 238,
+     "symbol": "VmmKind::Libkrun",
+     "tokens": [
+      "engine: VmmKind::Libkrun"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 163,
+     "line_end": 163,
+     "symbol": "VM",
+     "tokens": [
+      "a hardware-virtualized VM per box (KVM / Hypervisor.framework)"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "gvproxy",
+   "label": "gvproxy",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/shim/src/main.rs",
+     "line_start": 141,
+     "line_end": 146,
+     "symbol": "GvproxyInstance::from_config",
+     "tokens": [
+      "Stand up the network backend (gvproxy)",
+      "GvproxyInstance::from_config(spec)"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 33,
+     "line_end": 33,
+     "symbol": "allow_net",
+     "tokens": [
+      "restrict egress with `allow_net`"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "agent",
+   "label": "boxlite-guest",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/guest/src/service/server.rs",
+     "line_start": 107,
+     "line_end": 109,
+     "symbol": "Server::builder",
+     "tokens": [
+      "Server::builder()",
+      "GuestServer"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "container",
+   "label": "OCI container",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/guest/src/container/mod.rs",
+     "line_start": 3,
+     "line_end": 3,
+     "symbol": "libcontainer",
+     "tokens": [
+      "OCI-compliant container runtime using libcontainer"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "images",
+   "label": "Image cache",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/images/manager.rs",
+     "line_start": 106,
+     "line_end": 106,
+     "symbol": "ImageStore::new",
+     "tokens": [
+      "ImageStore::new(images_dir, db, image_registries)"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "box_files",
+   "label": "QCOW2 disks, shared dirs",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/disk/qcow2.rs",
+     "line_start": 40,
+     "line_end": 40,
+     "symbol": "create_disk",
+     "tokens": [
+      "pub fn create_disk"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/vmm/krun/context.rs",
+     "line_start": 466,
+     "line_end": 466,
+     "symbol": "add_virtiofs",
+     "tokens": [
+      "pub unsafe fn add_virtiofs("
+     ]
+    }
+   ]
+  },
+  {
+   "id": "db",
+   "label": "Box database",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/runtime/rt_impl.rs",
+     "line_start": 297,
+     "line_end": 297,
+     "symbol": "Database::open",
+     "tokens": [
+      "boxlite.db"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/Cargo.toml",
+     "line_start": 69,
+     "line_end": 69,
+     "symbol": "rusqlite",
+     "tokens": [
+      "rusqlite"
+     ]
+    }
+   ]
+  }
+ ],
+ "edges": [
+  {
+   "id": "o_registry_local",
+   "label": "image layers",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/images/manager.rs",
+     "line_start": 110,
+     "line_end": 117,
+     "symbol": "pull",
+     "tokens": [
+      "Pull an OCI image from a registry.",
+      "pub async fn pull"
+     ]
+    }
+   ],
+   "from": "registry",
+   "to": "local_runtime",
+   "kind": "data"
+  },
+  {
+   "id": "o_local_boxes",
+   "label": "create + run",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 163,
+     "line_end": 163,
+     "symbol": "VM",
+     "tokens": [
+      "a hardware-virtualized VM per box (KVM / Hypervisor.framework)"
+     ]
+    }
+   ],
+   "from": "local_runtime",
+   "to": "local_boxes",
+   "kind": "spawn"
+  },
+  {
+   "id": "o_clients_edge",
+   "label": "HTTPS",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 42,
+     "line_end": 43,
+     "symbol": "alb",
+     "tokens": [
+      "browser -->|\"API / WebSocket / SSE\"|alb",
+      "sdk -->alb"
+     ]
+    }
+   ],
+   "from": "clients",
+   "to": "edge_lb",
+   "kind": "rpc"
+  },
+  {
+   "id": "o_edge_api",
+   "label": "API",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 45,
+     "line_end": 45,
+     "symbol": "alb",
+     "tokens": [
+      "alb -->api"
+     ]
+    }
+   ],
+   "from": "edge_lb",
+   "to": "api",
+   "kind": "rpc"
+  },
+  {
+   "id": "o_edge_proxy",
+   "label": "box previews",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 44,
+     "line_end": 44,
+     "symbol": "nlb",
+     "tokens": [
+      "browser -->|\"Box preview\"|nlb -->proxy"
+     ]
+    }
+   ],
+   "from": "edge_lb",
+   "to": "proxy",
+   "kind": "rpc"
+  },
+  {
+   "id": "o_idp_api",
+   "label": "JWKS keys",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 51,
+     "line_end": 51,
+     "symbol": "idp",
+     "tokens": [
+      "api -. \"JWT / JWKS\" .->idp"
+     ]
+    }
+   ],
+   "from": "idp",
+   "to": "api",
+   "kind": "data"
+  },
+  {
+   "id": "o_api_runner",
+   "label": "schedule boxes",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 50,
+     "line_end": 50,
+     "symbol": "runner",
+     "tokens": [
+      "api -->|\"Schedule boxes\"|runner"
+     ]
+    }
+   ],
+   "from": "api",
+   "to": "runner",
+   "kind": "rpc"
+  },
+  {
+   "id": "o_proxy_runner",
+   "label": "tunnel",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/proxy/README.md",
+     "line_start": 3,
+     "line_end": 3,
+     "symbol": "proxy",
+     "tokens": [
+      "tunnels traffic"
+     ]
+    }
+   ],
+   "from": "proxy",
+   "to": "runner",
+   "kind": "rpc"
+  },
+  {
+   "id": "o_registry_runner",
+   "label": "image layers",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 53,
+     "line_end": 53,
+     "symbol": "registry",
+     "tokens": [
+      "runner -->|\"Pull box images\"|registry"
+     ]
+    }
+   ],
+   "from": "registry",
+   "to": "runner",
+   "kind": "data"
+  },
+  {
+   "id": "o_runner_boxes",
+   "label": "create + run",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 131,
+     "line_end": 131,
+     "symbol": "boxlite_to_boxes",
+     "tokens": [
+      "boxlite_core boxlite_to_boxes@-->|\"create + run\"| boxes"
+     ]
+    }
+   ],
+   "from": "runner",
+   "to": "cloud_boxes",
+   "kind": "spawn"
+  },
+  {
+   "id": "o_api_state",
+   "label": "state, queues",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/aws/architecture.md",
+     "line_start": 47,
+     "line_end": 48,
+     "symbol": "api",
+     "tokens": [
+      "api -->pg",
+      "api -->redis"
+     ]
+    }
+   ],
+   "from": "api",
+   "to": "cloud_state",
+   "kind": "data"
+  },
+  {
+   "id": "o_runner_volumes",
+   "label": "volumes",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/docs/gcp/architecture.md",
+     "line_start": 60,
+     "line_end": 60,
+     "symbol": "storage",
+     "tokens": [
+      "runner <-->|\"Mount persistent volumes\"|storage"
+     ]
+    }
+   ],
+   "from": "runner",
+   "to": "cloud_state",
+   "kind": "data"
+  },
+  {
+   "id": "e_client_rest",
+   "label": "HTTP /v1/boxes",
+   "from": "http_client",
+   "to": "rest",
+   "kind": "rpc",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/cli/src/commands/serve/mod.rs",
+     "line_start": 1810,
+     "line_end": 1812,
+     "symbol": "boxes::create_box",
+     "tokens": [
+      "\"/v1/boxes\"",
+      "post(boxes::create_box)"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_sdk_runtime",
+   "label": "Rust API",
+   "from": "sdk",
+   "to": "runtime",
+   "kind": "dispatch",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "docs/contributing/architecture/README.md",
+     "line_start": 299,
+     "line_end": 305,
+     "symbol": "SDK",
+     "tokens": [
+      "Language SDK (Python, Node, C)",
+      "Native bindings",
+      "BoxLite Core (Rust)"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_rest_runtime",
+   "label": "Rust API",
+   "from": "rest",
+   "to": "runtime",
+   "kind": "dispatch",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/cli/src/commands/serve/mod.rs",
+     "line_start": 78,
+     "line_end": 78,
+     "symbol": "BoxliteRuntime",
+     "tokens": [
+      "runtime: BoxliteRuntime"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_spawn_shim",
+   "label": "spawns shim",
+   "from": "runtime",
+   "to": "vmm",
+   "kind": "spawn",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/vmm/controller/spawn.rs",
+     "line_start": 35,
+     "line_end": 35,
+     "symbol": "boxlite-shim",
+     "tokens": [
+      "Spawns `boxlite-shim` with full isolation"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_grpc",
+   "label": "gRPC over vsock",
+   "from": "runtime",
+   "to": "agent",
+   "kind": "rpc",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "docs/contributing/architecture/README.md",
+     "line_start": 229,
+     "line_end": 240,
+     "symbol": "bridge",
+     "tokens": [
+      "Unix Socket (boxes/{id}/sockets/box.sock)",
+      "libkrun vsock",
+      "Vsock (port 2695)",
+      "Guest Agent (gRPC Server)"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/shared/src/constants.rs",
+     "line_start": 21,
+     "line_end": 21,
+     "symbol": "GUEST_AGENT_PORT",
+     "tokens": [
+      "GUEST_AGENT_PORT: u32 = 2695"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_run_container",
+   "label": "runs · libcontainer",
+   "from": "agent",
+   "to": "container",
+   "kind": "spawn",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/guest/src/container/mod.rs",
+     "line_start": 3,
+     "line_end": 3,
+     "symbol": "libcontainer",
+     "tokens": [
+      "container runtime using libcontainer"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_pull",
+   "label": "image layers",
+   "from": "registry",
+   "to": "runtime",
+   "kind": "data",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/images/manager.rs",
+     "line_start": 110,
+     "line_end": 117,
+     "symbol": "pull",
+     "tokens": [
+      "Pull an OCI image from a registry.",
+      "pub async fn pull"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_cache",
+   "label": "cache layers",
+   "from": "runtime",
+   "to": "images",
+   "kind": "data",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/images/manager.rs",
+     "line_start": 112,
+     "line_end": 112,
+     "symbol": "cache",
+     "tokens": [
+      "Checks local cache first."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_disks",
+   "label": "create disks",
+   "from": "runtime",
+   "to": "box_files",
+   "kind": "data",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/disk/qcow2.rs",
+     "line_start": 40,
+     "line_end": 40,
+     "symbol": "create_disk",
+     "tokens": [
+      "pub fn create_disk(disk_path: &Path, persistent: bool)"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_db",
+   "label": "box state",
+   "from": "runtime",
+   "to": "db",
+   "kind": "data",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/runtime/rt_impl.rs",
+     "line_start": 297,
+     "line_end": 297,
+     "symbol": "Database::open",
+     "tokens": [
+      "Database::open(&layout.db_dir().join(\"boxlite.db\"))"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_block",
+   "label": "virtio-blk · virtio-fs",
+   "from": "vmm",
+   "to": "box_files",
+   "kind": "data",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/vmm/krun/context.rs",
+     "line_start": 14,
+     "line_end": 14,
+     "symbol": "krun_add_disk2",
+     "tokens": [
+      "krun_add_disk2",
+      "krun_add_virtiofs3"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "e_net",
+   "label": "virtio-net",
+   "from": "vmm",
+   "to": "gvproxy",
+   "kind": "data",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/shim/src/main.rs",
+     "line_start": 142,
+     "line_end": 142,
+     "symbol": "gvproxy",
+     "tokens": [
+      "gvproxy provides virtio-net (eth0) to the guest"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/vmm/krun/context.rs",
+     "line_start": 14,
+     "line_end": 14,
+     "symbol": "krun_add_net_unixgram",
+     "tokens": [
+      "krun_add_net_unixgram"
+     ]
+    }
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "id": "local_machine",
+   "label": "Your machine",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 34,
+     "line_end": 34,
+     "symbol": "engine",
+     "tokens": [
+      "one engine, from your laptop to a multi-tenant cloud"
+     ]
+    }
+   ],
+   "members": [
+    {
+     "target": "node:local_runtime",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    },
+    {
+     "target": "node:local_boxes",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "cloud",
+   "label": "Cloud",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/README.md",
+     "line_start": 3,
+     "line_end": 3,
+     "symbol": "AWS",
+     "tokens": [
+      "cloud platform on AWS or GCP"
+     ]
+    }
+   ],
+   "members": [
+    {
+     "target": "boundary:edge_zone",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    },
+    {
+     "target": "boundary:control_plane",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    },
+    {
+     "target": "boundary:runner_fleet",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    },
+    {
+     "target": "boundary:state_zone",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "edge_zone",
+   "label": "Public edge",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/edge.ts",
+     "line_start": 13,
+     "line_end": 13,
+     "symbol": "balancer",
+     "tokens": [
+      "TLS terminates at the *balancer* on both clouds"
+     ]
+    }
+   ],
+   "scope": "edge",
+   "members": [
+    {
+     "target": "node:edge_lb",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "control_plane",
+   "label": "Control plane",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/api.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "workload",
+     "tokens": [
+      "The control plane"
+     ]
+    }
+   ],
+   "scope": "compute",
+   "members": [
+    {
+     "target": "node:api",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    },
+    {
+     "target": "node:proxy",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "runner_fleet",
+   "label": "Runner fleet",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/runners.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "machines",
+     "tokens": [
+      "The machines boxes actually run on."
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/runner/README.md",
+     "line_start": 13,
+     "line_end": 13,
+     "symbol": "KVM",
+     "tokens": [
+      "nested KVM"
+     ]
+    }
+   ],
+   "scope": "execution",
+   "members": [
+    {
+     "target": "node:runner",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    },
+    {
+     "target": "node:cloud_boxes",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "state_zone",
+   "label": "State",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview"
+   ],
+   "proposed": false,
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/database.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "PostgreSQL",
+     "tokens": [
+      "managed PostgreSQL"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/infra/mdeploy/stack/storage.ts",
+     "line_start": 2,
+     "line_end": 2,
+     "symbol": "store",
+     "tokens": [
+      "The object store boxes keep their volumes in."
+     ]
+    }
+   ],
+   "scope": "state",
+   "members": [
+    {
+     "target": "node:cloud_state",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "callers",
+   "label": "External",
+   "scope": "external",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "overview",
+    "local_machine"
+   ],
+   "proposed": false,
+   "members": [
+    {
+     "target": "node:clients",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    },
+    {
+     "target": "node:registry",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview",
+      "local_machine"
+     ]
+    },
+    {
+     "target": "node:idp",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "overview"
+     ]
+    },
+    {
+     "target": "node:http_client",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    }
+   ],
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 168,
+     "line_end": 168,
+     "symbol": "Interfaces",
+     "tokens": [
+      "the `boxlite` CLI",
+      "a REST API"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "host_process",
+   "label": "Host process",
+   "scope": "compute",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "members": [
+    {
+     "target": "node:sdk",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    },
+    {
+     "target": "node:rest",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    },
+    {
+     "target": "node:runtime",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    }
+   ],
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 31,
+     "line_end": 31,
+     "symbol": "Daemonless",
+     "tokens": [
+      "embed as a library"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 116,
+     "line_end": 116,
+     "symbol": "runtime",
+     "tokens": [
+      "runtime embedded"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "apps/runner/README.md",
+     "line_start": 25,
+     "line_end": 25,
+     "symbol": "runtime",
+     "tokens": [
+      "the embedded BoxLite runtime"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "shim_process",
+   "label": "boxlite-shim process",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "members": [
+    {
+     "target": "node:vmm",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    },
+    {
+     "target": "node:gvproxy",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    },
+    {
+     "target": "boundary:micro_vm",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    }
+   ],
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/vmm/controller/shim.rs",
+     "line_start": 250,
+     "line_end": 250,
+     "symbol": "ShimHandler",
+     "tokens": [
+      "Spawns the `boxlite-shim` binary in a subprocess"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/jailer/mod.rs",
+     "line_start": 20,
+     "line_end": 21,
+     "symbol": "SeatbeltSandbox",
+     "tokens": [
+      "BwrapSandbox",
+      "bubblewrap",
+      "sandbox-exec"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "src/boxlite/src/jailer/mod.rs",
+     "line_start": 77,
+     "line_end": 77,
+     "symbol": "seccomp",
+     "tokens": [
+      "pub mod seccomp;"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "docs/contributing/architecture/README.md",
+     "line_start": 51,
+     "line_end": 51,
+     "symbol": "BoxManager",
+     "tokens": [
+      "Tracks all Boxes and their states"
+     ]
+    }
+   ],
+   "scope": "execution"
+  },
+  {
+   "id": "micro_vm",
+   "label": "micro-VM",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "members": [
+    {
+     "target": "node:agent",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    },
+    {
+     "target": "node:container",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    }
+   ],
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "README.md",
+     "line_start": 163,
+     "line_end": 163,
+     "symbol": "VM",
+     "tokens": [
+      "a hardware-virtualized VM per box (KVM / Hypervisor.framework)"
+     ]
+    },
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "docs/contributing/architecture/vmm/README.md",
+     "line_start": 448,
+     "line_end": 448,
+     "symbol": "libkrunfw",
+     "tokens": [
+      "libkrunfw: Linux 6.12"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "boxlite_home",
+   "label": "State",
+   "scope": "state",
+   "states": [
+    "current"
+   ],
+   "views": [
+    "architecture"
+   ],
+   "topics": [
+    "local_machine"
+   ],
+   "proposed": false,
+   "members": [
+    {
+     "target": "node:images",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    },
+    {
+     "target": "node:box_files",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    },
+    {
+     "target": "node:db",
+     "states": [
+      "current"
+     ],
+     "topics": [
+      "local_machine"
+     ]
+    }
+   ],
+   "evidence": [
+    {
+     "type": "source",
+     "state": "current",
+     "revision": "5b3321c7ade4d2e7bed7350c7f054d437035fa9e",
+     "path": "docs/contributing/architecture/README.md",
+     "line_start": 54,
+     "line_end": 54,
+     "symbol": "FilesystemLayout",
+     "tokens": [
+      "Directory structure (~/.boxlite)"
+     ]
+    }
+   ]
+  }
+ ],
+ "annotations": [
+  {
+   "kind": "PROPOSED",
+   "target": "node:vmm",
+   "state": "current",
+   "text": "our own VMM and kernel, issue 1512"
+  }
+ ]
+}

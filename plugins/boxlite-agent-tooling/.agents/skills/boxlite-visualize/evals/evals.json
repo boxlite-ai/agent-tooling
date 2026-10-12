@@ -11,7 +11,7 @@
         "evidence.json explicitly selects only the architecture view, and diagram.md does not add unrequested Sequence or Call graph sections.",
         "The architecture covers user and SDK entry points, external dependencies, public ingress, private compute and box execution, state, observability, and the main request/control/data/image routes at one deployment altitude.",
         "The Runner fleet surrounds a representative EC2 instance × N; EC2 surrounds the Runner daemon; Runner surrounds the embedded BoxLite runtime; BoxLite surrounds box microVMs. These immediate memberships are declared in evidence.json boundaries and validated against Mermaid nesting.",
-        "Related components form contiguous scope zones ordered along the main path; each zone subgraph carries its exact house palette class (classDef scope_* plus class assignment) with the matching scope declared in evidence.json boundaries, while physical boundaries and nodes stay unstyled and no style, linkStyle, theme, or non-palette classDef appears, keeping the diagram legible on light/dark hosts with the PNG used only as a static preview.",
+        "Related components form contiguous scope zones ordered along the main path; each zone subgraph carries its exact house palette class (classDef scope_* plus class assignment) with the matching scope declared in evidence.json boundaries; nodes take the house default dark card, at most two elements wear the cyan accent, physical boundaries stay unstyled, and no style, other linkStyle, theme, or non-palette classDef appears, keeping the diagram legible on light/dark hosts with the PNG used only as a static preview.",
         "validation.json reports valid=true and emits both SVG and PNG artifacts; the agent opens the PNG and checks readability, truthful containment, disjoint boundaries, routing, and label clipping before presenting it.",
         "The canonical deployment fits one laptop-sized diagram, so the agent does not declare topics; validation.json reports mermaid.viewport as a pass with the measured size rather than splitting an already-readable picture."
       ]
@@ -65,6 +65,19 @@
         "Each child's <details> block nests inside its parent's block, matching the declared parent in evidence.json; siblings appear in manifest order.",
         "The deepest topic may select the call_graph view where source mechanics answer the question better than another architecture inventory.",
         "validation.json reports valid=true with manifest.topics confirming a rooted tree 3 levels deep, and every diagram passes mermaid.viewport."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Draw a figure for our blog post showing what runs on one machine when BoxLite runs a box. Readers use light and dark mode.",
+      "expected_output": "A hand-placed figure.json grounded in a validated evidence.json, passing check_figure.py with zero findings, rendered with render_figure.py --pair --png as an editorial light image and a blueprint dark image, plus a <picture> snippet carrying the alt text.",
+      "files": [],
+      "expectations": [
+        "The agent first validates diagram.md and evidence.json, then writes figure.json whose every zone, node and edge ID resolves in that evidence.json.",
+        "The figure answers one question with a title naming its type and scope, a version naming the source revision, and alt text.",
+        "check_figure.py reports zero findings: no edge crosses a title, node or another edge; labels do not overlap; the key covers every colour, shape and line style; text stays at least 12 px at a 700 px column.",
+        "render_figure.py --pair --png writes the light and dark PNGs and the <picture> snippet, and figure.json sits beside them as the editable source.",
+        "The agent opens both PNGs and runs the figure visual QA before presenting them, and cyan marks only the subject."
       ]
     }
   ]

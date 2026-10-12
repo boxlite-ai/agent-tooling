@@ -18,8 +18,10 @@ sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 from validate_diagrams import _write_report
 from validator.mermaid import LAPTOP_VIEWPORT, _svg_size
 from validator.changes import _parse_diff
+from validator.models import HOUSE_CLASSES, HOUSE_LINK_STYLE, SCOPE_PALETTE
 
-SCOPE_COMPUTE_STYLES = "fill:#dcfce7,stroke:#16a34a,color:#1f2933"
+SCOPE_COMPUTE_STYLES = SCOPE_PALETTE["scope_compute"]
+PREVIOUS_SCOPE_COMPUTE_STYLES = "fill:#dcfce7,stroke:#16a34a,color:#1f2933"
 
 
 class DiagramValidatorTests(unittest.TestCase):
@@ -332,6 +334,71 @@ class DiagramValidatorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assert_check_failed(report, "mermaid.structure_security")
 
+    def test_previous_light_palette_is_rejected(self) -> None:
+        document, manifest = scoped_zone_fixture(self.head)
+        document = document.replace(SCOPE_COMPUTE_STYLES, PREVIOUS_SCOPE_COMPUTE_STYLES, 1)
+        result, report = self.validate(document, manifest)
+        self.assertEqual(result.returncode, 1)
+        self.assert_check_reports(report, "mermaid.structure_security", "alters the house palette")
+
+    def test_house_node_accent_and_link_styles_are_accepted(self) -> None:
+        document, manifest = scoped_zone_fixture(self.head)
+        document = document.replace(
+            "flowchart TB",
+            f"flowchart TB\nclassDef default {HOUSE_CLASSES['default']}\nclassDef accent {HOUSE_CLASSES['accent']}\n"
+            f"classDef accent_zone {HOUSE_CLASSES['accent_zone']}\nlinkStyle default {HOUSE_LINK_STYLE}",
+            1,
+        )
+        document = document.replace(
+            "class inner scope_compute", "class inner scope_compute\nclass start accent\nclass outer accent_zone", 1
+        )
+        result, report = self.validate(document, manifest)
+        self.assertEqual(result.returncode, 0, result.stderr + json.dumps(report, indent=2))
+
+    def test_other_link_styles_are_rejected(self) -> None:
+        document, manifest = architecture_only_fixture(self.head)
+        document = document.replace("flowchart LR", "flowchart LR\n  linkStyle 0 stroke:#ff0000", 1)
+        result, report = self.validate(document, manifest)
+        self.assertEqual(result.returncode, 1)
+        self.assert_check_reports(report, "mermaid.structure_security", "non-house link style")
+
+    def test_more_than_two_accented_elements_are_rejected(self) -> None:
+        document, manifest = contained_architecture_fixture(self.head)
+        document = document.replace(
+            "flowchart TB",
+            f"flowchart TB\nclassDef accent {HOUSE_CLASSES['accent']}\nclassDef accent_zone {HOUSE_CLASSES['accent_zone']}",
+            1,
+        )
+        document = document.replace(
+            'start start_load@-->|"load"| load',
+            'start start_load@-->|"load"| load\nclass start,load accent\nclass outer accent_zone',
+            1,
+        )
+        result, report = self.validate(document, manifest)
+        self.assertEqual(result.returncode, 1)
+        self.assert_check_reports(report, "mermaid.structure_security", "accents 3 elements")
+
+    def test_accent_zone_on_a_node_is_rejected(self) -> None:
+        document, manifest = contained_architecture_fixture(self.head)
+        document = document.replace(
+            "flowchart TB", f"flowchart TB\nclassDef accent_zone {HOUSE_CLASSES['accent_zone']}", 1
+        )
+        document = document.replace(
+            'start start_load@-->|"load"| load', 'start start_load@-->|"load"| load\nclass start accent_zone', 1
+        )
+        result, report = self.validate(document, manifest)
+        self.assertEqual(result.returncode, 1)
+        self.assert_check_reports(report, "mermaid.structure_security", "applies only to a subgraph")
+
+    def test_accent_zone_stands_in_for_a_declared_scope(self) -> None:
+        document, manifest = scoped_zone_fixture(self.head)
+        document = document.replace(
+            "flowchart TB", f"flowchart TB\nclassDef accent_zone {HOUSE_CLASSES['accent_zone']}", 1
+        )
+        document = document.replace("class inner scope_compute", "class inner accent_zone", 1)
+        result, report = self.validate(document, manifest)
+        self.assertEqual(result.returncode, 0, result.stderr + json.dumps(report, indent=2))
+
     def test_scope_class_on_node_is_rejected(self) -> None:
         document, manifest = contained_architecture_fixture(self.head)
         document = document.replace(
@@ -546,6 +613,16 @@ class DiagramValidatorTests(unittest.TestCase):
         self.assertIn("architecture, deployment, topology, overview", skill)
         for needle in ("light/dark", "scope_"):
             self.assertIn(needle, contract)
+
+    def test_publication_figure_contract_is_routed_and_documented(self) -> None:
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        figure = (SKILL_ROOT / "references" / "figure-contract.md").read_text(encoding="utf-8")
+        evals = (SKILL_ROOT / "evals" / "evals.json").read_text(encoding="utf-8")
+        self.assertIn("figure-contract.md", skill)
+        for needle in ("render_figure.py", "check_figure.py", "700 px", "blueprint", "editorial",
+                       "whiteboard", "walls", "isometric", "<picture>"):
+            self.assertIn(needle, figure)
+        self.assertIn("check_figure.py", evals)
 
     def test_topic_tree_contract_is_documented(self) -> None:
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -1029,6 +1106,12 @@ class DiagramValidatorTests(unittest.TestCase):
     def assert_check_failed(self, report: dict[str, object], name: str) -> None:
         checks = {value["name"]: value for value in report["checks"]}
         self.assertEqual(checks[name]["status"], "fail", json.dumps(checks.get(name), indent=2))
+
+    def assert_check_reports(self, report: dict[str, object], name: str, needle: str) -> None:
+        """Fails unless the named check failed for the stated reason, not an unrelated one."""
+        self.assert_check_failed(report, name)
+        evidence = next(value for value in report["checks"] if value["name"] == name)["evidence"]
+        self.assertTrue(any(needle in line for line in evidence), json.dumps(evidence, indent=2))
 
     def _run(self, *command: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(command, cwd=self.repo, text=True, capture_output=True, check=True)

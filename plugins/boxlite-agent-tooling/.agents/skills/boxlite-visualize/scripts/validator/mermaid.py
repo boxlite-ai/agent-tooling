@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .models import SCOPE_PALETTE, StateBlock, ValidationContext
+from .models import HOUSE_CLASSES, HOUSE_LINK_STYLE, MAX_ACCENTS, SCOPE_PALETTE, StateBlock, ValidationContext
 
 # Anything float() accepts, so a malformed attribute misses and reads as unmeasured.
 NUMBER = r"[0-9]+(?:\.[0-9]+)?"
@@ -19,14 +19,16 @@ UNSAFE_PATTERNS = [
     (re.compile(r"%%\{"), "initialization directives"),
     (re.compile(r"(?im)^\s*click\s+"), "click directives"),
     (
-        re.compile(r"(?im)^\s*(?:style|linkStyle)\b"),
-        "per-element style overrides; the scope palette classes are the only permitted styling",
+        re.compile(r"(?im)^\s*style\b"),
+        "per-element style overrides; the house palette classes are the only permitted styling",
     ),
     (re.compile(r"(?i)\bthemeVariables\b"), "fixed theme variables"),
     (re.compile(r"(?i)javascript\s*:"), "javascript URLs"),
     (re.compile(r"(?i)https?://|\bhref\s*="), "external links"),
 ]
-SEQUENCE_STYLE_RE = re.compile(r"(?im)^\s*(?:classDef|class)\b")
+SEQUENCE_STYLE_RE = re.compile(r"(?im)^\s*(?:classDef|class|linkStyle)\b")
+HOUSE_LINK_LINE = f"linkStyle default {HOUSE_LINK_STYLE}"
+ACCENT_TARGETS = {"accent": "node", "accent_zone": "subgraph"}
 MERMAID_LEFT_ARROWS = ("<-->", "<-.->", "<==>")
 MERMAID_RIGHT_ARROWS = ("-->", "---", "-.->", "==>", "--o", "--x")
 NODE_RE = re.compile(r'^\s*([a-z][a-z0-9_]*)\s*(?:\[\[|\[\(|\[|\(\(|\(|\{\{\{|\{\{|\{|>)\s*["\']?(.+?)["\']?\s*(?:\]\]|\)\]|\]|\)\)|\)|\}\}\}|\}\}|\}|\])\s*$')
@@ -85,6 +87,13 @@ def _parse_architecture(ctx: ValidationContext, state: str, block: StateBlock, e
             continue
         if stripped.startswith("classDef"):
             _collect_classdef(state, block.start_line + offset, line, declared_classdefs, errors)
+            continue
+        if stripped.startswith("linkStyle"):
+            if stripped != HOUSE_LINK_LINE:
+                errors.append(
+                    f"architecture/{state} line {block.start_line + offset} has a non-house link style; "
+                    f"only '{HOUSE_LINK_LINE}' is allowed"
+                )
             continue
         if stripped.startswith("class "):
             statement = CLASS_RE.match(line)
@@ -160,11 +169,11 @@ def _collect_classdef(
         )
         return
     name, styles = definition.groups()
-    expected = SCOPE_PALETTE.get(name)
+    expected = SCOPE_PALETTE.get(name) or HOUSE_CLASSES.get(name)
     if expected is None:
         errors.append(
             f"architecture/{state} line {line_number} defines non-palette class {name!r}; "
-            f"only the house scope classes {sorted(SCOPE_PALETTE)} are allowed"
+            f"only the house classes {sorted(SCOPE_PALETTE) + sorted(HOUSE_CLASSES)} are allowed"
         )
     elif styles != expected:
         errors.append(
@@ -184,11 +193,12 @@ def _resolve_class_assignments(
     class_assignments: list[tuple[int, str, str]],
     errors: list[str],
 ) -> None:
+    accented = 0
     for line_number, target, class_name in class_assignments:
-        if class_name not in SCOPE_PALETTE:
+        if class_name not in SCOPE_PALETTE and class_name not in ACCENT_TARGETS:
             errors.append(
                 f"architecture/{state} line {line_number} assigns non-palette class {class_name!r}; "
-                f"only the house scope classes {sorted(SCOPE_PALETTE)} are allowed"
+                f"only {sorted(SCOPE_PALETTE) + sorted(ACCENT_TARGETS)} can be assigned"
             )
             continue
         if class_name not in declared_classdefs:
@@ -196,6 +206,20 @@ def _resolve_class_assignments(
                 f"architecture/{state} line {line_number} uses {class_name!r} without its "
                 "palette classDef in the same block"
             )
+        if class_name in ACCENT_TARGETS:
+            accented += 1
+            is_node = (state, target) in ctx.parsed.architecture_nodes
+            is_subgraph = (state, target) in ctx.parsed.architecture_boundaries
+            if (ACCENT_TARGETS[class_name] == "node" and not is_node) or (
+                ACCENT_TARGETS[class_name] == "subgraph" and not is_subgraph
+            ):
+                errors.append(
+                    f"architecture/{state} line {line_number} puts {class_name!r} on {target!r}; "
+                    f"it applies only to a {ACCENT_TARGETS[class_name]}"
+                )
+            elif is_subgraph:
+                ctx.parsed.architecture_accent_zones.add((state, target))
+            continue
         if (state, target) in ctx.parsed.architecture_nodes:
             errors.append(
                 f"architecture/{state} line {line_number} puts a scope class on node {target!r}; "
@@ -215,6 +239,11 @@ def _resolve_class_assignments(
             )
             continue
         ctx.parsed.architecture_scopes[key] = class_name
+    if accented > MAX_ACCENTS:
+        errors.append(
+            f"architecture/{state} accents {accented} elements; cyan marks only the subject, "
+            f"at most {MAX_ACCENTS}"
+        )
 
 
 def _parse_sequence(ctx: ValidationContext, state: str, block: StateBlock, errors: list[str]) -> None:
