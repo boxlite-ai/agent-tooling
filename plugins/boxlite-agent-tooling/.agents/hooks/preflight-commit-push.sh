@@ -583,26 +583,76 @@ if ! audit_criteria="$(subagent_prompt audit/commit-push-criteria "$tooling_root
   printf 'preflight-commit-push: cannot load nonempty commit-push-criteria prompt\n' >&2
   exit 2
 fi
-audit_task="$(subagent_prompt audit/commit-push-task "$tooling_root" \
-  "audit_criteria=${audit_criteria}" "task_input_json=${task_input_json}")" || exit 2
-invoke_instruction="$(subagent_instruction \
-  --agent commit-push-auditor \
-  --root "$tooling_root" \
-  --description 'CLAUDE.md audit' \
-  --artifact "$audit_file" \
-  --task "$audit_task" \
-  --timeout-seconds "${COMMIT_PUSH_AUDITOR_TIMEOUT:-900}" \
-  --headless "$headless_command")" || exit 2
-invoke_instruction="$(subagent_prompt audit/commit-push-retry "$tooling_root" \
-  "instruction=$invoke_instruction" "target_command_note=$target_command_note")" || exit 2
+
+audit_timeout="${COMMIT_PUSH_AUDITOR_TIMEOUT:-900}"
+if [[ ! "$audit_timeout" =~ ^[1-9][0-9]{0,3}$ ]]; then
+  printf 'preflight-commit-push: COMMIT_PUSH_AUDITOR_TIMEOUT must be 1 to 9999 seconds\n' >&2
+  exit 2
+fi
+
+# The hook owns the history attempt so an auditor that stops early cannot leave it
+# open or unbound. It is prepared only where an auditor is requested; a passing
+# dossier never opens one, and repeated denies for one binding reuse the open attempt.
+# The binding omits the commit subject: the dossier and commit-msg hook still bind it.
+prepare_audit_attempt() {  # task input JSON -> task input JSON with attempt fields
+  local input="$1" binding tree request link
+  binding="$(jq -nc --arg branch "$branch" --arg head "$head" --arg kind "$kind" \
+    --arg diff "$diff_hash" --arg command "$(printf '%s' "$audit_target_command" | hash_stdin)" \
+    '{branch:$branch,head:$head,command_kind:$kind,diff_hash:$diff,command_hash:$command}')" || return 2
+  if [[ "$kind" == commit ]]; then
+    tree="$(git -C "$repo_root" write-tree)" || return 2
+  else
+    tree="$(git -C "$repo_root" rev-parse 'HEAD^{tree}')" || return 2
+  fi
+  audit_reflection_cancel_open "$reflection_context" \
+    "Superseded: the change no longer matches this attempt" "$binding" || return 2
+  request="$(audit_reflection_gate "$reflection_context" prepare "" "$(jq -nc \
+    --argjson binding "$binding" --arg tree "$tree" --arg command "$audit_target_command" \
+    '{binding:$binding,snapshot:{tree:$tree,command:$command}}')")" || return 2
+  # SubagentStop reads this link to check the dossier and close the attempt.
+  link="$(auditor_override_control_dir "$(jq -r .repo_root <<<"$reflection_context")")" || return 2
+  mkdir -p "$link" || return 2
+  jq -nc --argjson context "$reflection_context" --argjson request "$request" \
+    --arg dossier "$audit_file" --argjson deadline "$(( $(date +%s) + audit_timeout ))" \
+    '{context:$context,attempt_id:$request.attempt_id,dossier_path:$dossier,deadline:$deadline}' \
+    | verdict_audit_write_atomic "$link/audit-task.$hook_session_scope.commit-push-auditor.json" || return 2
+  jq -c --argjson request "$request" \
+    '. + {attempt_id:$request.attempt_id,history_path:$request.history_path}' <<<"$input"
+}
+
+audit_instruction() {
+  local input="$task_input_json" task instruction
+  if [[ -n "$reflection_context" ]]; then
+    input="$(prepare_audit_attempt "$input")" || return 2
+  fi
+  task="$(subagent_prompt audit/commit-push-task "$tooling_root" \
+    "audit_criteria=${audit_criteria}" "task_input_json=${input}")" || return 2
+  instruction="$(subagent_instruction \
+    --agent commit-push-auditor \
+    --root "$tooling_root" \
+    --description 'CLAUDE.md audit' \
+    --artifact "$audit_file" \
+    --task "$task" \
+    --headless "$headless_command")" || return 2
+  subagent_prompt audit/commit-push-retry "$tooling_root" \
+    "instruction=$instruction" "target_command_note=$target_command_note"
+}
+
+deny_with_audit() {  # reason preceding the auditor instruction
+  local instruction
+  instruction="$(audit_instruction)" || deny "$1
+
+Audit history requires recovery; inspect .agents/state/audit-history-* and .agents/prompts/audit/audit-reflection.md."
+  deny "$1
+
+$instruction"
+}
 
 validate_audit() {
   local consume_on_pass="${1:-consume}"
 
   if [[ ! -r "$audit_file" ]]; then
-    deny "No CLAUDE.md audit found for this change.
-
-${invoke_instruction}"
+    deny_with_audit "No CLAUDE.md audit found for this change."
   fi
 
   local audit_branch audit_head audit_kind audit_diff_hash audit_command_hash
@@ -613,9 +663,7 @@ ${invoke_instruction}"
   selected_identity="$(verdict_audit_link_no_clobber_identity \
     "$audit_file" "$audit_selection" 2>/dev/null)" || selected_identity=""
   if [[ -z "$selected_identity" ]]; then
-    deny "Existing audit is not a stable regular file; re-audit is required.
-
-${invoke_instruction}"
+    deny_with_audit "Existing audit is not a stable regular file; re-audit is required."
   fi
   audit_snapshot="$(verdict_audit_read_json_snapshot \
     "$audit_selection" 2>/dev/null)" || audit_snapshot=""
@@ -661,9 +709,7 @@ ${invoke_instruction}"
   ' 2>/dev/null || true)"
   if [[ -z "$audit_document" || ! "$audit_mtime" =~ ^[0-9]+$ ]]; then
     rm -f "$audit_selection"
-    deny "Existing audit is malformed or exceeds its safety limits; re-audit is required.
-
-${invoke_instruction}"
+    deny_with_audit "Existing audit is malformed or exceeds its safety limits; re-audit is required."
   fi
   audit_branch="$(printf '%s' "$audit_document" | jq -r '.branch')"
   audit_head="$(printf '%s' "$audit_document" | jq -r '.head')"
@@ -710,7 +756,7 @@ Retry the push through the git-level pre-push gate so it can produce the exact r
      [[ "$command_bound" != 1 ]] || \
      (( age < 0 || age > max_age_seconds )); then
     rm -f "$audit_selection"
-    deny "Existing audit does not match current state:
+    deny_with_audit "Existing audit does not match current state:
   audit.branch=${audit_branch}  current=${branch}
   audit.head=${audit_head}      current=${head}
   audit.command_kind=${audit_kind}  current=${kind}
@@ -719,16 +765,14 @@ Retry the push through the git-level pre-push gate so it can produce the exact r
   handoff.command_hash=${handoff_command_hash:-none}
   audit age: ${age}s (max ${max_age_seconds}s)
 
-Re-audit is required.
-${invoke_instruction}"
+Re-audit is required."
   fi
   if [[ -n "$reflection_context" ]]; then
     local history_id
     history_id="$(jq -r '.history_review.attempt_id // empty' <<<"$audit_document")"
     if ! audit_reflection_gate "$reflection_context" record "$history_id" "$audit_document" >/dev/null; then
       rm -f "$audit_selection"
-      deny "The audit did not reconcile current history; verification remains incomplete.
-${invoke_instruction}"
+      deny_with_audit "The audit did not reconcile current history; verification remains incomplete."
     fi
   fi
 
@@ -746,8 +790,7 @@ ${invoke_instruction}"
     # has no diff to change, so new receipts earn a fresh audit, not the old verdict.
     if test_runs_after "$audit_mtime"; then
       rm -f "$audit_selection"
-      deny "Tests ran after this audit; re-audit is required.
-${invoke_instruction}"
+      deny_with_audit "Tests ran after this audit; re-audit is required."
     fi
     findings="$(printf '%s' "$audit_document" \
       | jq -r '.findings[]? | "  - " + .' 2>/dev/null || echo '')"

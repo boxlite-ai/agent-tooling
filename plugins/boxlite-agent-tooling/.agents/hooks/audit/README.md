@@ -48,7 +48,7 @@ flowchart TB
 ```
 
 1. **Turn end.** When the final turn asks the reader to trust a conclusion, the verdict gate runs `run-verdict-audit.sh` inside the same Stop. It then re-enters itself to validate the new dossier: PASS allows silently; FAIL blocks with findings.
-2. **Commit or push.** `preflight-commit-push.sh` denies and names the auditor routes. The agent spawns `commit-push-auditor` or runs the headless runner. The retried command runs only on a fresh, matching PASS, which the gate consumes.
+2. **Commit or push.** `preflight-commit-push.sh` prepares the history attempt, denies, and names the auditor routes. The agent spawns `commit-push-auditor` or runs the headless runner. On Claude Code, `SubagentStop` closes the attempt. The retried command runs only on a fresh, matching PASS, which the gate consumes.
 
 Each dossier is bound to what it judged. A stale turn dossier is discarded; a stale commit/push dossier denies until a fresh audit.
 See [bindings](../../../ARCHITECTURE.md#boundaries), [Stop decisions](../../../ARCHITECTURE.md#stop-gate-decisions),
@@ -114,6 +114,7 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.tes
 | [run-verdict-audit-retry.test.sh](run-verdict-audit-retry.test.sh) | Same-generation retries with history and publication interference. |
 | [run-commit-push-audit.test.sh](run-commit-push-audit.test.sh) | Commit/push runner: sandbox flags; malformed or unbound answers land on FAIL. |
 | [preflight-commit-push.test.sh](preflight-commit-push.test.sh) | [../preflight-commit-push.sh](../preflight-commit-push.sh): command matching and dossier checks. |
+| [commit-push-attempt.test.sh](commit-push-attempt.test.sh) | Hook-prepared commit/push attempts and the `SubagentStop` check that closes them. |
 | [cancel-verdict-audit.test.sh](cancel-verdict-audit.test.sh) | [../cancel-verdict-audit.sh](../cancel-verdict-audit.sh): a new prompt cancels the session's audit. |
 | [auditor-override.test.sh](auditor-override.test.sh) | [../auditor-control.sh](../auditor-control.sh): auditor escalation and prompt-scoped overrides. |
 | [record-test-run.test.sh](record-test-run.test.sh) | [../record-test-run.sh](../record-test-run.sh): which commands leave test-run receipts. |

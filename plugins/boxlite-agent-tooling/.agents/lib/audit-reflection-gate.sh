@@ -99,6 +99,17 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   printf '%s' "$request" | audit_reflection record "$path"
 }
 
+# Cancel the open attempt unless its binding equals the optional JSON binding. Hooks
+# prepare attempts, so a newer change or another producer must close the stale one.
+audit_reflection_cancel_open() {  # context-json reason [binding-json]
+  local context="$1" reason="$2" binding="${3:-null}" history id
+  history="$(audit_reflection_gate "$context" inspect)" || return 2
+  id="$(jq -r --argjson binding "$binding" '.state.attempts[-1] // empty |
+    select(.outcome == null and .input.binding != $binding) | .id' <<<"$history")" || return 2
+  [[ -z "$id" ]] || audit_reflection_gate "$context" cancel "$id" \
+    "$(jq -nc --arg reason "$reason" '$reason')" >/dev/null
+}
+
 _audit_reflection_remove() {
   local identity
   [[ -e "$1" || -L "$1" ]] || return 0

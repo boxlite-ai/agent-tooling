@@ -1196,6 +1196,9 @@ run_agentic_audit() {
       --arg branch "${branch:-HEAD}" --arg kind "$kind" \
       '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:$kind}')"
     local history_input history_request
+    # The preflight prepares an attempt on each deny; running this producer replaces it.
+    audit_reflection_cancel_open "$reflection_context" "Superseded by the headless runner" \
+      || write_fail "Audit history requires recovery; inspect the reported state path and .agents/prompts/audit/audit-reflection.md"
     history_input="$(jq -nc --arg branch "$branch" --arg head "$head" --arg kind "$kind" \
       --arg diff "$diff_hash" --arg command "$command_hash" --arg subject "$bound_commit_subject_hash" \
       --rawfile evidence "$evidence_file" '{binding:{branch:$branch,head:$head,command_kind:$kind,

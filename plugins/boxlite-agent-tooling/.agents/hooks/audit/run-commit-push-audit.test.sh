@@ -441,6 +441,36 @@ fi
 rm -rf "$R_LIFECYCLE"
 
 echo
+echo "## The headless runner replaces the attempt the preflight opened"
+R_OPEN="$(setup)"; install_stub "$R_OPEN"
+open_scope="git-$(printf '%s' session-open-attempt | git -C "$R_OPEN" hash-object --stdin)"
+open_epoch=1201-1202-12
+printf '%s\n' "$open_epoch" > "$R_OPEN/.agents/state/verdict-prompt-epoch.$open_scope"
+open_context="$(jq -nc --arg root "$(cd "$R_OPEN" && pwd -P)" --arg session "$open_scope" \
+  --arg epoch "$open_epoch" --arg branch "$(git -C "$R_OPEN" branch --show-current)" \
+  '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"commit"}')"
+printf '{"binding":{"head":"preflight"},"snapshot":{"tree":"t","command":"c"}}' \
+  | bash "$REPO_ROOT/scripts/audit-reflection-gate.sh" "$open_context" prepare >/dev/null
+( cd "$R_OPEN" && CLAUDE_PROJECT_DIR="$R_OPEN" FAKE_DIR="$R_OPEN" \
+    CODEX_BIN="$R_OPEN/bin/codex" CODEX_FAKE_OUTPUT="$(bound_output "$R_OPEN" PASS '[]')" \
+    CODEX_COMMIT_PUSH_AUDIT_MODE=agentic \
+    AUDITOR_SESSION_SCOPE="$open_scope" AUDITOR_PROMPT_EPOCH="$open_epoch" \
+    TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/scripts/fixtures/audit-history-result.sh" \
+    bash "$R_OPEN/.agents/hooks/audit/run-commit-push-audit.sh" commit "$CMD" \
+) >/dev/null 2>&1
+open_rc=$?
+open_attempts="$(printf '%s' "$open_context" | jq -nc --argjson context "$(cat)" '{context:$context}' \
+  | bash "$REPO_ROOT/scripts/audit-reflection.sh" status \
+    "$(ls "$R_OPEN"/.agents/state/audit-history-*.json)" \
+  | jq -r '[.attempts[].outcome.verdict] | join(" ")')"
+if [[ "rc=$open_rc $open_attempts" == "rc=0 CANCELED PASS" ]]; then
+  ok "the runner cancels the open preflight attempt and records its own"
+else
+  bad "the runner cancels the open preflight attempt and records its own (rc=$open_rc $open_attempts)"
+fi
+rm -rf "$R_OPEN"
+
+echo
 echo "## Headless auditor execution owns its deadline, process group, and live streams"
 R_RESOURCE_TIMEOUT="$(setup)"; install_resource_stub "$R_RESOURCE_TIMEOUT"
 run_resource_case "$R_RESOURCE_TIMEOUT" timeout 1 7

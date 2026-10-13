@@ -913,6 +913,24 @@ case "$event" in
     fi
     ;;
   SubagentStop)
+    # A Claude commit/push auditor stops only with its attempt closed. A block resumes
+    # the auditor and skips the stop dispatch, so its escalation stays running. A check
+    # failure allows the stop: exit 2 would resume it, and the git gate still holds.
+    if [[ "$auditor" == commit-push-auditor && "$(hook_host_kind)" == claude ]]; then
+      resumed="$(printf '%s' "$payload" | jq -r '.stop_hook_active == true')"
+      # shellcheck source=/dev/null
+      if ! { source "$tooling_root/.agents/lib/audit-reflection.sh" \
+          && source "$tooling_root/.agents/lib/audit-reflection-gate.sh" \
+          && source "$tooling_root/.agents/lib/commit-push-stop.sh" \
+          && block_reason="$(commit_push_stop_check "$repo" "$scope" "$resumed")"; }; then
+        printf 'auditor-control.sh: could not close the commit/push audit attempt.\n' >&2
+        block_reason=""
+      fi
+      if [[ -n "$block_reason" ]]; then
+        jq -nc --arg reason "$block_reason" '{decision:"block",reason:$reason}'
+        exit 0
+      fi
+    fi
     message="$(printf '%s' "$payload" | jq -r '.last_assistant_message // ""')"
     case "$message" in
       PASS*) terminal=PASS ;;

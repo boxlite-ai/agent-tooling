@@ -175,7 +175,6 @@ subagent_timed_prompt() {  # tooling root, positive timeout seconds (at most 4 d
 #   subagent_instruction --agent commit-push-auditor --root "$tooling_root" \
 #                        --task "$task" [--description D] [--artifact F]
 #                        [--codex-task-name N] [--codex-retry-existing]
-#                        [--timeout-seconds N]
 #                        [--headless CMD]
 #
 # Exit 2 on a usage error, so a miswired caller fails loudly in tests rather than
@@ -189,7 +188,6 @@ subagent_instruction() {
     return 2
   fi
   local agent="" root="" task="" description="" artifact="" headless=""
-  local timeout_seconds="" timed_prompt
   local codex_task_name="" codex_task_name_explicit=false codex_retry_existing=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -202,9 +200,6 @@ subagent_instruction() {
       --task)
         [[ $# -ge 2 ]] || { printf 'subagent_instruction: --task requires a value\n' >&2; return 2; }
         task="$2"; shift 2 ;;
-      --timeout-seconds)
-        [[ $# -ge 2 && -n "${2:-}" ]] || { printf 'subagent_instruction: --timeout-seconds requires a value\n' >&2; return 2; }
-        timeout_seconds="$2"; shift 2 ;;
       --description)
         [[ $# -ge 2 ]] || { printf 'subagent_instruction: --description requires a value\n' >&2; return 2; }
         description="$2"; shift 2 ;;
@@ -226,10 +221,6 @@ subagent_instruction() {
     return 2
   fi
   [[ -n "$description" ]] || description="$agent"
-  if [[ -n "$timeout_seconds" ]]; then
-    timed_prompt="$(subagent_timed_prompt "$root" "$timeout_seconds")" || return 2
-    task="$timed_prompt"$'\n\n'"$task"
-  fi
   if [[ -n "$codex_task_name" && ! "$codex_task_name" =~ ^[a-z0-9_]+$ ]]; then
     printf 'subagent_instruction: --codex-task-name must use lowercase letters, digits, or underscores\n' >&2
     return 2

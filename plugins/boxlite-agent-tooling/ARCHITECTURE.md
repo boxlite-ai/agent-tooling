@@ -22,7 +22,7 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | --- | --- | --- | --- |
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. An audit still running for the abandoned turn is revoked. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
-| Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. |
+| Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. On Claude Code, a commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. PRs over 400 added code lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
@@ -333,21 +333,39 @@ change those controls.
 
 `subagent_timed_prompt` in `.agents/lib/subagent.sh` renders
 `.agents/prompts/subagent/timed-subagent.md` with an absolute deadline: 85 percent of the
-timeout, capped at 510 seconds after rendering. Both headless audit runners use it;
-native commit/push dispatch opts in through `subagent_instruction --timeout-seconds`.
+timeout, capped at 510 seconds after rendering. Only the two headless audit runners use
+it; native dispatch carries no reminder (see [commit/push attempts](#commitpush-attempts)).
 Verdict and commit/push audits both default to 900 seconds, so each requests a report
 by 510 seconds and keeps 390 seconds to write it; a 120-second audit requests one by
 102. A 600-second verdict default left 90 seconds, too few for a retry's history and
 reflection reviews: every reflection retry hit the hard timeout
 ([#234](https://github.com/boxlite-ai/agent-tooling/issues/234)).
 
-The agent starts one native Monitor, stops new checks on its notice, and cancels an
-unused timer with TaskStop. Each auditor owns its result schema and treats unchecked
-required evidence as FAIL. Existing hard timeouts and publication checks remain in
-their runners; native dispatch gains only a cooperative reminder. Hosts without
-Monitor skip it, including the current isolated Codex CLI route. No scheduler or
-polling fallback is installed. See [design #174](https://github.com/boxlite-ai/agent-tooling/issues/174)
+The runner's model starts one native Monitor, stops new checks on its notice, and cancels
+an unused timer with TaskStop. Each auditor owns its result schema. Existing hard timeouts
+and publication checks remain in the runners; the reminder is cooperative. Hosts without
+Monitor skip it, including the current isolated Codex CLI route. No scheduler or polling
+fallback is installed. See [design #174](https://github.com/boxlite-ai/agent-tooling/issues/174)
 and [Monitor limits](https://code.claude.com/docs/en/tools-reference#monitor-tool).
+
+### Commit/push attempts
+
+Native commit/push auditors no longer prepare or record history, and their prompt has no
+timer: no Monitor event reached a Claude subagent in about 80 audits, and auditors cited
+a timeout that never fired ([#240](https://github.com/boxlite-ai/agent-tooling/issues/240)).
+
+- **Prepare.** On each deny, `preflight-commit-push.sh` prepares the attempt for the
+  current binding, cancels an open attempt with another binding, and passes `attempt_id`
+  and `history_path` to the auditor. It writes
+  `auditor-control/audit-task.<scope>.commit-push-auditor.json` with the context, dossier
+  path, and a deadline of `COMMIT_PUSH_AUDITOR_TIMEOUT` seconds.
+- **Close.** On Claude Code `SubagentStop`, `.agents/lib/commit-push-stop.sh` records a
+  dossier bound to the attempt. Before the deadline it blocks once when the dossier is
+  missing or has an `unchecked:` finding; otherwise it records `ERROR`. A check failure
+  allows the stop, since the Git gate still holds.
+- **Other routes.** Codex native auditors are not blocked; their dossier is recorded when
+  the gate validates the retried command. The headless runner cancels the preflight's
+  open attempt, then prepares and records its own.
 
 The procedure is embedded literally into each task. Agent specs reference the supplied
 procedure instead of duplicating it; prompt tests verify delivery, not live model compliance.
@@ -433,7 +451,7 @@ Audit history components:
 | `.agents/lib/audit-reconciliation.jq` | Stable finding IDs, dispositions, coverage, provenance, and reopening evidence; reject unresolved PASS. |
 | `.agents/lib/audit-reflection-contract.jq` | After two failures, require current reflection covering every failed ID and an independent sufficient assessment for PASS. Freeze active reflection; invalidate after failure. |
 | `scripts/audit-reflection-gate.sh` → `.agents/lib/audit-reflection-gate.sh` | Bind scoped verdict/Git audits before launch and acceptance; snapshot evidence; recheck prompt epoch; reconcile dossiers. |
-| `.agents/prompts/audit/audit-reflection.md`, `.agents/prompts/audit/git-audit-history.md` | Shared reconciliation contract and native Git prepare/record procedure. |
+| `.agents/prompts/audit/audit-reflection.md`, `.agents/prompts/audit/git-audit-history.md` | Shared reconciliation contract and native Git history review; hooks prepare and record native Git attempts. |
 
 Cycles bind a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`; cap at eight failures,
 sixteen attempts, and 10 MiB. PASS closes a cycle; the next operation starts another.
