@@ -663,7 +663,8 @@ non-blocking `advisories`, which never decide the verdict.
 ## Code map
 
 Directory guides cover [host wiring](hooks/README.md),
-[hook scripts](.agents/hooks/README.md), [Git hooks](.githooks/README.md), and
+[hook scripts](.agents/hooks/README.md), [audit gates and runners](.agents/hooks/audit/README.md),
+[Git hooks](.githooks/README.md), and
 [maintenance commands](scripts/README.md), with entry points and focused tests.
 
 ```text

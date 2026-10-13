@@ -63,7 +63,7 @@ by purpose:
 
 | Directory | Responsibility |
 | --- | --- |
-| `audit/` | Audit runners, verdict checker, schema, and audit tests |
+| [`audit/`](audit/README.md) | Audit runners, verdict checker, schema, and audit tests |
 | `design/` | Design-document preflight tests |
 | `pr/` | PR publication tests and rendering fixtures |
 | `resume/` | API failure and recovery tests |

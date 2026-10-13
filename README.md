@@ -263,6 +263,7 @@ Reusable implementation lives in [`plugins/boxlite-agent-tooling/`](plugins/boxl
 
 Directory guides: [host hook wiring](plugins/boxlite-agent-tooling/hooks/README.md),
 [hook scripts](plugins/boxlite-agent-tooling/.agents/hooks/README.md),
+[audit gates and runners](plugins/boxlite-agent-tooling/.agents/hooks/audit/README.md),
 [Git hooks](plugins/boxlite-agent-tooling/.githooks/README.md), and
 [maintenance scripts](plugins/boxlite-agent-tooling/scripts/README.md).
 
