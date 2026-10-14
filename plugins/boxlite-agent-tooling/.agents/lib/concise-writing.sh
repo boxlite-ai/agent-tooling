@@ -2,10 +2,14 @@
 # Shared summary check and skill reminder. Requires reply-summary.sh and perl.
 # Source only; callers own dependency checks, host delivery and failure policy.
 
-concise_writing_check_summary() { # Markdown, anywhere|first, optional word limit
-  local location="${2:-anywhere}" max_words="${3:-0}" summary counts status=0 problem correction
+concise_writing_check_summary() { # Markdown, anywhere|first, optional word limit, optional no-hint
+  local location="${2:-anywhere}" max_words="${3:-0}" summary counts status=0 verb=add
+  local skill_hint='; apply boxlite-writing'
+  # Name the skill unless the caller appends its own reminder, as the PR gate does for
+  # GitHub writing denials. Stop skips its writing reminder after this denial.
+  [[ "${4:-}" != no-hint ]] || skill_hint=''
   if (( ${#1} > 262144 )); then
-    printf '## TL;DR\n\nThe text exceeds the 262144-character inspection limit.\n\n## Correction\n\nShorten the text below the inspection limit before retrying.\n'
+    printf 'TL;DR not checked: text over 262144 characters; shorten it\n'
     return 1
   fi
   # Accept an ATX heading and prose, never an example or a hidden comment.
@@ -49,25 +53,22 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
     counts="$(reply_summary_word_counts "$summary")" || status=6
     [[ -n "$counts" ]] || status=6
   fi
-  # Give a complete correction: rewording the summary cannot fix a section boundary.
+  # One line each: the failed condition, then a literal fix that passes when followed.
+  # Checker failures omit the skill hint: rewording cannot repair them.
   # shellcheck disable=SC2016 # Render literal Markdown headings, never shell expansion.
   case "$status" in
     0) (( max_words == 0 || ${counts%% *} <= max_words )) && return 0
-       problem="The TL;DR section has ${counts%% *} words; limit $max_words."
-       correction='Keep one short sentence and start a new section (for example, `## Details` after `## TL;DR`); only a heading of the same or higher level ends the summary.' ;;
-    3) problem='Missing a Markdown TL;DR heading.'
-       correction='Use the literal line `## TL;DR`, then one short sentence and a peer heading such as `## Details` before supporting text; a bold label is not a heading.'
-       [[ "$location" != first ]] || correction="Begin the reply with it. $correction" ;;
-    4) problem='The TL;DR heading appears after other content.'
-       correction='Move the TL;DR heading and its summary to the beginning, before any other visible text.' ;;
-    5) problem='TL;DR summary prose is missing or malformed.'
-       correction='Put one short sentence beginning with a word directly below the heading, outside lists, tables, quotes, and code.' ;;
-    6) problem='The TL;DR section could not be counted.'
-       correction='Check the word-counter dependency before retrying; rewording the reply will not repair the checker.' ;;
-    *) problem='The TL;DR section could not be inspected.'
-       correction='Check the Markdown-parser dependency before retrying; rewording the reply will not repair the checker.' ;;
+       printf 'TL;DR has %s words (limit %s): keep one short sentence, then a same-level heading like `## Details`%s\n' \
+         "${counts%% *}" "$max_words" "$skill_hint" ;;
+    3) [[ "$location" != first ]] || verb='start with'
+       printf 'TL;DR heading missing: %s `## TL;DR`, one short sentence, then `## Details` before more text%s\n' \
+         "$verb" "$skill_hint" ;;
+    4) printf 'TL;DR not first: move `## TL;DR` and its sentence to the top%s\n' "$skill_hint" ;;
+    5) printf 'TL;DR summary missing or invalid: put one plain sentence, starting with a word, right under `## TL;DR`%s\n' \
+         "$skill_hint" ;;
+    6) printf 'TL;DR word counter failed: fix the counter; rewording will not help\n' ;;
+    *) printf 'TL;DR parser (perl) failed: fix it; rewording will not help\n' ;;
   esac
-  printf '## TL;DR\n\n%s\n\n## Correction\n\n%s\n' "$problem" "$correction"
   return 1
 }
 

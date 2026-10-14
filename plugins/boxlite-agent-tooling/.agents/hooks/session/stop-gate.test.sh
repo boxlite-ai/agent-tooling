@@ -189,7 +189,7 @@ check_writing_continuations() {
     append_assistant "$R" "$long_claim"
     payload="$(stop_payload "$R" "$S" true '' | jq '.last_assistant_message = "The root cause is the stale index."')"
     out="$(TEST_AUDIT_VERDICT=FAIL run_in_repo "$R" "$HOOK" YES "$host" "$payload")"
-    audit_ran "$R" && [[ "$(decision_of "$out")" == block && "$out" != *'Missing a Markdown TL;DR heading'* ]]
+    audit_ran "$R" && [[ "$(decision_of "$out")" == block && "$out" != *'TL;DR heading missing'* ]]
     expect "$host: new work after a reminder still reaches the failing audit without TL;DR" "$?" "out=$out"
     rm -rf "$R"
   done

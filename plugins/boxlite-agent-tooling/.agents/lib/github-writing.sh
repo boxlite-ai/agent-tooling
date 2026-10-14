@@ -57,7 +57,8 @@ github_writing_check_body() { # body
   # only to the Stop gate's unaudited follow-up reply.
   reply_summary_is_dense "$body" || density=$?
   case "$density" in
-    1) concise_writing_check_summary "$body" anywhere 39; return $? ;;
+    # The PR gate appends the shared skill reminder to every writing denial.
+    1) concise_writing_check_summary "$body" anywhere 39 no-hint; return $? ;;
     0) printf 'GitHub text has a paragraph over %s words or a list item over %s words.' \
          "$reply_summary_paragraph_max_words" "$reply_summary_item_max_words" ;;
     *) printf 'GitHub text could not be counted.' ;;

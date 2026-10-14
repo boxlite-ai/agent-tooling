@@ -98,7 +98,7 @@ check '39-word summary' "gh issue comment 7 --body '## TL;DR
 $(printf 'word %.0s' {1..39})'" allow
 check '40-word summary' "gh issue comment 7 --body '## TL;DR
 
-$(printf 'word %.0s' {1..40})'" deny 'TL;DR section'
+$(printf 'word %.0s' {1..40})'" deny 'TL;DR has 40 words (limit 39)'
 check 'oversized structured document' "gh issue comment 7 --body '$structured
 
 ## Example

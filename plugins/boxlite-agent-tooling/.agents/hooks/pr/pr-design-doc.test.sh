@@ -111,8 +111,11 @@ export SUMMARY_PREFIX=$'## TL;DR\n\nFixture summary.\n\n## How it works\n\nVerif
 export DESIGN_TEST_BODY="${SUMMARY_PREFIX}Design doc: $DESIGN_TEST_URL"
 check 'matching published body reaches human review' 'gh pr ready 42' 'Review required'
 export DESIGN_TEST_BODY="Design doc: $DESIGN_TEST_URL"
-check 'ready rejects a published body without TL;DR' 'gh pr ready 42' 'TL;DR'
-check 'metadata edits reject a published body without TL;DR' 'gh pr edit 42 --add-label safe' 'TL;DR'
+# The PR gate adds no reminder on this path, so the denial itself names the skill.
+# shellcheck disable=SC2016 # Markdown backticks in the expected denial are literal.
+missing_tldr='TL;DR heading missing: add `## TL;DR`, one short sentence, then `## Details` before more text; apply boxlite-writing'
+check 'ready rejects a published body without TL;DR' 'gh pr ready 42' "$missing_tldr"
+check 'metadata edits reject a published body without TL;DR' 'gh pr edit 42 --add-label safe' "$missing_tldr"
 export DESIGN_TEST_BRANCH=other
 check 'wrong branch is rejected by the earlier size binding' 'gh pr ready 42' 'exact PR size'
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
