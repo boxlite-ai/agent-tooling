@@ -34,6 +34,11 @@ Bump the generic, Claude, and Codex plugin manifests together with both version
 fields in the Claude and Copilot marketplaces. The Codex marketplace follows
 `main` without a version field. Run `host-parity.test.sh` to verify agreement.
 
+Bump the version with any change to an auditor's task or dossier format. The
+commit/push gate detects a stale session plugin only by version; an unchanged
+version lets a loaded auditor reject the newer gate's tasks instead of asking
+for `/reload-plugins`.
+
 After the release merges, run each consumer's `.agent-tooling/install.sh`, then
 refresh its host plugin. Verify the recorded revision, worktree hook path, managed
 guidance, and installed plugin version separately. Preserve explicit holds and
