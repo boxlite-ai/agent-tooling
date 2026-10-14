@@ -22,7 +22,7 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | --- | --- | --- | --- |
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. An audit still running for the abandoned turn is revoked. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
-| Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. On Claude Code, a commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
+| Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. PRs over 400 added code lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
@@ -359,13 +359,13 @@ a timeout that never fired ([#240](https://github.com/boxlite-ai/agent-tooling/i
   and `history_path` to the auditor. It writes
   `auditor-control/audit-task.<scope>.commit-push-auditor.json` with the context, dossier
   path, and a deadline of `COMMIT_PUSH_AUDITOR_TIMEOUT` seconds.
-- **Close.** On Claude Code `SubagentStop`, `.agents/lib/commit-push-stop.sh` records a
+- **Close.** On `SubagentStop` in Claude Code or Codex, `.agents/lib/commit-push-stop.sh` records a
   dossier bound to the attempt. Before the deadline it blocks once when the dossier is
   missing or has an `unchecked:` finding; otherwise it records `ERROR`. A check failure
   allows the stop, since the Git gate still holds.
-- **Other routes.** Codex native auditors are not blocked; their dossier is recorded when
-  the gate validates the retried command. The headless runner cancels the preflight's
-  open attempt, then prepares and records its own.
+- **Hosts.** Claude Code 2.1.296 and Codex CLI 0.162.1 both resumed a blocked subagent and
+  then set `stop_hook_active`. The headless runner cancels the preflight's open attempt,
+  then prepares and records its own.
 
 The procedure is embedded literally into each task. Agent specs reference the supplied
 procedure instead of duplicating it; prompt tests verify delivery, not live model compliance.

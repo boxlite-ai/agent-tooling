@@ -48,7 +48,7 @@ flowchart TB
 ```
 
 1. **Turn end.** When the final turn asks the reader to trust a conclusion, the verdict gate runs `run-verdict-audit.sh` inside the same Stop. It then re-enters itself to validate the new dossier: PASS allows silently; FAIL blocks with findings.
-2. **Commit or push.** `preflight-commit-push.sh` prepares the history attempt, denies, and names the auditor routes. The agent spawns `commit-push-auditor` or runs the headless runner. On Claude Code, `SubagentStop` closes the attempt. The retried command runs only on a fresh, matching PASS, which the gate consumes.
+2. **Commit or push.** `preflight-commit-push.sh` prepares the history attempt, denies, and names the auditor routes. The agent spawns `commit-push-auditor` or runs the headless runner. `SubagentStop` closes the attempt. The retried command runs only on a fresh, matching PASS, which the gate consumes.
 
 Each dossier is bound to what it judged. A stale turn dossier is discarded; a stale commit/push dossier denies until a fresh audit.
 See [bindings](../../../ARCHITECTURE.md#boundaries), [Stop decisions](../../../ARCHITECTURE.md#stop-gate-decisions),

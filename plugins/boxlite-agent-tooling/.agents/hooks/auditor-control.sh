@@ -913,10 +913,11 @@ case "$event" in
     fi
     ;;
   SubagentStop)
-    # A Claude commit/push auditor stops only with its attempt closed. A block resumes
-    # the auditor and skips the stop dispatch, so its escalation stays running. A check
-    # failure allows the stop: exit 2 would resume it, and the git gate still holds.
-    if [[ "$auditor" == commit-push-auditor && "$(hook_host_kind)" == claude ]]; then
+    # A commit/push auditor stops only with its attempt closed; Claude Code and Codex
+    # both resume a blocked subagent. A block skips the stop dispatch, so escalation
+    # stays running. A check failure allows the stop: exit 2 would resume it, and the
+    # git gate still holds.
+    if [[ "$auditor" == commit-push-auditor ]]; then
       resumed="$(printf '%s' "$payload" | jq -r '.stop_hook_active == true')"
       # shellcheck source=/dev/null
       if ! { source "$tooling_root/.agents/lib/audit-reflection.sh" \

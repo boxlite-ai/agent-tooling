@@ -64,6 +64,22 @@ stop() {  # stop_hook_active
         bash "$CONTROL" 2>/dev/null)
 }
 
+# Codex names its native subagent "default" and identifies it through the subagent
+# transcript's spawn metadata.
+codex_stop() {  # stop_hook_active
+  local transcript="$R/.agents/state/codex-auditor.jsonl"
+  jq -nc --arg parent "$SESSION" \
+    '{type:"session_meta",payload:{id:"codex-auditor-1",session_id:$parent,thread_source:"subagent",
+      source:{subagent:{thread_spawn:{parent_thread_id:$parent,depth:1,
+        agent_path:"/root/commit_push_auditor",agent_nickname:"test",agent_role:null}}}}}' > "$transcript"
+  jq -nc --arg session "$SESSION" --argjson resumed "$1" --arg transcript "$transcript" \
+    '{hook_event_name:"SubagentStop",session_id:$session,agent_id:"codex-auditor-1",
+      agent_type:"default",agent_transcript_path:$transcript,stop_hook_active:$resumed,
+      last_assistant_message:"FAIL"}' \
+    | (cd "$R" && env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$REPO_ROOT" CLAUDE_PROJECT_DIR="$R" \
+        bash "$CONTROL" 2>/dev/null)
+}
+
 attempts() {  # -> "id:verdict" per attempt
   (
     source "$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
@@ -132,6 +148,14 @@ check_eq "an unchecked finding before the deadline blocks" "$(stop false | jq -r
 jq -c '.deadline = 0' "$LINK" > "$LINK.tmp" && mv "$LINK.tmp" "$LINK"
 stop false >/dev/null
 check_eq "an unchecked finding after the deadline is recorded" "$(attempts | sed 's/.*://')" "FAIL"
+
+echo "Codex SubagentStop closes the attempt the same way"
+use_session attempt-codex
+stage_change
+preflight >/dev/null
+check_eq "a first Codex stop without a dossier blocks" "$(codex_stop false | jq -r .decision)" "block"
+codex_stop true >/dev/null
+check_eq "a resumed Codex stop without a dossier records ERROR" "$(attempts | sed 's/.*://')" "ERROR"
 
 echo
 printf 'RESULT: %s passed, %s failed\n' "$pass" "$fail"
