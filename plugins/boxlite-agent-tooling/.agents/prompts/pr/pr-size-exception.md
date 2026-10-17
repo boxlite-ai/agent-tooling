@@ -2,17 +2,15 @@
 name: pr-size-exception
 used-by: .agents/lib/pr-size.sh
 placeholders: lines, base, head, request_id, state, tooling
-description: A measured oversized PR needs a concrete human reason or splitting.
+description: Ask whether to bypass the size guideline or split the measured PR.
 ---
 
-PR size: {{lines}} added code lines; maximum 400. Base {{base}}, head {{head}}.
-Show this diff and a concrete split plan. Request human-typed
-pr-size-exception: <change, concrete constraint, and why that split is unsafe or impractical>.
-Reject generic urgency or convenience. The reason needs at least 12 words; length alone
-does not make it concrete. Never invent or pre-fill a reason.
-Claude's native question hook records valid replies automatically. Otherwise run
-{{tooling}}/scripts/timed-user-prompt.sh respond for a valid human reply
-with arguments {{state}}, {{request_id}}, and the verbatim reply, safely quoted.
-Record the reason and diff context in the PR and tracking issue; then retry.
-On timeout reuse or create one tracking issue with a PR checklist and split into small tested PRs.
-Create separate issues only for work needing independent tracking.
+PR size: {{lines}} added code lines; guideline 400. Base {{base}}, head {{head}}.
+Show the diff and ask once with two choices: "Bypass limit" or "Split PR".
+Bypass needs no written justification and applies only to this diff; other gates remain.
+Never invent a choice or treat a default selection as an answer.
+Claude's native question hook records replies. Otherwise run
+{{tooling}}/scripts/timed-user-prompt.sh respond with {{state}}, {{request_id}},
+and the exact selected label, safely quoted. Retry after bypass.
+On Split PR or timeout, reuse or create one tracking issue with a PR checklist
+and split into small tested PRs. Create separate issues only for independent tracking.

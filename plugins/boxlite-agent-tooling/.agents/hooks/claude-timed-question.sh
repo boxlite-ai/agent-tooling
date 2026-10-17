@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture managed AskUserQuestion replies at the host boundary, never from an option.
+# Capture managed replies: size choices or typed review acknowledgments.
 # shellcheck source-path=SCRIPTDIR
 set -euo pipefail
 fail() { printf 'claude-timed-question: %s\n' "$1" >&2; exit 2; }
@@ -40,9 +40,9 @@ case "$(jq -r .hook_event_name <<<"$payload")" in
       ([.response,.annotations[$key].notes,.answers[$key]] |
        map(select(type=="string" and length>0)) | .[0]) |
       select(type=="string") | {tool_use_id:$id,answer:.}' <<<"$payload")" \
-      || fail 'no typed reply; keep the request unapproved and follow its original deadline'
+      || fail 'no user reply; keep the request unapproved and follow its original deadline'
     request="$(timed_user_prompt native-reply "$state" "$id" "$answer")" \
-      || fail 'no valid timely typed reply; never infer approval, follow the original deadline'
+      || fail 'no valid timely reply; never infer approval, follow the original deadline'
     if [[ "$kind" == pr-review ]]; then
       jq -c '{branch:.spec.binding.branch,head:.spec.binding.head,message:.response,request:.id}' <<<"$request" \
         | verdict_audit_write_atomic "$repo/.agents/state/pr-reviewed.json" || fail 'could not record review acknowledgment'

@@ -33,6 +33,11 @@ for name in pr-size-request pr-review-request; do
       reason="$(timed_user_prompt_instruction "$plugin" "$request")" || exit 2
       reason="$(subagent_prompt questions/timed-continue-pending "$plugin" \
         "name=${name%-request}" "instruction=$reason")" || exit 2 ;;
+    declined)
+      [[ "$(jq -r .fallback_delivered <<<"$request")" == false ]] || continue
+      reason="$(subagent_prompt pr/pr-size-declined "$plugin" \
+        "request_id=$id" "state=$path" "tooling=$plugin")" || exit 2
+      timed_user_prompt fallback "$path" "$id" >/dev/null || exit 2 ;;
     expired)
       [[ "$(jq -r .fallback_delivered <<<"$request")" == false ]] || continue
       if [[ "$(jq -r .spec.fallback <<<"$request")" == split ]]; then

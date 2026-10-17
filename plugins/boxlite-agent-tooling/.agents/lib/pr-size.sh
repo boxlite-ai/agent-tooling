@@ -79,6 +79,11 @@ pr_size_check() { # context JSON {root,project,session,tooling}, subcommand argv
     [[ "$(_pr_size_snapshot "$@")" == "$snapshot" ]] || return 2
     return 0
   fi
+  if [[ "$status" == declined ]]; then
+    subagent_prompt pr/pr-size-declined "$tooling" \
+      "request_id=$request_id" "state=$state" "tooling=$tooling" || return 2
+    return 1
+  fi
   if [[ "$status" == expired ]]; then
     subagent_prompt pr/pr-size-expired "$tooling" "lines=$lines" \
       "base=$(jq -r .base <<<"$snapshot")" "head=$(jq -r .head <<<"$snapshot")" \

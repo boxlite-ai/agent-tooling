@@ -25,8 +25,8 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
-| Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. PRs over 400 added code lines require a timed exception or splitting. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
-| Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely typed answer; idle expiry and selected options never authorize a PR. |
+| Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. Above 400 added code lines, asks the user to bypass the guideline or split. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
+| Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely size choice or typed review answer. Idle expiry never authorizes; size choices cannot satisfy review acknowledgment. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
 | Finishes a plain `make test...` command | `PostToolUse`; `PostToolUseFailure` on Claude Code | `.agents/hooks/record-test-run.sh` | Nothing. A receipt in `.agents/state/test-runs/` that `commit-push-auditor` reads as an observed run. |
 | Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | At most one writing reminder per turn, for TL;DR or dense text. Continued replies still reach timed confirmations and verdict checks. See the decision table below. |
@@ -197,7 +197,10 @@ All filenames and statistics are validated before filtering. Comparisons with 30
 or more returned files fail closed because GitHub may truncate the list, including
 documentation-only comparisons. Exceptions retain the exact base/head binding;
 excluded file changes still move HEAD and invalidate approval. For example, 400
-added code lines plus 2,000 Markdown lines pass the size check; 401 do not.
+added code lines plus 2,000 Markdown lines pass the size check; 401 prompt for a
+choice. **Bypass limit** accepts the current diff without a written justification;
+**Split PR** records a declined request. Retrying preserves that decision, and
+changing the diff invalidates bypass. Other publication checks still run.
 
 The workflow owns decomposition and stack requirements; the
 [tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md) supplies the plan structure.
@@ -219,17 +222,19 @@ non-blocking question. It never waits or opens a host dialog inside the state lo
 New requests and explicit renewals receive 300 seconds. Existing 180-second records
 remain readable and keep their original deadlines; retries cannot extend them.
 
-Size exceptions bind to repository, base/head, measured size, and session. A reason
-needs at least 12 words; the agent must judge whether it names a concrete constraint.
+Size choices bind to repository, base/head, measured size, and session. The exact
+label `Bypass limit` is accepted without a reason; `Split PR` records `declined`.
+The same labels work through the CLI and native Claude replies. Existing prefixed
+reasons remain readable for compatibility. Neither label authorizes a review request.
 
 After an explicit human instruction, `renew STATE REQUEST_ID USER_REQUEST` creates a
-new pending PR-size attempt with an empty response, new ID/deadline, and no native
+new pending PR-size attempt after expiry or a split choice, with an empty response, new ID/deadline, and no native
 question ID. The agent first remeasures through the guarded PR operation and shows
-the current diff and split. Ordinary `request` calls cannot renew expired attempts;
+the current diff and split. Ordinary `request` calls cannot renew expired or declined attempts;
 review requests cannot be renewed. Like `respond`, the CLI trusts the agent to relay
 verbatim human text; it does not authenticate human identity.
 
-Renewal exclusively writes an archive containing the expired record, human instruction,
+Renewal exclusively writes an archive containing the expired or declined record, human instruction,
 successor ID, and renewal time before atomically replacing the active state, all under
 the existing request lock. Archive collisions and unsafe paths fail closed. If publication
 fails after archival, the archive remains for inspection; no approval was granted.
@@ -253,9 +258,11 @@ one-shot delivery remain state transitions in code.
 
 Before normal Stop checks, `scripts/continue-timed-prompts.sh` resumes pending requests or delivers their timeout
 fallback once: split oversized work, or leave an unreviewed PR draft/uncreated.
+A declined size request delivers its splitting continuation once too, without asking again.
 The agent performs the wait, issue creation, and splitting; these are not background
 jobs. `.agents/prompts/pr/pr-size-exception.md` carries the size-specific wording;
 `.agents/prompts/pr/pr-size-expired.md` describes splitting and human-requested renewal.
+`.agents/prompts/pr/pr-size-declined.md` handles the user's split choice in both PR and Stop gates.
 
 Local interactive sessions launched through `scripts/claude-with-timed-prompts.sh`
 load this plugin with `--plugin-dir`, enable 300-second native idle dismissal, and
@@ -492,7 +499,7 @@ than one session can share a checkout.
 - `commit-audit-receipt.json`: the receipt commit-msg publishes and pre-push spends.
 - `pr-reviewed.json`: the typed PR-review acknowledgment, bound to branch, HEAD, and request ID.
 - `pr-review-request.json`: the review deadline and response lifecycle.
-- `pr-size-request.json`: the size exception deadline, diff binding, and exact reason; renewal archives live at `<state>.expired-<request-id>.json`.
+- `pr-size-request.json`: the size-choice deadline, diff binding, and exact response; renewal archives retain the legacy `<state>.expired-<request-id>.json` name for expired or declined requests.
 - `auditor-control`: a directory of escalation, completion, grant and event records for running auditors and overrides.
 - `last-api-failure.json`: the kind of API error that ended a turn.
 - `api-resume`: the recent resumes and the unspent wake hashes of the API-failure resume.

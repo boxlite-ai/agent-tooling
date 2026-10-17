@@ -76,7 +76,7 @@ done
 context_command="env -C '$target_root' $plain_context_command"
 export SIZE_TEST_LINES=401
 out="$(context_hook '{}')"
-[[ "$out" == *'pr-size-exception:'* ]]
+[[ "$out" == *'Bypass limit'* && "$out" == *'Split PR'* ]]
 [[ "$(jq -r .spec.binding.root .agents/state/pr-size-request.json)" == "$target_root" ]]
 rm .agents/state/pr-size-request.json
 context_command="env -C '$target_root' gh pr ready"
@@ -100,7 +100,7 @@ context="$(jq -nc --arg root "$target_root" --arg other "$scratch/other" \
   '{cwd:$other,tool_input:{workdir:$root,cwd:$other}}')"
 export SIZE_TEST_LINES=401
 out="$(context_hook "$context")"
-[[ "$out" == *'pr-size-exception:'* ]] || {
+[[ "$out" == *'Bypass limit'* && "$out" == *'Split PR'* ]] || {
   printf 'FAIL: the target checkout escaped size enforcement\n%s\n' "$out" >&2; exit 1;
 }
 [[ "$(jq -r .spec.binding.root .agents/state/pr-size-request.json)" == "$target_root" ]]
@@ -150,11 +150,11 @@ Retry failed calls once. https://github.com/example/repo/issues/123"' ;;
     esac
     out="$(call_hook "$command")"
     if { [[ "$expected" == unknown && "$out" == *'Cannot determine the exact PR size'* ]]; } \
-      || { [[ "$expected" != unknown && "$expected" -gt 400 && "$out" == *'pr-size-exception:'* ]] \
+      || { [[ "$expected" != unknown && "$expected" -gt 400 && "$out" == *'Bypass limit'* && "$out" == *'Split PR'* ]] \
         && [[ "$(jq -r .spec.binding.lines "$scratch/repo/.agents/state/pr-size-request.json")" == "$expected" ]]; } \
       || { [[ "$expected" != unknown && "$expected" -le 400 ]] \
         && { [[ "$operation" == create && -z "$out" ]] \
-          || [[ "$operation" != create && "$out" == *'reviewed:'* && "$out" != *'pr-size-exception:'* ]]; }; }; then
+          || [[ "$operation" != create && "$out" == *'reviewed:'* && "$out" != *'Bypass limit'* ]]; }; }; then
       printf 'PASS: %s / %s\n' "$label" "$operation"
     else
       printf 'FAIL: %s / %s: expected code size %s\n%s\n' "$label" "$operation" "$expected" "$out" >&2
@@ -243,7 +243,13 @@ Retry failed calls once. https://github.com/example/repo/issues/123"')"
 state="$scratch/repo/.agents/state/pr-size-request.json"
 id="$(jq -r .id "$state")"
 deadline="$(jq -r .deadline "$state")"
-reason='pr-size-exception: This protocol update regenerates 612 binding-code lines; splitting the schema from generated bindings leaves incompatible interfaces.'
+bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" 'Split PR' >/dev/null
+out="$(call_hook 'gh pr ready')"
+[[ "$out" == *'chose Split PR'* && "$(jq -r .id "$state")" == "$id" ]]
+renewed="$(bash "$plugin/scripts/timed-user-prompt.sh" renew "$state" "$id" 'Ask whether to bypass again.')"
+id="$(jq -r .id <<<"$renewed")"
+deadline="$(jq -r .deadline <<<"$renewed")"
+reason='Bypass limit'
 "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" >/dev/null
 [[ -z "$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
@@ -253,6 +259,10 @@ Fixture change.
 
 Retry failed calls once. https://github.com/example/repo/issues/123"')" ]]
 [[ "$(jq -r .deadline "$state")" == "$deadline" ]]
+out="$(call_hook 'gh pr ready')"
+[[ "$out" == *'reviewed:'* && "$out" != *'Bypass limit'* ]] || {
+  printf 'FAIL: size bypass did not preserve the separate review gate\n' >&2; exit 1;
+}
 export SIZE_TEST_BASE=1111111111111111111111111111111111111111
 out="$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 

@@ -69,6 +69,22 @@ call_hook PostToolUse "$(reply "$reason")"
 [[ "$(jq -r .response "$state")" == "$reason" ]]
 reject call_hook PostToolUse "$(reply "$reason")"
 
+# Size choices are real responses; automatic defaults and review bypass stay invalid.
+for choice in 'Bypass limit' 'Split PR'; do
+  rm "$state"
+  bash "$cli" request "$state" "$spec" >/dev/null
+  id="$(jq -r .id "$state")"
+  question="$(bash "$cli" question "$state" "$id")"
+  jq -e '[.questions[0].options[].label] == ["Bypass limit","Split PR"]' <<<"$question" >/dev/null
+  key="$(jq -r '.questions[0].question' <<<"$question")"
+  call_hook PreToolUse
+  reject call_hook PostToolUse "$(reply "$choice" | jq '.afkTimeoutMs=300000')"
+  call_hook PostToolUse "$(reply "$choice")"
+  expected=accepted; [[ "$choice" != 'Split PR' ]] || expected=declined
+  [[ "$(jq -r .status "$state")" == "$expected" && "$(jq -r .response "$state")" == "$choice" ]]
+  reject call_hook PostToolUse "$(reply "$choice")"
+done
+
 # A native review response produces the marker consumed by the existing PR gate.
 state="$repo/.agents/state/pr-review-request.json"
 spec="$(jq '.prefix="reviewed:" | .fallback="keep-draft" | .minimum_words=1 |
@@ -78,6 +94,8 @@ id="$(jq -r .id "$state")"
 question="$(bash "$cli" question "$state" "$id")"
 key="$(jq -r '.questions[0].question' <<<"$question")"
 call_hook PreToolUse
+reject call_hook PostToolUse "$(reply 'Bypass limit')"
+reject call_hook PostToolUse "$(reply 'Split PR')"
 call_hook PostToolUse '{"answers":{},"response":"reviewed: deadlines bind the typed reply to the presented diff"}'
 jq -e --arg id "$id" '.request==$id and (.message|startswith("reviewed: deadlines"))' .agents/state/pr-reviewed.json >/dev/null
 cat > "$scratch/bin/gh" <<'GH'

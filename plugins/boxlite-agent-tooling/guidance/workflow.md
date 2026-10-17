@@ -30,9 +30,11 @@ Apply the `boxlite-design-doc` skill before implementation.
 
 #### PR size and decomposition
 
-- Target 100–200 added code lines; cap 400 code additions, including drafts. Count source, scripts, configuration, and generated code; exclude `*.spec.ts`, `*_test.go`, files under `tests` directories, recognized documentation, data/assets, and lockfiles. Unclassified files count. Estimate before coding; measure against the intended base before every PR creation/update.
-- Split into tested PRs under one tracking issue; use native GitHub stacks for dependencies. Follow the installed plugin's `.agents/prompts/pr/split-pr-tracking-issue.md`.
-- Exceptions: human justification within **5 minutes**, otherwise split. Diff changes invalidate approval. Follow the installed plugin's `.agents/prompts/pr/pr-size-exception.md` and `.agents/prompts/pr/pr-size-expired.md`.
+- Prefer 100–200 added code lines; 400 is a bypassable guideline, including drafts. Estimate before coding; measure against the intended base before every PR creation/update.
+- Count source, scripts, configuration, generated code, and unfamiliar files; exclude `*.spec.ts`, `*_test.go`, `tests` directories, recognized documentation, data/assets, and lockfiles.
+- Above 400, ask the user to choose **Bypass limit** or **Split PR**. Bypass needs no written justification and applies only to the current diff. Never infer a choice; diff changes require a new decision.
+- When splitting, use tested PRs under one tracking issue and native GitHub stacks for dependencies. Follow the installed plugin's `.agents/prompts/pr/split-pr-tracking-issue.md`.
+- Allow **5 minutes** to choose; silence defaults to splitting. Reconsider a split choice or expired request only after explicit human instruction. Follow the installed plugin's `.agents/prompts/pr/pr-size-exception.md` and `.agents/prompts/pr/pr-size-expired.md`.
 
 ### Test
 

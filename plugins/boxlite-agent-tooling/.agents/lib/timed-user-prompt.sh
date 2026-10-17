@@ -61,8 +61,9 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       and ((.prefix == "reviewed:") == (.fallback == "keep-draft"))
       and (.minimum_words | type == "number" and . >= 1 and . <= 100 and floor == .);
     def response_ok($s):
-      line and startswith($s.prefix + " ")
-      and ([.[($s.prefix|length):] | scan("\\S+")] | length) >= $s.minimum_words;
+      line and (if $s.prefix == "pr-size-exception:" and . == "Bypass limit" then true
+        else startswith($s.prefix + " ")
+          and ([.[($s.prefix|length):] | scan("\\S+")] | length) >= $s.minimum_words end);
     def valid:
       type == "object" and .version == 1 and (.spec | spec)
       and (keys == ["created_at","deadline","fallback_delivered","id","question_tool_id","response","spec","status","version"])
@@ -70,14 +71,16 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       and (.created_at | type == "number" and . >= 0 and floor == .)
       # Keep legacy deadlines valid without extending existing attempts.
       and (.deadline == .created_at + 180 or .deadline == .created_at + 300)
-      and (.status | IN("pending","accepted","expired","consumed"))
+      and (.status | IN("pending","accepted","expired","consumed","declined"))
       and (.question_tool_id | type == "string" and test("^[A-Za-z0-9_-]{0,200}$"))
       and (.fallback_delivered | type == "boolean");
     def record_ok:
       valid
       and (if .status == "accepted" or .status == "consumed"
-        then .spec as $s | .response | response_ok($s) else .response == "" end)
-      and (if .fallback_delivered then .status == "expired" else true end);
+        then .spec as $s | .response | response_ok($s)
+        elif .status == "declined" then .spec.prefix == "pr-size-exception:" and .response == "Split PR"
+        else .response == "" end)
+      and (if .fallback_delivered then (.status | IN("expired","declined")) else true end);
     # Older version-one records predate native questions; preserve their deadline.
     if type == "object" and .version == 1 and (has("question_tool_id") | not)
       then .question_tool_id = "" else . end |
@@ -94,9 +97,9 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       else . end
     elif . == null or .id != $arg then error("unknown or superseded confirmation")
     elif $op == "renew" then
-      if .status != "expired" or .spec.prefix != "pr-size-exception:"
+      if (.status | IN("expired","declined") | not) or .spec.prefix != "pr-size-exception:"
         or ($reply | line and test("\\S") | not)
-      then error("renewal requires an expired PR-size request and the explicit human instruction")
+      then error("renewal requires an expired or declined PR-size request and the explicit human instruction")
       else .id = $id | .created_at = $now | .deadline = ($now+300)
         | .status = "pending" | .response = "" | .fallback_delivered = false
         | .question_tool_id = "" end
@@ -116,14 +119,16 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
        elif .question_tool_id != "" then error("native replies must come through the question hook")
        else $reply end) as $answer |
       .spec as $s |
-      if ($answer | response_ok($s) | not)
-      then error("type the required prefix and a concrete response")
+      if $s.prefix == "pr-size-exception:" and $answer == "Split PR"
+      then .status = "declined" | .response = $answer
+      elif ($answer | response_ok($s) | not)
+      then error("response does not match this confirmation")
       else .status = "accepted" | .response = $answer end
     elif $op == "consume" then
       if .status != "accepted" then error("confirmation is not accepted")
       else .status = "consumed" end
     elif $op == "fallback" then
-      if .status != "expired" then error("confirmation has not expired")
+      if (.status | IN("expired","declined") | not) then error("confirmation has not expired or been declined")
       else .fallback_delivered = true end
     elif $op == "status" or $op == "question" then .
     else error("unknown confirmation operation") end
@@ -133,10 +138,10 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
     archive="$path.expired-$argument.json"
     jq -nc --argjson request "$record" --arg user_request "$response" \
       --arg successor_id "$nonce" --argjson renewed_at "$now" \
-      '{request:($request | .status="expired"),user_request:$user_request,
+      '{request:($request | if .status == "pending" then .status="expired" else . end),user_request:$user_request,
         successor_id:$successor_id,renewed_at:$renewed_at}' \
       | verdict_audit_write_exclusive_regular "$archive" || {
-        printf 'timed-user-prompt: cannot archive expired request: %s; renewal not published; inspect any existing archive before retrying\n' "$archive" >&2
+        printf 'timed-user-prompt: cannot archive prior request: %s; renewal not published; inspect any existing archive before retrying\n' "$archive" >&2
         return 2
       }
   fi

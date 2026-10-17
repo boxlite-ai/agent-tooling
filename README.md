@@ -14,7 +14,7 @@ A repository can tell an agent how to work. This toolkit also checks key actions
 | --- | --- |
 | Consistent engineering practices across repositories | Shared guidance installed into `AGENTS.md`, plus reusable skills |
 | Evidence behind an agent's conclusions | Independent auditors for completion claims and commit/push readiness |
-| Reviewable changes | Design-document checks, PR size checks, and human review acknowledgments |
+| Reviewable changes | Design-document checks, a user choice to bypass or split large PRs, and human review acknowledgments |
 | Feedback after a push | A PR watcher for checks, reviews, comments, and merge conflicts |
 | Repository-specific verification | A small profile declaring the checks each project needs |
 

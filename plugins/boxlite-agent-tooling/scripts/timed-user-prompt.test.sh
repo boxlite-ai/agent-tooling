@@ -26,6 +26,8 @@ expect "$request" '.status == "pending" and .deadline == 1300'
 printf '1100\n' > "$CONFIRMATION_TEST_CLOCK"
 expect "$(run request "$state" "$spec")" ".id == \"$id\" and .deadline == 1300"
 reject respond "$state" "$id" 'yes'
+reject respond "$state" "$id" 'Bypass limit'
+reject respond "$state" "$id" 'Split PR'
 reject respond "$state" "$id" 'reviewed: '
 reject respond "$state" "$id" $'reviewed: text\nextra'
 printf '1181\n' > "$CONFIRMATION_TEST_CLOCK"
@@ -57,6 +59,23 @@ expect "$(run respond "$state" "$id" "$reason")" '.status == "accepted" and .spe
 printf '1\n' > "$CONFIRMATION_TEST_CLOCK"
 reject status "$state" "$id"
 printf '2000\n' > "$CONFIRMATION_TEST_CLOCK"
+
+choice_state="$scratch/state with spaces/choice.json"
+request="$(run request "$choice_state" "$size_spec")"
+choice_id="$(jq -r .id <<<"$request")"
+question="$(run question "$choice_state" "$choice_id")"
+expect "$question" '[.questions[0].options[].label] == ["Bypass limit","Split PR"]'
+expect "$(run respond "$choice_state" "$choice_id" 'Split PR')" '.status == "declined" and .response == "Split PR"'
+expect "$(run request "$choice_state" "$size_spec")" ".id == \"$choice_id\" and .status == \"declined\""
+reject consume "$choice_state" "$choice_id"
+reject respond "$choice_state" "$choice_id" 'Bypass limit'
+expect "$(run fallback "$choice_state" "$choice_id")" '.fallback_delivered and .status == "declined"'
+request="$(run renew "$choice_state" "$choice_id" 'Ask me again.')"
+expect "$(cat "$choice_state.expired-$choice_id.json")" '.request.status == "declined" and .request.response == "Split PR"'
+choice_id="$(jq -r .id <<<"$request")"
+expect "$(run respond "$choice_state" "$choice_id" 'Bypass limit')" '.status == "accepted" and .response == "Bypass limit"'
+reject respond "$choice_state" "$choice_id" 'Bypass limit'
+expect "$(run status "$choice_state" "$choice_id")" '.status == "accepted"'
 
 for type in symlink fifo directory malformed; do
   unsafe="$scratch/state with spaces/$type"

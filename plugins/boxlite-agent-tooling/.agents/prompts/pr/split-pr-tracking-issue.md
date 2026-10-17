@@ -25,7 +25,7 @@ issue solely to hold the design.
 
 ## Steps
 
-Repeat this todo for each coherent PR within the size limit. Replace the instructions
+Repeat this todo for each coherent PR in the agreed split. Replace the instructions
 and placeholders with the actual plan; add PR links when available.
 
 - [ ] Slice title — PR: pending; depends on: none; estimate: added code lines.

@@ -6,17 +6,17 @@ placeholders: prefix, id
 {
   "questions": [
     {
-      "question": "{{prefix}} <why one PR is necessary> [{{id}}]",
+      "question": "{{prefix}} Bypass the 400-line guideline for this PR? [{{id}}]",
       "header": "PR size",
       "multiSelect": false,
       "options": [
         {
-          "label": "Split work",
-          "description": "Do not approve."
+          "label": "Bypass limit",
+          "description": "Proceed with this PR without splitting."
         },
         {
-          "label": "Show diff",
-          "description": "Inspect changes."
+          "label": "Split PR",
+          "description": "Break changes into smaller PRs."
         }
       ]
     }

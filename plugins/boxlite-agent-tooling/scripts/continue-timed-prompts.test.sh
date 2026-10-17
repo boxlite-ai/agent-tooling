@@ -28,6 +28,12 @@ jq -e '.reason | contains("one tracking issue") and contains("checklist")' <<<"$
   || { printf 'FAIL: size timeout continuation must default to one tracking issue with a checklist\n' >&2; exit 1; }
 jq -e '.reason | contains("Only a new explicit human request permits renewal")' <<<"$out" >/dev/null
 [[ -z "$(stop)" ]]
+choice_spec="$(jq '.binding.choice="split"' <<<"$spec")"
+request="$(bash "$plugin/scripts/timed-user-prompt.sh" request "$state" "$choice_spec")"
+bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$(jq -r .id <<<"$request")" 'Split PR' >/dev/null
+out="$(stop)"
+jq -e '.decision=="block" and (.reason|contains("chose Split PR"))' <<<"$out" >/dev/null
+[[ -z "$(stop)" ]]
 spec="$(jq '.prefix="reviewed:"|.fallback="keep-draft"|.minimum_words=1' <<<"$spec")"
 state="$scratch/repo/.agents/state/pr-review-request.json"
 bash "$plugin/scripts/timed-user-prompt.sh" request "$state" "$spec" >/dev/null

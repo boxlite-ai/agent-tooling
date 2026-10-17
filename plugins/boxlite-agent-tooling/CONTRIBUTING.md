@@ -76,15 +76,19 @@ The preflight hook's denials point here as `CONTRIBUTING.md #commit--pr-messages
 
 ### Pull request size
 
-Apply the workflow's **PR size and decomposition** requirements, including exception
-expiry and renewal. Use the [tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md)
+Above 400 added code lines, ask the user to choose **Bypass limit** or **Split PR**.
+Bypass requires no written justification and permits the current diff through the
+size check. Design, writing, and human-review checks still apply. Use the
+[tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md)
 when splitting; see [size enforcement](ARCHITECTURE.md#pr-size-and-stacks) for hook coverage.
 
-The 400-line cap counts added code, including scripts, configuration, and generated
+The 400-line guideline counts added code, including scripts, configuration, and generated
 source. Deletions, `*.spec.ts`, `*_test.go`, files under `tests` directories,
 recognized documentation, assets/data, and lockfiles are excluded; unfamiliar
 files count. A PR with 400 added code lines and 2,000 Markdown lines fits;
-401 added code lines require splitting or an exception.
+401 added code lines trigger the choice. No response within five minutes defaults
+to splitting. A split choice persists without repeated questions; only an explicit
+human request permits reconsideration. Changes to the diff require a fresh choice.
 
 For managed native questions in local Claude sessions, launch with:
 
@@ -95,11 +99,10 @@ bash plugins/boxlite-agent-tooling/scripts/claude-with-timed-prompts.sh
 This disables Remote Control for that session. Read [timed confirmations](ARCHITECTURE.md#timed-confirmations)
 for supported modes, fallback questions, deadlines, and renewal behavior.
 
-Illustrative typed exception:
+Example: a 612-line PR presents **Bypass limit** and **Split PR**. Selecting bypass
+records that choice for its exact diff; no explanation is required.
 
-> pr-size-exception: The protocol change regenerates 612 binding-code lines; splitting the schema and generated bindings would leave incompatible interfaces.
-
-Do not pre-fill this example as a developer response.
+Never pre-fill or invent the user's selection.
 
 ### Pull request descriptions
 
