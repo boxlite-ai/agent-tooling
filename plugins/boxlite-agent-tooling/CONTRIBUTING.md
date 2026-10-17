@@ -51,6 +51,12 @@ them. Compare `.agent-tooling/install.sh`, `claude-plugin-bootstrap.sh`, and
 changes while preserving consumer customizations. Verify Claude records by exact
 `projectPath`: a successful update in one linked worktree can leave another stale.
 
+### PR-size choice rollout
+
+Version 0.1.29 packages the **Bypass limit** / **Split PR** flow. Verify both adopted
+tooling and the installed host plugin report 0.1.29 or newer; reload or start a new
+session to replace already-loaded prompts.
+
 ### Verification boundaries
 
 In lifecycle tests, wait for the observed phase before injecting a signal. A
