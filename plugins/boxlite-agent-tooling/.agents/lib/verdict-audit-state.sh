@@ -1079,10 +1079,11 @@ verdict_audit_regular_size_if_identity() {  # selected-path device:inode
 # A PID is only an observation; pair it with the process start instant before trusting
 # persisted metadata across crashes. ps(1) exposes the same portable lstart field on the
 # macOS and Linux hosts supported by this plugin, and cksum makes it one record token.
+# lstart follows the locale; pin C so callers with different locales agree.
 verdict_audit_process_start_token() {  # pid
   local started checksum bytes extra
   [[ "$1" =~ ^[1-9][0-9]*$ ]] || return 1
-  started="$(ps -p "$1" -o lstart= 2>/dev/null)" || return 1
+  started="$(LC_ALL=C ps -p "$1" -o lstart= 2>/dev/null)" || return 1
   [[ -n "$started" ]] || return 1
   read -r checksum bytes extra <<< "$(printf '%s' "$started" | cksum)"
   [[ "$checksum" =~ ^[0-9]+$ && "$bytes" =~ ^[0-9]+$ && -z "$extra" ]] || return 1

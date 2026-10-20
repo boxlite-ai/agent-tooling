@@ -386,6 +386,29 @@ The native spec owns task-input validation; the task template supplies its JSON 
 and shared criteria. Verdict runners already load the full verdict spec, so their
 task template supplies only the record and refers to that spec's rules.
 
+### API compatibility
+
+`scripts/api-compatibility.sh` checks changes to `openapi/box.openapi.yaml` before
+commit/push verdicts, including auditor overrides. Stop does not run it: the
+change reaches the maintainer only through a finished reply. Unchanged contracts skip the
+checker. The push hook checks actual API refs before the commit-receipt shortcut,
+using the configured PR comparison base. The UserPromptSubmit hook records typed confirmation,
+bound to the digest current at submission (an optional typed digest must match), only
+after the existing design-document reader verifies a linked Notion page.
+
+`api_contract.py` derives obligations using pinned oasdiff 1.33.0 and JSON output;
+`api_requests.py` runs consumer adapters against isolated pre-change/current sources
+and captures HTTP requests. The shell owns atomic evidence publication through the
+existing audit-state library. Receipts and approvals live in the worktree Git directory.
+SDK cases follow actual changed source mappings; Server-only PRs need no SDK change.
+
+Breaking findings and existing-default changes require the same human confirmation.
+Required cases, actual requests, and source digests determine acceptance; an auditor
+PASS cannot replace missing or stale evidence. Prompts still inspect adapter provenance,
+mapping completeness, and semantic declarations. Writable state remains a workflow
+boundary, not a sandbox. See [policy](guidance/api-compatibility.md) and
+[consumer setup](scripts/api-compatibility.md).
+
 ### Author review acknowledgment
 
 GitHub events run `.github/workflows/author-review.yml` from trusted base/default-branch

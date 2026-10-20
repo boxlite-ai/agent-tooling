@@ -32,13 +32,13 @@ Prompts, skills, and all agent-facing docs MUST use minimum prose per `boxlite-w
 
 ## Validate
 
-Run from repo root, plus focused tests:
+Run from repo root, plus focused tests (`make test:plugin TEST_FILTER=<name>`):
 
 ```sh
-bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .
-bash plugins/boxlite-agent-tooling/host-parity.test.sh
-bash plugins/boxlite-agent-tooling/architecture.test.sh
+make test:writing test:parity test:architecture
 ```
+
+API: `make test:api-compatibility test:api-lint` (oasdiff 1.33.0 or `OASDIFF_BIN`).
 
 Host parity: after manifest/marketplace/symlink/hook-JSON changes and before release; covers all marketplaces/manifests. Copilot: generic only; installs untested.
 
@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 In plugin, edit `guidance/workflow.md`; run
 `bash scripts/sync-guidance.sh <repo-root>` and `bash scripts/sync-guidance.test.sh`.
 
-<!-- agent-tooling:guidance:begin rev=45d2d8b2218a-dirty sha256=22652354a9e5 -->
+<!-- agent-tooling:guidance:begin rev=13a9ed1785ad-dirty sha256=16827d35ecb2 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -90,6 +90,7 @@ Apply the `boxlite-design-doc` skill before implementation.
 
 ### Test
 
+- Box API contract changes require the installed plugin's `guidance/api-compatibility.md`: breaking and existing-default changes need human confirmation linked to Notion; new optional SDK parameters need local before/after request tests.
 - For each test added with a fix, manually run both steps in order:
   1. Revert **every** production change: restore every non-test file to its pre-fix state; only the test remains. If API, signature, or schema changes prevent compilation or reaching the defect check, keep production reverted and add the smallest temporary test-only compatibility adapter for the old contract. The test-only compatibility adapter may adjust setup or invocation only; it must not implement the fix, alter the defect check, or become the failure signal. Run the test: it must reach the defect check and fail for the original bug. Log the failure signal (assertion, hang, panic). **Partial reverts, mental simulation, and assumed failure are cheating.** If no adapter preserves the signal, stop and report the blocker.
   2. Remove the adapter, restore all production changes, and rerun: the test must pass. Without step 1, a pass cannot prove the test catches the bug or the fix is necessary.

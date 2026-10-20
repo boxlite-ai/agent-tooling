@@ -893,6 +893,10 @@ if [[ -z "${GITHOOK_DELEGATED:-}" ]]; then
   fi
 fi
 
+if ! compatibility_error="$(bash "$tooling_root/scripts/api-compatibility.sh" "$kind" "$repo_root" 2>&1)"; then
+  deny "$compatibility_error"
+fi
+
 # Installation/guidance/framework checks remain owned by the git hooks above this
 # delegated call. This branch skips only the auditor verdict and deliberately returns
 # context (not permissionDecision:"allow"), so host approval policy is unchanged.

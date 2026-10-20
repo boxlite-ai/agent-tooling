@@ -40,6 +40,8 @@ HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 # lets the commit through unaudited. Tests that invoke the real $HOOK in place need
 # nothing; only the copies do.
 stage_lib() {  # $1 = fake repo root
+  mkdir -p "$1/scripts"
+  cp "$REPO_ROOT/scripts/api-compatibility.sh" "$1/scripts/"
   mkdir -p "$1/.agents/lib" "$1/.agents/prompts"
   cp "$REPO_ROOT/.agents/lib/subagent.sh" \
      "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
@@ -1075,6 +1077,15 @@ bridge_command="$GC -m audited"
 delegated_command="$GC --pre-commit-hook"
 bridge_hash="$(command_hash_for "$bridge_command")"
 owner_token="$(verdict_audit_process_start_token "$$")"
+# Writers and readers of the owner token may run with different locales.
+gb_token="$(LANG=en_GB.UTF-8 verdict_audit_process_start_token "$$")"
+c_token="$(LANG=C verdict_audit_process_start_token "$$")"
+if [[ -n "$gb_token" && "$gb_token" == "$c_token" ]]; then
+  pass=$((pass + 1)); printf '  PASS  process start token ignores the caller locale\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  process start token ignores the caller locale (en_GB=%s C=%s)\n' \
+    "$gb_token" "$c_token"
+fi
 write_bridge_state() { # destination
   jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" \
     --arg dh "$(diff_hash_for commit)" --arg ch "$bridge_hash" \

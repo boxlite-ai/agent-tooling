@@ -124,6 +124,16 @@ spend_wake() {  # marker-name owner-hook
 spend_wake auditor-wake auditor-control.sh && exit 0
 spend_wake api-resume-wake resume-after-api-failure.sh && exit 0
 
+# A failed confirmation approves nothing; report it to the session and keep the prompt.
+if [[ "$prompt_text" == maintainer\ confirmed:\ * ]]; then
+  if compatibility_record="$(printf '%s' "$payload" |
+       bash "$tooling_root/scripts/api-compatibility.sh" record "$project_dir" 2>&1)"; then
+    printf '%s\n' "$compatibility_record"
+  else
+    printf 'api-compatibility: confirmation not recorded: %s\n' "${compatibility_record#api-compatibility: }"
+  fi
+fi
+
 state_dir="$project_dir/.agents/state"
 if ! mkdir -p "$state_dir" 2>/dev/null; then
   printf 'cancel-verdict-audit.sh: could not create runtime state directory.\n' >&2

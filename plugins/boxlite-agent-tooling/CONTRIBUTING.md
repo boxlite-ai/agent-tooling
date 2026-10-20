@@ -57,6 +57,12 @@ Version 0.1.29 packages the **Bypass limit** / **Split PR** flow. Verify both ad
 tooling and the installed host plugin report 0.1.29 or newer; reload or start a new
 session to replace already-loaded prompts.
 
+### API compatibility rollout
+
+Version 0.1.30 adds the API compatibility gate and changes the commit/push audit
+criteria. Breaking and existing-default API changes need `maintainer confirmed:`;
+reload or start a new session to replace already-loaded prompts.
+
 ### Verification boundaries
 
 In lifecycle tests, wait for the observed phase before injecting a signal. A

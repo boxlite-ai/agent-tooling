@@ -65,6 +65,7 @@ refresh at most once every 15 minutes; `AGENT_TOOLING_REFRESH=0` disables it and
 | Script / arguments | Responsibility and effects |
 | --- | --- |
 | [design-doc.sh](design-doc.sh) `bind <URL>`, `check`, or `show` | Fetch and validate a design; bind it to the current worktree/branch, recheck the existing binding, or recheck it and print its content. |
+| [api-compatibility.sh](api-compatibility.sh) `inspect\|test\|check [repo-root] [base-ref]` | Classify Box OpenAPI changes and verify local SDK request cases; see [consumer setup](api-compatibility.md). |
 | [pr-author-review.sh](pr-author-review.sh) `<github-event.json>` | CI publisher: update the author-review check and prompt, and return an unacknowledged PR to draft. Exit 0: acknowledged/irrelevant; 1: awaiting acknowledgment; 2: API/validation error. |
 | [audit-reflection.sh](audit-reflection.sh) `prepare\|record\|status\|submit STATE` | Read bounded request JSON from stdin; validate and persist audit-cycle transitions, returning cycle JSON on stdout. |
 | [audit-reflection-gate.sh](audit-reflection-gate.sh) `CONTEXT OPERATION [ATTEMPT_ID]` | Adapt audit history to scoped gates: validate context, snapshot evidence, and reconcile outcomes; payload JSON arrives on stdin. |

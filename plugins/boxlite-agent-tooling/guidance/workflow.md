@@ -38,6 +38,7 @@ Apply the `boxlite-design-doc` skill before implementation.
 
 ### Test
 
+- Box API contract changes require the installed plugin's `guidance/api-compatibility.md`: breaking and existing-default changes need human confirmation linked to Notion; new optional SDK parameters need local before/after request tests.
 - For each test added with a fix, manually run both steps in order:
   1. Revert **every** production change: restore every non-test file to its pre-fix state; only the test remains. If API, signature, or schema changes prevent compilation or reaching the defect check, keep production reverted and add the smallest temporary test-only compatibility adapter for the old contract. The test-only compatibility adapter may adjust setup or invocation only; it must not implement the fix, alter the defect check, or become the failure signal. Run the test: it must reach the defect check and fail for the original bug. Log the failure signal (assertion, hang, panic). **Partial reverts, mental simulation, and assumed failure are cheating.** If no adapter preserves the signal, stop and report the blocker.
   2. Remove the adapter, restore all production changes, and rerun: the test must pass. Without step 1, a pass cannot prove the test catches the bug or the fix is necessary.

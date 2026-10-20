@@ -459,6 +459,20 @@ verdict_rendered="$(subagent_prompt audit/verdict-runner "$PLUGIN_ROOT" \
 static_precedes_dynamic "verdict-runner keeps reusable policy before run data" \
   "$verdict_rendered" 'dossier bindings' DYNAMIC_VERDICT_TASK
 
+# The policy lives in the plugin, not the consumer repository. Exercise rendered
+# tasks so a missing reference or unresolved plugin root fails at the delivery boundary.
+# shellcheck disable=SC2031 # Host fixtures change PLUGIN_ROOT only in subshells.
+compatibility_policy="$PLUGIN_ROOT/guidance/api-compatibility.md"
+check "native Git audit receives the compatibility policy path" \
+  "$compatibility_policy" "$commit_task_rendered"
+check "headless Git audit receives the compatibility policy path" \
+  "$compatibility_policy" "$commit_runner_rendered"
+if [[ -s "$compatibility_policy" ]]; then
+  ok "delivered compatibility policy exists in the plugin"
+else
+  bad "delivered compatibility policy exists in the plugin"
+fi
+
 model_documents="$(cat \
   "$PLUGIN_ROOT"/.agents/prompts/*/*.md \
   "$PLUGIN_ROOT/.claude/agents/commit-push-auditor.md" \
