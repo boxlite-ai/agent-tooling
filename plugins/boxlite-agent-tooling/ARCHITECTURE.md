@@ -392,22 +392,20 @@ task template supplies only the record and refers to that spec's rules.
 commit/push verdicts, including auditor overrides. Stop does not run it: the
 change reaches the maintainer only through a finished reply. Unchanged contracts skip the
 checker. The push hook checks actual API refs before the commit-receipt shortcut,
-using the configured PR comparison base. The UserPromptSubmit hook records typed confirmation,
-bound to the digest current at submission (an optional typed digest must match), only
-after the existing design-document reader verifies a linked Notion page.
+using the PR comparison base. The UserPromptSubmit hook records typed confirmation,
+bound to the specification at submission, only after the existing design-document
+reader verifies a linked Notion page.
 
-`api_contract.py` derives obligations using pinned oasdiff 1.33.0 and JSON output;
-`api_requests.py` runs consumer adapters against isolated pre-change/current sources
-and captures HTTP requests. The shell owns atomic evidence publication through the
-existing audit-state library. Receipts and approvals live in the worktree Git directory.
-SDK cases follow actual changed source mappings; Server-only PRs need no SDK change.
-
+`api_contract.py` reads only the specification at the merge base and in the working
+copy, and classifies it with pinned oasdiff 1.33.0 JSON output. No consumer
+configuration exists, so submodules and build outputs never enter the check.
 Breaking findings and existing-default changes require the same human confirmation.
-Required cases, actual requests, and source digests determine acceptance; an auditor
-PASS cannot replace missing or stale evidence. Prompts still inspect adapter provenance,
-mapping completeness, and semantic declarations. Writable state remains a workflow
+New optional request fields become `obligations`; the commit/push auditor verifies the
+consumer's request tests for them against the policy, because SDK requests come from
+consumer code (for boxlite, the Rust REST client) that the plugin does not build.
+Approvals live in the worktree Git directory. Writable state remains a workflow
 boundary, not a sandbox. See [policy](guidance/api-compatibility.md) and
-[consumer setup](scripts/api-compatibility.md).
+[commands](scripts/api-compatibility.md).
 
 ### Author review acknowledgment
 

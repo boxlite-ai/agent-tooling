@@ -26,9 +26,6 @@ if [[ ! -e "$root/$spec" ]] && ! git -C "$root" cat-file -e "HEAD:$spec" 2>/dev/
    && ! git -C "$root" cat-file -e "origin/main:$spec" 2>/dev/null \
    && ! git -C "$root" cat-file -e "main:$spec" 2>/dev/null; then exit 0; fi
 base_ref="$explicit_base"
-if [[ -z "$base_ref" && -f "$root/.agent-tooling/api-compatibility.json" ]]; then
-  base_ref="$(jq -er '.baseRef // empty' "$root/.agent-tooling/api-compatibility.json" 2>/dev/null)" || base_ref=''
-fi
 if [[ -z "$base_ref" ]]; then
   for ref in origin/main main; do
     if git -C "$root" rev-parse --verify "$ref" >/dev/null 2>&1; then base_ref="$ref"; break; fi
@@ -51,21 +48,17 @@ read_record() {
   snapshot="$(verdict_audit_read_json_snapshot "$1")" || return 1
   printf '%s' "${snapshot#*$'\n'}"
 }
-receipt="$(read_record "$state.receipt.json")" || { printf 'api-compatibility: unreadable receipt\n' >&2; exit 1; }
 approval="$(read_record "$state.approval.json")" || { printf 'api-compatibility: unreadable approval\n' >&2; exit 1; }
 action="$operation"
 prompt=''
 if [[ "$operation" == record ]]; then
   prompt="$(jq -er 'select(.hook_event_name == "UserPromptSubmit" and (.session_id | type == "string") and (.session_id | length > 0)) | .prompt | strings')" || exit 0
-  # The digest is optional; without it the confirmation binds the change current at submission.
-  [[ "$prompt" =~ ^maintainer\ confirmed:\ (([a-f0-9]{64})\ )?(https://[^[:space:]]+)$ ]] || exit 0
-  typed_digest="${BASH_REMATCH[2]}"; notion_url="${BASH_REMATCH[3]}"
+  # The confirmation binds the specification change current at submission.
+  [[ "$prompt" =~ ^maintainer\ confirmed:\ (https://[^[:space:]]+)$ ]] || exit 0
+  notion_url="${BASH_REMATCH[1]}"
   action=inspect
 fi
-evidence="$(jq -nc --argjson receipt "$receipt" --argjson approval "$approval" '{receipt:$receipt,approval:$approval}')" || exit 1
-if [[ "$operation" == test ]]; then
-  printf '{}' | verdict_audit_write_atomic "$state.receipt.json" || exit 1
-fi
+evidence="$(jq -nc --argjson approval "$approval" '{approval:$approval}')" || exit 1
 args=("$action" "$root")
 [[ -z "$explicit_base" ]] || args+=(--base "$explicit_base")
 report="$(printf '%s' "$evidence" | python3 "$plugin_root/scripts/api-compatibility.py" "${args[@]}")"
@@ -73,7 +66,6 @@ status=$?
 if [[ "$operation" == record ]]; then
   approved_digest="$(jq -r '.fingerprint // ""' <<<"$report")"
   [[ -n "$approved_digest" ]] || { printf 'api-compatibility: no API change to confirm\n' >&2; exit 1; }
-  [[ -z "$typed_digest" || "$typed_digest" == "$approved_digest" ]] || { printf 'api-compatibility: confirmation does not match current changes\n' >&2; exit 1; }
   [[ "$notion_url" =~ ^https://(www\.)?notion\.so/ ]] || { printf 'api-compatibility: a canonical Notion document is required\n' >&2; exit 1; }
   # shellcheck source=../.agents/lib/reply-summary.sh
   source "$plugin_root/.agents/lib/reply-summary.sh"
@@ -87,9 +79,6 @@ if [[ "$operation" == record ]]; then
     verdict_audit_write_atomic "$state.approval.json" || exit 1
   printf 'api-compatibility: human confirmation recorded\n' >&2
   exit 0
-fi
-if [[ "$operation" == test && -n "$report" ]]; then
-  printf '%s' "$report" | verdict_audit_write_atomic "$state.receipt.json" || exit 1
 fi
 if (( status != 0 )); then
   jq -r '.errors[] | "api-compatibility: " + .' <<<"$report" >&2 || printf 'api-compatibility: checker failed\n' >&2

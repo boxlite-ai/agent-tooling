@@ -44,4 +44,4 @@ test\:api-lint:
 	shellcheck -x -P SCRIPTDIR $(filter-out %.test.sh,$(API_SHELL))
 	# Existing test fixtures intentionally contain shell source as literal strings.
 	shellcheck -x -P SCRIPTDIR --severity=warning $(filter %.test.sh,$(API_SHELL))
-	python3 -m py_compile $(P)/scripts/api-compatibility.py $(P)/.agents/lib/api_contract.py $(P)/.agents/lib/api_requests.py
+	python3 -m py_compile $(P)/scripts/api-compatibility.py $(P)/.agents/lib/api_contract.py

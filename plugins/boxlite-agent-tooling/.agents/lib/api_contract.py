@@ -7,7 +7,6 @@ import subprocess
 import tempfile
 
 SPEC = "openapi/box.openapi.yaml"
-CONFIG = ".agent-tooling/api-compatibility.json"
 OASDIFF_VERSION = "1.33.0"
 METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
 
@@ -31,65 +30,43 @@ def git(root, *args):
     return run(["git", *args], root)
 
 
-def link_target(name, target):
-    """Return a symlink target that stays inside the repository; snapshots recreate the link."""
-    if os.path.isabs(target) or os.path.normpath(os.path.join(os.path.dirname(name), target)).split(os.sep)[0] == "..":
-        raise ValueError(f"symlink leaves the repository: {name}")
-    return target
-
-
-def source_files(root):
-    names = git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
-    files, links = {}, {}
-    for name in sorted(set(names.decode().split("\0")) - {""}):
-        path = root / name
-        if path.is_symlink():
-            links[name] = link_target(name, os.readlink(path))
-        elif path.is_file():
-            files[name] = path.read_bytes()
-        elif path.exists():
-            raise ValueError(f"unsupported source entry: {name}")
-    for name in (SPEC, CONFIG):
-        if name in links:
-            raise ValueError(f"{name} must be a regular file")
-    return files, links
+def spec_revision(root, revision):
+    """Return the specification at a revision ("" is the index), or None when absent."""
+    result = subprocess.run(["git", "show", f"{revision}:{SPEC}"], cwd=root, capture_output=True)
+    return result.stdout if result.returncode == 0 else None
 
 
 def load_inputs(root, explicit_base):
-    files, links = source_files(root)
-    config = json.loads(files.get(CONFIG, b"{}"))
-    if not isinstance(config, dict):
-        raise ValueError("compatibility configuration must be an object")
-    base_ref = explicit_base or config.get("baseRef")
+    """Read only the Box API specification: its merge-base and working copies."""
+    base_ref = explicit_base
     if not base_ref:
         for ref in ("origin/main", "main"):
             if subprocess.run(["git", "rev-parse", "--verify", ref], cwd=root,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
                 base_ref = ref
                 break
-    if not base_ref or not isinstance(base_ref, str) or base_ref.startswith("-"):
-        raise ValueError("set baseRef or pass --base to identify the pre-change revision")
+    if not base_ref or base_ref.startswith("-"):
+        raise ValueError("pass --base to identify the pre-change revision")
     base = git(root, "merge-base", "HEAD", base_ref).decode().strip()
-    old = subprocess.run(["git", "show", f"{base}:{SPEC}"], cwd=root, capture_output=True)
-    before = old.stdout if old.returncode == 0 else None
-    after = files.get(SPEC)
+    before = spec_revision(root, base)
+    path = root / SPEC
+    if path.is_symlink():
+        raise ValueError(f"{SPEC} must be a regular file")
+    after = path.read_bytes() if path.is_file() else None
     if before == after:
-        staged = subprocess.run(["git", "show", f":{SPEC}"], cwd=root, capture_output=True)
-        if staged.returncode == 0 and staged.stdout != after:
+        staged = spec_revision(root, "")
+        if staged is not None and staged != after:
             raise ValueError("staged OpenAPI differs from the working copy; audit the intended changes")
         return None
     if before is None or after is None:
         raise ValueError("adding or deleting the complete Box API contract requires manual review")
     tooling = Path(__file__).resolve().parents[2]
     policy = {p: hashlib.sha256((tooling / p).read_bytes()).hexdigest() for p in (
-        ".agents/lib/api_contract.py", ".agents/lib/api_requests.py",
-        "scripts/api-compatibility.py", "scripts/api-compatibility.sh")}
-    fingerprint = digest({"base": base, "files": {p: [hashlib.sha256(v).hexdigest(), (root / p).stat().st_mode & 0o777] for p, v in files.items()},
-                          "links": links, "policy": policy, "oasdiff": OASDIFF_VERSION})
-    changed = set(git(root, "diff", "--name-only", base, "--").decode().splitlines())
-    changed.update(git(root, "ls-files", "--others", "--exclude-standard").decode().splitlines())
-    return {"base": base, "files": files, "links": links, "before": before, "after": after,
-            "config": config, "fingerprint": fingerprint, "changed": changed}
+        ".agents/lib/api_contract.py", "scripts/api-compatibility.py", "scripts/api-compatibility.sh")}
+    # Confirmation binds the specification change, so unrelated files never invalidate it.
+    fingerprint = digest({"before": hashlib.sha256(before).hexdigest(), "after": hashlib.sha256(after).hexdigest(),
+                          "policy": policy, "oasdiff": OASDIFF_VERSION})
+    return {"base": base, "before": before, "after": after, "fingerprint": fingerprint}
 
 
 def inspect_specs(root, before, after):
@@ -224,37 +201,3 @@ def additions(before, after, changes):
         if detected != classified:
             raise ValueError(f"unclassified optional request addition: {method} {path} ({detected} findings, {classified} fields)")
     return sorted(result, key=lambda feature: feature["id"])
-
-
-def required_cases(inputs, features):
-    config = inputs["config"]
-    if features and not config.get("sdks"):
-        raise ValueError(f"declare SDK source mappings in {CONFIG}")
-    required = []
-    names = set()
-    for sdk in config.get("sdks", []):
-        if not sdk.get("name") or not sdk.get("paths") or not isinstance(sdk.get("command"), list) or not sdk["command"]:
-            raise ValueError("SDK mapping requires name, paths, and an adapter argv command")
-        if sdk["name"] in names or not all(isinstance(arg, str) and arg for arg in sdk["command"]):
-            raise ValueError("SDK names must be unique and commands must contain nonempty strings")
-        names.add(sdk["name"])
-        if not all(isinstance(p, str) and p and not p.startswith(("/", "..")) for p in sdk["paths"]):
-            raise ValueError("SDK source paths must be repository-relative prefixes")
-        if not any(p == prefix or p.startswith(prefix.rstrip("/") + "/") for p in inputs["changed"] for prefix in sdk["paths"]):
-            continue
-        for feature in features:
-            declaration = config.get("features", {}).get(feature["id"])
-            if not isinstance(declaration, dict) or "nonDefault" not in declaration:
-                raise ValueError(f"declare nonDefault and stub response for {feature['id']}")
-            schema = feature["schema"]
-            if "default" in schema and canonical(schema["default"]) == canonical(declaration["nonDefault"]):
-                raise ValueError(f"nonDefault equals the default: {feature['id']}")
-            cases = ["omitted", "non-default"]
-            if "default" in schema:
-                cases.append("default")
-            if feature["nullable"] or declaration.get("nullIsOmitted") is True:
-                if type(declaration.get("nullIsOmitted")) is not bool:
-                    raise ValueError(f"declare nullIsOmitted for {feature['id']}")
-                cases.append("null")
-            required.append({"sdk": sdk, "feature": feature, "declaration": declaration, "cases": cases})
-    return required
