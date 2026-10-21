@@ -4,32 +4,50 @@ set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 operation="${1:-check}"
 root="$(git -C "${2:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
-spec='openapi/box.openapi.yaml'
+spec=':(top,glob)**/*openapi*.yaml'
 explicit_base="${3:-}"
 revision=''
+prompt=''
+if [[ "$operation" == record ]]; then
+  prompt="$(jq -er 'select(.hook_event_name == "UserPromptSubmit" and (.session_id | type == "string") and (.session_id | length > 0)) | .prompt | strings')" || exit 0
+  [[ "$prompt" == 'api compatibility: skip' ]] || exit 0
+fi
 if [[ "$operation" == push-ref ]]; then
   local_sha="${3:-}"; remote_sha="${4:-}"
   [[ "$local_sha" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ && "$remote_sha" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]] || exit 1
   [[ ! "$local_sha" =~ ^0+$ ]] || exit 0
   explicit_base=''
-  if [[ ! "$remote_sha" =~ ^0+$ ]]; then
-    if git -C "$root" diff --quiet "$remote_sha" "$local_sha" -- "$spec"; then exit 0; fi
-    git -C "$root" merge-base --is-ancestor "$remote_sha" "$local_sha" || {
-      printf 'api-compatibility: audit a non-fast-forward API update separately\n' >&2; exit 1;
-    }
-  fi
-  [[ "$local_sha" == "$(git -C "$root" rev-parse HEAD)" ]] || {
-    printf 'api-compatibility: check out and audit the API ref being pushed\n' >&2; exit 1;
-  }
   revision="$local_sha"
   operation=push
 fi
-if [[ "$operation" == push || "$operation" == inspect-push || ! -e "$root/$spec" ]] \
-   && ! git -C "$root" cat-file -e "${revision:-HEAD}:$spec" 2>/dev/null \
-   && ! git -C "$root" cat-file -e "origin/main:$spec" 2>/dev/null \
-   && ! git -C "$root" cat-file -e "main:$spec" 2>/dev/null; then exit 0; fi
 if [[ -z "$revision" && ( "$operation" == push || "$operation" == inspect-push ) ]]; then
   revision="$(git -C "$root" rev-parse --verify HEAD)" || exit 1
+fi
+# Git discovery keeps unrelated repositories independent of Python and oasdiff.
+matching=''
+untracked=''
+if [[ -z "$revision" ]]; then
+  matching="$(git -C "$root" ls-files --cached --others --exclude-standard -- "$spec")" || exit 1
+  untracked="$(git -C "$root" ls-files --others --exclude-standard -- "$spec")" || exit 1
+fi
+if [[ -z "$matching" ]]; then
+  for ref in "${revision:-HEAD}" "${explicit_base:-origin/main}" main "${remote_sha:-HEAD}"; do
+    if git -C "$root" ls-files --error-unmatch --with-tree="$ref" -- "$spec" >/dev/null 2>&1; then
+      matching=present; break
+    fi
+  done
+fi
+[[ -n "$matching" ]] || exit 0
+if [[ "${1:-}" == push-ref ]]; then
+  if [[ ! "$remote_sha" =~ ^0+$ ]]; then
+    if git -C "$root" diff --quiet "$remote_sha" "$revision" -- "$spec"; then exit 0; fi
+    git -C "$root" merge-base --is-ancestor "$remote_sha" "$revision" || {
+      printf 'api-compatibility: audit a non-fast-forward API update separately\n' >&2; exit 1;
+    }
+  fi
+  [[ "$revision" == "$(git -C "$root" rev-parse HEAD)" ]] || {
+    printf 'api-compatibility: check out and audit the API ref being pushed\n' >&2; exit 1;
+  }
 fi
 base_ref="$explicit_base"
 if [[ -z "$base_ref" ]]; then
@@ -41,8 +59,7 @@ if [[ -n "$base_ref" && "$base_ref" != -* ]] \
    && base="$(git -C "$root" merge-base "${revision:-HEAD}" "$base_ref" 2>/dev/null)"; then
   if [[ -n "$revision" ]]; then
     if git -C "$root" diff --quiet "$base" "$revision" -- "$spec"; then exit 0; fi
-  elif git -C "$root" ls-files --error-unmatch "$spec" >/dev/null 2>&1 \
-       && git -C "$root" diff --quiet "$base" -- "$spec" \
+  elif [[ -z "$untracked" ]] && git -C "$root" diff --quiet "$base" -- "$spec" \
        && git -C "$root" diff --cached --quiet "$base" -- "$spec"; then exit 0; fi
 fi
 for dependency in python3 jq; do
@@ -60,12 +77,7 @@ read_record() {
 approval="$(read_record "$state.approval.json")" || { printf 'api-compatibility: unreadable approval\n' >&2; exit 1; }
 action="$operation"
 [[ "$operation" != inspect-push ]] || action=inspect
-prompt=''
 if [[ "$operation" == record ]]; then
-  prompt="$(jq -er 'select(.hook_event_name == "UserPromptSubmit" and (.session_id | type == "string") and (.session_id | length > 0)) | .prompt | strings')" || exit 0
-  # The confirmation binds the specification change current at submission.
-  [[ "$prompt" =~ ^maintainer\ confirmed:\ (https://[^[:space:]]+)$ ]] || exit 0
-  notion_url="${BASH_REMATCH[1]}"
   action=inspect
 fi
 evidence="$(jq -nc --argjson approval "$approval" '{approval:$approval}')" || exit 1
@@ -75,20 +87,15 @@ args=("$action" "$root")
 report="$(printf '%s' "$evidence" | python3 "$plugin_root/scripts/api-compatibility.py" "${args[@]}")"
 status=$?
 if [[ "$operation" == record ]]; then
-  approved_digest="$(jq -r '.fingerprint // ""' <<<"$report")"
-  [[ -n "$approved_digest" ]] || { printf 'api-compatibility: no API change to confirm\n' >&2; exit 1; }
-  [[ "$notion_url" =~ ^https://(www\.)?notion\.so/ ]] || { printf 'api-compatibility: a canonical Notion document is required\n' >&2; exit 1; }
-  # shellcheck source=../.agents/lib/reply-summary.sh
-  source "$plugin_root/.agents/lib/reply-summary.sh"
-  # shellcheck source=../.agents/lib/concise-writing.sh
-  source "$plugin_root/.agents/lib/concise-writing.sh"
-  # shellcheck source=../.agents/lib/design-doc.sh
-  source "$plugin_root/.agents/lib/design-doc.sh"
-  design_doc_verify "$notion_url" >/dev/null || exit 1
-  jq -nc --arg fingerprint "$approved_digest" --arg url "$notion_url" --arg prompt "$prompt" \
-    '{fingerprint:$fingerprint,notion:$url,confirmation:$prompt,source:"UserPromptSubmit"}' |
+  approved_digest="$(jq -r 'select(.requires_confirmation == true) | .fingerprint // ""' <<<"$report")"
+  [[ -n "$approved_digest" ]] || {
+    jq -r '.errors[]? | "api-compatibility: " + .' <<<"$report" >&2
+    printf 'api-compatibility: no classified breaking/default change to confirm\n' >&2; exit 1;
+  }
+  jq -nc --arg fingerprint "$approved_digest" --arg prompt "$prompt" \
+    '{fingerprint:$fingerprint,confirmation:$prompt,source:"UserPromptSubmit"}' |
     verdict_audit_write_atomic "$state.approval.json" || exit 1
-  printf 'api-compatibility: human confirmation recorded\n' >&2
+  printf 'api-compatibility: human confirmation recorded; skip breaking/default gate for this change\n' >&2
   exit 0
 fi
 if (( status != 0 )); then

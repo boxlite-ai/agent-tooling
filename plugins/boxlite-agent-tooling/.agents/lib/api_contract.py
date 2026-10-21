@@ -6,8 +6,9 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-SPEC = "openapi/box.openapi.yaml"
+SPEC_PATHSPEC = ":(top,glob)**/*openapi*.yaml"
 OASDIFF_VERSION = "1.33.0"
+SKIP_CONFIRMATION = "api compatibility: skip"
 
 
 def canonical(value):
@@ -16,6 +17,10 @@ def canonical(value):
 
 def digest(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
+
+
+def normalize_line_endings(content):
+    return content.replace(b"\r\n", b"\n") if content is not None else None
 
 
 def run(args, root, *, accepted=(0,), env=None):
@@ -29,14 +34,23 @@ def git(root, *args):
     return run(["git", *args], root)
 
 
-def spec_revision(root, revision):
+def spec_revision(root, revision, path):
     """Return the specification at a revision ("" is the index), or None when absent."""
-    result = subprocess.run(["git", "show", f"{revision}:{SPEC}"], cwd=root, capture_output=True)
+    result = subprocess.run(["git", "show", f"{revision}:{path}"], cwd=root, capture_output=True)
     return result.stdout if result.returncode == 0 else None
 
 
+def specification_paths(root, revision=None):
+    if revision:
+        names = git(root, "ls-tree", "-r", "-z", "--name-only", revision)
+    else:
+        names = git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", SPEC_PATHSPEC)
+    return {os.fsdecode(name) for name in names.split(b"\0") if name
+            and "openapi" in Path(os.fsdecode(name)).name and name.endswith(b".yaml")}
+
+
 def load_inputs(root, explicit_base, revision=None):
-    """Read the specification at the merge base and selected commit or working copy."""
+    """Read changed specifications at the merge base and commit or working copy."""
     base_ref = explicit_base
     if not base_ref:
         for ref in ("origin/main", "main"):
@@ -47,33 +61,39 @@ def load_inputs(root, explicit_base, revision=None):
     if not base_ref or base_ref.startswith("-"):
         raise ValueError("pass --base to identify the pre-change revision")
     base = git(root, "merge-base", revision or "HEAD", base_ref).decode().strip()
-    before = spec_revision(root, base)
-    if revision:
-        after = spec_revision(root, revision)
-    else:
-        path = root / SPEC
-        if path.is_symlink():
-            raise ValueError(f"{SPEC} must be a regular file")
-        after = path.read_bytes() if path.is_file() else None
-    if before == after:
-        if not revision:
-            staged = spec_revision(root, "")
-            if staged is not None and staged != after:
-                raise ValueError("staged OpenAPI differs from the working copy; audit the intended changes")
+    specifications = []
+    for name in sorted(specification_paths(root, base) | specification_paths(root, revision)):
+        before = spec_revision(root, base, name)
+        if revision:
+            after = spec_revision(root, revision, name)
+        else:
+            path = root / name
+            if path.is_symlink():
+                raise ValueError(f"{name} must be a regular file")
+            after = path.read_bytes() if path.is_file() else None
+        if normalize_line_endings(before) == normalize_line_endings(after):
+            if not revision:
+                staged = spec_revision(root, "", name)
+                if staged is not None and normalize_line_endings(staged) != normalize_line_endings(after):
+                    raise ValueError(f"{name}: staged OpenAPI differs from the working copy; audit the intended changes")
+            continue
+        if before is None or after is None:
+            raise ValueError(f"{name}: adding or deleting a complete OpenAPI contract requires manual review")
+        specifications.append({"path": name, "before": before, "after": after})
+    if not specifications:
         return None
-    if before is None or after is None:
-        raise ValueError("adding or deleting the complete Box API contract requires manual review")
     tooling = Path(__file__).resolve().parents[2]
     policy = {p: hashlib.sha256((tooling / p).read_bytes()).hexdigest() for p in (
         ".agents/lib/api_contract.py", "scripts/api-compatibility.py", "scripts/api-compatibility.sh")}
     # Confirmation binds the specification change, so unrelated files never invalidate it.
     # Ignore Git's CRLF/LF conversion in approval hashes; retain exact snapshots.
     fingerprint = digest({
-        "before": hashlib.sha256(before.replace(b"\r\n", b"\n")).hexdigest(),
-        "after": hashlib.sha256(after.replace(b"\r\n", b"\n")).hexdigest(),
+        "specifications": [{"path": spec["path"], **{
+            side: hashlib.sha256(normalize_line_endings(spec[side])).hexdigest()
+            for side in ("before", "after")}} for spec in specifications],
         "policy": policy, "oasdiff": OASDIFF_VERSION,
     })
-    return {"base": base, "before": before, "after": after, "fingerprint": fingerprint}
+    return {"base": base, "specifications": specifications, "fingerprint": fingerprint}
 
 
 def inspect_specs(root, before, after, *, details=False):

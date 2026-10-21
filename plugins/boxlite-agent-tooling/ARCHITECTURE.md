@@ -388,28 +388,35 @@ task template supplies only the record and refers to that spec's rules.
 
 ### API compatibility
 
-`scripts/api-compatibility.sh` checks changes to `openapi/box.openapi.yaml` before
+`scripts/api-compatibility.sh` checks every `*openapi*.yaml` basename, case-sensitively
+at any repository depth, before
 commit/push verdicts, including auditor overrides. Stop does not run it: the
-change reaches the maintainer only through a finished reply. Unchanged contracts skip the
+change reaches the user through a finished reply. Unchanged contracts skip the
 checker. The push hook checks actual API refs before the commit-receipt shortcut,
 using the PR comparison base and Git's outgoing SHA throughout the check. Direct
 `push` and `inspect-push` calls capture HEAD once. Workspace/index changes cannot
 hide a committed API change or invalidate approval of an unchanged outgoing commit.
-The UserPromptSubmit hook records typed confirmation,
-bound to the specification at submission, only after the existing design-document
-reader verifies a linked Notion page.
+Breaking/default changes are reported by path with a recommendation to discuss in
+a GitHub issue. The user must explicitly confirm skipping with
+`api compatibility: skip`; no issue, link, or Notion token is required.
+The UserPromptSubmit hook binds that choice to all changed paths and their
+before/after specifications at submission. New affected paths invalidate it.
 Specification hashes normalize physical CRLF to LF so Git line-ending conversion
 preserves confirmation; other byte changes still invalidate it. Snapshots stay exact.
 
-`api_contract.py` reads only the specification at the merge base and either the
+Git discovers tracked and unignored untracked files for local checks; push discovery
+uses committed trees. Directory-only matches and `.yml` files are excluded.
+`api_contract.py` reads matching specifications at the merge base and either the
 working copy (commit/inspection) or selected commit (push/`inspect-push`), and
-classifies it with pinned oasdiff 1.33.0 JSON output. No consumer
-configuration exists, so submodules and build outputs never enter the check.
-Breaking findings and existing-default changes require the same human confirmation.
+classifies each with pinned oasdiff 1.33.0 JSON output. No consumer configuration
+exists; unrelated files and submodules never enter comparison. Complete contract
+additions/deletions require manual review. User confirmation skips breaking/default
+enforcement only; malformed inputs and SDK request-test requirements still block.
 Inspection exports native changelog, breaking, and detailed diff JSON with exact
-before/after snapshots into a fresh private directory under the worktree Git directory;
-stdout returns metadata and file paths. These files persist for bounded auditor reads.
-Push auditors use `inspect-push` to capture the committed specification.
+before/after snapshots into a fresh private directory per changed specification under
+the worktree Git directory. Stdout returns a `specifications` list of repository paths,
+defaults, and artifact paths. These files persist for bounded auditor reads.
+Push auditors use `inspect-push` to capture committed specifications.
 Python does not extract request-test requirements. The auditor uses the reports,
 schema context (including parameter content and ancestor readOnly), and consumer SDK
 code to identify new optional request fields and verify their tests against the policy.

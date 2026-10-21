@@ -10,7 +10,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".agents/lib"))
-from api_contract import SPEC, default_changes, git, inspect_specs, load_inputs
+from api_contract import SKIP_CONFIRMATION, default_changes, git, inspect_specs, load_inputs
 
 
 def write_inspection(root, inputs, reports):
@@ -36,32 +36,40 @@ def evaluate(action, root, base, evidence, revision=None):
     inputs = load_inputs(root, base, revision)
     if inputs is None:
         return {"status": "NOT_APPLICABLE", "errors": []}
-    if action == "commit":
-        pending = subprocess.run(["git", "diff", "--quiet", "--", SPEC], cwd=root)
-        if pending.returncode:
-            raise ValueError("stage the reviewed OpenAPI before committing")
-    report = {"fingerprint": inputs["fingerprint"], "base": inputs["base"], "errors": []}
-    before, after, changes, breaking, detail = inspect_specs(root, inputs["before"], inputs["after"], details=action == "inspect")
-    report["changes"] = changes
-    report["breaking"] = breaking
-    report["defaults"] = default_changes(before, after)
-    report["defaults"].extend(f"{c.get('operation', '')} {c.get('path', '')}: {c['text']}"
-                              for c in changes if "-default-value-" in c.get("id", ""))
+    report = {"fingerprint": inputs["fingerprint"], "base": inputs["base"], "errors": [],
+              "requires_confirmation": False, "specifications": []}
     approval = evidence.get("approval", {})
-    url = approval.get("notion", "")
-    approved = (approval.get("fingerprint") == inputs["fingerprint"]
+    approved = (isinstance(approval, dict) and approval.get("fingerprint") == inputs["fingerprint"]
                 and approval.get("source") == "UserPromptSubmit"
-                and isinstance(url, str) and re.fullmatch(r"https://(?:www\.)?notion\.so/[^\s]+", url)
-                and approval.get("confirmation") == f"maintainer confirmed: {url}")
-    if report["defaults"] and not approved:
-        report["errors"].append("existing default changes need human confirmation: " + ", ".join(report["defaults"]))
-    if (breaking or report["defaults"]) and not approved:
+                and approval.get("confirmation") == SKIP_CONFIRMATION)
+    for spec in inputs["specifications"]:
+        name = spec["path"]
+        if action == "commit":
+            pending = subprocess.run(["git", "diff", "--quiet", "--", ":(literal)" + name], cwd=root)
+            if pending.returncode:
+                raise ValueError(f"{name}: stage the reviewed OpenAPI before committing")
+        before, after, changes, breaking, detail = inspect_specs(root, spec["before"], spec["after"], details=action == "inspect")
+        defaults = default_changes(before, after)
+        defaults.extend(f"{c.get('operation', '')} {c.get('path', '')}: {c['text']}"
+                        for c in changes if "-default-value-" in c.get("id", ""))
+        item = {"path": name, "defaults": defaults}
+        if action == "inspect":
+            item["artifacts"] = write_inspection(root, spec, {"changelog": changes, "breaking": breaking, "diff": detail})
+        else:
+            item.update(changes=changes, breaking=breaking)
+        report["specifications"].append(item)
+        if breaking or defaults:
+            report["requires_confirmation"] = True
+        if not approved:
+            if breaking:
+                report["errors"].append(f"{name}: {len(breaking)} breaking API finding(s)")
+            if defaults:
+                report["errors"].append(f"{name}: existing default changes need human confirmation: " + ", ".join(defaults))
+    if report["requires_confirmation"] and not approved:
         report["errors"].append("human confirmation required for change " + inputs["fingerprint"] +
-                                ": maintainer confirmed: <Notion-URL>")
+                                ": recommend discussing these breaking/default changes in a GitHub issue. "
+                                "Do you want to skip this compatibility gate? To confirm, submit exactly: " + SKIP_CONFIRMATION)
     report["status"] = "FAIL" if report["errors"] else "PASS"
-    if action == "inspect":
-        report["artifacts"] = write_inspection(root, inputs, {
-            "changelog": report.pop("changes"), "breaking": report.pop("breaking"), "diff": detail})
     return report
 
 

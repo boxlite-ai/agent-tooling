@@ -60,7 +60,9 @@ session to replace already-loaded prompts.
 ### API compatibility rollout
 
 Version 0.1.30 adds the API compatibility gate and changes the commit/push audit
-criteria. Breaking and existing-default API changes need `maintainer confirmed:`;
+criteria for all `*openapi*.yaml` contracts. Explain breaking/default changes and
+recommend GitHub issue discussion; only the user's `api compatibility: skip`
+confirmation bypasses that gate. No Notion link is required;
 reload or start a new session to replace already-loaded prompts.
 
 ### Verification boundaries

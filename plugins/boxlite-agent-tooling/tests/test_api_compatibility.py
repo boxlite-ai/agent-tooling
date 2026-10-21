@@ -24,8 +24,8 @@ def specification():
                 "responses": {"200": {"description": "OK"}}}}}}
 
 
-def confirmation(phrase="maintainer confirmed"):
-    return f"{phrase}: https://notion.so/" + "a" * 32
+def confirmation():
+    return "api compatibility: skip"
 
 
 class RepositoryFixture:
@@ -72,8 +72,10 @@ class RepositoryFixture:
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertNotIn("obligations", report, "request tests must be judged from native evidence")
-        self.assertIn("artifacts", report, "the auditor needs reports and specification snapshots")
-        files = {name: Path(path) for name, path in report["artifacts"].items()}
+        self.assertEqual(len(report["specifications"]), 1)
+        spec = report["specifications"][0]
+        self.assertIn("artifacts", spec, "the auditor needs reports and specification snapshots")
+        files = {name: Path(path) for name, path in spec["artifacts"].items()}
         self.assertEqual(set(files), {"before", "after", "changelog", "breaking", "diff"})
         for path in files.values():
             self.assertTrue(path.is_absolute() and path.is_file(), path)
@@ -97,20 +99,6 @@ class RepositoryFixture:
         return command(["bash", str(self.plugin / ".agents/hooks/cancel-verdict-audit.sh")],
                        self.root, input=json.dumps(payload), env=env, timeout=20)
 
-    def notion_env(self):
-        directory = self.root / "bin"
-        directory.mkdir(exist_ok=True)
-        fake = directory / "curl"
-        fake.write_text("#!/usr/bin/env python3\nimport json, sys\nsys.stdin.read()\n"
-                        "if any('/pages/' in a for a in sys.argv):\n"
-                        " print(json.dumps({'object':'page','id':'a'*32,'archived':False}))\n"
-                        "else:\n"
-                        " blocks=[]\n"
-                        " for kind,text in [('heading_2','TL;DR'),('paragraph','Approve this API change.'),('heading_2','Details'),('paragraph','Reviewed compatibility impact.')]:\n"
-                        "  blocks.append({'type':kind,'has_children':False,kind:{'rich_text':[{'plain_text':text}]}})\n"
-                        " print(json.dumps({'object':'list','has_more':False,'results':blocks}))\n")
-        fake.chmod(0o755)
-        return {"PATH": str(directory) + os.pathsep + os.environ["PATH"], "NOTION_TOKEN": "fixture-token"}
 
 
 class StopCompatibilityTests(RepositoryFixture, unittest.TestCase):
@@ -142,7 +130,7 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
         os.symlink("/etc/hosts", self.root / "outside-link")
         self.breaking_change()
         result = self.audit()
-        self.assertEqual(result.stderr.count("api-compatibility:"), 1, result.stderr)
+        self.assertIn("openapi/box.openapi.yaml: 1 breaking API finding", result.stderr)
         self.assertIn("human confirmation required", result.stderr)
 
     def test_default_change_needs_confirmation_even_without_breaking_findings(self):
@@ -150,7 +138,7 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.write_spec()
         result = self.audit("inspect")
         report = json.loads(result.stdout)
-        self.assertEqual(json.loads(Path(report["artifacts"]["breaking"]).read_text()), [])
+        self.assertEqual(json.loads(Path(report["specifications"][0]["artifacts"]["breaking"]).read_text()), [])
         self.assertIn("existing default changes need human confirmation", result.stderr)
         self.assertIn("human confirmation required for change " + report["fingerprint"], result.stderr)
 
@@ -166,7 +154,7 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.assertIn("requires oasdiff 1.33.0", self.audit("check", {"OASDIFF_BIN": str(fake)}).stderr)
 
     def test_confirmation_binds_the_specification_only(self):
-        env = self.notion_env()
+        env = {}
         self.breaking_change()
         result = self.submit_prompt(confirmation(), env)
         self.assertIn("human confirmation recorded", result.stdout)
@@ -178,27 +166,18 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.assertIn("human confirmation required", self.audit("check", env).stderr)
 
     def test_invalid_confirmations_cannot_approve(self):
-        env = self.notion_env()
+        env = {}
         self.breaking_change()
         fingerprint = json.loads(self.audit("inspect", env).stdout)["fingerprint"]
         for event, prompt in (("Stop", confirmation()),
                               ("UserPromptSubmit", "https://notion.so/" + "a" * 32),
-                              ("UserPromptSubmit", confirmation("Someone confirmed")),
+                              ("UserPromptSubmit", "Someone confirmed: " + confirmation()),
                               ("UserPromptSubmit", f"maintainer confirmed: {fingerprint} https://notion.so/" + "a" * 32)):
             self.audit("record", env, {"hook_event_name": event, "session_id": "human", "prompt": prompt})
             self.assertIn("human confirmation required for change " + fingerprint, self.audit("check", env).stderr)
 
-    def test_prompt_hook_reports_failed_confirmation_without_blocking_the_prompt(self):
-        env = self.notion_env()
-        (self.root / "bin/curl").write_text("#!/bin/sh\nexit 22\n")
-        self.breaking_change()
-        result = self.submit_prompt(confirmation(), env)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("confirmation not recorded", result.stdout)
-        self.assertIn("human confirmation required", self.audit("check", env).stderr)
-
     def test_approval_accepts_existing_default_change(self):
-        env = self.notion_env()
+        env = {}
         self.body_schema()["properties"]["enabled"]["default"] = True
         self.write_spec()
         result = self.audit("record", env, {"hook_event_name": "UserPromptSubmit", "session_id": "human",
@@ -389,7 +368,7 @@ class LineEndingCompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.body_schema()["properties"]["enabled"]["default"] = True
         self.body_schema()["properties"]["name"]["default"] = "first\r\nsecond"
         self.write_formatted_spec(b"\r\n")
-        result = self.submit_prompt(confirmation(), self.notion_env())
+        result = self.submit_prompt(confirmation(), {})
         self.assertIn("human confirmation recorded", result.stdout, result.stderr)
         _report, files = self.inspection()
         working = (self.root / "openapi/box.openapi.yaml").read_bytes()
@@ -461,7 +440,7 @@ class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
 
     def test_push_approval_matches_committed_specification_despite_local_edits(self):
         base, head = self.commit_breaking_change()
-        env = self.notion_env()
+        env = {}
         recorded = self.submit_prompt(confirmation(), env)
         self.assertIn("human confirmation recorded", recorded.stdout)
         self.spec = specification()
@@ -478,7 +457,7 @@ class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
 
     def test_push_rejects_approval_for_a_different_committed_specification(self):
         base, _head = self.commit_breaking_change()
-        env = self.notion_env()
+        env = {}
         recorded = self.submit_prompt(confirmation(), env)
         self.assertIn("human confirmation recorded", recorded.stdout)
         approved_spec = json.dumps(self.spec)

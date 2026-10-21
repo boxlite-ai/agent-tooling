@@ -434,11 +434,8 @@ run_push_audit() {  # remote-name remote-url
   local api_local_ref api_local_sha _api_remote_ref api_remote_sha
   while read -r api_local_ref api_local_sha _api_remote_ref api_remote_sha; do
     [[ -n "$api_local_ref" ]] || continue
-    if git -C "$repo_root" cat-file -e "$api_local_sha:openapi/box.openapi.yaml" 2>/dev/null \
-       || git -C "$repo_root" cat-file -e "$api_remote_sha:openapi/box.openapi.yaml" 2>/dev/null; then
-      bash "$tooling_root/scripts/api-compatibility.sh" push-ref "$repo_root" \
-        "$api_local_sha" "$api_remote_sha" || exit 1
-    fi
+    bash "$tooling_root/scripts/api-compatibility.sh" push-ref "$repo_root" \
+      "$api_local_sha" "$api_remote_sha" || exit 1
   done < "$stdin_file"
   audited_commit="$(push_is_single_audited_commit "$remote_name" || true)"
   if [[ -n "$audited_commit" ]]; then
