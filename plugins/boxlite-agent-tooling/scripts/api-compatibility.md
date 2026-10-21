@@ -10,9 +10,13 @@ Install Python 3.9+ and [oasdiff 1.33.0](https://github.com/oasdiff/oasdiff/rele
 
 `api-compatibility.sh inspect [repo-root] [base-ref]` prints the report: oasdiff changes, breaking findings, default changes, request-test `obligations`, and errors. `check` exits nonzero on errors without printing the report.
 
+Use `inspect-push` with the same arguments to inspect the checked-out commit instead of local edits. `push` checks that commit without printing the report.
+
 The base is the merge base with `origin/main`, then `main`; a third argument overrides it. Only the specification is read, so submodules, symlinks, and build outputs elsewhere in the repository do not matter.
 
-Commit requires the reviewed specification to be staged; push requires it to be committed. The push hook checks API refs before reusing a commit audit receipt; changed API refs must be checked out and fast-forward updates.
+Commit requires the reviewed specification to be staged. Push checks read the outgoing commit supplied by Git; direct `push` and `inspect-push` calls capture HEAD once. Neither the working copy nor the index controls push classification or approval matching.
+
+Example: deleting an endpoint in a commit, then restoring and staging the original file without committing, still requires confirmation to push the deletion. The push hook checks API refs before reusing a commit audit receipt; changed API refs must be checked out and fast-forward updates.
 
 ## Approval
 

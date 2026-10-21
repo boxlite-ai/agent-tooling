@@ -36,8 +36,8 @@ def spec_revision(root, revision):
     return result.stdout if result.returncode == 0 else None
 
 
-def load_inputs(root, explicit_base):
-    """Read only the Box API specification: its merge-base and working copies."""
+def load_inputs(root, explicit_base, revision=None):
+    """Read the specification at the merge base and selected commit or working copy."""
     base_ref = explicit_base
     if not base_ref:
         for ref in ("origin/main", "main"):
@@ -47,16 +47,20 @@ def load_inputs(root, explicit_base):
                 break
     if not base_ref or base_ref.startswith("-"):
         raise ValueError("pass --base to identify the pre-change revision")
-    base = git(root, "merge-base", "HEAD", base_ref).decode().strip()
+    base = git(root, "merge-base", revision or "HEAD", base_ref).decode().strip()
     before = spec_revision(root, base)
-    path = root / SPEC
-    if path.is_symlink():
-        raise ValueError(f"{SPEC} must be a regular file")
-    after = path.read_bytes() if path.is_file() else None
+    if revision:
+        after = spec_revision(root, revision)
+    else:
+        path = root / SPEC
+        if path.is_symlink():
+            raise ValueError(f"{SPEC} must be a regular file")
+        after = path.read_bytes() if path.is_file() else None
     if before == after:
-        staged = spec_revision(root, "")
-        if staged is not None and staged != after:
-            raise ValueError("staged OpenAPI differs from the working copy; audit the intended changes")
+        if not revision:
+            staged = spec_revision(root, "")
+            if staged is not None and staged != after:
+                raise ValueError("staged OpenAPI differs from the working copy; audit the intended changes")
         return None
     if before is None or after is None:
         raise ValueError("adding or deleting the complete Box API contract requires manual review")

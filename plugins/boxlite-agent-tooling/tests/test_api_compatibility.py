@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -282,6 +283,88 @@ class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("human confirmation required", result.stderr)
 
+    def test_push_blocks_committed_breaking_change_after_local_restore(self):
+        base, head = self.commit_breaking_change()
+        self.spec = specification()
+        self.write_spec()
+        for staged in (False, True):
+            if staged:
+                command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
+            for action in ("push", "push-ref"):
+                with self.subTest(staged=staged, action=action):
+                    args = ["bash", str(self.plugin / "scripts/api-compatibility.sh"), action, str(self.root)]
+                    if action == "push-ref":
+                        args.extend([head, base])
+                    result = command(args, self.root)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn("human confirmation required", result.stderr)
+
+    def test_push_approval_matches_committed_specification_despite_local_edits(self):
+        base, head = self.commit_breaking_change()
+        env = self.notion_env()
+        recorded = self.submit_prompt(confirmation(), env)
+        self.assertIn("human confirmation recorded", recorded.stdout)
+        self.spec = specification()
+        self.body_schema()["properties"]["enabled"]["default"] = True
+        self.write_spec()
+        command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
+        for action in ("push", "push-ref"):
+            with self.subTest(action=action):
+                args = ["bash", str(self.plugin / "scripts/api-compatibility.sh"), action, str(self.root)]
+                if action == "push-ref":
+                    args.extend([head, base])
+                result = command(args, self.root, env=dict(os.environ, **env))
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_push_rejects_approval_for_a_different_committed_specification(self):
+        base, _head = self.commit_breaking_change()
+        env = self.notion_env()
+        recorded = self.submit_prompt(confirmation(), env)
+        self.assertIn("human confirmation recorded", recorded.stdout)
+        approved_spec = json.dumps(self.spec)
+        self.spec["info"]["version"] = "2"
+        self.write_spec()
+        command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "revise API contract"], self.root, check=True)
+        head = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        (self.root / "openapi/box.openapi.yaml").write_text(approved_spec)
+        result = command(["bash", str(self.plugin / "scripts/api-compatibility.sh"), "push-ref", str(self.root), head, base], self.root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("human confirmation required", result.stderr)
+
+    def test_push_ref_keeps_selected_commit_if_head_moves_before_python(self):
+        base, head = self.commit_breaking_change()
+        self.spec = specification()
+        self.spec["info"]["version"] = "pending"
+        self.write_spec()
+        directory = self.root / "bin"
+        directory.mkdir()
+        # Move HEAD at the shell/Python boundary; classification still runs real code.
+        move_head = [shutil.which("git"), "-C", str(self.root), "update-ref", "refs/heads/feature", base]
+        wrapper = directory / "python3"
+        wrapper.write_text(f"#!{sys.executable}\nimport os, subprocess, sys\n"
+                           f"subprocess.run({move_head!r}, check=True)\n"
+                           f"os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])\n")
+        wrapper.chmod(0o755)
+        env = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"])
+        result = command(["bash", str(self.plugin / "scripts/api-compatibility.sh"), "push-ref", str(self.root), head, base], self.root, env=env)
+        self.assertEqual(command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip(), base)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("human confirmation required", result.stderr)
+
+    def test_inspect_push_reports_fields_from_committed_specification(self):
+        self.body_schema()["properties"]["committed"] = {"type": "boolean", "default": False}
+        self.write_spec()
+        command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "add optional request field"], self.root, check=True)
+        self.spec = specification()
+        self.body_schema()["properties"]["pending"] = {"type": "string"}
+        self.write_spec()
+        result = self.audit("inspect-push")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["obligations"], [
+            {"id": "POST /boxes body/committed", "default": False, "hasDefault": True, "nullable": False}])
+
     def test_other_api_ref_must_be_checked_out(self):
         base, head = self.commit_breaking_change()
         command(["git", "checkout", "main"], self.root, check=True)
@@ -295,6 +378,9 @@ class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
 
     def test_commit_audit_receipt_does_not_bypass_api_push_gate(self):
         base, head = self.commit_breaking_change()
+        self.spec = specification()
+        self.write_spec()
+        command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
         updates = self.root / ".git/ref-updates"
         updates.write_text(f"refs/heads/feature {head} refs/heads/feature {base}\n")
         # Exercise the real hook function; only the unrelated auditor receipt is stubbed.
@@ -308,10 +394,11 @@ exit 0
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("human confirmation required", result.stderr)
 
-    def test_push_rejects_staged_specification_that_is_not_in_head(self):
+    def test_push_ignores_staged_specification_that_is_not_in_head(self):
         self.breaking_change()
         command(["git", "add", "."], self.root, check=True)
-        self.assertIn("commit it before pushing", self.audit("push").stderr)
+        result = self.audit("push", {"OASDIFF_BIN": "/nonexistent/oasdiff"})
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

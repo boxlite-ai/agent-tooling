@@ -6,6 +6,7 @@ operation="${1:-check}"
 root="$(git -C "${2:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
 spec='openapi/box.openapi.yaml'
 explicit_base="${3:-}"
+revision=''
 if [[ "$operation" == push-ref ]]; then
   local_sha="${3:-}"; remote_sha="${4:-}"
   [[ "$local_sha" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ && "$remote_sha" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]] || exit 1
@@ -20,11 +21,16 @@ if [[ "$operation" == push-ref ]]; then
   [[ "$local_sha" == "$(git -C "$root" rev-parse HEAD)" ]] || {
     printf 'api-compatibility: check out and audit the API ref being pushed\n' >&2; exit 1;
   }
+  revision="$local_sha"
   operation=push
 fi
-if [[ ! -e "$root/$spec" ]] && ! git -C "$root" cat-file -e "HEAD:$spec" 2>/dev/null \
+if [[ "$operation" == push || "$operation" == inspect-push || ! -e "$root/$spec" ]] \
+   && ! git -C "$root" cat-file -e "${revision:-HEAD}:$spec" 2>/dev/null \
    && ! git -C "$root" cat-file -e "origin/main:$spec" 2>/dev/null \
    && ! git -C "$root" cat-file -e "main:$spec" 2>/dev/null; then exit 0; fi
+if [[ -z "$revision" && ( "$operation" == push || "$operation" == inspect-push ) ]]; then
+  revision="$(git -C "$root" rev-parse --verify HEAD)" || exit 1
+fi
 base_ref="$explicit_base"
 if [[ -z "$base_ref" ]]; then
   for ref in origin/main main; do
@@ -32,10 +38,13 @@ if [[ -z "$base_ref" ]]; then
   done
 fi
 if [[ -n "$base_ref" && "$base_ref" != -* ]] \
-   && base="$(git -C "$root" merge-base HEAD "$base_ref" 2>/dev/null)" \
-   && git -C "$root" ls-files --error-unmatch "$spec" >/dev/null 2>&1 \
-   && git -C "$root" diff --quiet "$base" -- "$spec" \
-   && git -C "$root" diff --cached --quiet "$base" -- "$spec"; then exit 0; fi
+   && base="$(git -C "$root" merge-base "${revision:-HEAD}" "$base_ref" 2>/dev/null)"; then
+  if [[ -n "$revision" ]]; then
+    if git -C "$root" diff --quiet "$base" "$revision" -- "$spec"; then exit 0; fi
+  elif git -C "$root" ls-files --error-unmatch "$spec" >/dev/null 2>&1 \
+       && git -C "$root" diff --quiet "$base" -- "$spec" \
+       && git -C "$root" diff --cached --quiet "$base" -- "$spec"; then exit 0; fi
+fi
 for dependency in python3 jq; do
   command -v "$dependency" >/dev/null || { printf 'api-compatibility: missing %s\n' "$dependency" >&2; exit 1; }
 done
@@ -50,6 +59,7 @@ read_record() {
 }
 approval="$(read_record "$state.approval.json")" || { printf 'api-compatibility: unreadable approval\n' >&2; exit 1; }
 action="$operation"
+[[ "$operation" != inspect-push ]] || action=inspect
 prompt=''
 if [[ "$operation" == record ]]; then
   prompt="$(jq -er 'select(.hook_event_name == "UserPromptSubmit" and (.session_id | type == "string") and (.session_id | length > 0)) | .prompt | strings')" || exit 0
@@ -61,6 +71,7 @@ fi
 evidence="$(jq -nc --argjson approval "$approval" '{approval:$approval}')" || exit 1
 args=("$action" "$root")
 [[ -z "$explicit_base" ]] || args+=(--base "$explicit_base")
+[[ -z "$revision" ]] || args+=(--revision "$revision")
 report="$(printf '%s' "$evidence" | python3 "$plugin_root/scripts/api-compatibility.py" "${args[@]}")"
 status=$?
 if [[ "$operation" == record ]]; then

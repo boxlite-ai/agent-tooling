@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".agents/lib"))
-from api_contract import SPEC, additions, default_changes, inspect_specs, load_inputs
+from api_contract import SPEC, additions, default_changes, git, inspect_specs, load_inputs
 
 
 def obligations(before, after, changes):
@@ -21,14 +21,18 @@ def obligations(before, after, changes):
              "nullable": f["nullable"]} for f in features]
 
 
-def evaluate(action, root, base, evidence):
-    inputs = load_inputs(root, base)
+def evaluate(action, root, base, evidence, revision=None):
+    if action == "push" and revision is None:
+        revision = git(root, "rev-parse", "--verify", "HEAD").decode().strip()
+    if revision is not None and (action not in ("push", "inspect") or not re.fullmatch(r"[a-f0-9]{40}(?:[a-f0-9]{24})?", revision)):
+        raise ValueError("--revision requires a full commit SHA for push or inspect")
+    inputs = load_inputs(root, base, revision)
     if inputs is None:
         return {"status": "NOT_APPLICABLE", "obligations": [], "errors": []}
-    if action in ("commit", "push"):
-        pending = subprocess.run(["git", "diff", "--quiet", *(["HEAD"] if action == "push" else []), "--", SPEC], cwd=root)
+    if action == "commit":
+        pending = subprocess.run(["git", "diff", "--quiet", "--", SPEC], cwd=root)
         if pending.returncode:
-            raise ValueError("stage the reviewed OpenAPI before committing; commit it before pushing")
+            raise ValueError("stage the reviewed OpenAPI before committing")
     report = {"fingerprint": inputs["fingerprint"], "base": inputs["base"], "errors": []}
     before, after, changes, breaking = inspect_specs(root, inputs["before"], inputs["after"])
     report["changes"] = changes
@@ -57,12 +61,13 @@ def main():
     parser.add_argument("action", choices=("check", "inspect", "commit", "push"))
     parser.add_argument("root", type=Path)
     parser.add_argument("--base")
+    parser.add_argument("--revision")
     args = parser.parse_args()
     try:
         evidence = json.load(sys.stdin)
         if not isinstance(evidence, dict):
             raise ValueError("evidence must be an object")
-        report = evaluate(args.action, args.root.resolve(), args.base, evidence)
+        report = evaluate(args.action, args.root.resolve(), args.base, evidence, args.revision)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         report = {"status": "FAIL", "errors": [str(error)], "obligations": []}
     print(json.dumps(report))

@@ -392,15 +392,20 @@ task template supplies only the record and refers to that spec's rules.
 commit/push verdicts, including auditor overrides. Stop does not run it: the
 change reaches the maintainer only through a finished reply. Unchanged contracts skip the
 checker. The push hook checks actual API refs before the commit-receipt shortcut,
-using the PR comparison base. The UserPromptSubmit hook records typed confirmation,
+using the PR comparison base and Git's outgoing SHA throughout the check. Direct
+`push` and `inspect-push` calls capture HEAD once. Workspace/index changes cannot
+hide a committed API change or invalidate approval of an unchanged outgoing commit.
+The UserPromptSubmit hook records typed confirmation,
 bound to the specification at submission, only after the existing design-document
 reader verifies a linked Notion page.
 
-`api_contract.py` reads only the specification at the merge base and in the working
-copy, and classifies it with pinned oasdiff 1.33.0 JSON output. No consumer
+`api_contract.py` reads only the specification at the merge base and either the
+working copy (commit/inspection) or selected commit (push/`inspect-push`), and
+classifies it with pinned oasdiff 1.33.0 JSON output. No consumer
 configuration exists, so submodules and build outputs never enter the check.
 Breaking findings and existing-default changes require the same human confirmation.
-New optional request fields become `obligations`; the commit/push auditor verifies the
+New optional request fields become `obligations`; push auditors use `inspect-push`
+to derive them from the committed specification. The commit/push auditor verifies the
 consumer's request tests for them against the policy, because SDK requests come from
 consumer code (for boxlite, the Rust REST client) that the plugin does not build.
 Approvals live in the worktree Git directory. Writable state remains a workflow
