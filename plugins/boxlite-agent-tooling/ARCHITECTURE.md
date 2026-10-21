@@ -398,6 +398,8 @@ hide a committed API change or invalidate approval of an unchanged outgoing comm
 The UserPromptSubmit hook records typed confirmation,
 bound to the specification at submission, only after the existing design-document
 reader verifies a linked Notion page.
+Specification hashes normalize physical CRLF to LF so Git line-ending conversion
+preserves confirmation; other byte changes still invalidate it. Snapshots stay exact.
 
 `api_contract.py` reads only the specification at the merge base and either the
 working copy (commit/inspection) or selected commit (push/`inspect-push`), and

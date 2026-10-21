@@ -46,7 +46,7 @@ maintainer confirmed: https://notion.so/<page-id>
 
 The confirmation must be exactly `maintainer confirmed: <Notion URL>`; other phrasings do not approve the change. The hook checks only this text, not who typed it.
 
-The UserPromptSubmit hook verifies the Notion document using `NOTION_TOKEN`, then binds confirmation to the working specification at submission. The checked specification must match it. Pending local edits do not invalidate approval of an unchanged outgoing commit.
+The UserPromptSubmit hook verifies the Notion document using `NOTION_TOKEN`, then binds confirmation to the working specification at submission. The checked specification must match it, treating physical CRLF and LF line endings as equivalent. Other byte changes require confirmation again. Pending local edits do not invalidate approval of an unchanged outgoing commit.
 
 A URL without the phrase, assistant-generated confirmation, or model PASS cannot approve the change. Never manufacture an approval record.
 

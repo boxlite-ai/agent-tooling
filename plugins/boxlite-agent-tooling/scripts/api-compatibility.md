@@ -32,4 +32,6 @@ Example: deleting an endpoint in a commit, then restoring and staging the origin
 
 Follow [human confirmation](../guidance/api-compatibility.md#human-confirmation). The Notion page must follow the existing design-document format. Approvals live in the worktree Git directory and bind the specification at submission. Do not invoke `record` to manufacture a user event.
 
+Approval fingerprints normalize physical CRLF line endings to LF. A confirmed CRLF working copy remains approved when Git stores LF, including with `core.autocrlf=true`. Other byte changes, including escaped `\r\n` versus `\n` in string values, still invalidate confirmation. Inspection snapshots retain their original bytes.
+
 The commit/push auditor uses these files and SDK code to determine and verify request tests; see [request tests](../guidance/api-compatibility.md#request-tests).

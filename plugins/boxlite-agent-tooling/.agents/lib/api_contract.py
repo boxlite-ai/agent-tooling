@@ -67,8 +67,12 @@ def load_inputs(root, explicit_base, revision=None):
     policy = {p: hashlib.sha256((tooling / p).read_bytes()).hexdigest() for p in (
         ".agents/lib/api_contract.py", "scripts/api-compatibility.py", "scripts/api-compatibility.sh")}
     # Confirmation binds the specification change, so unrelated files never invalidate it.
-    fingerprint = digest({"before": hashlib.sha256(before).hexdigest(), "after": hashlib.sha256(after).hexdigest(),
-                          "policy": policy, "oasdiff": OASDIFF_VERSION})
+    # Ignore Git's CRLF/LF conversion in approval hashes; retain exact snapshots.
+    fingerprint = digest({
+        "before": hashlib.sha256(before.replace(b"\r\n", b"\n")).hexdigest(),
+        "after": hashlib.sha256(after.replace(b"\r\n", b"\n")).hexdigest(),
+        "policy": policy, "oasdiff": OASDIFF_VERSION,
+    })
     return {"base": base, "before": before, "after": after, "fingerprint": fingerprint}
 
 

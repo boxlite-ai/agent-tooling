@@ -362,6 +362,71 @@ class InspectionEvidenceTests(RepositoryFixture, unittest.TestCase):
         self.assertIn("invalid oasdiff diff", result.stderr)
 
 
+class LineEndingCompatibilityTests(RepositoryFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        command(["git", "config", "core.autocrlf", "true"], self.root, check=True)
+        command(["git", "config", "core.safecrlf", "false"], self.root, check=True)
+
+    def write_formatted_spec(self, newline):
+        content = (json.dumps(self.spec, indent=2) + "\n").encode()
+        (self.root / "openapi/box.openapi.yaml").write_bytes(content.replace(b"\n", newline))
+
+    def check_push_gates(self, expected_status):
+        base = command(["git", "rev-parse", "main"], self.root, check=True).stdout.strip()
+        head = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        for action in ("push", "push-ref"):
+            with self.subTest(action=action):
+                args = ["bash", str(self.plugin / "scripts/api-compatibility.sh"), action, str(self.root)]
+                if action == "push-ref":
+                    args.extend([head, base])
+                result = command(args, self.root)
+                self.assertEqual(result.returncode, expected_status, result.stderr)
+                if expected_status:
+                    self.assertIn("human confirmation required", result.stderr)
+
+    def test_crlf_confirmation_survives_git_normalization(self):
+        self.body_schema()["properties"]["enabled"]["default"] = True
+        self.body_schema()["properties"]["name"]["default"] = "first\r\nsecond"
+        self.write_formatted_spec(b"\r\n")
+        result = self.submit_prompt(confirmation(), self.notion_env())
+        self.assertIn("human confirmation recorded", result.stdout, result.stderr)
+        _report, files = self.inspection()
+        working = (self.root / "openapi/box.openapi.yaml").read_bytes()
+        self.assertIn(b"\r\n", working)
+        self.assertEqual(files["after"].read_bytes(), working)
+
+        command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
+        staged = subprocess.run(["git", "show", ":openapi/box.openapi.yaml"],
+                                cwd=self.root, capture_output=True, check=True).stdout
+        self.assertNotIn(b"\r", staged)
+        self.assertEqual(staged, working.replace(b"\r\n", b"\n"))
+        result = self.audit("commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.write_formatted_spec(b"\n")
+        with self.subTest(action="commit", working_copy="LF"):
+            result = self.audit("commit")
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "confirmed default change"],
+                self.root, check=True)
+        committed = subprocess.run(["git", "show", "HEAD:openapi/box.openapi.yaml"],
+                                   cwd=self.root, capture_output=True, check=True).stdout
+        self.assertEqual(committed, staged)
+        self.check_push_gates(0)
+
+        # Escaped line breaks are string values, not physical line endings.
+        self.body_schema()["properties"]["name"]["default"] = "first\nsecond"
+        self.write_formatted_spec(b"\n")
+        command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
+        result = self.audit("commit")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("human confirmation required", result.stderr)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "unconfirmed string default"],
+                self.root, check=True)
+        self.check_push_gates(1)
+
+
 class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
     def commit_breaking_change(self):
         base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
