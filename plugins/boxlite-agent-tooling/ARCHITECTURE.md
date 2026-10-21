@@ -404,10 +404,15 @@ working copy (commit/inspection) or selected commit (push/`inspect-push`), and
 classifies it with pinned oasdiff 1.33.0 JSON output. No consumer
 configuration exists, so submodules and build outputs never enter the check.
 Breaking findings and existing-default changes require the same human confirmation.
-New optional request fields become `obligations`; push auditors use `inspect-push`
-to derive them from the committed specification. The commit/push auditor verifies the
-consumer's request tests for them against the policy, because SDK requests come from
-consumer code (for boxlite, the Rust REST client) that the plugin does not build.
+Inspection exports native changelog, breaking, and detailed diff JSON with exact
+before/after snapshots into a fresh private directory under the worktree Git directory;
+stdout returns metadata and file paths. These files persist for bounded auditor reads.
+Push auditors use `inspect-push` to capture the committed specification.
+Python does not extract request-test requirements. The auditor uses the reports,
+schema context (including parameter content and ancestor readOnly), and consumer SDK
+code to identify new optional request fields and verify their tests against the policy.
+Response-only fields need no request tests; shared writable additions need coverage
+for each affected operation. The plugin does not build the consumer SDK.
 Approvals live in the worktree Git directory. Writable state remains a workflow
 boundary, not a sandbox. See [policy](guidance/api-compatibility.md) and
 [commands](scripts/api-compatibility.md).

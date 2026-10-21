@@ -8,7 +8,17 @@ Install Python 3.9+ and [oasdiff 1.33.0](https://github.com/oasdiff/oasdiff/rele
 
 ## Commands
 
-`api-compatibility.sh inspect [repo-root] [base-ref]` prints the report: oasdiff changes, breaking findings, default changes, request-test `obligations`, and errors. `check` exits nonzero on errors without printing the report.
+`api-compatibility.sh inspect [repo-root] [base-ref]` prints JSON with status, base commit, fingerprint, default changes, errors, and an `artifacts` map of absolute paths:
+
+| Artifact | Content |
+| --- | --- |
+| `before`, `after` | Exact compared specifications |
+| `changelog`, `breaking` | Native oasdiff JSON findings |
+| `diff` | Native detailed JSON diff; use the specifications for full schema context |
+
+Each inspection writes a fresh private `api-compatibility-report-*` directory inside the worktree Git directory. Files remain available after exit and later inspections; delete these directories when no longer needed. Native source names `before.yaml` and `after.yaml` refer to the adjacent snapshots. No request-test list is generated.
+
+`check` exits nonzero on errors without printing or saving reports. Unchanged specifications skip the checker and print nothing. An inspection requiring human confirmation still exports evidence and exits nonzero; the evidence does not grant approval.
 
 Use `inspect-push` with the same arguments to inspect the checked-out commit instead of local edits. `push` checks that commit without printing the report.
 
@@ -22,4 +32,4 @@ Example: deleting an endpoint in a commit, then restoring and staging the origin
 
 Follow [human confirmation](../guidance/api-compatibility.md#human-confirmation). The Notion page must follow the existing design-document format. Approvals live in the worktree Git directory and bind the specification at submission. Do not invoke `record` to manufacture a user event.
 
-Request-test obligations are checked by the commit/push auditor, not by this script; see [request tests](../guidance/api-compatibility.md#request-tests).
+The commit/push auditor uses these files and SDK code to determine and verify request tests; see [request tests](../guidance/api-compatibility.md#request-tests).

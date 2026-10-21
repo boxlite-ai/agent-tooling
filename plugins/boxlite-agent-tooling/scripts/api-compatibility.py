@@ -4,21 +4,28 @@ import argparse
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".agents/lib"))
-from api_contract import SPEC, additions, default_changes, git, inspect_specs, load_inputs
+from api_contract import SPEC, default_changes, git, inspect_specs, load_inputs
 
 
-def obligations(before, after, changes):
-    """New optional request fields whose SDK request tests the commit/push auditor must check."""
+def write_inspection(root, inputs, reports):
+    """Publish a private, independent evidence directory for one inspection."""
+    git_dir = git(root, "rev-parse", "--absolute-git-dir").decode().strip()
+    directory = Path(tempfile.mkdtemp(prefix="api-compatibility-report-", dir=git_dir))
     try:
-        features = additions(before, after, changes)
-    except (ValueError, KeyError, TypeError) as error:
-        return [{"id": "unclassified", "note": str(error)}]
-    return [{"id": f["id"], "default": f["schema"].get("default"), "hasDefault": "default" in f["schema"],
-             "nullable": f["nullable"]} for f in features]
+        files = {"before.yaml": inputs["before"], "after.yaml": inputs["after"]}
+        files.update({name + ".json": json.dumps(value, indent=2).encode() for name, value in reports.items()})
+        for name, content in files.items():
+            (directory / name).write_bytes(content)
+        return {Path(name).stem: str(directory / name) for name in files}
+    except (OSError, TypeError, ValueError):
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
 
 
 def evaluate(action, root, base, evidence, revision=None):
@@ -28,13 +35,13 @@ def evaluate(action, root, base, evidence, revision=None):
         raise ValueError("--revision requires a full commit SHA for push or inspect")
     inputs = load_inputs(root, base, revision)
     if inputs is None:
-        return {"status": "NOT_APPLICABLE", "obligations": [], "errors": []}
+        return {"status": "NOT_APPLICABLE", "errors": []}
     if action == "commit":
         pending = subprocess.run(["git", "diff", "--quiet", "--", SPEC], cwd=root)
         if pending.returncode:
             raise ValueError("stage the reviewed OpenAPI before committing")
     report = {"fingerprint": inputs["fingerprint"], "base": inputs["base"], "errors": []}
-    before, after, changes, breaking = inspect_specs(root, inputs["before"], inputs["after"])
+    before, after, changes, breaking, detail = inspect_specs(root, inputs["before"], inputs["after"], details=action == "inspect")
     report["changes"] = changes
     report["breaking"] = breaking
     report["defaults"] = default_changes(before, after)
@@ -51,8 +58,10 @@ def evaluate(action, root, base, evidence, revision=None):
     if (breaking or report["defaults"]) and not approved:
         report["errors"].append("human confirmation required for change " + inputs["fingerprint"] +
                                 ": maintainer confirmed: <Notion-URL>")
-    report["obligations"] = obligations(before, after, changes)
     report["status"] = "FAIL" if report["errors"] else "PASS"
+    if action == "inspect":
+        report["artifacts"] = write_inspection(root, inputs, {
+            "changelog": report.pop("changes"), "breaking": report.pop("breaking"), "diff": detail})
     return report
 
 
@@ -69,7 +78,7 @@ def main():
             raise ValueError("evidence must be an object")
         report = evaluate(args.action, args.root.resolve(), args.base, evidence, args.revision)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-        report = {"status": "FAIL", "errors": [str(error)], "obligations": []}
+        report = {"status": "FAIL", "errors": [str(error)]}
     print(json.dumps(report))
     return 1 if report["status"] == "FAIL" else 0
 

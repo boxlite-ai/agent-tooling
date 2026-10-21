@@ -15,15 +15,15 @@ Box API changes need human confirmation for breaking and existing-default change
 | Existing default added, changed, or removed | Same as breaking, including informational findings |
 | New optional request field | The commit/push auditor verifies SDK request tests (below) |
 
-The checker uses pinned oasdiff 1.33.0 and its JSON parser. Inherited oasdiff configuration and external references are disabled. Shared schema additions expand to affected operations.
+The checker uses pinned oasdiff 1.33.0 and its JSON parser. Inherited oasdiff configuration and external references are disabled.
 
 ## Request tests
 
-Run `bash "<plugin>/scripts/api-compatibility.sh" inspect <repo-root>` for commits; use `inspect-push` for pushes to read the checked-out commit. Its `obligations` list each new optional field as `<METHOD> <path> <location>/<name>`, with its default and nullability.
+Run `bash "<plugin>/scripts/api-compatibility.sh" inspect <repo-root>` for commits; use `inspect-push` for pushes to read the checked-out commit. Read the returned `artifacts`: native `changelog`, `breaking`, and `diff` JSON reports, plus exact `before` and `after` specifications. Use bounded reads within the auditor's evidence budget; missing, truncated, or unresolved evidence blocks PASS.
 
-An `unclassified` entry is a blocking finding until the auditor identifies the new request fields by hand and verifies their tests.
+Use native findings and the detailed diff to locate changes; verify request relevance, defaults, and nullability against the snapshots and SDK code. Include parameter `content` schemas, references, composed schemas, and ancestor `readOnly` context. Native classifications can overreport request additions beneath a read-only parent. Response-only fields do not require request tests; shared writable fields need coverage for each affected operation. Python does not infer request-test obligations.
 
-For each obligation, the auditor requires repository tests that exercise production request code and assert:
+For each new optional request field, the auditor requires repository tests that exercise production request code and assert:
 
 | Input | Required request |
 | --- | --- |
@@ -34,7 +34,7 @@ For each obligation, the auditor requires repository tests that exercise product
 
 Test the shared request layer (for boxlite, the Rust REST client in `src/boxlite`) against a local HTTP server. Compare method, path, query, meaningful headers, and body; preserve missing/null/false/zero. Handcrafted request literals or a printed PASS are not evidence.
 
-A missing obligation, missing case, or test without a passing `make test...` receipt for the audited tree is a blocking finding. Server-only changes still need the request tests if the shared client changed.
+A missed request field, missing case, or test without a passing `make test...` receipt for the audited tree is a blocking finding. Server-only changes still need the request tests if the shared client changed.
 
 ## Human confirmation
 

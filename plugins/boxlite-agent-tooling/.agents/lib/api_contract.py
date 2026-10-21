@@ -1,4 +1,4 @@
-"""Read immutable inputs and derive API review obligations; no state writes."""
+"""Read specification snapshots and native oasdiff reports; no persistent writes."""
 import hashlib
 import json
 import os
@@ -8,7 +8,6 @@ import tempfile
 
 SPEC = "openapi/box.openapi.yaml"
 OASDIFF_VERSION = "1.33.0"
-METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
 
 
 def canonical(value):
@@ -73,7 +72,7 @@ def load_inputs(root, explicit_base, revision=None):
     return {"base": base, "before": before, "after": after, "fingerprint": fingerprint}
 
 
-def inspect_specs(root, before, after):
+def inspect_specs(root, before, after, *, details=False):
     executable = os.environ.get("OASDIFF_BIN", "oasdiff")
     env = {k: v for k, v in os.environ.items() if not k.startswith("OASDIFF_")}
     version = run([executable, "--version"], root, env=env).decode().strip()
@@ -93,7 +92,10 @@ def inspect_specs(root, before, after):
         breaking = invoke("breaking", "before.yaml", "after.yaml")
         if not isinstance(changes, list) or not isinstance(breaking, list):
             raise ValueError("invalid oasdiff findings")
-        return invoke("flatten", "before.yaml"), invoke("flatten", "after.yaml"), changes, breaking
+        detail = invoke("diff", "before.yaml", "after.yaml") if details else None
+        if detail is not None and not isinstance(detail, dict):
+            raise ValueError("invalid oasdiff diff")
+        return invoke("flatten", "before.yaml"), invoke("flatten", "after.yaml"), changes, breaking, detail
 
 
 def default_changes(before, after, path="", mapping=False):
@@ -115,93 +117,3 @@ def default_changes(before, after, path="", mapping=False):
         for index, (left, right) in enumerate(zip(before, after)):
             changes.extend(default_changes(left, right, f"{path}/{index}"))
     return changes
-
-
-def resolve(spec, node):
-    seen = set()
-    while isinstance(node, dict) and "$ref" in node:
-        reference = node["$ref"]
-        if not isinstance(reference, str) or not reference.startswith("#/") or reference in seen:
-            raise ValueError(f"unsupported reference: {reference}")
-        seen.add(reference)
-        target = spec
-        for token in reference[2:].split("/"):
-            target = target[token.replace("~1", "/").replace("~0", "~")]
-        node = {**target, **{k: v for k, v in node.items() if k != "$ref"}}
-    return node
-
-
-def request_fields(spec, operation, path_item):
-    fields = {}
-
-    def properties(node, prefix, visited):
-        reference = node.get("$ref")
-        if reference and reference in visited:
-            return
-        node = resolve(spec, node)
-        visited = visited | {reference} if reference else visited
-        for name, child in node.get("properties", {}).items():
-            location = prefix + "/" + name.replace("~", "~0").replace("/", "~1")
-            schema = resolve(spec, child)
-            fields[location] = {"schema": schema, "required": name in node.get("required", [])}
-            properties(child, location, visited)
-        # Array/union changes still appear in changelog; unmapped additions fail closed below.
-
-    body = resolve(spec, operation.get("requestBody", {}))
-    for media, content in body.get("content", {}).items():
-        if media == "application/json":
-            properties(content.get("schema", {}), "body", set())
-    for parameter in path_item.get("parameters", []) + operation.get("parameters", []):
-        parameter = resolve(spec, parameter)
-        fields[parameter["in"] + "/" + parameter["name"]] = {
-            "schema": resolve(spec, parameter.get("schema", {})), "required": parameter.get("required", False)}
-    return fields
-
-
-def allows_null(spec, schema, depth=0):
-    if depth > 30:
-        raise ValueError("recursive nullability needs explicit schema support")
-    schema = resolve(spec, schema)
-    if not isinstance(schema, dict):
-        raise ValueError("boolean request schemas need explicit support")
-    kind = schema.get("type")
-    if kind is not None and kind != "null" and not (isinstance(kind, list) and "null" in kind) and not schema.get("nullable"):
-        return False
-    if "enum" in schema and None not in schema["enum"]:
-        return False
-    if "const" in schema and schema["const"] is not None:
-        return False
-    if any(key in schema for key in ("not", "if", "then", "else")):
-        raise ValueError("conditional request nullability needs explicit schema support")
-    for key in ("allOf", "anyOf", "oneOf"):
-        if key in schema:
-            matches = [allows_null(spec, branch, depth + 1) for branch in schema[key]]
-            if not {"allOf": all(matches), "anyOf": any(matches), "oneOf": sum(matches) == 1}[key]:
-                return False
-    return True
-
-
-def additions(before, after, changes):
-    result = []
-    for path, item in after.get("paths", {}).items():
-        item = resolve(after, item)
-        old_item = resolve(before, before.get("paths", {}).get(path, {}))
-        for method in METHODS & item.keys() & old_item.keys():
-            old_fields = request_fields(before, old_item[method], old_item)
-            new_fields = request_fields(after, item[method], item)
-            for field in new_fields.keys() - old_fields.keys():
-                value = new_fields[field]
-                if value["required"]:
-                    continue
-                # An added parent is tested as one value, including nested content.
-                if any(field.startswith(parent + "/") for parent in new_fields.keys() - old_fields.keys()):
-                    continue
-                result.append({"id": f"{method.upper()} {path} {field}", "method": method.upper(),
-                               "path": path, "field": field, "nullable": allows_null(after, value["schema"]), **value})
-    operations = {(c.get("operation"), c.get("path")) for c in changes if c.get("id", "").startswith("new-optional-request-")}
-    for method, path in operations:
-        detected = sum(c.get("id", "").startswith("new-optional-request-") and c.get("operation") == method and c.get("path") == path for c in changes)
-        classified = sum(f["method"] == method and f["path"] == path for f in result)
-        if detected != classified:
-            raise ValueError(f"unclassified optional request addition: {method} {path} ({detected} findings, {classified} fields)")
-    return sorted(result, key=lambda feature: feature["id"])

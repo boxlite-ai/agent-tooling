@@ -67,6 +67,18 @@ class RepositoryFixture:
         return command(["bash", str(self.plugin / "scripts/api-compatibility.sh"), action, str(self.root)],
                        self.root, env=env, input=json.dumps(payload or {}), timeout=20)
 
+    def inspection(self, action="inspect"):
+        result = self.audit(action)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertNotIn("obligations", report, "request tests must be judged from native evidence")
+        self.assertIn("artifacts", report, "the auditor needs reports and specification snapshots")
+        files = {name: Path(path) for name, path in report["artifacts"].items()}
+        self.assertEqual(set(files), {"before", "after", "changelog", "breaking", "diff"})
+        for path in files.values():
+            self.assertTrue(path.is_absolute() and path.is_file(), path)
+        return report, files
+
     def commit_base(self, message):
         command(["git", "add", "."], self.root, check=True)
         command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", message], self.root, check=True)
@@ -133,47 +145,12 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.assertEqual(result.stderr.count("api-compatibility:"), 1, result.stderr)
         self.assertIn("human confirmation required", result.stderr)
 
-    def test_new_optional_field_is_an_auditor_obligation(self):
-        self.body_schema()["properties"]["extra"] = {"type": ["boolean", "null"], "default": False}
-        self.write_spec()
-        result = self.audit("inspect")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["obligations"], [
-            {"id": "POST /boxes body/extra", "default": False, "hasDefault": True, "nullable": True}])
-
-    def test_unsupported_addition_is_reported_for_manual_review(self):
-        self.body_schema()["properties"]["extra"] = {"if": {"type": "string"}, "then": {"minLength": 1}}
-        self.write_spec()
-        obligations = json.loads(self.audit("inspect").stdout)["obligations"]
-        self.assertEqual([o["id"] for o in obligations], ["unclassified"])
-        self.assertIn("conditional request nullability", obligations[0]["note"])
-
-    def test_shared_schema_addition_lists_each_operation(self):
-        self.spec["components"] = {"schemas": {"Create": self.body_schema()}}
-        content = self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]
-        content["schema"] = {"$ref": "#/components/schemas/Create"}
-        self.spec["paths"]["/copies"] = self.spec["paths"]["/boxes"]
-        self.write_spec()
-        self.commit_base("shared schema")
-        self.spec["components"]["schemas"]["Create"]["properties"]["extra"] = {"type": "boolean"}
-        self.write_spec()
-        obligations = json.loads(self.audit("inspect").stdout)["obligations"]
-        self.assertEqual([o["id"] for o in obligations], ["POST /boxes body/extra", "POST /copies body/extra"])
-
-    def test_parameter_locations_are_listed(self):
-        operation = self.spec["paths"]["/boxes"]["post"]
-        self.spec["paths"]["/boxes"]["parameters"] = [{"name": "scope", "in": "query", "schema": {"type": "string"}}]
-        operation["parameters"] = [{"name": "trace", "in": "header", "schema": {"type": "string"}}]
-        self.write_spec()
-        obligations = json.loads(self.audit("inspect").stdout)["obligations"]
-        self.assertEqual([o["id"] for o in obligations], ["POST /boxes header/trace", "POST /boxes query/scope"])
-
     def test_default_change_needs_confirmation_even_without_breaking_findings(self):
         self.body_schema()["properties"]["enabled"]["default"] = True
         self.write_spec()
         result = self.audit("inspect")
         report = json.loads(result.stdout)
-        self.assertEqual(report["breaking"], [])
+        self.assertEqual(json.loads(Path(report["artifacts"]["breaking"]).read_text()), [])
         self.assertIn("existing default changes need human confirmation", result.stderr)
         self.assertIn("human confirmation required for change " + report["fingerprint"], result.stderr)
 
@@ -267,6 +244,124 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.assertIn("existing default changes need human confirmation", self.audit().stderr)
 
 
+class InspectionEvidenceTests(RepositoryFixture, unittest.TestCase):
+    def test_native_reports_and_exact_snapshots_survive_workspace_changes(self):
+        self.body_schema()["properties"]["extra"] = {"type": ["boolean", "null"], "default": False}
+        self.write_spec()
+        report, files = self.inspection()
+        captured = {key: path.read_bytes() for key, path in files.items()}
+        base = subprocess.run(["git", "show", f"{report['base']}:openapi/box.openapi.yaml"],
+                              cwd=self.root, capture_output=True, check=True).stdout
+        self.assertEqual(captured["before"], base)
+        self.assertEqual(captured["after"], (self.root / "openapi/box.openapi.yaml").read_bytes())
+        self.assertLess(len(json.dumps(report)), 4096)
+        config = self.root / "oasdiff-config.json"
+        config.write_text("{}")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("OASDIFF_")}
+        for action in ("changelog", "breaking", "diff"):
+            result = command([os.environ.get("OASDIFF_BIN", "oasdiff"), action,
+                              "before.yaml", "after.yaml", "--config", str(config),
+                              "--allow-external-refs=false", "--format", "json"], files["before"].parent, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(captured[action]), json.loads(result.stdout))
+        self.body_schema()["properties"]["another"] = {"type": "string"}
+        self.write_spec()
+        _report, second = self.inspection()
+        self.assertNotEqual(files["after"], second["after"])
+        self.assertEqual({key: path.read_bytes() for key, path in files.items()}, captured)
+        self.assertEqual(second["after"].read_bytes(), (self.root / "openapi/box.openapi.yaml").read_bytes())
+
+    def test_content_parameter_keeps_default_and_nullability_evidence(self):
+        self.spec["paths"]["/boxes"]["parameters"] = [
+            {"name": "scope", "in": "query", "schema": {"type": "string"}}]
+        self.spec["paths"]["/boxes"]["post"]["parameters"] = [
+            {"name": "verbose", "in": "query", "content": {
+                "application/json": {"schema": {"type": "boolean", "default": False}}}}]
+        self.write_spec()
+        _report, files = self.inspection()
+        after = json.loads(files["after"].read_text())
+        schema = after["paths"]["/boxes"]["post"]["parameters"][0]["content"]["application/json"]["schema"]
+        self.assertEqual(schema, {"type": "boolean", "default": False})
+        self.assertEqual(after["paths"]["/boxes"]["parameters"][0]["name"], "scope")
+        changes = json.loads(files["changelog"].read_text())
+        self.assertEqual(sorted(c["id"] for c in changes), [
+            "new-optional-request-default-parameter-to-existing-path", "new-optional-request-parameter"])
+
+    def test_shared_readonly_field_keeps_response_classification(self):
+        self.spec["components"] = {"schemas": {"Box": self.body_schema()}}
+        operation = self.spec["paths"]["/boxes"]["post"]
+        operation["requestBody"]["content"]["application/json"]["schema"] = {"$ref": "#/components/schemas/Box"}
+        operation["responses"]["200"]["content"] = {"application/json": {"schema": {"$ref": "#/components/schemas/Box"}}}
+        self.write_spec()
+        self.commit_base("shared schema")
+        self.spec["components"]["schemas"]["Box"]["properties"]["createdAt"] = {"type": "string", "readOnly": True}
+        self.write_spec()
+        _report, files = self.inspection()
+        self.assertEqual([c["id"] for c in json.loads(files["changelog"].read_text())], ["response-optional-property-added"])
+        after = json.loads(files["after"].read_text())
+        self.assertTrue(after["components"]["schemas"]["Box"]["properties"]["createdAt"]["readOnly"])
+
+    def test_readonly_ancestor_remains_available_to_the_auditor(self):
+        self.body_schema()["properties"]["metadata"] = {"type": "object", "readOnly": True, "properties": {"id": {"type": "string"}}}
+        self.write_spec()
+        self.commit_base("readonly metadata")
+        self.body_schema()["properties"]["metadata"]["properties"]["createdAt"] = {"type": "string"}
+        self.write_spec()
+        _report, files = self.inspection()
+        # Native findings can include this child; the original schema supplies its read-only context.
+        self.assertIn("new-optional-request-property", [c["id"] for c in json.loads(files["changelog"].read_text())])
+        after = json.loads(files["after"].read_text())
+        metadata = after["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"]["properties"]["metadata"]
+        self.assertTrue(metadata["readOnly"])
+        self.assertEqual(metadata["properties"]["createdAt"], {"type": "string"})
+
+    def test_response_only_schema_needs_no_generated_request_tests(self):
+        response = {"type": "object", "properties": {"name": {"type": "string"}}}
+        self.spec["paths"]["/boxes"]["post"]["responses"]["200"]["content"] = {"application/json": {"schema": response}}
+        self.write_spec()
+        self.commit_base("response schema")
+        response["properties"]["createdAt"] = {"type": "string"}
+        self.write_spec()
+        _report, files = self.inspection()
+        self.assertEqual([c["id"] for c in json.loads(files["changelog"].read_text())], ["response-optional-property-added"])
+        before, after = (json.loads(files[key].read_text())["paths"]["/boxes"]["post"] for key in ("before", "after"))
+        self.assertEqual(before["requestBody"], after["requestBody"])
+
+    def test_shared_writable_field_keeps_each_affected_operation(self):
+        self.spec["components"] = {"schemas": {"Create": self.body_schema()}}
+        self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"] = {"$ref": "#/components/schemas/Create"}
+        self.spec["paths"]["/copies"] = self.spec["paths"]["/boxes"]
+        self.write_spec()
+        self.commit_base("shared requests")
+        self.spec["components"]["schemas"]["Create"]["properties"]["extra"] = {"type": "boolean"}
+        self.write_spec()
+        _report, files = self.inspection()
+        changes = json.loads(files["changelog"].read_text())
+        self.assertEqual(sorted((c["operation"], c["path"], c["id"]) for c in changes), [
+            ("POST", "/boxes", "new-optional-request-property"), ("POST", "/copies", "new-optional-request-property")])
+
+    def test_conditional_schema_is_preserved_for_auditor_review(self):
+        self.body_schema()["properties"]["extra"] = {"if": {"type": "string"}, "then": {"minLength": 1}}
+        self.write_spec()
+        _report, files = self.inspection()
+        after = json.loads(files["after"].read_text())
+        schema = after["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+        self.assertEqual(schema["properties"]["extra"], {"if": {"type": "string"}, "then": {"minLength": 1}})
+
+    def test_malformed_native_diff_blocks_inspection(self):
+        executable = shutil.which(os.environ.get("OASDIFF_BIN", "oasdiff"))
+        wrapper = self.root / "invalid-diff"
+        wrapper.write_text(f"#!{sys.executable}\nimport os, sys\n"
+                           "if sys.argv[1] == 'diff':\n print('[]')\nelse:\n"
+                           f" os.execv({executable!r}, [{executable!r}, *sys.argv[1:]])\n")
+        wrapper.chmod(0o755)
+        self.body_schema()["properties"]["extra"] = {"type": "boolean"}
+        self.write_spec()
+        result = self.audit("inspect", {"OASDIFF_BIN": str(wrapper)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid oasdiff diff", result.stderr)
+
+
 class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
     def commit_breaking_change(self):
         base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
@@ -352,7 +447,7 @@ class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("human confirmation required", result.stderr)
 
-    def test_inspect_push_reports_fields_from_committed_specification(self):
+    def test_inspect_push_reports_committed_evidence(self):
         self.body_schema()["properties"]["committed"] = {"type": "boolean", "default": False}
         self.write_spec()
         command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
@@ -360,10 +455,13 @@ class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
         self.spec = specification()
         self.body_schema()["properties"]["pending"] = {"type": "string"}
         self.write_spec()
-        result = self.audit("inspect-push")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["obligations"], [
-            {"id": "POST /boxes body/committed", "default": False, "hasDefault": True, "nullable": False}])
+        _report, files = self.inspection("inspect-push")
+        committed = subprocess.run(["git", "show", "HEAD:openapi/box.openapi.yaml"],
+                                   cwd=self.root, capture_output=True, check=True).stdout
+        self.assertEqual(files["after"].read_bytes(), committed)
+        changes = json.loads(files["changelog"].read_text())
+        self.assertIn("committed", changes[0]["text"])
+        self.assertNotIn("pending", files["diff"].read_text())
 
     def test_other_api_ref_must_be_checked_out(self):
         base, head = self.commit_breaking_change()
