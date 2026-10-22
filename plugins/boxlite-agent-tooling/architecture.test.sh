@@ -5,8 +5,8 @@
 #   - every script, manifest and spec the map names exists on disk;
 #   - every hook script the manifests wire, and every non-test script in
 #     .agents/hooks/, is on the map;
-#   - the Stop-gate decision table and the rung/outcome pairs its two scripts log are
-#     the same set, in both directions;
+#   - the Stop-gate decision table and the rung/outcome pairs the verdict check logs
+#     are the same set, in both directions;
 #   - every state file the map lists is named by some non-test source;
 #   - every glossary term is used by some non-test source.
 #
@@ -19,8 +19,8 @@ set -uo pipefail
 PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$PLUGIN/../.." && pwd)"
 DOC="$PLUGIN/ARCHITECTURE.md"
-# stop-gate.sh logs the summary rungs around the verdict check it runs.
-STOP_GATE_SCRIPTS=("$PLUGIN/.agents/hooks/stop-gate.sh" "$PLUGIN/.agents/hooks/audit/preflight-verdict-check.sh")
+# The verdict check logs every Stop-gate decision; stop-gate.sh logs none of its own.
+STOP_GATE_SCRIPTS=("$PLUGIN/.agents/hooks/audit/preflight-verdict-check.sh")
 CLAUDE_HOOKS="$PLUGIN/hooks/hooks.json"
 CODEX_HOOKS="$PLUGIN/hooks/codex-hooks.json"
 

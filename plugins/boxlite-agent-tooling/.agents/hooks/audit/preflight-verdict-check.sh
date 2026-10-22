@@ -65,9 +65,8 @@
 #      waits briefly for the fresh message and, failing that, allows — a message is
 #      never judged twice.
 #
-# Run by stop-gate.sh, the Stop hook both manifests wire, at every turn end except one
-# that answers the gate's request for the result; stop-gate.sh reads the deciding rung
-# from VERDICT_DECISION_OUT when it sets that path.
+# Run by stop-gate.sh, the Stop hook both manifests wire, at every turn end. A caller
+# that sets VERDICT_DECISION_OUT also receives the deciding rung there.
 #
 # Design notes
 # ------------

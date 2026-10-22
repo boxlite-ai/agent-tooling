@@ -373,11 +373,11 @@ check "library routes through the shared accessor" "hook_host_kind" "$code_only"
 
 echo
 echo "## Every referenced spec exists on disk"
-for agent in verdict-auditor commit-push-auditor; do
+for agent in verdict-auditor commit-push-auditor design-research-auditor; do
   spec="$(subagent_spec_path "$agent" "$PLUGIN_ROOT")"
   [ -r "$spec" ] && ok "spec exists: $agent" || bad "spec exists: $agent ($spec)"
 done
-for agent in verdict-auditor commit-push-auditor; do
+for agent in verdict-auditor commit-push-auditor design-research-auditor; do
   spec="$(subagent_spec_path "$agent" "$PLUGIN_ROOT")"
   if grep -q 'UNTRUSTED_TASK_INPUT_JSON' "$spec" \
      && grep -qi 'decode.*JSON' "$spec" \
@@ -397,8 +397,11 @@ for budget in \
   '.agents/prompts/audit/commit-push-criteria.md:100:900' \
   '.agents/prompts/audit/commit-push-runner.md:280:1900' \
   '.agents/prompts/audit/commit-push-task.md:140:1100' \
+  '.agents/prompts/audit/design-research-criteria.md:120:1000' \
+  '.agents/prompts/audit/design-research-task.md:140:1100' \
   '.agents/prompts/audit/verdict-runner.md:110:850' \
   '.claude/agents/commit-push-auditor.md:560:4200' \
+  '.claude/agents/design-research-auditor.md:300:2400' \
   '.claude/agents/verdict-auditor.md:850:6500'; do
   relative="${budget%%:*}"
   limits="${budget#*:}"

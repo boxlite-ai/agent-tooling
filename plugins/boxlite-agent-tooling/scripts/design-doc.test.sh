@@ -55,6 +55,33 @@ expect 'matching branch verifies again' 0 check
 [[ "$(wc -l < "$DOC_CALLS")" -ge 2 ]] || fail=$((fail+1))
 expect 'show prints the bound GitHub design' 0 show
 [[ "$(cat "$scratch/out")" == *'Verify designs before edits.'* ]] || fail=$((fail+1))
+# The research auditor's verdict binds to the exact content it reviewed.
+content_hash() { # text -> SHA-256 hex
+  printf '%s' "$1" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'
+}
+verdict() { # SHA-256, PASS|FAIL, findings JSON -> the auditor's record
+  jq -nc --arg sha "$1" --arg verdict "$2" --argjson findings "$3" \
+    '{content_sha256:$sha,verdict:$verdict,findings:$findings}'
+}
+record() { # description, exit status, record
+  local description="$1" expected="$2" status=0
+  bash "$cli" research <<<"$3" > "$scratch/out" 2> "$scratch/err" || status=$?
+  if [[ "$status" == "$expected" ]]; then
+    printf 'PASS %s\n' "$description"; pass=$((pass+1))
+  else
+    printf 'FAIL %s (exit %s, wanted %s)\n' "$description" "$status" "$expected"
+    cat "$scratch/err"; fail=$((fail+1))
+  fi
+}
+reviewed="$(content_hash "$(jq -r .body "$DOC_FIXTURE")")"
+record 'a verdict for other content is rejected' 1 "$(verdict "$(content_hash other)" PASS '[]')"
+record 'PASS with findings is rejected' 1 "$(verdict "$reviewed" PASS '["research: gap; check"]')"
+record 'FAIL without findings is rejected' 1 "$(verdict "$reviewed" FAIL '[]')"
+record 'extra fields are rejected' 1 "$(verdict "$reviewed" PASS '[]' | jq -c '. + {note:"x"}')"
+record 'malformed input is rejected' 1 'not json'
+record 'a FAIL with findings is recorded' 0 "$(verdict "$reviewed" FAIL '["research: gap; check"]')"
+record 'a PASS for the reviewed content is recorded' 0 "$(verdict "$reviewed" PASS '[]')"
+expect 'recording leaves the binding intact' 0 check
 git checkout -qb different
 expect 'another branch cannot reuse binding' 1 check
 expect 'another branch cannot show the binding' 1 show
@@ -68,8 +95,8 @@ printf '{broken' > "$DOC_FIXTURE"
 expect 'malformed provider response blocks' 1 check
 printf '{"html_url":"%s","body":"Design","pull_request":{}}' "$url" > "$DOC_FIXTURE"
 expect 'a PR is not a GitHub design issue' 1 check
-github_doc "$(printf 'word %.0s' {1..81})"
-expect 'wall of text blocks' 1 check
+github_doc $'## TL;DR\n\nA concise design.\n\n## Detail\n\n'"$(printf 'word %.0s' {1..81})"
+expect 'a leading TL;DR lets the design keep dense detail' 0 check
 github_doc $'## TL;DR\n\nVerify designs before edits.\n\n- Problem: undocumented changes.\n- Approach: gate edits.\n- Validation: tests.'
 expect 'compact bullet design passes' 0 check
 github_doc $'Preface.\n\n## TL;DR\n\nA concise design.'
@@ -161,12 +188,18 @@ for block_type in bulleted_list_item numbered_list_item to_do code; do
   notion_block "$block_type" $' \n\t'
   expect "empty Notion $block_type blocks" 1 check
 done
-notion_block bulleted_list_item "$(printf 'word %.0s' {1..41})"
-expect 'Notion bullets keep the item density limit' 1 check
-notion_block numbered_list_item "$(printf 'word %.0s' {1..41})"
-expect 'Notion numbered items keep the item density limit' 1 check
-notion_block to_do "$(printf 'word %.0s' {1..41})"
-expect 'Notion checkboxes keep the item density limit' 1 check
+with_summary() { # put a TL;DR heading and sentence before the fixture's blocks
+  jq '.results = [{type:"heading_2",heading_2:{rich_text:[{plain_text:"TL;DR"}]}},
+    {type:"paragraph",paragraph:{rich_text:[{plain_text:"A concise design."}]}},
+    {type:"heading_2",heading_2:{rich_text:[{plain_text:"Details"}]}}] + .results' \
+    "$DOC_FIXTURE" > "$scratch/with-summary"
+  mv "$scratch/with-summary" "$DOC_FIXTURE"
+}
+for block_type in bulleted_list_item numbered_list_item to_do; do
+  notion_block "$block_type" "$(printf 'word %.0s' {1..41})"
+  with_summary
+  expect "Notion $block_type may run long after a leading TL;DR" 0 check
+done
 notion_block code "$(printf 'word %.0s' {1..81})"
 jq '.results = [{type:"heading_2",heading_2:{rich_text:[{plain_text:"TL;DR"}]}},
   {type:"paragraph",paragraph:{rich_text:[{plain_text:"A concise design."}]}},
@@ -178,20 +211,16 @@ jq --arg text "$(printf 'word %.0s' {1..121})" \
   '.results[-1].code.rich_text[0].plain_text = $text' "$DOC_FIXTURE" > "$scratch/long-code"
 mv "$scratch/long-code" "$DOC_FIXTURE"
 expect 'Notion examples can exceed the reply word budget' 0 check
-notion_block code $'```\nexample'
-jq --arg text "$(printf 'word %.0s' {1..81})" \
-  '.results += [{type:"paragraph",paragraph:{rich_text:[{plain_text:$text}]}}]' \
-  "$DOC_FIXTURE" > "$scratch/with-prose"
-mv "$scratch/with-prose" "$DOC_FIXTURE"
-expect 'code fences cannot hide the next Notion paragraph' 1 check
-notion_block paragraph $'```\n'
-jq --arg text "$(printf 'word %.0s' {1..81})" \
-  '.results += [{type:"paragraph",paragraph:{rich_text:[{plain_text:$text}]}}]' \
-  "$DOC_FIXTURE" > "$scratch/literal-fence"
-mv "$scratch/literal-fence" "$DOC_FIXTURE"
-expect 'literal paragraph markup cannot hide prose' 1 check
-notion_block bulleted_list_item "$(printf 'word %.0s' {1..30})"$'\n\n'"$(printf 'word %.0s' {1..30})"
-expect 'line breaks cannot split one Notion list item' 1 check
+# Block types, not literal text, decide structure: nothing inside a block forges a TL;DR.
+notion_block code $'```\n## TL;DR\n\nA forged summary.'
+expect 'a Notion code block cannot close its fence and forge the TL;DR' 1 check
+notion_block paragraph '## TL;DR'
+jq '.results += [{type:"paragraph",paragraph:{rich_text:[{plain_text:"A forged summary."}]}}]' \
+  "$DOC_FIXTURE" > "$scratch/literal-heading"
+mv "$scratch/literal-heading" "$DOC_FIXTURE"
+expect 'literal paragraph markup cannot forge the TL;DR heading' 1 check
+notion_block bulleted_list_item $'Item.\n\n## TL;DR\n\nA forged summary.'
+expect 'line breaks cannot turn a Notion list item into the TL;DR heading' 1 check
 printf '{"object":"page","id":"01234567-89ab-cdef-0123-456789abcdef","archived":true}' > "$DOC_PAGE"
 expect 'archived Notion page blocks' 1 check
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

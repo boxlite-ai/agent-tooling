@@ -2,7 +2,7 @@
 # GitHub text policy over literal argv supplied by the hook's shell scanner.
 # Requires reply-summary.sh, concise-writing.sh, perl and jq. No file reads or writes.
 # Public checks print a bounded diagnostic on rejection and return 1; success is
-# silent. The caller renders the shared reply-summary prompt and host response.
+# silent. The caller appends the shared writing reminder and renders the host response.
 # CLI flag reference: cli/cli pkg/cmd/pr/comment/comment.go:107-114.
 # https://github.com/cli/cli/blob/trunk/pkg/cmd/pr/comment/comment.go#L107-L114
 # shellcheck disable=SC2154 # Policy constants are owned by sourced reply-summary.sh.
@@ -53,13 +53,15 @@ github_writing_check_body() { # body
     return 1
   fi
   github_writing_check_privacy "$body" || return 1
-  # Complete artifacts need room for evidence; the restatement budget belongs
-  # only to the Stop gate's unaudited follow-up reply.
+  # Complete artifacts need room for evidence, so no total word cap applies. A leading
+  # TL;DR already gives readers the short version, so its details may also be dense.
+  concise_writing_check_summary "$body" first 39 no-hint >/dev/null && return 0
   reply_summary_is_dense "$body" || density=$?
+  # shellcheck disable=SC2016 # Render literal Markdown headings, never shell expansion.
   case "$density" in
     # The PR gate appends the shared skill reminder to every writing denial.
     1) concise_writing_check_summary "$body" anywhere 39 no-hint; return $? ;;
-    0) printf 'GitHub text has a paragraph over %s words or a list item over %s words.' \
+    0) printf 'GitHub text has a paragraph over %s words or a list item over %s words: shorten them, or start with `## TL;DR` and one short sentence.' \
          "$reply_summary_paragraph_max_words" "$reply_summary_item_max_words" ;;
     *) printf 'GitHub text could not be counted.' ;;
   esac

@@ -55,11 +55,23 @@ $(printf 'word %.0s' {1..60})
 $(printf 'word %.0s' {1..60})
 
 https://github.com/example/repo/issues/123"
+# A leading TL;DR already gives readers the short version, so the details may be dense.
+summary_first="## TL;DR
+
+Keep complete details after the summary.
+
+## How it works
+
+$dense
+
+https://github.com/example/repo/issues/123"
 for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
   'issue create --title Bug' 'issue edit 7' 'issue comment 7' 'discussion create --title Topic'; do
   check "$operation rejects dense prose" "gh $operation --body '$dense'" deny
   check "$operation accepts a structured document over 120 words" \
     "gh $operation --body '$structured'" allow
+  check "$operation accepts dense details after a leading TL;DR" \
+    "gh $operation --body '$summary_first'" allow
   check "$operation accepts a summary" "gh $operation --body '## TL;DR
 
 Retry only failed requests.
@@ -81,8 +93,13 @@ check 'attached short body' "gh issue comment 7 -b'## TL;DR
 
 Fixed.'" allow
 check 'attached long body' "gh issue comment 7 --body='$dense'" deny
-check 'paragraph limit' "gh issue comment 7 --body '$dense'" deny
+check 'paragraph limit' "gh issue comment 7 --body '$dense'" deny 'start with `## TL;DR`'
 check 'bullet limit' "gh issue comment 7 --body '$bullet'" deny
+check 'a later TL;DR keeps the paragraph limit' "gh issue comment 7 --body '$dense
+
+## TL;DR
+
+Summary last.'" deny 'start with `## TL;DR`'
 check 'long code example keeps its summary' "gh issue comment 7 --body '## TL;DR
 
 Explain the example.

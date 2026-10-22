@@ -548,7 +548,10 @@ rm -f "$uses_log" "$R/outside-use-log"
 
 echo "## Every shipped auditor is registered"
 known="$($CONTROL --known-auditors 2>/dev/null | sort)"
-specs="$(find "$REPO_ROOT/.claude/agents" -maxdepth 1 -name '*-auditor.md' -exec basename {} .md \; | sort)"
+# design-research-auditor blocks only edits, never a turn's end or a commit, so it has
+# no override (design #253); host-parity.test.sh pins the same exception.
+specs="$(find "$REPO_ROOT/.claude/agents" -maxdepth 1 -name '*-auditor.md' \
+  ! -name design-research-auditor.md -exec basename {} .md \; | sort)"
 check_eq "the control plane maps every shipped auditor spec" "$known" "$specs"
 
 echo "## Auditor control is composed from reusable modules"

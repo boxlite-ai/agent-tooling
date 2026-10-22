@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# PreToolUse: verify the current design before explicit edits inside a repository.
+# PreToolUse: verify the current design, and an independent research verdict for its
+# exact content, before explicit edits inside a repository.
 # Native tool names/denials: openai/codex codex-rs/hooks/src/events/pre_tool_use.rs:30-44.
 set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -49,10 +50,32 @@ source "$plugin_root/.agents/lib/reply-summary.sh" || deny 'writing checks unava
 source "$plugin_root/.agents/lib/concise-writing.sh" || deny 'summary check unavailable'
 # shellcheck source=../lib/design-doc.sh
 source "$plugin_root/.agents/lib/design-doc.sh" || deny 'document verifier unavailable'
-if ! design_doc_binding check "$cwd" >/dev/null; then
-  # shellcheck source=../lib/subagent.sh
-  source "$plugin_root/.agents/lib/subagent.sh" || deny 'prompt loader unavailable'
+status=0
+request="$(design_doc_binding edit "$cwd")" || status=$?
+(( status != 0 )) || exit 0
+# shellcheck source=../lib/subagent.sh
+source "$plugin_root/.agents/lib/subagent.sh" || deny 'prompt loader unavailable'
+if (( status != 3 )); then
   instruction="$(subagent_prompt design/design-required "$plugin_root" "plugin_root=$plugin_root")" \
     || deny 'design instruction unavailable'
   deny "$instruction"
 fi
+# The design is bound and readable, but no research PASS matches its content yet.
+if ! task_input="$(jq -c '{repo_root, design_url, content_sha256}' <<<"$request")" \
+   || ! findings="$(jq -r '.findings[] | "- " + .' <<<"$request")"; then
+  deny 'research request unreadable'
+fi
+if ! criteria="$(subagent_prompt audit/design-research-criteria "$plugin_root" "plugin_root=$plugin_root")" \
+   || ! task="$(subagent_prompt audit/design-research-task "$plugin_root" \
+     "audit_criteria=$criteria" "task_input_json=$task_input")" \
+   || ! instruction="$(subagent_instruction --agent design-research-auditor --root "$plugin_root" \
+     --description 'Design research audit' --task "$task")"; then
+  deny 'research audit instruction unavailable'
+fi
+if [[ -n "$findings" ]]; then
+  message="$(subagent_prompt design/research-failed "$plugin_root" \
+    "findings=$findings" "instruction=$instruction")"
+else
+  message="$(subagent_prompt design/research-required "$plugin_root" "instruction=$instruction")"
+fi || deny 'research instruction unavailable'
+deny "$message"

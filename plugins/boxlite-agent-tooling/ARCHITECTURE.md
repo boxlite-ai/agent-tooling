@@ -23,13 +23,13 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. An audit still running for the abandoned turn is revoked. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
-| Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, unless every target resolves outside every repository; shell commands are outside this gate. |
+| Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-research-auditor` PASS for its exact content, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. Above 400 added code lines, asks the user to bypass the guideline or split. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely size choice or typed review answer. Idle expiry never authorizes; size choices cannot satisfy review acknowledgment. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
 | Finishes a plain `make test...` command | `PostToolUse`; `PostToolUseFailure` on Claude Code | `.agents/hooks/record-test-run.sh` | Nothing. A receipt in `.agents/state/test-runs/` that `commit-push-auditor` reads as an observed run. |
-| Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | At most one writing reminder per turn, for TL;DR or dense text. Continued replies still reach timed confirmations and verdict checks. See the decision table below. |
+| Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | At most one TL;DR correction per turn; a reply that leads with a TL;DR is never asked to shorten. Continued replies still reach timed confirmations and verdict checks. See the decision table below. |
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
 | Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
 
@@ -63,20 +63,35 @@ Research and design policy lives in `boxlite-design-doc`; registration
 and publishing steps live in [CONTRIBUTING.md](CONTRIBUTING.md#pull-request-descriptions).
 
 `scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
-provider read; the gate rechecks existence, nonempty content, and the shared
-paragraph/list limits, with a leading TL;DR under 40 words. No total-word cap applies.
+provider read; the gate rechecks existence, nonempty content, and a leading TL;DR
+under 40 words. Details after that TL;DR may be dense; no total-word cap applies.
 Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` and
 match its canonical root and branch (or detached HEAD). State reads and replacement
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
-Notion child blocks fail closed; list items and code retain their density semantics.
+Notion child blocks fail closed; list items and code keep their block structure, so
+literal text inside a block cannot forge a TL;DR.
 Workflow and tracking issues invoke `boxlite-design-doc` by name.
-`.agents/prompts/audit/commit-push-criteria.md` and the PR question require native/headless
-reviewers to verify sources against the diff and report blocking gaps/corrective checks.
+
+Research is verified before code, not at commit or PR time
+([design #253](https://github.com/boxlite-ai/agent-tooling/issues/253)):
+
+- The pre-edit gate also requires `agent-tooling-design-research.json` beside the
+  binding: a PASS bound to the root, branch, URL, and SHA-256 of the live content.
+  Any edit to the design needs a new review.
+- Missing or stale: the denial names the `design-research-auditor` route with
+  `.agents/prompts/audit/design-research-task.md` and its criteria. A FAIL for
+  unchanged content: the denial lists its findings.
+- The auditor reads the design through `design-doc.sh show` and records through
+  `design-doc.sh research`, which accepts one `{content_sha256, verdict, findings}`
+  object for the live content only: PASS without findings, FAIL with one-line findings.
+- It has no override card: it blocks only edits, never a turn's end or a commit, so
+  the user can always redirect it. `host-parity.test.sh` names it as the one exception.
+
 Commit-push auditors read the bound design through `design-doc.sh show`, which rechecks
 the binding and prints the same authenticated provider read, so Linear and Notion
-designs need no browser login.
-Pre-edit validation covers access/structure; research completeness, page length,
-and design quality remain review criteria.
+designs need no browser login. `.agents/prompts/audit/commit-push-criteria.md` checks
+the diff against the design; neither it nor the PR question re-audits research.
+Page length and design quality remain review criteria.
 Every PR requires substantive project docs; reviewers assess their quality.
 The design-doc gate does not inspect documentation diffs.
 The pre-edit gate covers native editor, notebook, and patch tools on both hosts.
@@ -111,8 +126,9 @@ rule; their classification and explanation accuracy remain review responsibiliti
 The PR-review hook checks PR bodies (including drafts), issue/discussion bodies, comments,
 reviews, close/reopen comments, release notes, and REST body/description fields.
 `.agents/lib/github-writing.sh` reuses `.agents/lib/reply-summary.sh`'s block
-limits: paragraphs at most 80 words and list items at most 40. Complete documents
-have no total-word cap; the Stop gate's 120-word restatement budget is separate.
+limits: paragraphs at most 80 words and list items at most 40. Text that starts with a
+valid TL;DR skips them, since readers already have the short version; complete
+documents have no total-word cap.
 Fences and tables are excluded from block limits; Chinese/Japanese characters
 count individually. Empty text and inputs over 8000 shell characters fail closed.
 Denials reuse the `boxlite-writing` skill; clarity remains a reviewer judgment.
@@ -533,7 +549,6 @@ than one session can share a checkout.
 - `verdict-decisions.log`: one line per Stop-gate decision, rung and outcome.
 - `verdict-last-uuid`: the id of the message the gate last judged.
 - `verdict-prompt-epoch`: the current prompt epoch.
-- `reply-summary-ask`: the previous Stop's request for the result in few words, which the next Stop takes.
 - `verdict-stop-message.jsonl`: Codex's Stop message preserved in transcript shape when no transcript exists.
 - `last-audit.json`: the commit or push dossier. `last-audit-handoff.json` carries the gate's request to the auditor.
 - `commit-audit-receipt.json`: the receipt commit-msg publishes and pre-push spends.
@@ -610,12 +625,12 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
 - Host to hook: the host injects its own plugin-root name, `PLUGIN_ROOT` on Codex and `CLAUDE_PLUGIN_ROOT` on Claude Code, and every wired command resolves `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `.agents/lib/hook-host.sh` answers which host is calling from that name alone. Session variables such as `CLAUDECODE` name whatever launched the process tree and are never used for routing.
 - Hook to agent: a hook is a bash process and cannot spawn a subagent. It emits text naming the route the calling host has, and the agent takes it. `.agents/lib/subagent.sh:8`
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
-- Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/audit/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Reply-summary ask: prompt epoch, how the request went out, and the judged turn's tool count (`.agents/lib/reply-summary.sh`).
+- Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/audit/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Research verdict: root, branch, design URL, and the SHA-256 of the content the auditor reviewed (`.agents/lib/design-doc.sh`).
 - Incomplete evidence: a missing or empty source during refresh retains the published failed snapshot. Audit re-entry reads and validates that bounded snapshot before consuming the dossier; loss of the original source cannot become `empty-allow`. An initially absent or empty transcript still has nothing to judge.
-- Stop gate to verdict check: after checking TL;DR, `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/audit/preflight-verdict-check.sh`. It learns which rung decided from `VERDICT_DECISION_OUT`. Missing dependencies fail closed.
-- Mandatory summary: `.agents/lib/concise-writing.sh` checks for an ATX TL;DR heading and summary prose outside fences, quotes, and comments. Human-facing replies must start there; the entire section has at most 39 words using the shared Unicode-aware counter. Each denial is one line: the failed condition, then a literal fix; length failures report the count and limit and ask for a same-level heading after one short sentence. Missing, misplaced, malformed, and overlong TL;DR denials end with `apply boxlite-writing` unless the caller passes `no-hint`. Only the GitHub writing check does, because the PR gate appends its own reminder; Stop skips its writing reminder after the denial. Stop checks writing only when `stop_hook_active` is false: one reminder can continue a turn, then further writing checks are skipped, including after unrelated Stop continuations. GitHub and design-document checks remain mandatory. Missing Stop text falls back to a bounded transcript snapshot; unreadable or truncated snapshots fail closed even on continuations. Explicitly empty reply text remains empty without replaying earlier text; verdict auditing still runs. Internal instructions and tool payloads need no summary. Sentence simplicity remains a writing instruction.
+- Stop gate to verdict check: after checking TL;DR, `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/audit/preflight-verdict-check.sh`, whose output, stderr, and exit status become the gate's. The gate still sets `VERDICT_DECISION_OUT`, though nothing reads it now (follow-up in #253). Missing dependencies fail closed.
+- Mandatory summary: `.agents/lib/concise-writing.sh` checks for an ATX TL;DR heading and summary prose outside fences, quotes, and comments. Human-facing replies must start there; the entire section has at most 39 words using the shared Unicode-aware counter. Each denial is one line: the failed condition, then a literal fix; length failures report the count and limit and ask for a same-level heading after one short sentence. Missing, misplaced, malformed, and overlong TL;DR denials end with `apply boxlite-writing` unless the caller passes `no-hint`. Only the GitHub writing check does, because the PR gate appends its own reminder. Stop checks the TL;DR only when `stop_hook_active` is false: one correction can continue a turn, then the check is skipped, including after unrelated Stop continuations. GitHub and design-document checks remain mandatory. Missing Stop text falls back to a bounded transcript snapshot; unreadable or truncated snapshots fail closed even on continuations. Explicitly empty reply text remains empty without replaying earlier text; verdict auditing still runs. Internal instructions and tool payloads need no summary. Sentence simplicity remains a writing instruction.
 - Enforcement scope: Stop checks the final reply after generation; it cannot retract streamed commentary. GitHub checks cover recognized CLI calls, not browser or connector writes. Design checks cover fetched GitHub, Linear, and Notion content; native Notion headings retain their structure. Shared guidance applies to every human-facing output across these surfaces.
-- Shared writing skill: `boxlite-writing` owns writing rules. Workflow, Stop, GitHub reminders, PR guidance, and the optional prompt hook reference it by name. `concise_writing_reminder` supplies the shared shortening request without reading skill files. Dense paragraphs over 80 words or list items over 40 still trigger shortening; the independent TL;DR check is unchanged.
+- Shared writing skill: `boxlite-writing` owns writing rules. Workflow, Stop TL;DR denials, GitHub reminders, PR guidance, and the optional prompt hook reference it by name. `concise_writing_reminder` supplies the shortening request the PR gate appends to GitHub writing denials, without reading skill files. Paragraphs over 80 words or list items over 40 trigger it only in GitHub text that does not start with a valid TL;DR; Stop never asks to shorten a reply.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`. One refresh runs at a time, held by `.git/agent-tooling/.refresh.lock` (`scripts/refresh-installation.sh:31`), and a refresh that finds it held skips. Breaking that lock would race its holder, so one left behind by a killed run is reported rather than cleared: `scripts/verify-installation.sh:22`, which every commit and push runs, names it once it is an hour old. Without that, the automatic refresh is dead and only a log nobody reads would say so.
 
 - Offline installation repair: `templates/install.sh` routes the recorded cache through
@@ -638,13 +653,13 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
 Often stated as an absence. Each names the line that states or enforces it.
 
 - A gate never produces the verdict it checks. `.agents/hooks/preflight-commit-push.sh:6`
-- A PASS never reaches the model: nothing of a consumed PASS or its advisories is shown to the model, and advisories go to the human only. After a dense reply the model sees only the request for the result in few words. `.agents/hooks/audit/preflight-verdict-check.sh:17`
+- A PASS never reaches the model: nothing of a consumed PASS or its advisories is shown to the model, and advisories go to the human only. `.agents/hooks/audit/preflight-verdict-check.sh:17`
 - A stale or mismatched turn dossier is discarded, never blocked on. `.agents/hooks/audit/preflight-verdict-check.sh:28`
 - A readable snapshot with no assistant text ends unjudged under `blind-allow`; a failed or truncated snapshot requires an audit. `.agents/hooks/audit/preflight-verdict-check.sh:53`
 - A message is never judged twice. `.agents/hooks/audit/preflight-verdict-check.sh:62`
-- A parked FAIL serves only the next audit of the same round. `.agents/hooks/audit/preflight-verdict-check.sh:213`
-- The Stop gate asks for the result only after the verdict check judged and allowed the turn, or a user's override let it end, and only on the initial Stop attempt. Example: a TL;DR correction followed by dense text reaches auditing without another writing reminder; the next user turn can receive one again. `.agents/hooks/stop-gate.sh`
-- An answer to that ask ends unjudged only at 120 words or fewer, code included, with no tool call since the ask. `.agents/hooks/stop-gate.sh:124`
+- A parked FAIL serves only the next audit of the same round. `.agents/hooks/audit/preflight-verdict-check.sh:1759`
+- A reply that leads with a valid TL;DR is never asked to shorten; the Stop gate's only writing check is that TL;DR. `.agents/hooks/stop-gate.sh:4`
+- No editor or patch edit lands in a repository before a research PASS for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
 - Humans are not gated; named harness variables gate, never prefix wildcards. `.githooks/pre-commit:9`
@@ -664,38 +679,34 @@ Often stated as an absence. Each names the line that states or enforces it.
 
 ## Stop gate decisions
 
-Timed confirmations run first and persist their own lifecycle. The normal verdict
-and summary decisions below are logged as a rung and an outcome, in this order.
-`.agents/hooks/stop-gate.sh` logs the two `summary` rows, first and last, and runs
-`.agents/hooks/audit/preflight-verdict-check.sh` for every row between them. Line numbers
-are in the script that logs the row; a pair logged at more than one line cites the
-first.
+Timed confirmations run first and persist their own lifecycle. After the TL;DR check,
+`.agents/hooks/audit/preflight-verdict-check.sh` logs each decision below as a rung and
+an outcome, in this order. Line numbers are in that script; a pair logged at more than
+one line cites the first.
 
 | Rung | Outcome | When | Line |
 | --- | --- | --- | --- |
-| summary | restatement-allow | The previous Stop asked for the result, this answer is 120 words or fewer counting code, and no tool ran since the ask; it ends the turn and the verdict check does not run. | 137 |
-| override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 716 |
-| history | exhausted-stop | Failure, attempt, or remaining-capacity exhaustion terminates Stop with INCOMPLETE; no further audit or summary continuation runs. | 741 |
-| extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1802 |
-| extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1809 |
-| extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1812 |
-| cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1826 |
-| dossier | discard-generation | The dossier's generation is not the requested one. | 1904 |
-| dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1910 |
-| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 1943 |
-| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1953 |
-| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 1961 |
-| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 1974 |
-| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2101 |
-| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2114 |
-| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2146 |
-| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2155 |
-| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2162 |
-| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2171 |
-| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2175 |
-| regex | none-allow | No model reachable and no fallback pattern matched. | 2183 |
-| regex | match-block | No model reachable and a fallback pattern matched. | 2187 |
-| summary | ask-continue | The verdict check ended on overridden, PASS, IN_PROGRESS, NO or none, the last reply has a paragraph over 80 words or a list item over 40, and the previous Stop did not ask. The turn continues once: `additionalContext` on Claude Code, `decision: block` elsewhere. | 214 |
+| override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 721 |
+| history | exhausted-stop | Failure, attempt, or remaining-capacity exhaustion terminates Stop with INCOMPLETE; no further audit runs. | 742 |
+| extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1833 |
+| extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1840 |
+| extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1843 |
+| cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1857 |
+| dossier | discard-generation | The dossier's generation is not the requested one. | 1935 |
+| dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1941 |
+| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 1984 |
+| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1994 |
+| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 2002 |
+| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 2015 |
+| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2139 |
+| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2164 |
+| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2196 |
+| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2205 |
+| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2212 |
+| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2221 |
+| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2225 |
+| regex | none-allow | No model reachable and no fallback pattern matched. | 2233 |
+| regex | match-block | No model reachable and a fallback pattern matched. | 2237 |
 
 Dossier shape, from `.claude/agents/verdict-auditor.md`: `branch`, `head`, `tree_hash`,
 `generation`, a `verdict` of `PASS`, `FAIL` or `IN_PROGRESS`, and `findings`. The
@@ -716,7 +727,6 @@ non-blocking `advisories`, which never decide the verdict.
 - **override**: a prompt-scoped grant that bypasses both auditor gates, recorded as `OVERRIDDEN BY USER`.
 - **revoke**: what a newer prompt does to an audit or override the previous prompt owned.
 - **parked**: a FAIL dossier kept after the tree moves so the next audit re-checks its findings.
-- **restatement**: the answer to the Stop gate's request for the result in few words; it ends the turn without the verdict check when it holds 120 words or fewer and no tool ran since the request.
 - **stale**: a binding that no longer matches. A stale turn dossier is discarded; a stale commit or push dossier denies until a fresh audit.
 - **blind-allow**: the rung under which a turn ends unjudged because the gate could not read its text.
 - **hold**: `.agent-tooling/hold`, one full lowercase SHA that freezes adoption; a malformed hold fails closed.

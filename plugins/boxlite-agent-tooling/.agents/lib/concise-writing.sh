@@ -6,7 +6,7 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
   local location="${2:-anywhere}" max_words="${3:-0}" summary counts status=0 verb=add
   local skill_hint='; apply boxlite-writing'
   # Name the skill unless the caller appends its own reminder, as the PR gate does for
-  # GitHub writing denials. Stop skips its writing reminder after this denial.
+  # GitHub writing denials.
   [[ "${4:-}" != no-hint ]] || skill_hint=''
   if (( ${#1} > 262144 )); then
     printf 'TL;DR not checked: text over 262144 characters; shorten it\n'

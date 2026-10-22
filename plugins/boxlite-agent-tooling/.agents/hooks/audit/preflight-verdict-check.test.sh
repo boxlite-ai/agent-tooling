@@ -4353,9 +4353,9 @@ else
 fi
 rm -rf "$R"
 
-# stop-gate.sh asks for a small closing reply only after a judged allow, and learns
-# which rung decided from VERDICT_DECISION_OUT. The file sits outside the repo: a line
-# appended inside it would move the tree hash a dossier is bound to.
+# A caller that sets VERDICT_DECISION_OUT learns which rung decided. The file sits
+# outside the repo: a line appended inside it would move the tree hash a dossier is
+# bound to.
 printf '\n## The deciding rung reaches a caller that asks for it\n'
 decided_rung() {  # repo classifier-answer -> last line the gate reported
   local decisions; decisions="$(mktemp)"

@@ -109,6 +109,11 @@ check nested_heading $'## TL;DR\n\nRetry failed requests once.\n\n### Details\n\
   deny deny 'same-level heading like `## Details`'
 check table_after $'## TL;DR\n\nA concise answer.\n\n| Gate | Result |\n|---|---|\n'"$(printf '| stop gate | denied the reply |\n%.0s' {1..10})" \
   deny deny 'keep one short sentence, then a same-level heading'
+# A leading TL;DR already gives readers the short version, so dense details may follow;
+# GitHub text whose TL;DR comes later keeps the paragraph and item limits.
+dense="$(printf 'word %.0s' {1..81})"
+check dense_after_summary $'## TL;DR\n\nA concise answer.\n\n## Details\n\n'"$dense" allow
+check dense_before_summary "$dense"$'\n\n## TL;DR\n\nA concise answer.' deny deny 'TL;DR'
 
 for host in claude codex; do
   jq -nc '{type:"assistant",message:{content:[{type:"text",text:"Earlier progress."}]}}' > "$scratch/turn.jsonl"

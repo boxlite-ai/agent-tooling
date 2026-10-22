@@ -6,5 +6,3 @@ description: Shared explanation check for local and GitHub PR review.
 ---
 
 Apply boxlite-writing. Does How it works explain the diff's mechanism or rationale?
-
-Verify design research against sources; evidence gaps block approval.

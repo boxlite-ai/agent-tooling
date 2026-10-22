@@ -126,6 +126,10 @@ Apply `boxlite-design-doc`, then bind before coding:
 bash <plugin-root>/scripts/design-doc.sh bind <URL>
 ```
 
+The first code edit then needs a research PASS for the design's exact content. The
+pre-edit gate names the `design-research-auditor` route; the auditor records its
+verdict with `design-doc.sh research`. Editing the design needs a new review.
+
 GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
 `LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.
 Re-register after changing branches.

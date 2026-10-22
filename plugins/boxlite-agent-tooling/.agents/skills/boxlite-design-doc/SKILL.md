@@ -29,9 +29,11 @@ Write findings:
 - **How it works:** approach/mechanism → outcome; trade-offs.
 - **Validation:** claim/risk → check → expected result; observed versus planned.
 
-[Bind](../../../CONTRIBUTING.md#pull-request-descriptions). Every PR (drafts included): link design; match final scope.
+[Bind](../../../CONTRIBUTING.md#pull-request-descriptions), then pass `design-research-auditor` before the first code edit.
+Every PR (drafts included): link design; match final scope.
 
 ## Review
 
-Verify sources against diff. Missing/unreadable/unsupported evidence blocks approval:
-gap → corrective check. Binding ≠ research.
+Before code, `design-research-auditor` verifies sources. Missing/unreadable/unsupported
+evidence blocks edits: gap → corrective check. Later reviews check the diff against the
+design. Binding ≠ research.

@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
-# Tests for .agents/hooks/stop-gate.sh, the Stop hook that runs the small-reply rule
-# around preflight-verdict-check.sh.
+# Tests for .agents/hooks/stop-gate.sh, the Stop hook that checks the final reply's
+# TL;DR before preflight-verdict-check.sh judges the turn.
 #
-#   - judged allow + paragraph over 80 words  -> continue once with the editable
-#     or list item over 40 words                 reply-summary prompt
-#   - that reply, at most 120 words counting   -> ends the turn; the verdict check is
-#     code blocks, no tool since the ask          not run again
-#   - anything else                            -> the verdict check's own output, exit
-#                                                 status and stderr, unchanged
+#   - a nonempty reply without a leading TL;DR  -> one correction on the initial Stop
+#   - anything else, dense TL;DR-led replies    -> the verdict check's own output, exit
+#     included                                     status and stderr, unchanged
 # Each case builds a throwaway git repo with a fake transcript, runs the gate there
 # (cwd + CLAUDE_PROJECT_DIR pointed at it), and asserts on its output.
 #
@@ -91,11 +88,6 @@ bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$VERDICT_AUDITOR_OUTPUT_FILE"'
 export TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/scripts/fixtures/audit-history-result.sh"
 export TEST_AUDIT_VERDICT=FAIL
 
-# Session state paths use an opaque Git object hash, reproduced here independently.
-session_state_path() {  # repo basename session
-  printf '%s/.agents/state/%s.git-%s' "$1" "$2" \
-    "$(printf '%s' "$3" | git -C "$1" hash-object --stdin)"
-}
 prompt_hook() {  # repo session turn
   jq -nc --arg s "$2" --arg t "$3" '{hook_event_name:"UserPromptSubmit",session_id:$s,turn_id:$t,prompt:"new user input"}' \
     | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" bash "$CANCEL_HOOK" ) >/dev/null 2>&1
@@ -109,7 +101,6 @@ new_repo() {  # session -> repo at prompt epoch 1 with a user turn
 }
 
 summary_prefix=$'## TL;DR\n\nFixture summary.\n\n## Details\n\n'
-HARD_BLOCK=1
 stop_payload() {  # repo session stop-hook-active last-message
   if [[ -n "$2" ]]; then
     jq -nc --arg p "$1/transcript.jsonl" --arg s "$2" --argjson a "$3" --arg m "$summary_prefix$4" \
@@ -121,15 +112,12 @@ stop_payload() {  # repo session stop-hook-active last-message
         last_assistant_message:$m}'
   fi
 }
-# INJECT_BASH_ENV, when set, names a file every bash in the run sources first; the race
-# cases use it to move the prompt epoch at one exact command.
-INJECT_BASH_ENV=""
 run_in_repo() {  # repo script classifier-answer host payload
   printf '%s' "$5" | (
     cd "$1" || exit 1
     unset PLUGIN_ROOT CLAUDE_PLUGIN_ROOT
     [[ "$4" != claude ]] || export CLAUDE_PLUGIN_ROOT="$REPO_ROOT"
-    BASH_ENV="$INJECT_BASH_ENV" CLAUDE_PROJECT_DIR="$1" VERDICT_GATE_HARD_BLOCK="$HARD_BLOCK" \
+    CLAUDE_PROJECT_DIR="$1" VERDICT_GATE_HARD_BLOCK=1 \
       VERDICT_CLASSIFIER_CMD="$(cls_stub "$1" "$3")" bash "$2"
   ) 2>"${HOOK_STDERR:-/dev/null}"
 }
@@ -142,31 +130,14 @@ decision_of() {
   if [[ -z "$1" ]]; then printf allow; return; fi
   [[ "$(field "$1" '.decision')" == block ]] && printf block || printf allow
 }
-expected_request='Use the boxlite-writing skill to shorten this response.'
-asked_as_context() {
-  [[ "$(field "$1" '.hookSpecificOutput.hookEventName')" == Stop \
-     && -n "$expected_request" \
-     && "$(field "$1" '.hookSpecificOutput.additionalContext')" == "$expected_request" \
-     && -z "$(field "$1" '.decision')" ]]
-}
-asked_as_block() {
-  [[ "$(field "$1" '.decision')" == block && -n "$expected_request" \
-     && "$(field "$1" '.reason')" == "$expected_request" ]]
-}
-asked() { asked_as_context "$1" || asked_as_block "$1"; }
-not_asked() { ! asked "$1"; }
+# The request the gate made before a leading TL;DR was enough; it must never return.
+shortening_request='Use the boxlite-writing skill to shorten this response.'
+no_request() { [[ "$1" != *"$shortening_request"* && -z "$(field "$1" '.hookSpecificOutput.additionalContext')" ]]; }
 keeps_triage_note() { [[ "$(field "$1" '.systemMessage')" == *"triage: NO"* ]]; }
-ended_unjudged() { [[ -z "$1" && "$(classifier_ran "$2")" == no ]]; }
-judged_without_ask() {
-  [[ "$(classifier_ran "$2")" == yes && "$(decision_of "$1")" == allow ]] && not_asked "$1"
-}
 audit_ran() { [[ -e "$1/.agents/state/SYNC_AUDIT_RAN" ]]; }
-logged_rung() {  # repo session "rung outcome"
-  grep -q " $3\$" "$(session_state_path "$1" verdict-decisions.log "$2")" 2>/dev/null
-}
 
 long_reply="$(printf 'word%.0s ' {1..81})"
-short_reply="Done: the gate asks for a small closing reply. Say go to commit."
+short_reply="Done: the gate checks the summary. Say go to commit."
 long_claim="$(printf 'more%.0s ' {1..121})and the root cause is the stale index."
 
 check_writing_continuations() {
@@ -179,18 +150,14 @@ check_writing_continuations() {
     expect "$host: the first missing summary gets a correction" "$?" "out=$out"
     append_assistant "$R" "$long_reply"
     out="$(gate_stop "$R" "$S" true "$long_reply" NO "$host")"
-    judged_without_ask "$out" "$R"
-    expect "$host: a TL;DR correction cannot trigger a density reminder" "$?" "out=$out"
-    prompt_hook "$R" "$S" turn-2
-    out="$(gate_stop "$R" "$S" false "$long_reply" NO "$host")"
-    asked "$out"
-    expect "$host: a new turn can receive a writing reminder" "$?" "out=$out"
+    [[ "$(classifier_ran "$R")" == yes && "$(decision_of "$out")" == allow ]] && no_request "$out"
+    expect "$host: the corrected dense reply is judged and ends" "$?" "out=$out"
     append_tool_call "$R"
     append_assistant "$R" "$long_claim"
     payload="$(stop_payload "$R" "$S" true '' | jq '.last_assistant_message = "The root cause is the stale index."')"
     out="$(TEST_AUDIT_VERDICT=FAIL run_in_repo "$R" "$HOOK" YES "$host" "$payload")"
     audit_ran "$R" && [[ "$(decision_of "$out")" == block && "$out" != *'TL;DR heading missing'* ]]
-    expect "$host: new work after a reminder still reaches the failing audit without TL;DR" "$?" "out=$out"
+    expect "$host: new work in a continuation still reaches the failing audit without TL;DR" "$?" "out=$out"
     rm -rf "$R"
   done
 }
@@ -200,280 +167,33 @@ if [[ "${1:-}" == writing-continuations ]]; then
   exit $(( fail > 0 ? 1 : 0 ))
 fi
 
-printf '## Summary requests follow text-block density\n'
-check_summary_density() {  # name reply ask|skip
-  local name="$1" reply="$2" expected="$3" repo output status
-  repo="$(new_repo "density-$name")"
-  append_assistant "$repo" "$reply"
-  output="$(gate_stop "$repo" "density-$name" false "$reply" NO claude)"
-  status=$?
-  if [[ "$expected" == ask ]]; then
-    [[ "$status" == 0 ]] && asked "$output"
-  else
-    [[ "$status" == 0 ]] && judged_without_ask "$output" "$repo"
-  fi
-  expect "$name: $expected summary" "$?" "status=$status out=$output"
-  rm -rf "$repo"
-}
-check_summary_density "80-word paragraph" "$(printf 'word%.0s ' {1..80})" skip
-check_summary_density "81-word paragraph" "$(printf 'word%.0s ' {1..81})" ask
-check_summary_density "two 60-word paragraphs" \
-  "$(printf 'word%.0s ' {1..60}; printf '\n\n'; printf 'word%.0s ' {1..60})" skip
-check_summary_density "40-word bullet" "- $(printf 'word%.0s ' {1..40})" skip
-check_summary_density "41-word bullet" "- $(printf 'word%.0s ' {1..41})" ask
-check_summary_density "ten short bullets" \
-  "$(for item in {1..10}; do printf -- '- '; printf 'word%.0s ' {1..20}; printf '\n'; done)" skip
-check_summary_density "ten short numbered items" \
-  "$(for item in {1..10}; do printf '%s. ' "$item"; printf 'word%.0s ' {1..20}; printf '\n'; done)" skip
-check_summary_density "200-word table" \
-  "$(printf '| Result | Details |\n| --- | --- |\n| Done | '; printf 'word%.0s ' {1..200}; printf '|\n')" skip
-check_summary_density "200-word table without outer pipes" \
-  "$(printf 'Result | Details\n--- | ---\nDone | '; printf 'word%.0s ' {1..200}; printf '\n')" skip
-check_summary_density "soft-wrapped 81-word paragraph" \
-  "$(printf 'word%.0s ' {1..40}; printf '\n'; printf 'word%.0s ' {1..41})" ask
-check_summary_density "wrapped 41-word bullet" \
-  "$(printf -- '- '; printf 'word%.0s ' {1..20}; printf '\n  '; printf 'word%.0s ' {1..21})" ask
-check_summary_density "41-word numbered item" "1. $(printf 'word%.0s ' {1..41})" ask
-check_summary_density "70-character Chinese paragraph" "$(printf '长%.0s' {1..70})" skip
-check_summary_density "41-character Chinese bullet" "- $(printf '长%.0s' {1..41})" ask
-check_summary_density "two paragraphs inside one 50-word bullet" \
-  "$(printf -- '- '; printf 'word%.0s ' {1..25}; printf '\n\n  '; printf 'word%.0s ' {1..25})" ask
-check_summary_density "40-word bullet followed by a 60-word paragraph" \
-  "$(printf -- '- '; printf 'word%.0s ' {1..40}; printf '\n\n'; printf 'word%.0s ' {1..60})" skip
-check_summary_density "headings separate short paragraphs" \
-  "$(printf 'word%.0s ' {1..60}; printf '\n# Next\n'; printf 'word%.0s ' {1..60})" skip
-check_summary_density "a pipe does not make prose a table" \
-  "$(printf 'left | right '; printf 'word%.0s ' {1..79})" ask
-check_summary_density "a table does not hide a following dense bullet" \
-  "$(printf '| Result | Details |\n| --- | --- |\n| Done | Clear |\n\n- '; printf 'word%.0s ' {1..41})" ask
-check_summary_density "a bullet interrupts a table without a blank line" \
-  "$(printf '| Result | Details |\n| --- | --- |\n| Done | Clear |\n- left | right '; printf 'word%.0s ' {1..39})" ask
-check_summary_density "table body rows can omit pipes" \
-  "$(printf '| Result | Details |\n| --- | --- |\n'; printf 'word%.0s ' {1..200})" skip
-check_summary_density "a single-column table is excluded" \
-  "$(printf '| Details |\n| --- |\n| '; printf 'word%.0s ' {1..200}; printf '|\n')" skip
-check_summary_density "mismatched table columns remain prose" \
-  "$(printf '| Result | Details |\n| --- |\n| '; printf 'word%.0s ' {1..81}; printf '|\n')" ask
-check_summary_density "a block quote interrupts a table" \
-  "$(printf '| Result | Details |\n| --- | --- |\n| Done | Clear |\n> '; printf 'word%.0s ' {1..81})" ask
-check_summary_density "nested fence markers stay inside their fence" \
-  "$(printf '\140\140\140\140text\n\140\140\140\n'; printf 'word%.0s ' {1..200}; printf '\n\140\140\140\140\n')" skip
-check_summary_density "a fenced block does not hide following dense prose" \
-  "$(printf '\140\140\140text\nexample\n\140\140\140\n'; printf 'word%.0s ' {1..81})" ask
+printf '## A TL;DR-led reply, dense or short, gets exactly the verdict check'"'"'s output\n'
+# Twin repos in the same state: the verdict check records what it judged, so a second
+# run in one repo would see an already-judged message.
+for host in claude codex; do
+  for size in dense short; do
+    reply="$long_reply"
+    [[ "$size" == dense ]] || reply="$short_reply"
+    S="$size-$host"; R="$(new_repo "$S")"; T="$(new_repo "$S")"
+    append_assistant "$R" "$reply"
+    append_assistant "$T" "$reply"
+    out="$(gate_stop "$R" "$S" false "$reply" NO "$host")"
+    direct="$(run_in_repo "$T" "$VERDICT_CHECK" NO "$host" "$(stop_payload "$T" "$S" false "$reply")")"
+    [[ -n "$out" && "$out" == "$direct" ]] && keeps_triage_note "$out" && no_request "$out"
+    expect "$host: a $size TL;DR-led reply ends with the verdict check's output" "$?" \
+      "gate=$out direct=$direct"
+    rm -rf "$R" "$T"
+  done
+done
 
-printf '## Claude Code: ask as context, then end on the small reply\n'
-S="context"; R="$(new_repo "$S")"
-append_tool_call "$R"
-append_assistant "$R" "$long_reply"
-out="$(gate_stop "$R" "$S" false "$long_reply" NO claude)"
-asked_as_context "$out"
-expect "a long judged reply continues the turn with the request as context" "$?" "out=$out"
-keeps_triage_note "$out"
-expect "the ask keeps the human's triage note" "$?" "out=$out"
-append_assistant "$R" "$short_reply"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$short_reply" YES claude)"
-ended_unjudged "$out" "$R"
-expect "the small reply ends the turn without running the verdict check" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-logged_rung "$R" "$S" "summary restatement-allow"
-expect "the restatement joins the verdict check's decision log" "$?" \
-  "log=$(cat "$(session_state_path "$R" verdict-decisions.log "$S")" 2>/dev/null)"
-rm -rf "$R"
-
-printf '\n## Any other caller: ask with a block, which starts a new transcript turn\n'
-S="block"; R="$(new_repo "$S")"
-append_tool_call "$R"
-append_assistant "$R" "$long_reply"
-out="$(gate_stop "$R" "$S" false "$long_reply" NO)"
-asked_as_block "$out"
-expect "an unidentified host gets the request as a portable block" "$?" "out=$out"
-append_user "$R" "Stop hook feedback: $(field "$out" '.reason')"
-append_assistant "$R" "$short_reply"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$short_reply" YES)"
-ended_unjudged "$out" "$R"
-expect "the small reply after a block ends the turn without running the verdict check" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-rm -rf "$R"
-
-S="block-tool"; R="$(new_repo "$S")"
-append_tool_call "$R"
-append_assistant "$R" "$long_reply"
-out="$(gate_stop "$R" "$S" false "$long_reply" NO)"
-append_user "$R" "Stop hook feedback: $(field "$out" '.reason')"
-append_tool_call "$R"
-append_assistant "$R" "$short_reply"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$short_reply" NO)"
-judged_without_ask "$out" "$R"
-expect "a tool call after a block ask sends the reply to the verdict check" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-rm -rf "$R"
-
-printf '\n## The answer to an ask is new work unless it only restates\n'
-S="tool"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-gate_stop "$R" "$S" false "$long_reply" NO claude >/dev/null
-append_tool_call "$R"
-append_assistant "$R" "$short_reply"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$short_reply" NO claude)"
-judged_without_ask "$out" "$R"
-expect "a tool call since the ask sends the reply to the verdict check" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-rm -rf "$R"
-
-S="overshoot"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-gate_stop "$R" "$S" false "$long_reply" NO claude >/dev/null
-overshoot="$(printf 'word%.0s ' {1..67})"
-append_assistant "$R" "$overshoot"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$overshoot" YES claude)"
-ended_unjudged "$out" "$R"
-expect "an answer within the independent 120-word bound still ends as a restatement" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-rm -rf "$R"
-
-# The bound is words, not size: many wide drawings with few labels restate, while a
-# fenced dump of many words is new text and goes to the verdict check.
-fence="$(printf '\140\140\140')"
-box="$(printf '%s\n' \
-  "┌────────────────────┐    ask once    ┌────────────────────┐" \
-  "│ Stop 1, long reply │ ─────────────▶ │  gate asks for it  │" \
-  "└────────────────────┘                └────────────────────┘")"
-drawings="$(for _ in 1 2 3 4 5 6; do printf '%stext\n%s\n%s\n' "$fence" "$box" "$fence"; done
-  printf '| before | after |\n| --- | --- |\n| long last | result last |\n')"
-S="drawings"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-gate_stop "$R" "$S" false "$long_reply" NO claude >/dev/null
-append_assistant "$R" "$drawings"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$drawings" YES claude)"
-ended_unjudged "$out" "$R"
-expect "many drawings with few words end as a restatement" \
-  "$?" "out=$out classifier=$(classifier_ran "$R") chars=${#drawings}"
-rm -rf "$R"
-
-S="dump"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-gate_stop "$R" "$S" false "$long_reply" NO claude >/dev/null
-dump="$(printf '%stext\n' "$fence"; printf 'log line %s of the run\n' $(seq 1 40); printf '%s\n' "$fence")"
-append_assistant "$R" "$dump"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$dump" NO claude)"
-judged_without_ask "$out" "$R"
-expect "a fenced dump of many words answering the ask is judged" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-rm -rf "$R"
-
-S="long-again"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-gate_stop "$R" "$S" false "$long_reply" NO claude >/dev/null
-long_again="$(printf 'more%.0s ' {1..121})"
-append_assistant "$R" "$long_again"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$long_again" NO claude)"
-judged_without_ask "$out" "$R"
-expect "a long answer to the ask is judged and never asked twice in a row" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-out="$(gate_stop "$R" "$S" true "$long_again" NO claude)"
-judged_without_ask "$out" "$R"
-expect "a third Stop in the same turn does not repeat the writing reminder" "$?" "out=$out"
-rm -rf "$R"
-
-S="audited-answer"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-gate_stop "$R" "$S" false "$long_reply" NO claude >/dev/null
-append_assistant "$R" "$long_claim"
-out="$(TEST_AUDIT_VERDICT=PASS gate_stop "$R" "$S" true "$long_claim" YES claude)"
-audit_ran "$R" && [[ "$(decision_of "$out")" == allow ]] && not_asked "$out"
-expect "an audited PASS answering the ask does not ask again" "$?" "out=$out"
-rm -rf "$R"
-
-S="epoch"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-gate_stop "$R" "$S" false "$long_reply" NO claude >/dev/null
-prompt_hook "$R" "$S" turn-2
-append_user "$R" "next question"
-append_assistant "$R" "$short_reply"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$short_reply" NO claude)"
-judged_without_ask "$out" "$R"
-expect "an ask from an earlier prompt is stale and the reply is judged" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-rm -rf "$R"
-
-# A prompt that arrives while this Stop decides supersedes it. The BASH_ENV file plants
-# a DEBUG trap that moves the prompt epoch right before the named command of
-# stop-gate.sh, the one point a real prompt could land between two checks.
-epoch_moves_before() {  # command-prefix -> path of a BASH_ENV file
-  local file; file="$(mktemp)"
-  printf 'STOP_GATE_MOVE_EPOCH_BEFORE=%q\n' "$1" > "$file"
-  cat >> "$file" <<'INJECT'
-set -T
-trap 'if [[ "$0" == *stop-gate.sh && -z "${_epoch_moved:-}" \
-           && "$BASH_COMMAND" == "$STOP_GATE_MOVE_EPOCH_BEFORE"* ]]; then
-        _epoch_moved=1; printf "9-9-9\n" > "$prompt_epoch_file"; fi' DEBUG
-INJECT
-  printf '%s' "$file"
-}
-S="superseded-decision"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-INJECT_BASH_ENV="$(epoch_moves_before reply_summary_is_dense)"
-out="$(gate_stop "$R" "$S" false "$long_reply" NO claude)"
-rm -f "$INJECT_BASH_ENV"; INJECT_BASH_ENV=""
-not_asked "$out" && [[ ! -e "$(session_state_path "$R" reply-summary-ask "$S")" ]]
-expect "a prompt arriving before the ask is decided stops it" "$?" "out=$out"
-rm -rf "$R"
-
-S="superseded-record"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-INJECT_BASH_ENV="$(epoch_moves_before reply_summary_record_ask)"
-out="$(gate_stop "$R" "$S" false "$long_reply" NO claude)"
-rm -f "$INJECT_BASH_ENV"; INJECT_BASH_ENV=""
-not_asked "$out" && [[ ! -e "$(session_state_path "$R" reply-summary-ask "$S")" ]]
-expect "a prompt arriving while the ask is recorded retracts it" "$?" "out=$out"
-rm -rf "$R"
-
-# Chinese and Japanese count one word per character.
-S="unspaced-long"; R="$(new_repo "$S")"
-unspaced_long="$(printf '长%.0s' {1..81})"
-append_assistant "$R" "$unspaced_long"
-out="$(gate_stop "$R" "$S" false "$unspaced_long" NO claude)"
-asked "$out"
-expect "a Chinese paragraph of 81 characters is dense enough to ask" "$?" "out=$out"
-rm -rf "$R"
-
-S="unspaced-answer"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-gate_stop "$R" "$S" false "$long_reply" NO claude >/dev/null
-unspaced_answer="$(printf '答%.0s' {1..130})"
-append_assistant "$R" "$unspaced_answer"
-rm -f "$R/CLASSIFIER_RAN"
-out="$(gate_stop "$R" "$S" true "$unspaced_answer" NO claude)"
-judged_without_ask "$out" "$R"
-expect "a Chinese answer of 130 characters is judged, not taken as a restatement" \
-  "$?" "out=$out classifier=$(classifier_ran "$R")"
-rm -rf "$R"
-
-printf '\n## Which allows ask\n'
 S="pass"; R="$(new_repo "$S")"
 append_assistant "$R" "$long_claim"
 out="$(TEST_AUDIT_VERDICT=PASS gate_stop "$R" "$S" false "$long_claim" YES claude)"
-audit_ran "$R" && asked "$out"
-expect "an audited PASS on a long reply asks for the small one" "$?" "out=$out"
+audit_ran "$R" && [[ "$(decision_of "$out")" == allow ]] && no_request "$out"
+expect "an audited PASS on a dense reply ends without a shortening request" "$?" "out=$out"
 rm -rf "$R"
 
-S="in-progress"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_claim"
-out="$(TEST_AUDIT_VERDICT=IN_PROGRESS gate_stop "$R" "$S" false "$long_claim" YES claude)"
-audit_ran "$R" && asked "$out"
-expect "an audited IN_PROGRESS on a long reply asks for the result" "$?" "out=$out"
-rm -rf "$R"
-
-# A user's override ends the turn without an audit; the result is still asked for.
+# A user's override ends the turn without an audit and without a shortening request.
 grant_override() {  # repo session
   local repo="$1" scope epoch now repo_hash
   scope="git-$(printf '%s' "$2" | git -C "$repo" hash-object --stdin)"
@@ -493,27 +213,22 @@ S="override"; R="$(new_repo "$S")"
 grant_override "$R" "$S"
 append_assistant "$R" "$long_claim"
 out="$(gate_stop "$R" "$S" false "$long_claim" YES claude)"
-[[ "$(field "$out" '.systemMessage')" == *"OVERRIDDEN BY USER"* ]] && asked "$out"
-expect "a user's override on a long reply asks for the result" "$?" "out=$out"
-rm -rf "$R"
-
-S="after-fail"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-out="$(gate_stop "$R" "$S" true "$long_reply" NO claude)"
-judged_without_ask "$out" "$R"
-expect "an unrelated Stop continuation also suppresses writing reminders" "$?" "out=$out"
+[[ "$(field "$out" '.systemMessage')" == *"OVERRIDDEN BY USER"* && "$(decision_of "$out")" == allow ]] \
+  && no_request "$out"
+expect "a user's override on a dense reply ends without a shortening request" "$?" "out=$out"
 rm -rf "$R"
 
 check_writing_continuations
 
-# Harness text is allowed without a judgment, so it is no turn to summarize.
+# Harness text is allowed without a judgment, but it still needs a TL;DR.
 S="harness"; R="$(new_repo "$S")"
 api_error="API Error: 529 $long_reply"
 saved_summary_prefix="$summary_prefix"; summary_prefix=""
 append_assistant "$R" "$api_error"
 out="$(gate_stop "$R" "$S" false "$api_error" YES claude)"
-[[ "$(classifier_ran "$R")" == no && "$(decision_of "$out")" == block && "$out" == *"TL;DR"* ]]
 summary_prefix="$saved_summary_prefix"
+unjudged() { [[ "$(classifier_ran "$1")" == no ]]; }
+unjudged "$R" && [[ "$(decision_of "$out")" == block && "$out" == *"TL;DR"* ]]
 expect "nonempty harness text without TL;DR is blocked before judgment" \
   "$?" "out=$out classifier=$(classifier_ran "$R")"
 rm -rf "$R"
@@ -521,56 +236,8 @@ rm -rf "$R"
 S="fail"; R="$(new_repo "$S")"
 append_assistant "$R" "$long_claim"
 out="$(gate_stop "$R" "$S" false "$long_claim" YES claude)"
-[[ "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *"Verdict proof check FAILED"* ]] \
-  && not_asked "$out"
-expect "a verdict FAIL blocks with its findings and no ask" "$?" "out=$out"
-rm -rf "$R"
-
-printf '\n## Everything else is the verdict check, unchanged\n'
-# Twin repos in the same state: the verdict check records what it judged, so a second
-# run in one repo would see an already-judged message.
-S="short"; R="$(new_repo "$S")"; T="$(new_repo "$S")"
-append_assistant "$R" "$short_reply"
-append_assistant "$T" "$short_reply"
-out="$(gate_stop "$R" "$S" false "$short_reply" NO claude)"
-direct="$(run_in_repo "$T" "$VERDICT_CHECK" NO claude "$(stop_payload "$T" "$S" false "$short_reply")")"
-[[ -n "$out" && "$out" == "$direct" ]] && keeps_triage_note "$out"
-expect "a short reply gets exactly the verdict check's output" "$?" "gate=$out direct=$direct"
-rm -rf "$R" "$T"
-
-S="fenced"; R="$(new_repo "$S")"
-fenced="$(printf 'Run this to reproduce it:\n%stext\n%s\n%s' "$fence" "$long_reply" "$fence")"
-append_assistant "$R" "$fenced"
-out="$(gate_stop "$R" "$S" false "$fenced" NO claude)"
-not_asked "$out"
-expect "fenced code is not counted" "$?" "out=$out"
-rm -rf "$R"
-
-S="marks"; R="$(new_repo "$S")"
-marks="$(printf 'Both paths, side by side:\n| path | kept |\n| --- | --- |\n'; \
-  printf '| p%s | y |\n' 1 2 3 4 5 6 7 8 9 10; printf -- '- **a**\n- **b**\n')"
-append_assistant "$R" "$marks"
-out="$(gate_stop "$R" "$S" false "$marks" NO claude)"
-not_asked "$out"
-expect "table pipes and list marks are not words" "$?" "out=$out"
-rm -rf "$R"
-
-S="soft"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-HARD_BLOCK=0
-out="$(gate_stop "$R" "$S" false "$long_reply" NO claude)"
-HARD_BLOCK=1
-not_asked "$out"
-expect "soft mode never continues a turn to ask" "$?" "out=$out"
-rm -rf "$R"
-
-R="$(setup)"
-: > "$R/transcript.jsonl"
-append_user "$R" "explain the gate"
-append_assistant "$R" "$long_reply"
-out="$(gate_stop "$R" "" false "$long_reply" NO claude)"
-not_asked "$out"
-expect "a caller without a session never asks, having nowhere to remember it" "$?" "out=$out"
+audit_ran "$R" && [[ "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *"Verdict proof check FAILED"* ]]
+expect "an audited FAIL blocks with its findings" "$?" "out=$out"
 rm -rf "$R"
 
 R="$(setup)"
@@ -582,13 +249,6 @@ reported_by_verdict_check() {  # status stderr
 reported_by_verdict_check "$status" "$err"
 expect "a malformed payload gets the verdict check's own error and exit status" "$?" \
   "status=$status err=$err"
-rm -rf "$R"
-
-S="none-allow"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-out="$(gate_stop "$R" "$S" false "$long_reply" UNKNOWN claude)"
-asked "$out"
-expect "an allow from the fallback patterns asks like a triage allow" "$?" "out=$out"
 rm -rf "$R"
 
 printf '\n## A signal to the gate or its process group stops the verdict check\n'
@@ -665,11 +325,7 @@ stopped_cleanly 143 "$status" "$elapsed" "$gone" "$clean" "$reached" && [[ "$aud
 expect "a termination to the gate alone during triage stops the check before any audit" \
   "$?" "status=$status after=${elapsed}s gone=$gone scratch_gone=$clean reached=$reached audit=$audited"
 
-printf '\n## Invariant: the ask record is gitignored, so it never enters the tree hash\n'
-git -C "$REPO_ROOT" check-ignore -q .agents/state/reply-summary-ask
-expect ".agents/state/reply-summary-ask is gitignored" "$?" "not ignored"
-
-printf '\n## Writing reminders reference the skill without reading its body\n'
+printf '\n## Writing denials reference the skill without reading its body\n'
 # Isolate skill changes and exercise checkout names with spaces.
 prompt_fixture="$(mktemp -d)"
 cp -R "$REPO_ROOT" "$prompt_fixture/plugin copy"
@@ -677,26 +333,23 @@ original_hook="$HOOK"
 HOOK="$prompt_fixture/plugin copy/.agents/hooks/stop-gate.sh"
 prompt_file="$prompt_fixture/plugin copy/.agents/skills/boxlite-writing/SKILL.md"
 HOOK_STDERR="$prompt_fixture/stderr"
+missing_summary() {  # repo session -> Stop payload whose reply has no TL;DR
+  stop_payload "$1" "$2" false '' | jq '.last_assistant_message = "Missing summary."'
+}
 edits_status=0
 for host in claude codex; do
-  if [[ "$host" == claude ]]; then
-    prompt_field='.hookSpecificOutput.additionalContext'
-  else
-    prompt_field='.reason'
-  fi
   printf 'Unique writing policy marker.\n' > "$prompt_file"
   S="prompt-$host"; R="$(new_repo "$S")"
-  append_assistant "$R" "$long_reply"
-  out="$(gate_stop "$R" "$S" false "$long_reply" NO "$host")"
-  [[ "$(field "$out" "$prompt_field")" == "$expected_request" ]] \
-    && keeps_triage_note "$out" || edits_status=1
+  out="$(run_in_repo "$R" "$HOOK" NO "$host" "$(missing_summary "$R" "$S")")"
+  [[ "$(field "$out" '.reason')" == *'apply boxlite-writing'* && "$out" != *'Unique writing policy marker'* ]] \
+    || edits_status=1
   for operation in 'pr comment 7' 'pr create --title "feat: share prompt"'; do
     github_output="$(jq -nc --arg command "gh $operation --body '$long_reply'" \
       '{tool_input:{command:$command}}' \
       | bash "$prompt_fixture/plugin copy/.agents/hooks/preflight-pr-review.sh")"
     github_reason="$(field "$github_output" '.hookSpecificOutput.permissionDecisionReason')"
     [[ "$(field "$github_output" '.hookSpecificOutput.permissionDecision')" == deny \
-       && "${github_reason#*$'\n\n'}" == "$expected_request" ]] || edits_status=1
+       && "${github_reason#*$'\n\n'}" == "$shortening_request" ]] || edits_status=1
   done
   rm -rf "$R"
 done
@@ -705,13 +358,9 @@ expect "Stop and GitHub hooks on both hosts name the skill without copying its b
 
 rm -f "$prompt_file"
 S="prompt-missing"; R="$(new_repo "$S")"
-append_assistant "$R" "$long_reply"
-out="$(gate_stop "$R" "$S" false "$long_reply" NO codex)"
+out="$(run_in_repo "$R" "$HOOK" NO codex "$(missing_summary "$R" "$S")")"
 status=$?
-[[ "$status" == 0 && -e "$(session_state_path "$R" reply-summary-ask "$S")" ]] \
-  && asked_as_block "$out" \
-  && keeps_triage_note "$out" \
-  && logged_rung "$R" "$S" 'summary ask-continue' \
+[[ "$status" == 0 && "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *'apply boxlite-writing'* ]] \
   && ! grep -q 'no such prompt' "$HOOK_STDERR"
 expect "a missing local skill does not prevent the host from receiving its name" \
   "$?" "status=$status out=$out stderr=$(cat "$HOOK_STDERR")"

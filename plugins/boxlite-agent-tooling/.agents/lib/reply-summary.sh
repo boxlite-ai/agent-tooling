@@ -1,34 +1,13 @@
 #!/usr/bin/env bash
-# The closing reply that stop-gate.sh asks for after a dense one. Source this file; it
-# performs no work on load. Requires sourced verdict-audit-state.sh,
-# and perl and jq on PATH; callers own those checks and all reporting.
-#
-# A turn ending on a dense reply gets one more message using the prompt in
-# the boxlite-writing skill. The original reply stays as written and the result
-# follows it. A summary that needs a tool to render or send is new tool work, so the
-# verdict check judges that answer as usual.
-# The Stop gate asks only after the verdict check has judged and allowed the turn, or a
-# user's override let it end, and never on a Stop continuation, so a model that cannot
-# shorten its answer reaches the verdict check instead of another writing reminder.
-#
-# ONE session-scoped record remembers the ask until the next Stop takes it. Its body is
-# `<prompt-epoch> <mode> <tool-count>`:
-#   mode        context: Claude Code continued the same turn (additionalContext), so
-#                 the transcript's final turn still holds the judged turn before it
-#               block: the request went back as a user message (decision:block), so
-#                 the transcript's final turn starts at it
-#   tool-count  tool calls in the judged turn, or - when they could not be counted
-# Tool calls since the ask are what separate a restatement of an already-judged turn
-# from new work, which the verdict check must judge.
+# Shared reply measurements: the Markdown word counter behind the TL;DR limit and the
+# GitHub paragraph and item limits, and the bounded reader that recovers the Stop
+# gate's last reply from the transcript. Source this file; it performs no work on
+# load. Requires sourced verdict-audit-state.sh, and perl and jq on PATH; callers own
+# those checks and all reporting.
 
 # Readability thresholds are independent of the shared prompt's prose budget.
 reply_summary_paragraph_max_words=80
 reply_summary_item_max_words=40
-# The answer to the ask ends unjudged only up to this many words, counted everywhere,
-# fenced blocks included. Words, not size: drawings may be many and large as long as
-# their labels are few, while a pasted log or code dump is words and counts. This
-# bound must not grow when the readability thresholds change.
-reply_summary_restatement_max_words=120
 # The same bounds the verdict check puts on the transcript it reads.
 reply_summary_transcript_max_bytes=67108864
 reply_summary_snapshot_max_bytes=262144
@@ -132,8 +111,8 @@ reply_summary_word_counts() {  # text -> total largest-paragraph largest-item
   printf '%s' "$counts"
 }
 
-# 0 when a paragraph or list item is dense enough to ask, 1 when none is, 2 when
-# the text could not be counted.
+# 0 when a paragraph or list item is over its limit, 1 when none is, 2 when the text
+# could not be counted.
 reply_summary_is_dense() {  # text
   local counts _total paragraph_words item_words
   counts="$(reply_summary_word_counts "${1-}")" || return 2
@@ -143,16 +122,8 @@ reply_summary_is_dense() {  # text
   return 1
 }
 
-# 0 only for a counted answer with few enough words to restate a judged turn.
-reply_summary_fits_restatement() {  # text
-  local counts words
-  counts="$(reply_summary_word_counts "${1-}")" || return 1
-  words="${counts%% *}"
-  (( words <= reply_summary_restatement_max_words ))
-}
-
-# Tool calls in the transcript's final turn, read by the verdict check's own bounded
-# snapshot reader. The snapshot goes to a fresh path in the caller's scratch directory.
+# The transcript's final turn, read by the verdict check's own bounded snapshot
+# reader. The snapshot goes to a fresh path in the caller's scratch directory.
 _reply_summary_snapshot() {  # transcript-path scratch-dir -> bounded JSON
   local snapshot="$2/final-turn.json" identity state
   [[ -n "${1-}" && -f "$1" && ! -L "$1" && -d "${2-}" ]] || return 1
@@ -169,40 +140,4 @@ _reply_summary_snapshot() {  # transcript-path scratch-dir -> bounded JSON
 reply_summary_last_text() { # transcript-path scratch-dir -> last assistant text
   _reply_summary_snapshot "$1" "$2" | jq -er 'select(.truncated == false) |
     [.records[] | select(.kind == "assistant") | .texts | join("\n")] | last // ""'
-}
-
-reply_summary_tool_count() {  # transcript-path scratch-dir
-  local count
-  count="$(_reply_summary_snapshot "$1" "$2" \
-    | jq -r '.evidence_summary.seen // empty' 2>/dev/null)" || return 1
-  [[ "$count" =~ ^[0-9]+$ ]] || return 1
-  printf '%s' "$count"
-}
-
-reply_summary_record_ask() {  # record-path prompt-epoch mode tool-count
-  [[ -n "${1-}" && "${2-}" =~ ^[A-Za-z0-9_.:-]+$ ]] || return 1
-  [[ "${3-}" == context || "${3-}" == block ]] || return 1
-  [[ "${4-}" =~ ^([0-9]+|-)$ ]] || return 1
-  mkdir -p "$(dirname "$1")" 2>/dev/null || return 1
-  printf '%s %s %s\n' "$2" "$3" "$4" | verdict_audit_write_atomic "$1"
-}
-
-# Removes the record reply_summary_record_ask wrote with these fields, and only that
-# record: a newer ask written since stays.
-reply_summary_retract_ask() {  # record-path prompt-epoch mode tool-count
-  verdict_audit_remove_record_if_matches "$1" "$2 $3 $4" >/dev/null 2>&1
-}
-
-# Prints the fields of a well-formed record and removes it. A record whose removal
-# fails still counts as taken, so a broken state directory can stop further asks but
-# can never make the gate ask in a loop.
-reply_summary_take_ask() {  # record-path -> "prompt-epoch mode tool-count"
-  local body epoch mode tools extra
-  body="$(verdict_audit_read_single_record "$1" 2>/dev/null)" || return 1
-  verdict_audit_remove_record_if_matches "$1" "$body" >/dev/null 2>&1 || true
-  read -r epoch mode tools extra <<<"$body"
-  [[ "$epoch" =~ ^[A-Za-z0-9_.:-]+$ && -z "$extra" ]] || return 1
-  [[ "$mode" == context || "$mode" == block ]] || return 1
-  [[ "$tools" =~ ^([0-9]+|-)$ ]] || return 1
-  printf '%s %s %s' "$epoch" "$mode" "$tools"
 }

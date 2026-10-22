@@ -135,11 +135,50 @@ check Bash $'gh pr create --draft --title "fix: example" --body "## TL;DR\n\nA c
 check Bash "bash \"$plugin/scripts/design-doc.sh\" bind https://github.com/example/project/issues/1" allow
 check Bash "bash \"$plugin/scripts/design-doc.sh\" check" allow
 url=https://github.com/example/project/issues/1
-jq -nc --arg url "$url" '{html_url:$url,body:"## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests."}' > "$DOC_RESPONSE"
+design=$'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
+publish() { jq -nc --arg url "$url" --arg body "$1" '{html_url:$url,body:$body}' > "$DOC_RESPONSE"; }
+publish "$design"
 (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" bind "$url") >/dev/null || exit 1
+# A bound design still needs a research verdict for its exact content before any edit.
+design_denial() { # host -> what the design gate tells the agent about an edit
+  local root=PLUGIN_ROOT
+  [[ "$1" == codex ]] || root=CLAUDE_PLUGIN_ROOT
+  jq -nc --arg cwd "$scratch/repo" '{tool_name:"Write",cwd:$cwd,tool_input:{file_path:"source.py"}}' |
+    (cd "$scratch/repo" && { env -u PLUGIN_ROOT -u CLAUDE_PLUGIN_ROOT "$root=$plugin" \
+      bash "$plugin/.agents/hooks/preflight-design-doc.sh" >/dev/null; } 2>&1)
+}
+expect_denial() { # description, host, expected text
+  local denial
+  denial="$(design_denial "$2")"
+  if [[ "$denial" == *"$3"* ]]; then
+    printf 'PASS %s\n' "$1"; pass=$((pass+1))
+  else
+    printf 'FAIL %s: %s\n' "$1" "$denial"; fail=$((fail+1))
+  fi
+}
+record_research() { # PASS|FAIL, findings JSON
+  jq -nc --arg sha "$(printf '%s' "$design" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" \
+    --arg verdict "$1" --argjson findings "$2" '{content_sha256:$sha,verdict:$verdict,findings:$findings}' |
+    (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" research) >/dev/null ||
+    { printf 'FAIL recording a research %s\n' "$1"; fail=$((fail+1)); }
+}
+for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
+  check "$tool" 'edit source' deny
+done
+expect_denial 'Claude Code is routed to the research auditor' claude 'boxlite-agent-tooling:design-research-auditor'
+expect_denial 'Codex is routed to the research auditor spec' codex '.claude/agents/design-research-auditor.md'
+record_research FAIL '["research: no source supports the retry limit; cite one"]'
+check Write 'edit source' deny
+expect_denial 'a failed review lists its findings' codex 'no source supports the retry limit'
+record_research PASS '[]'
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' allow
 done
+publish "$design"$'\n\nA later decision.'
+check Write 'edit source' deny
+expect_denial 'an edited design needs a new review' codex 'design-research-auditor'
+publish "$design"
+check Write 'edit source' allow
 export DOC_ERROR=1
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' deny
