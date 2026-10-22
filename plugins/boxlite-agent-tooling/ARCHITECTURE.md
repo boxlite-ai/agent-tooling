@@ -627,7 +627,7 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/audit/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Research verdict: root, branch, design URL, and the SHA-256 of the content the auditor reviewed (`.agents/lib/design-doc.sh`).
 - Incomplete evidence: a missing or empty source during refresh retains the published failed snapshot. Audit re-entry reads and validates that bounded snapshot before consuming the dossier; loss of the original source cannot become `empty-allow`. An initially absent or empty transcript still has nothing to judge.
-- Stop gate to verdict check: after checking TL;DR, `.agents/hooks/stop-gate.sh` hands the payload unchanged to `.agents/hooks/audit/preflight-verdict-check.sh`, whose output, stderr, and exit status become the gate's. The gate still sets `VERDICT_DECISION_OUT`, though nothing reads it now (follow-up in #253). Missing dependencies fail closed.
+- Stop gate to verdict check: after the TL;DR check and timed confirmations, `.agents/hooks/stop-gate.sh` `exec`s `.agents/hooks/audit/preflight-verdict-check.sh` with the payload unchanged, so the check runs as the hook process: its output, stderr, exit status, and signal handling are the hook's ([#255](https://github.com/boxlite-ai/agent-tooling/issues/255)). Missing dependencies fail closed.
 - Mandatory summary: `.agents/lib/concise-writing.sh` checks for an ATX TL;DR heading and summary prose outside fences, quotes, and comments. Human-facing replies must start there; the entire section has at most 39 words using the shared Unicode-aware counter. Each denial is one line: the failed condition, then a literal fix; length failures report the count and limit and ask for a same-level heading after one short sentence. Missing, misplaced, malformed, and overlong TL;DR denials end with `apply boxlite-writing` unless the caller passes `no-hint`. Only the GitHub writing check does, because the PR gate appends its own reminder. Stop checks the TL;DR only when `stop_hook_active` is false: one correction can continue a turn, then the check is skipped, including after unrelated Stop continuations. GitHub and design-document checks remain mandatory. Missing Stop text falls back to a bounded transcript snapshot; unreadable or truncated snapshots fail closed even on continuations. Explicitly empty reply text remains empty without replaying earlier text; verdict auditing still runs. Internal instructions and tool payloads need no summary. Sentence simplicity remains a writing instruction.
 - Enforcement scope: Stop checks the final reply after generation; it cannot retract streamed commentary. GitHub checks cover recognized CLI calls, not browser or connector writes. Design checks cover fetched GitHub, Linear, and Notion content; native Notion headings retain their structure. Shared guidance applies to every human-facing output across these surfaces.
 - Shared writing skill: `boxlite-writing` owns writing rules. Workflow, Stop TL;DR denials, GitHub reminders, PR guidance, and the optional prompt hook reference it by name. `concise_writing_reminder` supplies the shortening request the PR gate appends to GitHub writing denials, without reading skill files. Paragraphs over 80 words or list items over 40 trigger it only in GitHub text that does not start with a valid TL;DR; Stop never asks to shorten a reply.
@@ -657,7 +657,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A stale or mismatched turn dossier is discarded, never blocked on. `.agents/hooks/audit/preflight-verdict-check.sh:28`
 - A readable snapshot with no assistant text ends unjudged under `blind-allow`; a failed or truncated snapshot requires an audit. `.agents/hooks/audit/preflight-verdict-check.sh:53`
 - A message is never judged twice. `.agents/hooks/audit/preflight-verdict-check.sh:62`
-- A parked FAIL serves only the next audit of the same round. `.agents/hooks/audit/preflight-verdict-check.sh:1759`
+- A parked FAIL serves only the next audit of the same round. `.agents/hooks/audit/preflight-verdict-check.sh:1754`
 - A reply that leads with a valid TL;DR is never asked to shorten; the Stop gate's only writing check is that TL;DR. `.agents/hooks/stop-gate.sh:4`
 - No editor or patch edit lands in a repository before a research PASS for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
@@ -686,27 +686,27 @@ one line cites the first.
 
 | Rung | Outcome | When | Line |
 | --- | --- | --- | --- |
-| override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 721 |
-| history | exhausted-stop | Failure, attempt, or remaining-capacity exhaustion terminates Stop with INCOMPLETE; no further audit runs. | 742 |
-| extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1833 |
-| extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1840 |
-| extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1843 |
-| cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1857 |
-| dossier | discard-generation | The dossier's generation is not the requested one. | 1935 |
-| dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1941 |
-| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 1984 |
-| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1994 |
-| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 2002 |
-| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 2015 |
-| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2139 |
-| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2164 |
-| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2196 |
-| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2205 |
-| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2212 |
-| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2221 |
-| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2225 |
-| regex | none-allow | No model reachable and no fallback pattern matched. | 2233 |
-| regex | match-block | No model reachable and a fallback pattern matched. | 2237 |
+| override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 716 |
+| history | exhausted-stop | Failure, attempt, or remaining-capacity exhaustion terminates Stop with INCOMPLETE; no further audit runs. | 737 |
+| extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1828 |
+| extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1835 |
+| extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1838 |
+| cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1852 |
+| dossier | discard-generation | The dossier's generation is not the requested one. | 1930 |
+| dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1936 |
+| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 1979 |
+| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1989 |
+| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 1997 |
+| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 2010 |
+| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2134 |
+| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2159 |
+| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2191 |
+| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2200 |
+| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2207 |
+| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2216 |
+| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2220 |
+| regex | none-allow | No model reachable and no fallback pattern matched. | 2228 |
+| regex | match-block | No model reachable and a fallback pattern matched. | 2232 |
 
 Dossier shape, from `.claude/agents/verdict-auditor.md`: `branch`, `head`, `tree_hash`,
 `generation`, a `verdict` of `PASS`, `FAIL` or `IN_PROGRESS`, and `findings`. The

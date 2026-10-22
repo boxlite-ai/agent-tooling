@@ -4353,19 +4353,17 @@ else
 fi
 rm -rf "$R"
 
-# A caller that sets VERDICT_DECISION_OUT learns which rung decided. The file sits
-# outside the repo: a line appended inside it would move the tree hash a dossier is
-# bound to.
-printf '\n## The deciding rung reaches a caller that asks for it\n'
-decided_rung() {  # repo classifier-answer -> last line the gate reported
-  local decisions; decisions="$(mktemp)"
+# The session's decision log names the rung that decided, including after the audit
+# child re-enters the check. Its scope suffix is the Git object hash of the session id.
+printf '\n## The decision log records the rung that decided\n'
+decided_rung() {  # repo classifier-answer -> rung and outcome of the last logged decision
+  local log
+  log="$1/.agents/state/verdict-decisions.log.git-$(printf decision-log | git -C "$1" hash-object --stdin)"
   jq -nc --arg p "$1/transcript.jsonl" \
-    '{transcript_path:$p, hook_event_name:"Stop", session_id:"decision-out"}' \
+    '{transcript_path:$p, hook_event_name:"Stop", session_id:"decision-log"}' \
     | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" VERDICT_GATE_HARD_BLOCK=1 \
-        VERDICT_DECISION_OUT="$decisions" \
         VERDICT_CLASSIFIER_CMD="$(cls_stub "$1" "$2")" bash "$HOOK" ) >/dev/null 2>&1
-  tail -n 1 "$decisions"
-  rm -f "$decisions"
+  tail -n 1 "$log" 2>/dev/null | cut -d' ' -f3-
 }
 R="$(setup)"; write_transcript "$R" "Nothing here is a verdict; just chatting."
 rung="$(decided_rung "$R" NO)"
