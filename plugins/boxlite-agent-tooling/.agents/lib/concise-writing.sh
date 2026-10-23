@@ -50,7 +50,7 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
     # emphasis, a link or a code span (6.1). A first character also admits a list item
     # (5.2), a thematic break (4.1), a footnote or link reference definition (4.7), a
     # setext heading (4.3) or a GFM table (4.10), so those are refused by shape. Keep
-    # each pattern linear: no two whitespace runs may match the same spaces.
+    # each pattern linear: no two unbounded whitespace runs may match the same spaces.
     my ($first, @rest) = split /\n/, $summary;
     $first //= "";
     exit 5 unless $first =~ /\A {0,3}(?:\\?[\p{L}\p{N}*_\[]|(`{1,2})(?!`).+?(?<!`)\1(?!`))/

@@ -47,7 +47,8 @@ Additional suites cover GitHub writing, PR design/explanations/size, TL;DR check
 auditor overrides, and watch delivery. `session/tldr-gates.test.sh fast` checks the
 TL;DR denials in under a minute; its full matrix takes over ten minutes. Set
 `TLDR_GATES_CASES=<label>,…` to run only those cases, for example a fix's new ones
-within a foreground time limit. Managed questions also use
+within a foreground time limit; a label that runs no case fails the suite.
+Managed questions also use
 [`scripts/claude-timed-prompts.test.sh`](../../scripts/claude-timed-prompts.test.sh).
 `pr/fixtures/` holds recorded test inputs.
 
