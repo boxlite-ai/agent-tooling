@@ -2,6 +2,7 @@
 # Exercise the three public gates with the same untrusted Markdown.
 # Usage: tldr-gates.test.sh [fast]. The full matrix takes minutes; `fast` keeps the
 # library denial checks and the all-gates `missing` case, under a minute.
+# TLDR_GATES_CASES=a,b runs only those all-gates cases, plus the library checks.
 # shellcheck disable=SC2016 # Markdown backticks in expected feedback are literal.
 set -euo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -37,6 +38,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
   local label="$1" body="$2" expected="$3" reply_expected="${4:-$3}" reason="${5:-TL;DR}"
   local output actual gate active wanted host mentions
   [[ "$mode" != fast || "$label" == missing ]] || return 0
+  [[ -z "${TLDR_GATES_CASES:-}" || ",$TLDR_GATES_CASES," == *",$label,"* ]] || return 0
   for gate in github-claude github-codex github-codex-native design stop-claude stop-codex stop-transcript-claude stop-transcript-codex; do
     host=claude
     [[ "$gate" != *codex* ]] || host=codex
@@ -88,6 +90,10 @@ check visible_alert 'PR #141 needs review.' deny deny 'TL;DR heading missing'
 check bold_label '**TL;DR:** A concise answer.' deny deny '`## TL;DR`, one short sentence'
 check empty $'## TL;DR\n\n## Details\nA concise answer.' deny deny 'summary missing or invalid'
 check symbol_start $'## TL;DR\n\n#120 is ready.' deny deny 'summary missing or invalid'
+# Inline code may open the sentence; a list or setext heading is no sentence (#257).
+check code_start $'## TL;DR\n\n`stop-gate.sh` now leads every reply with a summary.' allow
+check list_start $'## TL;DR\n\n* A concise answer.' deny deny 'summary missing or invalid'
+check setext_start $'## TL;DR\n\nA concise answer.\n===' deny deny 'summary missing or invalid'
 check fenced $'```markdown\n## TL;DR\nA concise answer.\n```' deny deny 'TL;DR heading missing'
 check quoted $'> ## TL;DR\n> A concise answer.' deny deny 'TL;DR heading missing'
 check commented $'<!--\n## TL;DR\nA concise answer.\n-->' deny deny 'TL;DR heading missing'

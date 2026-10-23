@@ -46,7 +46,26 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
     exit 3 unless $level;
     my $summary = join "\n", @summary;
     $summary =~ s/\A(?:[ \t]*\n)+//;
-    exit 5 unless $summary =~ /\A {0,3}\\?[\p{L}\p{N}*_\[]/ && $summary =~ /[\p{L}\p{N}]/;
+    # The summary opens with a paragraph (CommonMark 0.31.2, 4.8) that starts with a word,
+    # emphasis, a link or a code span (6.1). A first character also admits a list item
+    # (5.2), a thematic break (4.1), a footnote or link reference definition (4.7), a
+    # setext heading (4.3) or a GFM table (4.10), so those are refused by shape. Keep
+    # each pattern linear: no two whitespace runs may match the same spaces.
+    my ($first, @rest) = split /\n/, $summary;
+    $first //= "";
+    exit 5 unless $first =~ /\A {0,3}(?:\\?[\p{L}\p{N}*_\[]|(`{1,2})(?!`).+?(?<!`)\1(?!`))/
+      && $summary =~ /[\p{L}\p{N}]/;
+    my $break = qr/(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})\z/;
+    exit 5 if $first =~ /\A {0,3}(?:(?:[*+-]|[0-9]{1,9}[.)])(?:[ \t]|\z)|$break|\[\^[^\]\s]+\]:)/
+      || $first =~ /\A {0,3}\[[^\]]+\]:(?:[ \t]*(?:<[^>]*>|\S+)(?:[ \t]+(?:"[^"]*"|\x27[^\x27]*\x27|\([^)]*\)))?)?[ \t]*\z/
+      || ($rest[0] // "") =~ /\A {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*(?:\|[ \t]*)?\z/;
+    # The paragraph runs until a blank line or a block that interrupts it; an underline
+    # first makes it a heading.
+    for (@rest) {
+      last if /\A[ \t]*\z/;
+      exit 5 if /\A {0,3}(?:=+|-+)[ \t]*\z/;
+      last if /\A {0,3}(?:`{3,}|~{3,}|>|#{1,6}(?:[ \t]|\z)|(?:[*+-]|1[.)])[ \t]+\S|$break)/;
+    }
     print $summary;
   ' "$location")" || status=$?
   if (( status == 0 )); then
@@ -64,7 +83,7 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
        printf 'TL;DR heading missing: %s `## TL;DR`, one short sentence, then `## Details` before more text%s\n' \
          "$verb" "$skill_hint" ;;
     4) printf 'TL;DR not first: move `## TL;DR` and its sentence to the top%s\n' "$skill_hint" ;;
-    5) printf 'TL;DR summary missing or invalid: put one plain sentence, starting with a word, right under `## TL;DR`%s\n' \
+    5) printf 'TL;DR summary missing or invalid: under `## TL;DR`, start one plain sentence with a word or inline code%s\n' \
          "$skill_hint" ;;
     6) printf 'TL;DR word counter failed: fix the counter; rewording will not help\n' ;;
     *) printf 'TL;DR parser (perl) failed: fix it; rewording will not help\n' ;;
