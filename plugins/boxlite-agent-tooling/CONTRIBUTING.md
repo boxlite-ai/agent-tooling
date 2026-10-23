@@ -65,6 +65,19 @@ recommend GitHub issue discussion; only the user's `api compatibility: skip`
 confirmation bypasses that gate. No Notion link is required;
 reload or start a new session to replace already-loaded prompts.
 
+### Research gate and TL;DR rollout
+
+Version 0.1.31 moves the research check before code:
+
+- The first code edit on each in-progress branch needs a `design-research-auditor`
+  PASS for the bound design.
+- Code written or committed under any 0.1.30 build may lack a research check: before
+  the next commit or push on such a branch, attempt one editor edit so that review
+  runs. Merged work stays an accepted risk.
+- A TL;DR summary must open with a paragraph: a list, break, definition, setext
+  heading or table under `## TL;DR` is denied, while inline code may open it.
+- Reload or start a new session to replace already-loaded prompts.
+
 ### Verification boundaries
 
 In lifecycle tests, wait for the observed phase before injecting a signal. A
