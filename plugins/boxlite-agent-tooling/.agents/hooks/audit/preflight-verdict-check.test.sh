@@ -3070,6 +3070,111 @@ else
 fi; rm -rf "$R"
 
 echo
+echo "## Final-turn reader: parsing tracks the turn, not the session"
+# The reader scans back from the end of the transcript to the last real user message,
+# so earlier history is hashed, never parsed. A whole-file cap made every Stop after a
+# session passed 64 MiB fail as unreadable evidence (#262).
+R="$(setup)"
+perl -e 'my $pad = "x" x 1048000; print qq({"type":"progress","data":"$pad"}\n) for 1 .. 66' \
+  > "$R/transcript.jsonl"
+append_user "$R" "How is the session going?"
+append_assistant "$R" "Nothing here is a verdict; just chatting."
+long_decision="$(decide "$R")"
+long_rung="none"
+grep -q 'extract truncated-block' "$R"/.agents/state/verdict-decisions.log* 2>/dev/null \
+  && long_rung="extract truncated-block"
+if [[ "$long_decision" == allow && "$long_rung" == none ]]; then
+  pass=$((pass + 1))
+  printf '  PASS  a 66 MiB session with a small final turn is judged, not truncated\n'
+else
+  fail=$((fail + 1))
+  printf '  FAIL  a 66 MiB session with a small final turn is judged, not truncated  (decision=%s rung=%s)\n' \
+    "$long_decision" "$long_rung"
+fi
+rm -rf "$R"
+
+snapshot_of() {  # transcript turn-max -> snapshot JSON; non-zero when the reader refuses
+  local dir rc=0
+  dir="$(mktemp -d)"
+  ( source "$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
+    verdict_audit_snapshot_final_turn "$1" "$dir/snapshot.json" "$2" 262144 ) 2>/dev/null \
+    && cat "$dir/snapshot.json" || rc=1
+  rm -rf "$dir"
+  return "$rc"
+}
+sha256_of() { perl -MDigest::SHA -e 'print Digest::SHA->new(256)->addfile($ARGV[0])->hexdigest' "$1"; }
+
+# Lines come back exactly as a forward read gives them: one spanning several 64 KiB
+# blocks, a blank line, CRLF, and a last line without its LF.
+R="$(mktemp -d)"; t="$R/transcript.jsonl"
+long_claim="$(perl -e 'print "y" x 153600')"
+jq -nc '{type:"assistant", message:{content:[{type:"text",text:"OLD_TURN_CLAIM"}]}}' > "$t"
+jq -nc '{type:"user", message:{content:[{type:"text",text:"go on"}]}}' >> "$t"
+jq -nc --arg c "$long_claim" '{type:"assistant", message:{content:[{type:"text",text:$c}]}}' >> "$t"
+printf '\n' >> "$t"
+printf '%s\r\n' "$(jq -nc '{type:"assistant", message:{content:[{type:"text",text:"crlf"}]}}')" >> "$t"
+printf '%s' "$(jq -nc '{type:"assistant", message:{content:[{type:"text",text:"no final LF"}]}}')" >> "$t"
+boundary_snapshot="$(snapshot_of "$t" 67108864)" || boundary_snapshot=""
+boundary_texts="$(jq -c '[.records[] | select(.kind == "assistant") | .texts[]]' \
+  <<<"$boundary_snapshot" 2>/dev/null)"
+if [[ "$boundary_texts" == "$(jq -nc --arg c "$long_claim" '[$c, "crlf", "no final LF"]')" \
+   && "$(jq -r '.source_sha256' <<<"$boundary_snapshot")" == "$(sha256_of "$t")" \
+   && "$(jq -r '.source_bytes' <<<"$boundary_snapshot")" == "$(wc -c < "$t" | tr -d ' ')" ]]; then
+  pass=$((pass + 1))
+  printf '  PASS  block-spanning, blank, CRLF and unterminated lines read as a forward read does\n'
+else
+  fail=$((fail + 1))
+  printf '  FAIL  block-spanning, blank, CRLF and unterminated lines read as a forward read does  (texts=%.80s)\n' \
+    "$boundary_texts"
+fi
+rm -rf "$R"
+
+# The decode bound covers the final turn, not the file.
+R="$(mktemp -d)"; t="$R/transcript.jsonl"
+perl -e 'print qq({"type":"progress","data":"), "z" x 100000, qq("}\n)' > "$t"
+jq -nc '{type:"user", message:{content:[{type:"text",text:"go on"}]}}' >> "$t"
+jq -nc '{type:"assistant", message:{content:[{type:"text",text:"small turn"}]}}' >> "$t"
+small_turn_rc=0; snapshot_of "$t" 4096 >/dev/null || small_turn_rc=$?
+jq -nc --arg c "$(perl -e 'print "w" x 8192')" \
+  '{type:"assistant", message:{content:[{type:"text",text:$c}]}}' >> "$t"
+large_turn_rc=0; snapshot_of "$t" 4096 >/dev/null || large_turn_rc=$?
+if [[ "$small_turn_rc" == 0 && "$large_turn_rc" != 0 ]]; then
+  pass=$((pass + 1)); printf '  PASS  the decode bound covers the final turn, not the file\n'
+else
+  fail=$((fail + 1))
+  printf '  FAIL  the decode bound covers the final turn, not the file  (small=%s large=%s)\n' \
+    "$small_turn_rc" "$large_turn_rc"
+fi
+rm -rf "$R"
+
+# History is hashed, not parsed: NUL anywhere still fails, as does a malformed final-turn
+# line, but a malformed line before the last real user message no longer does.
+R="$(mktemp -d)"
+for history_case in nul malformed-turn malformed-history; do
+  t="$R/$history_case.jsonl"
+  case "$history_case" in
+    nul) printf '{"type":"progress","data":"a\0b"}\n' > "$t" ;;
+    malformed-turn) printf '{"type":"progress","data":"ok"}\n' > "$t" ;;
+    malformed-history) printf '{"type":"progress","data":\n' > "$t" ;;
+  esac
+  jq -nc '{type:"user", message:{content:[{type:"text",text:"go on"}]}}' >> "$t"
+  jq -nc '{type:"assistant", message:{content:[{type:"text",text:"turn"}]}}' >> "$t"
+  [[ "$history_case" == malformed-turn ]] && printf '{"type":"assistant","message":\n' >> "$t"
+done
+nul_rc=0; snapshot_of "$R/nul.jsonl" 67108864 >/dev/null || nul_rc=$?
+turn_rc=0; snapshot_of "$R/malformed-turn.jsonl" 67108864 >/dev/null || turn_rc=$?
+history_rc=0; snapshot_of "$R/malformed-history.jsonl" 67108864 >/dev/null || history_rc=$?
+if [[ "$nul_rc" != 0 && "$turn_rc" != 0 && "$history_rc" == 0 ]]; then
+  pass=$((pass + 1))
+  printf '  PASS  NUL and malformed final-turn lines fail; malformed history is only hashed\n'
+else
+  fail=$((fail + 1))
+  printf '  FAIL  NUL and malformed final-turn lines fail; malformed history is only hashed  (nul=%s turn=%s history=%s)\n' \
+    "$nul_rc" "$turn_rc" "$history_rc"
+fi
+rm -rf "$R"
+
+echo
 echo "## Harness-agnostic extraction: conventions, not schema lists"
 R="$(setup)"; write_codex_transcript "$R" "Root cause is the missing bind mount; all tests pass now."
 check "codex rollout schema, verdict → block"                    "$R" "block"
@@ -4216,8 +4321,8 @@ echo "## a transcript unreadable at one moment is re-read, not judged incomplete
 # The live failure: the gate reads the transcript while the harness is still appending
 # to it, the extractor's two passes disagree on the bytes, and the hollow snapshot it
 # publishes reads downstream as "evidence incomplete" — forcing a FAIL dossier about a
-# turn nobody actually looked at. A regular file the extractor refuses on sight (over
-# the source ceiling) reproduces that moment deterministically, and a helper swaps in
+# turn nobody actually looked at. A regular file the extractor refuses on sight (only
+# NUL bytes) reproduces that moment deterministically, and a helper swaps in
 # the settled transcript inside the retry window.
 R="$(setup)"
 write_transcript "$R" "Nothing here is a verdict; just chatting."
