@@ -8,8 +8,7 @@
 # Readability thresholds are independent of the shared prompt's prose budget.
 reply_summary_paragraph_max_words=80
 reply_summary_item_max_words=40
-# The same bounds the verdict check puts on the transcript it reads.
-reply_summary_transcript_max_bytes=67108864
+# The same snapshot bound the verdict check puts on the transcript it reads.
 reply_summary_snapshot_max_bytes=262144
 
 # A word is a whitespace-separated token holding a letter or digit, so table pipes,
@@ -127,8 +126,9 @@ reply_summary_is_dense() {  # text
 _reply_summary_snapshot() {  # transcript-path scratch-dir -> bounded JSON
   local snapshot="$2/final-turn.json" identity state
   [[ -n "${1-}" && -f "$1" && ! -L "$1" && -d "${2-}" ]] || return 1
+  # shellcheck disable=SC2154 # Assigned by verdict-audit-state.sh, which callers source.
   identity="$(verdict_audit_snapshot_final_turn_identity "$1" "$snapshot" \
-    "$reply_summary_transcript_max_bytes" "$reply_summary_snapshot_max_bytes" \
+    "$verdict_audit_final_turn_max_bytes" "$reply_summary_snapshot_max_bytes" \
     2>/dev/null)" || return 1
   state="$(verdict_audit_read_regular_state "$snapshot" \
     "$reply_summary_snapshot_max_bytes" json "$identity" 2>/dev/null)" || return 1

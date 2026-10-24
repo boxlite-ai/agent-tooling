@@ -115,6 +115,11 @@ flowchart TD
 | **Incomplete snapshot** | Gate | Evidence could not be captured completely |
 | **Dossier** | Auditor | Its assessment: PASS, FAIL, or IN_PROGRESS, with findings |
 
+The gate reads the transcript back from its end to the last real user message
+([reader](../lib/verdict-audit-state.sh)). It decodes at most 64 MiB of that final
+turn and only hashes earlier history, so a long session never makes evidence
+incomplete ([#262](https://github.com/boxlite-ai/agent-tooling/issues/262)).
+
 The runner gives the auditor a [private copy of the snapshot](audit/run-verdict-audit.sh).
 Re-entry means running the gate again to validate the returned dossier against the
 current session, audit generation, and repository state.
@@ -123,7 +128,7 @@ current session, audit generation, and repository state.
 
 The regression test follows this sequence:
 
-1. The **65 MiB original transcript** exceeds the reader's limit.
+1. The **65 MiB original transcript** holds only NUL bytes, which the reader refuses.
 2. The gate saves an **incomplete snapshot** containing `truncated: true` and `records: []`.
 3. The test deletes the **original transcript**.
 4. The fix preserves the snapshot through retries and reloads it during **gate re-entry**.

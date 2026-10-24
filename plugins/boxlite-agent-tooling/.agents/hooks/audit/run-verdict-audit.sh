@@ -65,7 +65,6 @@ audit_verified_identity=""
 audit_success_pending=false
 transcript_snapshot_dir=""
 transcript_snapshot_path=""
-transcript_source_max_bytes=67108864
 transcript_turn_max_bytes=262144
 previous_dossier_max_bytes=65536
 previous_dossier_input_path=""
@@ -754,9 +753,9 @@ snapshot_transcript() {
     fi
   elif ! verdict_audit_snapshot_final_turn \
         "$transcript_path" "$transcript_snapshot_path" \
-        "$transcript_source_max_bytes" "$transcript_turn_max_bytes"; then
-    printf 'run-verdict-audit.sh: transcript must be stable, regular JSONL no larger than %s bytes; auditor was not started.\n' \
-      "$transcript_source_max_bytes" >&2
+        "$verdict_audit_final_turn_max_bytes" "$transcript_turn_max_bytes"; then
+    printf 'run-verdict-audit.sh: transcript must be stable, regular JSONL whose final turn is at most %s bytes; auditor was not started.\n' \
+      "$verdict_audit_final_turn_max_bytes" >&2
     return 1
   fi
   transcript_path="$transcript_snapshot_path"

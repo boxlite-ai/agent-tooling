@@ -9,6 +9,11 @@
 verdict_audit_lock_max_seconds=3600
 # shellcheck disable=SC2034 # Public constants for scripts that source this library.
 verdict_audit_deadline_slack_seconds=60
+# Most transcript bytes the final-turn reader decodes, from the end of the file back to
+# the last real user message. JSON::PP decodes about 5 MiB/s, so this fits the reader's
+# 15 s alarm; earlier history is only hashed, so session length alone never trips it.
+# shellcheck disable=SC2034 # Public constants for scripts that source this library.
+verdict_audit_final_turn_max_bytes=67108864
 
 # Persisted decimal fields are untrusted. Keep them below 10^18 so Bash 3's signed
 # integer arithmetic cannot wrap a huge value into the live deadline window. The caller
@@ -240,19 +245,21 @@ verdict_audit_copy_regular_state() {  # source destination max-bytes
   ' "$1" "$2" "$3"
 }
 
-# Stream one selected JSONL transcript inode and retain only records after the last real
-# user message. Historical turns and harness envelopes never enter the model-visible
-# snapshot. Assistant claims stay whole; large tool events become bounded previews plus
-# size/hash metadata. Claim truncation is fail-closed. Summarized evidence remains usable
-# only when the auditor can independently reproduce what a claim depends on.
-_verdict_audit_snapshot_final_turn() {  # source destination source-max snapshot-max emit-identity
-  local source="$1" destination="$2" max_source_bytes="$3" max_snapshot_bytes="$4"
+# Select one JSONL transcript inode and retain only records after the last real user
+# message. Parsing scans back from the end of the file, so its cost tracks the final turn,
+# not the session; earlier history is only hashed. Historical turns and harness envelopes
+# never enter the model-visible snapshot. Assistant claims stay whole; large tool events
+# become bounded previews plus size/hash metadata. Claim truncation is fail-closed.
+# Summarized evidence remains usable only when the auditor can independently reproduce
+# what a claim depends on.
+_verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-max emit-identity
+  local source="$1" destination="$2" max_turn_bytes="$3" max_snapshot_bytes="$4"
   local emit_identity="$5" source_identity snapshot_identity="" snapshot_bytes
-  [[ "$max_source_bytes" =~ ^[1-9][0-9]*$ \
+  [[ "$max_turn_bytes" =~ ^[1-9][0-9]*$ \
      && "$max_snapshot_bytes" =~ ^[1-9][0-9]*$ \
      && ( "$emit_identity" == 0 || "$emit_identity" == 1 ) ]] || return 1
   source_identity="$(perl -MFcntl=:DEFAULT -e '
-    my ($path, $max) = @ARGV;
+    my ($path) = @ARGV;
     exit 1 if lstat($path) && -l _;
     my $flags = O_RDONLY | O_NONBLOCK;
     $flags |= Fcntl::O_NOFOLLOW() if defined &Fcntl::O_NOFOLLOW;
@@ -260,16 +267,15 @@ _verdict_audit_snapshot_final_turn() {  # source destination source-max snapshot
     my @opened = stat($fh);
     my @named = lstat($path);
     exit 1 unless @opened && @named && -f $fh
-      && $opened[0] == $named[0] && $opened[1] == $named[1]
-      && $opened[7] <= $max;
+      && $opened[0] == $named[0] && $opened[1] == $named[1];
     print join(":", @opened[0,1,7,9,10]);
-  ' "$source" "$max_source_bytes" 2>/dev/null)" || return 1
+  ' "$source" 2>/dev/null)" || return 1
 
   if ! snapshot_identity="$(
     (
     set -o pipefail
     perl -MFcntl=:DEFAULT -MJSON::PP -MDigest::SHA -MEncode=encode_utf8 -MScalar::Util=refaddr -e '
-    my ($path, $max_source, $max_snapshot, $expected) = @ARGV;
+    my ($path, $max_turn, $max_snapshot, $expected) = @ARGV;
     $SIG{ALRM} = sub { exit 1 };
     alarm 15;
     exit 1 if lstat($path) && -l _;
@@ -280,8 +286,7 @@ _verdict_audit_snapshot_final_turn() {  # source destination source-max snapshot
     my @named = lstat($path);
     exit 1 unless @before && @named && -f $fh
       && join(":", @before[0,1,7,9,10]) eq $expected
-      && $before[0] == $named[0] && $before[1] == $named[1]
-      && $before[7] <= $max_source;
+      && $before[0] == $named[0] && $before[1] == $named[1];
     binmode($fh);
     my $decoder = JSON::PP->new->utf8->allow_nonref;
     my $encoder = JSON::PP->new->canonical->allow_nonref;
@@ -482,32 +487,55 @@ _verdict_audit_snapshot_final_turn() {  # source destination source-max snapshot
       return "metadata" if $kind =~ /metadata|snapshot|queue|history/i;
       return "other";
     }
-    sub reset_turn {
-      @assistant_records = ();
-      @tool_entries = ();
-      $claim_bytes = 0;
-      $final_turn_bytes = 0;
-      %omitted = (system => 0, progress => 0, metadata => 0, other => 0);
-      %omitted_bytes = (system => 0, progress => 0, metadata => 0, other => 0);
-      $sequence = 0;
-    }
 
-    my $total = 0;
-    while (defined(my $line = <$fh>)) {
-      $total += length($line);
-      exit 1 if $total > $max_source || index($line, "\0") >= 0;
-      $source_digest->add($line);
-      next if $line =~ /^\s*$/;
+    # Scan back from the opened size to the last real user message; only those lines
+    # are decoded. JSON escapes control characters and UTF-8 never reuses ASCII bytes,
+    # so every LF ends a record wherever a block boundary falls.
+    my ($position, $pending, $scanned) = ($before[7], "", 0);
+    my (@turn_lines, @turn_records);
+    while (1) {
+      my $last = length($pending) - 1;
+      my $newline = $last > 0 ? rindex($pending, "\n", $last - 1) : -1;
+      my $line;
+      if ($newline >= 0) {
+        $line = substr($pending, $newline + 1, length($pending), "");
+      } elsif ($position > 0) {
+        # Stop reading at the turn bound, and read as much again as is pending, so one
+        # long line costs O(n), not O(n^2).
+        my $room = $max_turn - $scanned - length($pending);
+        exit 1 if $room < 0;
+        my $count = length($pending) > 65536 ? length($pending) : 65536;
+        $count = $room + 1 if $count > $room + 1;
+        $count = $position if $count > $position;
+        $position -= $count;
+        my $block = "";
+        sysseek($fh, $position, 0) or exit 1;
+        my $read = sysread($fh, $block, $count);
+        exit 1 unless defined($read) && $read == $count && index($block, "\0") < 0;
+        $pending = $block . $pending;
+        next;
+      } elsif (length($pending)) {
+        ($line, $pending) = ($pending, "");
+      } else {
+        last;
+      }
+      $scanned += length($line);
+      exit 1 if $scanned > $max_turn;
+      if ($line =~ /^\s*$/) {
+        push @turn_lines, $line;
+        next;
+      }
       my $record = eval { $decoder->decode($line) };
       exit 1 if $@;
       # A pre-normalized snapshot is accepted only by the bounded schema path.
-      # path. Never reinterpret an oversized or malformed snapshot as raw history.
+      # Never reinterpret an oversized or malformed snapshot as raw history.
       exit 1 if ref($record) eq "HASH"
         && ($record->{type} // "") eq "verdict_final_turn_snapshot";
-      if (is_real_user($record)) {
-        reset_turn();
-        next;
-      }
+      last if is_real_user($record);
+      push @turn_lines, $line;
+      push @turn_records, $record;
+    }
+    for my $record (reverse @turn_records) {
       $sequence++;
       my @tools = tool_objects($record);
       my @texts = assistant_texts($record);
@@ -528,6 +556,28 @@ _verdict_audit_snapshot_final_turn() {  # source destination source-max snapshot
         $omitted_bytes{$kind} += $record_bytes;
       }
     }
+    # Hash every byte, so source_sha256 still covers the whole file, and bind the turn
+    # lines decoded above to the bytes this pass reads.
+    my ($turn_bytes, $decoded_digest) = (0, Digest::SHA->new(256));
+    for my $line (reverse @turn_lines) {
+      $turn_bytes += length($line);
+      $decoded_digest->add($line);
+    }
+    my $turn_start = $before[7] - $turn_bytes;
+    my $turn_digest = Digest::SHA->new(256);
+    my $hashed = 0;
+    sysseek($fh, 0, 0) or exit 1;
+    while ($hashed < $before[7]) {
+      my $chunk = "";
+      my $count = sysread($fh, $chunk, 65536);
+      exit 1 unless $count && index($chunk, "\0") < 0;
+      $source_digest->add($chunk);
+      $turn_digest->add(substr($chunk, $turn_start > $hashed ? $turn_start - $hashed : 0))
+        if $hashed + $count > $turn_start;
+      $hashed += $count;
+    }
+    exit 1 unless $hashed == $before[7]
+      && $turn_digest->hexdigest eq $decoded_digest->hexdigest;
     my $first_digest = $source_digest->hexdigest;
     my @after = stat($fh);
     my @named_after = lstat($path);
@@ -543,7 +593,7 @@ _verdict_audit_snapshot_final_turn() {  # source destination source-max snapshot
       exit 1 unless defined $count;
       last if $count == 0;
       $verified_bytes += $count;
-      exit 1 if $verified_bytes > $max_source;
+      exit 1 if $verified_bytes > $before[7];
       $verify_digest->add($chunk);
     }
     my @verified = stat($fh);
@@ -633,7 +683,7 @@ _verdict_audit_snapshot_final_turn() {  # source destination source-max snapshot
     exit 1 if length($output) + 1 > $max_snapshot;
     alarm 0;
     print STDOUT $output, "\n" or exit 1;
-    ' "$source" "$max_source_bytes" "$max_snapshot_bytes" "$source_identity" \
+    ' "$source" "$max_turn_bytes" "$max_snapshot_bytes" "$source_identity" \
       | verdict_audit_write_exclusive_regular_identity "$destination"
     )
   )"; then

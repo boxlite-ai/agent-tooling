@@ -240,7 +240,7 @@ classifier_timeout_seconds=20
 classifier_max_bytes=12000
 classifier_output_max_bytes=4096
 verdict_output_max_bytes=8192
-transcript_source_max_bytes=67108864
+extractor_transcript_max_bytes=67108864
 transcript_turn_max_bytes=262144
 transcript_snapshot_truncated=false
 
@@ -1623,7 +1623,7 @@ prepare_audit_transcript() {
   mkdir -p "$(dirname "$payload_transcript_file")" 2>/dev/null || return 1
   if [[ -n "${VERDICT_EXTRACTOR_CMD:-}" ]] \
      && raw_snapshot="$(verdict_audit_read_regular_state \
-          "$source_path" "$transcript_source_max_bytes" json 2>/dev/null)" \
+          "$source_path" "$extractor_transcript_max_bytes" json 2>/dev/null)" \
      && [[ "$raw_snapshot" == *$'\n'* ]]; then
     raw_body="${raw_snapshot#*$'\n'}"
     if ! staged_identity="$(printf '%s' "$raw_body" \
@@ -1666,7 +1666,7 @@ prepare_audit_transcript() {
     fi
   elif staged_identity="$(verdict_audit_snapshot_final_turn_identity \
       "$source_path" "$staged" \
-      "$transcript_source_max_bytes" "$transcript_turn_max_bytes")"; then
+      "$verdict_audit_final_turn_max_bytes" "$transcript_turn_max_bytes")"; then
     snapshot_state="$(verdict_audit_read_regular_state \
       "$staged" "$transcript_turn_max_bytes" json \
       "$staged_identity" 2>/dev/null)" || snapshot_state=""
