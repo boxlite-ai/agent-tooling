@@ -143,11 +143,14 @@ Never pre-fill or invent the user's selection.
 
 ### Pull request descriptions
 
-Apply `boxlite-design-doc`, then bind before coding:
+Apply `boxlite-design-doc`, then register it before coding:
 
 ```sh
-bash <plugin-root>/scripts/design-doc.sh bind <URL>
+bash <plugin-root>/scripts/design-doc.sh register <URL>
 ```
+
+`bind` remains a compatibility alias; `register` avoids the reported Claude Code
+worktree refusal ([#207](https://github.com/boxlite-ai/agent-tooling/issues/207)).
 
 The first code edit then needs a research PASS for the design's exact content. The
 pre-edit gate names the `design-research-auditor` route; the auditor records its

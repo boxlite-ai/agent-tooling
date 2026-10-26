@@ -132,14 +132,12 @@ for manifest in hooks.json codex-hooks.json; do
 done
 # A missing document must still block PR publication through its own Bash hook.
 check Bash $'gh pr create --draft --title "fix: example" --body "## TL;DR\n\nA concise description."' deny
-check Bash "bash \"$plugin/scripts/design-doc.sh\" bind https://github.com/example/project/issues/1" allow
+check Bash "bash \"$plugin/scripts/design-doc.sh\" register https://github.com/example/project/issues/1" allow
 check Bash "bash \"$plugin/scripts/design-doc.sh\" check" allow
 url=https://github.com/example/project/issues/1
 design=$'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
 publish() { jq -nc --arg url "$url" --arg body "$1" '{html_url:$url,body:$body}' > "$DOC_RESPONSE"; }
 publish "$design"
-(cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" bind "$url") >/dev/null || exit 1
-# A bound design still needs a research verdict for its exact content before any edit.
 design_denial() { # host -> what the design gate tells the agent about an edit
   local root=PLUGIN_ROOT
   [[ "$1" == codex ]] || root=CLAUDE_PLUGIN_ROOT
@@ -156,6 +154,12 @@ expect_denial() { # description, host, expected text
     printf 'FAIL %s: %s\n' "$1" "$denial"; fail=$((fail+1))
   fi
 }
+for host in claude codex; do
+  expect_denial "$host prints the register command" "$host" \
+    "bash \"$plugin/scripts/design-doc.sh\" register <GitHub-issue/Notion/Linear-URL>"
+done
+(cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" register "$url") >/dev/null || exit 1
+# A bound design still needs a research verdict for its exact content before any edit.
 record_research() { # PASS|FAIL, findings JSON
   jq -nc --arg sha "$(printf '%s' "$design" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" \
     --arg verdict "$1" --argjson findings "$2" '{content_sha256:$sha,verdict:$verdict,findings:$findings}' |

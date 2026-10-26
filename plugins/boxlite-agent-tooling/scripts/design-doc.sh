@@ -16,10 +16,11 @@ source "$plugin_root/.agents/lib/reply-summary.sh" || exit 2
 source "$plugin_root/.agents/lib/concise-writing.sh" || exit 2
 # shellcheck source=../.agents/lib/design-doc.sh
 source "$plugin_root/.agents/lib/design-doc.sh" || exit 2
+# Keep bind for existing callers; register avoids Claude Code's worktree false positive.
 case "${1:-}:$#" in
-  bind:2) design_doc_binding bind "$PWD" "$2" ;;
+  register:2|bind:2) design_doc_binding bind "$PWD" "$2" ;;
   check:1) design_doc_binding check "$PWD" ;;
   research:1) design_doc_research_record "$PWD" ;;
   show:1) design_doc_show "$PWD" ;;
-  *) printf 'usage: design-doc.sh bind <URL> | check | research < verdict.json | show\n' >&2; exit 2 ;;
+  *) printf 'usage: design-doc.sh register <URL> | check | research < verdict.json | show\n' >&2; exit 2 ;;
 esac

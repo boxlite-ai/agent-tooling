@@ -64,7 +64,7 @@ refresh at most once every 15 minutes; `AGENT_TOOLING_REFRESH=0` disables it and
 
 | Script / arguments | Responsibility and effects |
 | --- | --- |
-| [design-doc.sh](design-doc.sh) `bind <URL>`, `check`, `research`, or `show` | Fetch and validate a design; bind it to the current worktree/branch, recheck the existing binding, record the research auditor's stdin verdict for the live content, or recheck it and print its content. |
+| [design-doc.sh](design-doc.sh) `register <URL>` (alias `bind`), `check`, `research`, or `show` | Fetch and validate a design; bind it to the current worktree/branch, recheck the existing binding, record the research auditor's stdin verdict for the live content, or recheck it and print its content. |
 | [api-compatibility.sh](api-compatibility.sh) `inspect\|inspect-push\|check\|push [repo-root] [base-ref]` | Check `*openapi*.yaml` changes, require user confirmation to skip breaking/default enforcement, and export per-file request-audit evidence; see [commands](api-compatibility.md). |
 | [pr-author-review.sh](pr-author-review.sh) `<github-event.json>` | CI publisher: update the author-review check and prompt, and return an unacknowledged PR to draft. Exit 0: acknowledged/irrelevant; 1: awaiting acknowledgment; 2: API/validation error. |
 | [audit-reflection.sh](audit-reflection.sh) `prepare\|record\|status\|submit STATE` | Read bounded request JSON from stdin; validate and persist audit-cycle transitions, returning cycle JSON on stdout. |

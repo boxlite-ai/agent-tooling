@@ -62,8 +62,12 @@ instructions load before the wake budget is recorded.
 Research and design policy lives in `boxlite-design-doc`; registration
 and publishing steps live in [CONTRIBUTING.md](CONTRIBUTING.md#pull-request-descriptions).
 
-`scripts/design-doc.sh` binds the URL with `.agents/lib/design-doc.sh` after a
-provider read; the gate rechecks existence, nonempty content, and a leading TL;DR
+`scripts/design-doc.sh` accepts `register <URL>` and binds it with `.agents/lib/design-doc.sh`
+after a provider read; `bind` remains a compatibility alias. The preferred verb avoids
+Claude Code's reported worktree command refusal ([#207](https://github.com/boxlite-ai/agent-tooling/issues/207));
+both verbs share validation and state.
+
+The gate rechecks existence, nonempty content, and a leading TL;DR
 under 40 words. Details after that TL;DR may be dense; no total-word cap applies.
 Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` and
 match its canonical root and branch (or detached HEAD). State reads and replacement

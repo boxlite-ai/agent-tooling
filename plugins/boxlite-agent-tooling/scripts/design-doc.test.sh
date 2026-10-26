@@ -6,6 +6,7 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 mkdir "$scratch/bin" "$scratch/repo"
 export DOC_FIXTURE="$scratch/response.json" DOC_CALLS="$scratch/calls"
+: > "$DOC_CALLS"
 cat > "$scratch/bin/gh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$DOC_CALLS"
@@ -31,6 +32,7 @@ git -C "$scratch/repo" branch -m feature
 cd "$scratch/repo" || exit 1
 cli="$plugin/scripts/design-doc.sh"
 url=https://github.com/example/project/issues/1
+state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-doc.json"
 pass=0 fail=0
 expect() { # description, exit status, arguments
   local description="$1" expected="$2" status=0
@@ -48,13 +50,24 @@ github_doc() {
 }
 expect 'missing binding blocks' 1 check
 expect 'missing binding has nothing to show' 1 show
+expect 'missing command prints usage' 2
+if [[ "$(cat "$scratch/err")" == *'design-doc.sh register <URL>'* ]]; then
+  printf 'PASS usage recommends register\n'; pass=$((pass+1))
+else
+  printf 'FAIL usage does not recommend register\n'; fail=$((fail+1))
+fi
+github_doc ''
+expect 'register rejects an empty design' 1 register "$url"
 github_doc $'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
-expect 'GitHub doc can be registered' 0 bind "$url"
+expect 'register creates an unbound worktree binding' 0 register "$url"
 expect 'matching branch verifies again' 0 check
 [[ "$(cat "$scratch/out")" == "$url" ]] || fail=$((fail+1))
 [[ "$(wc -l < "$DOC_CALLS")" -ge 2 ]] || fail=$((fail+1))
 expect 'show prints the bound GitHub design' 0 show
 [[ "$(cat "$scratch/out")" == *'Verify designs before edits.'* ]] || fail=$((fail+1))
+rm -f "$state"
+expect 'legacy bind registers an unbound worktree' 0 bind "$url"
+expect 'legacy binding verifies again' 0 check
 # The research auditor's verdict binds to the exact content it reviewed.
 content_hash() { # text -> SHA-256 hex
   printf '%s' "$1" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'
@@ -142,7 +155,6 @@ for unsafe_url in 'https://user:sensitive-fixture@github.com/example/project/iss
     printf 'PASS rejected URL stays out of diagnostics\n'; pass=$((pass+1))
   fi
 done
-state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-doc.json"
 mv "$state" "$scratch/saved"
 ln -s "$scratch/saved" "$state"
 expect 'symlink binding blocks' 1 check
