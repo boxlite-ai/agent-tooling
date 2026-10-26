@@ -78,6 +78,16 @@ Version 0.1.31 moves the research check before code:
   heading or table under `## TL;DR` is denied, while inline code may open it.
 - Reload or start a new session to replace already-loaded prompts.
 
+### Final-turn reader and short-reply rollout
+
+Version 0.1.32 ships two behavior changes:
+
+- The verdict gate parses only a transcript's final turn, so a session past 64 MiB
+  is judged instead of blocked on every Stop.
+- Replies and GitHub comments of at most 80 words no longer need a TL;DR; documents
+  and longer text still do.
+- Reload or start a new session to replace already-loaded hooks and prompts.
+
 ### Verification boundaries
 
 In lifecycle tests, wait for the observed phase before injecting a signal. A
