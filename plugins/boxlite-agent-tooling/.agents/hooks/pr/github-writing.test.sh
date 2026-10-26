@@ -110,12 +110,25 @@ Explain the example.
 $long
 ~~~'" allow
 check 'Chinese counts per character' "gh issue comment 7 --body '$(printf '字%.0s' {1..81})'" deny
-check '39-word summary' "gh issue comment 7 --body '## TL;DR
+check '39-word summary' "gh issue create --title Bug --body '## TL;DR
 
 $(printf 'word %.0s' {1..39})'" allow
-check '40-word summary' "gh issue comment 7 --body '## TL;DR
+check '40-word summary' "gh issue create --title Bug --body '## TL;DR
 
 $(printf 'word %.0s' {1..40})'" deny 'TL;DR has 40 words (limit 39)'
+# A comment of 80 words or fewer reads whole, so it needs no TL;DR once its blocks fit
+# the density limits; documents and longer comments keep the summary (#265).
+eighty="$(printf 'word %.0s' {1..80})"
+check 'short comment needs no summary' "gh issue comment 7 --body 'Fixed in #263.'" allow
+check '80-word comment needs no summary' "gh pr comment 7 --body '$eighty'" allow
+check 'short review body needs no summary' "gh pr review 7 --comment --body 'Looks right.'" allow
+check 'short close comment needs no summary' "gh issue close 7 --comment 'Fixed by #263.'" allow
+check 'short REST comment needs no summary' "gh api repos/o/r/issues/7/comments -f body='Thanks.'" allow
+check 'short issue body keeps the summary' "gh issue create --title Bug --body 'Fixed in #263.'" deny 'TL;DR'
+check 'short REST issue body keeps the summary' "gh api repos/o/r/issues -f title=Bug -f body='Short.'" deny 'TL;DR'
+check 'REST owner named comments keeps the summary' "gh api repos/comments/r/issues -f title=Bug -f body='Short.'" deny 'TL;DR'
+check 'short comment keeps the privacy check' "gh issue comment 7 --body 'See /Users/me/notes.'" deny 'private context'
+check 'short comment keeps the item limit' "gh issue comment 7 --body '- $(printf 'word %.0s' {1..50})'" deny 'list item over 40 words'
 check 'oversized structured document' "gh issue comment 7 --body '$structured
 
 ## Example

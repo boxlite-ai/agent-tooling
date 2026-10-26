@@ -41,8 +41,8 @@ github_writing_check_privacy() { # literal published text; no transcript access
   return 1
 }
 
-github_writing_check_body() { # body
-  local body="$1" density=0
+github_writing_check_body() { # body [comment]
+  local body="$1" kind="${2-}" density=0
   if [[ "$body" != *[![:space:]]* ]]; then
     printf 'GitHub text is empty.'
     return 1
@@ -59,8 +59,10 @@ github_writing_check_body() { # body
   reply_summary_is_dense "$body" || density=$?
   # shellcheck disable=SC2016 # Render literal Markdown headings, never shell expansion.
   case "$density" in
-    # The PR gate appends the shared skill reminder to every writing denial.
-    1) concise_writing_check_summary "$body" anywhere 39 no-hint; return $? ;;
+    # The PR gate appends the shared skill reminder to every writing denial. A comment
+    # within one paragraph's budget reads whole; documents keep their summary.
+    1) [[ "$kind" == comment ]] && reply_summary_is_short "$body" && return 0
+       concise_writing_check_summary "$body" anywhere 39 no-hint; return $? ;;
     0) printf 'GitHub text has a paragraph over %s words or a list item over %s words: shorten them, or start with `## TL;DR` and one short sentence.' \
          "$reply_summary_paragraph_max_words" "$reply_summary_item_max_words" ;;
     *) printf 'GitHub text could not be counted.' ;;
@@ -89,7 +91,7 @@ _github_writing_graphql_nonwriting() { # literal query
 }
 
 _github_writing_api() { # literal-argv(0|1), api argv
-  local literal="$1" token value key method="" endpoint="" query="" input=0 has_fields=0
+  local literal="$1" token value key method="" endpoint="" query="" input=0 has_fields=0 kind=""
   local bodies=() titles=() body_count=0 title_count=0
   shift
   while (( $# )); do
@@ -146,8 +148,13 @@ _github_writing_api() { # literal-argv(0|1), api argv
     _github_writing_opaque; return 1
   fi
   (( has_fields )) || return 0
+  # Only the path after repos/OWNER/REPO names the resource; owners and repos may be
+  # called comments too.
+  [[ "$endpoint" =~ (^|/)repos/[^/]+/[^/]+/(.+)$ ]] \
+    && [[ "${BASH_REMATCH[2]}" =~ (^|/)(comments|replies|reviews)(/|$|\?) ]] \
+    && kind=comment
   for value in ${bodies[@]+"${bodies[@]}"}; do
-    github_writing_check_body "$value" || return 1
+    github_writing_check_body "$value" "$kind" || return 1
   done
   for value in ${titles[@]+"${titles[@]}"}; do
     github_writing_check_privacy "$value" || return 1
@@ -155,7 +162,7 @@ _github_writing_api() { # literal-argv(0|1), api argv
 }
 
 github_writing_check() { # literal-argv(0|1), gh arguments after global options
-  local literal="$1" group="${2-}" operation="${3-}" token value
+  local literal="$1" group="${2-}" operation="${3-}" token value kind=""
   local required=0 has_body=0 has_option=0 deleting=0
   shift
   # gh persistent flags can occur between its noun and verb as well as before it.
@@ -178,9 +185,11 @@ github_writing_check() { # literal-argv(0|1), gh arguments after global options
       case "${3-}" in --draft|-d|--draft=true|-d=true) ;; *) return 0 ;; esac
       required=1 ;;
     pr:edit|pr:ready) return 0 ;;
-    issue:create|discussion:create|release:create|pr:comment|issue:comment|discussion:comment) required=1 ;;
-    issue:edit|discussion:edit|release:edit|pr:review) ;;
-    pr:close|issue:close|pr:reopen|issue:reopen) has_option=1 ;;
+    issue:create|discussion:create|release:create) required=1 ;;
+    pr:comment|issue:comment|discussion:comment) required=1; kind=comment ;;
+    issue:edit|discussion:edit|release:edit) ;;
+    pr:review) kind=comment ;;
+    pr:close|issue:close|pr:reopen|issue:reopen) has_option=1; kind=comment ;;
     api:*)
       shift
       _github_writing_api "$literal" "$@"
@@ -229,7 +238,7 @@ github_writing_check() { # literal-argv(0|1), gh arguments after global options
       -*) _github_writing_opaque; return 1 ;;
       *) continue ;;
     esac
-    github_writing_check_body "$value" || return 1
+    github_writing_check_body "$value" "$kind" || return 1
     has_body=1; has_option=1
   done
   if (( (required && !has_body && !deleting) || !has_option )); then

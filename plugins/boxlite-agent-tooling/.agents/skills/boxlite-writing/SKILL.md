@@ -5,7 +5,7 @@ description: Write or shorten human-facing replies, docs, PRs, issues, and comme
 
 * Walls of text are forbidden. Write minimally, including prompts. Preserve evidence, risks, failures, uncertainty.
 
-* Every human-facing output: `## TL;DR` (<40 words); first in replies/designs/artifacts/...
+* Every human-facing output: `## TL;DR` (<40 words); first in replies/designs/artifacts/... Replies and comments of at most 80 words skip it and lead with the point.
 
 * Prefer: visuals > structured message (tables, bullets) > cocise prose (under 40 words; 120 for complex topics); 
 

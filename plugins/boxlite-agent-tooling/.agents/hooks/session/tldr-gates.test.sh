@@ -35,12 +35,18 @@ run_hook() { # host, event, script basename; stdin is the native hook payload
   env -u PLUGIN_ROOT -u CLAUDE_PLUGIN_ROOT -u CLAUDE_PROJECT_DIR \
     "$root=$plugin" bash -c "$command"
 }
+# Comment and Stop gates exempt text of 80 words or fewer (#265), so matrix bodies get a
+# 90-word tail of short paragraphs under their own heading and every gate applies the
+# TL;DR rules. check_short covers the exempt text itself.
+matrix_padding="$(printf 'Ten more words keep this matrix body past the exemption.\n\n%.0s' {1..9})"
+matrix_short=
 check() { # label, text, expected allow|deny, optional reply/design expectation, denial text
   local label="$1" body="$2" expected="$3" reply_expected="${4:-$3}" reason="${5:-TL;DR}"
   local output actual gate active wanted host mentions
   [[ "$mode" != fast || "$label" == missing ]] || return 0
   [[ -z "${TLDR_GATES_CASES:-}" || ",$TLDR_GATES_CASES," == *",$label,"* ]] || return 0
   ran_cases+="$label,"
+  [[ -n "$matrix_short" ]] || body+=$'\n\n## Details\n\n'"$matrix_padding"
   for gate in github-claude github-codex github-codex-native design stop-claude stop-codex stop-transcript-claude stop-transcript-codex; do
     host=claude
     [[ "$gate" != *codex* ]] || host=codex
@@ -61,7 +67,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
           output="$(bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 2>&1)" || actual=deny ;;
         stop-*)
           wanted="$reply_expected"
-          [[ "$active" != true ]] || wanted=allow
+          [[ "$active" != true && -z "$matrix_short" ]] || wanted=allow
           jq -nc --arg body "$body" --arg host "$host" '
             if $host == "claude" then {type:"assistant",message:{content:[{type:"text",text:$body}]}}
             else {type:"response_item",payload:{type:"message",role:"assistant",phase:"final_answer",
@@ -122,6 +128,15 @@ check table_after $'## TL;DR\n\nA concise answer.\n\n| Gate | Result |\n|---|---
 dense="$(printf 'word %.0s' {1..81})"
 check dense_after_summary $'## TL;DR\n\nA concise answer.\n\n## Details\n\n'"$dense" allow
 check dense_before_summary "$dense"$'\n\n## TL;DR\n\nA concise answer.' deny deny 'TL;DR'
+# Unpadded text of 80 words or fewer: comment and Stop gates allow it, design docs do not.
+check_short() { # label, text, design denial
+  matrix_short=yes
+  check "$1" "$2" allow deny "$3"
+  matrix_short=
+}
+check_short short_missing 'A concise answer.' 'TL;DR heading missing'
+check_short short_bold_label '**TL;DR:** A concise answer.' '`## TL;DR`, one short sentence'
+check_short short_80_words "$(printf 'word %.0s' {1..80})" 'TL;DR heading missing'
 
 for host in claude codex; do
   jq -nc '{type:"assistant",message:{content:[{type:"text",text:"Earlier progress."}]}}' > "$scratch/turn.jsonl"

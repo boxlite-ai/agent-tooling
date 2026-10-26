@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Stop hook: confirmations and final-response checks run in sequence, so they
 # never race as separate Stop hooks would:
-#   1. On the initial Stop, a nonempty last reply must start with a short TL;DR;
-#      explicit empty replies stay empty. A reply that leads with one already gives
-#      its short version, so the gate never asks for another.
+#   1. On the initial Stop, a nonempty last reply over 80 words must start with a
+#      short TL;DR; shorter replies read whole, and explicit empty replies stay empty.
+#      A reply that leads with one already gives its short version, so the gate never
+#      asks for another.
 #   2. A pending timed confirmation resumes the agent; expiry selects its fallback.
 #   3. preflight-verdict-check.sh replaces this process and judges the turn. Its
 #      block, error or allow is the answer.
@@ -62,6 +63,7 @@ if [[ "$reply_is_supplied" != true && -n "$transcript_path" ]]; then
   trap - EXIT
 fi
 if [[ "$stop_hook_active" != true && -n "$last_assistant_message" ]] \
+   && ! reply_summary_is_short "$last_assistant_message" \
    && ! summary_error="$(concise_writing_check_summary "$last_assistant_message" first 39)"; then
   jq -nc --arg reason "$summary_error" '{decision:"block",reason:$reason}'
   exit 0

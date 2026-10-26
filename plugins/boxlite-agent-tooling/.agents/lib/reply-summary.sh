@@ -121,6 +121,19 @@ reply_summary_is_dense() {  # text
   return 1
 }
 
+# A text within one paragraph's word budget reads whole, so it needs no summary.
+# 0 when short, 1 when longer, 2 when the text could not be counted.
+reply_summary_is_short() {  # text
+  local text="${1-}" counts total
+  # Text over the 8000-character GitHub writing cap is never short, which bounds the
+  # counter's work before the TL;DR check applies its own limit.
+  (( ${#text} <= 8000 )) || return 1
+  counts="$(reply_summary_word_counts "$text")" || return 2
+  read -r total _ <<< "$counts"
+  [[ "$total" =~ ^[0-9]+$ ]] || return 2
+  (( total <= reply_summary_paragraph_max_words ))
+}
+
 # The transcript's final turn, read by the verdict check's own bounded snapshot
 # reader. The snapshot goes to a fresh path in the caller's scratch directory.
 _reply_summary_snapshot() {  # transcript-path scratch-dir -> bounded JSON

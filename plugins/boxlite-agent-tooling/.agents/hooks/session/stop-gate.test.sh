@@ -2,7 +2,7 @@
 # Tests for .agents/hooks/stop-gate.sh, the Stop hook that checks the final reply's
 # TL;DR before preflight-verdict-check.sh judges the turn.
 #
-#   - a nonempty reply without a leading TL;DR  -> one correction on the initial Stop
+#   - a nonempty reply over 80 words, no TL;DR  -> one correction on the initial Stop
 #   - anything else, dense TL;DR-led replies    -> the verdict check's own output, exit
 #     included                                     status and stderr, unchanged
 # Each case builds a throwaway git repo with a fake transcript, runs the gate there
@@ -144,7 +144,7 @@ check_writing_continuations() {
   local host S R payload out
   for host in claude codex; do
     S="tldr-to-dense-$host"; R="$(new_repo "$S")"
-    payload="$(stop_payload "$R" "$S" false '' | jq '.last_assistant_message = "Missing summary."')"
+    payload="$(stop_payload "$R" "$S" false '' | jq --arg m "$long_reply" '.last_assistant_message = $m')"
     out="$(run_in_repo "$R" "$HOOK" NO "$host" "$payload")"
     jq -e '.decision == "block" and (.reason | contains("TL;DR"))' <<<"$out" >/dev/null
     expect "$host: the first missing summary gets a correction" "$?" "out=$out"
@@ -186,6 +186,31 @@ for host in claude codex; do
   done
 done
 
+# A reply of 80 words or fewer reads whole, so it needs no TL;DR heading (#265).
+bare_reply="The gate reads only the final turn. Want me to push the branch?"
+saved_summary_prefix="$summary_prefix"; summary_prefix=""
+for host in claude codex; do
+  S="bare-$host"; R="$(new_repo "$S")"; T="$(new_repo "$S")"
+  append_assistant "$R" "$bare_reply"
+  append_assistant "$T" "$bare_reply"
+  out="$(gate_stop "$R" "$S" false "$bare_reply" NO "$host")"
+  direct="$(run_in_repo "$T" "$VERDICT_CHECK" NO "$host" "$(stop_payload "$T" "$S" false "$bare_reply")")"
+  [[ -n "$out" && "$out" == "$direct" ]] && keeps_triage_note "$out" && no_request "$out"
+  expect "$host: a short reply without a TL;DR ends with the verdict check's output" "$?" \
+    "gate=$out direct=$direct"
+  rm -rf "$R" "$T"
+done
+summary_prefix="$saved_summary_prefix"
+# Over 8000 characters a reply is not short whatever its word count, which bounds the
+# counter's work; the TL;DR check still applies.
+S="huge-token"; R="$(new_repo "$S")"
+huge_reply="$(printf 'x%.0s' {1..8001})"
+payload="$(stop_payload "$R" "$S" false '' | jq --arg m "$huge_reply" '.last_assistant_message = $m')"
+out="$(run_in_repo "$R" "$HOOK" NO claude "$payload")"
+[[ "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *'TL;DR heading missing'* ]]
+expect "a one-word reply over 8000 characters still needs a TL;DR" "$?" "out=$out"
+rm -rf "$R"
+
 S="pass"; R="$(new_repo "$S")"
 append_assistant "$R" "$long_claim"
 out="$(TEST_AUDIT_VERDICT=PASS gate_stop "$R" "$S" false "$long_claim" YES claude)"
@@ -220,7 +245,7 @@ rm -rf "$R"
 
 check_writing_continuations
 
-# Harness text is allowed without a judgment, but it still needs a TL;DR.
+# Harness text over 80 words is allowed without a judgment, but it still needs a TL;DR.
 S="harness"; R="$(new_repo "$S")"
 api_error="API Error: 529 $long_reply"
 saved_summary_prefix="$summary_prefix"; summary_prefix=""
@@ -333,8 +358,8 @@ original_hook="$HOOK"
 HOOK="$prompt_fixture/plugin copy/.agents/hooks/stop-gate.sh"
 prompt_file="$prompt_fixture/plugin copy/.agents/skills/boxlite-writing/SKILL.md"
 HOOK_STDERR="$prompt_fixture/stderr"
-missing_summary() {  # repo session -> Stop payload whose reply has no TL;DR
-  stop_payload "$1" "$2" false '' | jq '.last_assistant_message = "Missing summary."'
+missing_summary() {  # repo session -> Stop payload whose 81-word reply has no TL;DR
+  stop_payload "$1" "$2" false '' | jq --arg m "$long_reply" '.last_assistant_message = $m'
 }
 edits_status=0
 for host in claude codex; do
