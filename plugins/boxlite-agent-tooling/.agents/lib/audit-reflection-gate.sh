@@ -37,8 +37,7 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
         unresolved:(($state.attempts[-1].outcome.verdict | IN("PASS","IN_PROGRESS") | not) and
           (any($state.attempts[]; .outcome.verdict | IN("FAIL","ERROR")) or
             any($state.registry[]; .status | IN("open","not_assessed")))),
-        reflection_due:(([$state.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 2
-          and $state.reflection.body.history_hash != $state.history_hash)}' <<<"$state"
+        reflection_due:(audit_reflection_ready | not)}' <<<"$state"
     return $?
   fi
   if [[ "$operation" == prepare ]]; then

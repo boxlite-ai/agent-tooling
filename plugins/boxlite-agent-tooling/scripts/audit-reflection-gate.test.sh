@@ -7,6 +7,8 @@ source "$plugin/.agents/lib/verdict-audit-state.sh"
 source "$plugin/.agents/lib/audit-reflection.sh"
 # shellcheck source=../.agents/lib/audit-reflection-gate.sh
 source "$plugin/.agents/lib/audit-reflection-gate.sh"
+# shellcheck source=fixtures/audit-reflection-fixture.sh
+source "$plugin/scripts/fixtures/audit-reflection-fixture.sh"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 scratch="$(cd "$scratch" && pwd -P)"
@@ -41,6 +43,21 @@ gate inspect | jq -e '.reflection_due and (.pending | not)' >/dev/null
 reject prepare a5 "$input"
 [[ "$(cat "$scratch/err")" == *"$state"* ]]
 jq -e '[.attempts[].outcome.verdict] == ["CANCELED","ERROR","ERROR"]' "$state" >/dev/null
+for verdict in IN_PROGRESS PASS; do
+  audit_test_reflection "$state" | bash "$plugin/scripts/audit-reflection.sh" submit "$state" >/dev/null
+  retry="$(gate prepare "retry-$verdict" "$input")"
+  jq -nc --arg verdict "$verdict" '{verdict:$verdict,findings:[],advisories:[]}' > "$scratch/result.json"
+  bash "$plugin/scripts/fixtures/audit-history-result.sh" "$retry" "$scratch/result.json" bind
+  gate record "retry-$verdict" "$(cat "$scratch/result.json")" >/dev/null
+  if [[ "$verdict" == IN_PROGRESS ]]; then
+    gate inspect | jq -e '.reflection_due' >/dev/null
+    reject prepare still-needs-reflection "$input"
+  elif ! gate inspect | jq -e '(.reflection_due | not) and
+      .state.reflection.body.history_hash != .state.history_hash' >/dev/null; then
+    printf 'FAIL: terminal PASS requested reflection after advancing history\n' >&2
+    exit 1
+  fi
+done
 context="$(jq '.epoch="2"' <<<"$context")"
 gate inspect | jq -e '(.state.attempts | length) == 0 and (.reflection_due | not)' >/dev/null
 native_cli="$plugin/scripts/audit-reflection-gate.sh"

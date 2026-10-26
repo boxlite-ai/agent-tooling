@@ -38,12 +38,19 @@ state="$(printf '%s\n' "$PWD"/.agents/state/audit-history-*.json)"
 jq -e '(.attempts | length) == 2 and .registry[0].id == "F1"' "$state" >/dev/null
 gate() { jq -nc --arg command "$command" '{session_id:"history-session",tool_input:{command:$command}}' \
   | bash "$plugin/.agents/hooks/preflight-commit-push.sh"; }
+assert_consumed() {
+  if [[ -s .agents/state/gate-out || -e .agents/state/last-audit.json ]]; then
+    printf 'FAIL: matching PASS was denied or not consumed\n' >&2
+    cat .agents/state/gate-out >&2
+    exit 1
+  fi
+}
 gate | jq -e '.hookSpecificOutput.permissionDecisionReason | contains("reflection")' >/dev/null
 audit_test_reflection "$state" | bash "$plugin/scripts/audit-reflection.sh" submit "$state" >/dev/null
 TEST_HISTORY_VERDICT=PASS run
 cp .agents/state/last-audit.json .agents/state/old-pass
 gate > .agents/state/gate-out
-[[ ! -s .agents/state/gate-out && ! -f .agents/state/last-audit.json ]]
+assert_consumed
 context="$(jq -c .context "$state")"
 binding="$(jq -c '.attempts[-1].input.binding' "$state")"
 native="$(jq -nc --argjson binding "$binding" --arg tree "$(git write-tree)" --arg command "$command" \
@@ -54,7 +61,7 @@ bash "$TEST_HISTORY_RESULT_HELPER" "$native" .agents/state/last-audit.json
 bash "$plugin/scripts/audit-reflection-gate.sh" "$context" record "$(jq -r .attempt_id <<<"$native")" \
   < .agents/state/last-audit.json >/dev/null
 gate > .agents/state/gate-out
-[[ ! -s .agents/state/gate-out && ! -f .agents/state/last-audit.json ]]
+assert_consumed
 cp .agents/state/old-pass .agents/state/last-audit.json
 gate | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 kind=push
@@ -75,5 +82,5 @@ TEST_HISTORY_VERDICT=PASS run
 jq -e --arg hash "$pushed_hash" '.diff_hash == $hash and .history_review.attempt_id != null' \
   .agents/state/last-audit.json >/dev/null
 gate > .agents/state/gate-out
-[[ ! -s .agents/state/gate-out && ! -f .agents/state/last-audit.json ]]
+assert_consumed
 printf 'PASS: headless and native Git audits share history, require reflection, and reject stale PASS\n'

@@ -521,6 +521,10 @@ Audit history components:
 
 Cycles bind a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`; cap at eight failures,
 sixteen attempts, and 10 MiB. PASS closes a cycle; the next operation starts another.
+Preparation and inspection share `audit_reflection_ready`: a terminal PASS needs no
+new reflection even though recording it changes the history hash. The reflection
+retains the failed history it explains. Git still validates the approval's bindings
+and freshness before consuming it; changed staged content requires another audit.
 Runner failures record ERROR; cancellation is separate. Retain at most four closed cycles per context,
 four retired contexts/session, and the latest immutable input/context. Identity-checked
 cleanup preserves current-epoch evidence. Snapshots retain bounded transcripts,

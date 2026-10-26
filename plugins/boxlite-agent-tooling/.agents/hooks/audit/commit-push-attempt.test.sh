@@ -8,6 +8,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 HOOK="$REPO_ROOT/.agents/hooks/preflight-commit-push.sh"
 CONTROL="$REPO_ROOT/.agents/hooks/auditor-control.sh"
 FIXTURE="$REPO_ROOT/scripts/fixtures/audit-history-result.sh"
+# shellcheck source=../../../scripts/fixtures/audit-reflection-fixture.sh
+source "$REPO_ROOT/scripts/fixtures/audit-reflection-fixture.sh"
 unset CODEX_SANDBOX CLAUDECODE AGENT_GATED GITHOOK_DELEGATED GITHOOK_KEEP_AUDIT
 
 pass=0
@@ -80,13 +82,20 @@ codex_stop() {  # stop_hook_active
         bash "$CONTROL" 2>/dev/null)
 }
 
-attempts() {  # -> "id:verdict" per attempt
+inspect_history() {
   (
+    # shellcheck source=../../lib/verdict-audit-state.sh
     source "$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
+    # shellcheck source=../../lib/audit-reflection.sh
     source "$REPO_ROOT/.agents/lib/audit-reflection.sh"
+    # shellcheck source=../../lib/audit-reflection-gate.sh
     source "$REPO_ROOT/.agents/lib/audit-reflection-gate.sh"
     audit_reflection_gate "$CONTEXT" inspect
-  ) | jq -r '[.state.attempts[] | "\(.id):\(.outcome.verdict // "open")"] | join(" ")'
+  )
+}
+
+attempts() {  # -> "id:verdict" per attempt
+  inspect_history | jq -r '[.state.attempts[] | "\(.id):\(.outcome.verdict // "open")"] | join(" ")'
 }
 
 # Write a dossier bound to the prepared attempt: verdict, findings, binding, history review.
@@ -156,6 +165,46 @@ preflight >/dev/null
 check_eq "a first Codex stop without a dossier blocks" "$(codex_stop false | jq -r .decision)" "block"
 codex_stop true >/dev/null
 check_eq "a resumed Codex stop without a dossier records ERROR" "$(attempts | sed 's/.*://')" "ERROR"
+
+for host in claude codex; do
+  echo "Recorded retry PASS permits the identical commit ($host)"
+  use_session "attempt-retry-$host"
+  for (( round=1; round<=2; round++ )); do
+    stage_change
+    preflight >/dev/null || exit 1
+    write_dossier FAIL '["test: missing evidence"]' || exit 1
+    if [[ "$host" == codex ]]; then codex_stop false; else stop false; fi >/dev/null
+  done
+  history="$(inspect_history)"
+  state="$(jq -r .state_path <<<"$history")"
+  check_eq "$host requires reflection after two failures" \
+    "$(jq -r '.reflection_due' <<<"$history")" "true"
+  audit_test_reflection "$state" | bash "$REPO_ROOT/scripts/audit-reflection.sh" submit "$state" >/dev/null || exit 1
+  reflection="$(jq -c .reflection "$state")"
+  stage_change
+  preflight >/dev/null || exit 1
+  write_dossier PASS '[]' || exit 1
+  cp "$R/.agents/state/last-audit.json" "$R/.agents/state/retry-pass-$host.json"
+  if [[ "$host" == codex ]]; then codex_stop false; else stop false; fi >/dev/null
+  history="$(inspect_history)"
+  check_eq "$host records both failures and the assessed PASS" \
+    "$(jq -c '[.state.attempts[].outcome.verdict]' <<<"$history")" '["FAIL","FAIL","PASS"]'
+  check_eq "$host requires sufficient reflection assessment" \
+    "$(jq -r '.state.attempts[-1].outcome.reflection_review.assessment' <<<"$history")" "sufficient"
+  check_eq "$host preserves the reflection after PASS" "$(jq -c '.state.reflection' <<<"$history")" "$reflection"
+  check_eq "$host advances history when PASS is recorded" \
+    "$(jq -r '.state.history_hash != .state.reflection.body.history_hash' <<<"$history")" "true"
+  check_eq "$host terminal PASS needs no new reflection" "$(jq -r .reflection_due <<<"$history")" "false"
+  check_eq "$host identical retry is accepted" "$(preflight)" ""
+  check_eq "$host consumes the matching approval" \
+    "$([[ -e "$R/.agents/state/last-audit.json" ]] && echo present || echo gone)" "gone"
+  check_eq "$host cannot reuse the consumed approval" \
+    "$(preflight | jq -r .hookSpecificOutput.permissionDecision)" "deny"
+  stage_change
+  cp "$R/.agents/state/retry-pass-$host.json" "$R/.agents/state/last-audit.json"
+  check_eq "$host changed staged diff rejects the old PASS" \
+    "$(preflight | jq -r '.hookSpecificOutput.permissionDecisionReason | startswith("Existing audit does not match current state:")')" "true"
+done
 
 echo
 printf 'RESULT: %s passed, %s failed\n' "$pass" "$fail"

@@ -23,7 +23,7 @@ def audit_reflection_stored:
   . == null or (ar_keys(["body","hash"]) and (.body | audit_reflection_body)
     and (.hash | type == "string" and test("^[0-9a-f]{64}$")));
 def audit_reflection_ready:
-  if (audit_failure_ids | length) < 2 then true
+  if .attempts[-1].outcome.verdict == "PASS" or (audit_failure_ids | length) < 2 then true
   else .reflection != null and .reflection.body.history_hash == .history_hash end;
 def audit_reflection_submit($body):
   if ($body | audit_reflection_body | not) or $body.history_hash != .history_hash
