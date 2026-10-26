@@ -458,5 +458,87 @@ grep -q 'unexpected HEAD' "$TMP/hooked-warm.err" \
   || ok "the warm cache is not misread as corrupt"
 
 echo
+echo "## Lifecycle synchronization isolates committed legacy installers"
+legacy_lifecycle() {
+  local mode="$1" consumer="$TMP/legacy-$1" worktree="$TMP/legacy-$1-wt"
+  local cache baseline target git_dir consumer_head hook_output foreign
+  make_consumer "$consumer"
+  git -C "$consumer" remote add origin https://github.com/boxlite-ai/example-consumer.git
+  git -C "$consumer" worktree add -q "$worktree" -b "legacy-$mode"
+  cp "$REPO_ROOT/templates/install.sh" "$worktree/.agent-tooling/install.sh"
+  chmod +x "$worktree/.agent-tooling/install.sh"
+  (cd "$worktree" && AGENT_TOOLING_SYNC_ACTIVE=1 ./.agent-tooling/install.sh) \
+    > "$TMP/$mode-setup.out" 2> "$TMP/$mode-setup.err"
+  check_eq "$mode starts with an installed worktree" "$?" 0
+  cache="$consumer/.git/agent-tooling"
+  baseline="$(head -n1 "$cache/current")"
+  git_dir="$(git -C "$worktree" rev-parse --absolute-git-dir)"
+  consumer_head="$(git -C "$worktree" rev-parse HEAD)"
+  cp "$consumer/.git/config" "$TMP/$mode-config"
+  # Model a committed bootstrap predating git_cache(), without copying another repo.
+  sed 's/git_cache -C/git -C/g' "$REPO_ROOT/templates/install.sh" \
+    > "$worktree/.agent-tooling/install.sh"
+  cat > "$consumer/.git/hooks/post-checkout" <<'CHAINED'
+#!/usr/bin/env bash
+printf '%s\n' "${GIT_DIR:-unset}" "$@" > "$(git rev-parse --git-common-dir)/chained-args"
+CHAINED
+  chmod +x "$consumer/.git/hooks/post-checkout"
+  if [[ "$mode" == warm ]]; then
+    target="$baseline"
+    rm "$cache/current"
+  else
+    target="$(advance_remote)"
+  fi
+  if [[ "$mode" == foreground || "$mode" == warm ]]; then
+    printf '%s\n' "$target" > "$worktree/.agent-tooling/hold"
+  fi
+
+  if [[ "$mode" == direct ]]; then
+    foreign="$TMP/foreign"
+    make_consumer "$foreign"
+    cp "$foreign/.git/config" "$TMP/foreign-config"
+    (cd "$foreign" && GIT_DIR="$foreign/.git" GIT_WORK_TREE="$foreign" \
+      bash "$cache/$baseline/plugins/boxlite-agent-tooling/scripts/refresh-installation.sh" "$worktree") \
+      > "$TMP/$mode.out" 2> "$TMP/$mode.err"
+    check_eq "direct refresh succeeds with a foreign Git environment" "$?" 0
+    cmp -s "$TMP/foreign-config" "$foreign/.git/config" \
+      && ok "direct refresh leaves the foreign repository config intact" \
+      || bad "direct refresh changed the foreign repository config"
+    [[ ! -e "$foreign/.git/agent-tooling" ]] \
+      && ok "direct refresh creates no cache in the foreign repository" \
+      || bad "direct refresh used the foreign repository cache"
+  else
+    AGENT_TOOLING_REFRESH_MINUTES=0 AGENT_TOOLING_REFRESH_WAIT=1 \
+      git -C "$worktree" checkout -q -b "trigger-$mode" \
+      > "$TMP/$mode.out" 2> "$TMP/$mode.err"
+    check_eq "$mode checkout succeeds even if synchronization fails" "$?" 0
+    hook_output="$(cat "$consumer/.git/chained-args" 2>/dev/null || true)"
+    check_eq "$mode chained hook retains its Git environment and checkout arguments" \
+      "$hook_output" "$(printf '%s\n' "$git_dir" "$consumer_head" "$consumer_head" 1)"
+  fi
+  check_eq "$mode preserves core.bare" "$(git -C "$consumer" config --get core.bare)" false
+  cmp -s "$TMP/$mode-config" "$consumer/.git/config" \
+    && ok "$mode preserves the shared config byte for byte" \
+    || bad "$mode changed the shared config"
+  check_eq "$mode preserves origin" "$(git -C "$consumer" remote get-url origin)" \
+    https://github.com/boxlite-ai/example-consumer.git
+  check_eq "$mode preserves the main checkout" "$(git -C "$consumer" rev-parse HEAD)" "$consumer_head"
+  check_eq "$mode preserves the linked checkout" "$(git -C "$worktree" rev-parse HEAD)" "$consumer_head"
+  git -C "$consumer" status --porcelain >/dev/null 2>&1
+  check_eq "$mode leaves the main worktree usable" "$?" 0
+  git -C "$worktree" status --porcelain >/dev/null 2>&1
+  check_eq "$mode leaves the linked worktree usable" "$?" 0
+  [[ -d "$cache/$target/.git" ]] \
+    && ok "$mode cache has its own Git directory" || bad "$mode cache has no Git directory"
+  check_eq "$mode cache contains the resolved revision" \
+    "$(git -C "$cache/$target" rev-parse HEAD 2>/dev/null || true)" "$target"
+  check_eq "$mode adopts the requested revision" \
+    "$(head -n1 "$cache/current" 2>/dev/null || true)" "$target"
+}
+for lifecycle_mode in foreground background warm direct; do
+  legacy_lifecycle "$lifecycle_mode"
+done
+
+echo
 printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
 exit $(( fail > 0 ? 1 : 0 ))

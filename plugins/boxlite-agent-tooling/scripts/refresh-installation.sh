@@ -16,14 +16,19 @@ set -uo pipefail
 
 repo_root="${1:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
 [[ -n "$repo_root" ]] || { printf 'agent-tooling: run inside a Git repository or pass its root\n' >&2; exit 2; }
+plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=../.agents/lib/git-environment.sh
+source "$plugin_root/.agents/lib/git-environment.sh" || exit 1
+tooling_git_clear_repository_environment || exit 1
+cd -- "$repo_root" || exit 1
+repo_root="$(pwd -P)"
 profile_file="$repo_root/.agent-tooling/profile.json"
 [[ -r "$profile_file" ]] || { printf 'agent-tooling: missing %s\n' "$profile_file" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { printf 'agent-tooling: jq is required\n' >&2; exit 1; }
 command -v perl >/dev/null 2>&1 || { printf 'agent-tooling: perl is required\n' >&2; exit 1; }
 
-plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 installer="$repo_root/.agent-tooling/install.sh"
-common_git_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
+common_git_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)" || exit 1
 cache_parent="$common_git_dir/agent-tooling"
 mkdir -p "$cache_parent"
 
@@ -36,10 +41,7 @@ run_installer() {
     printf 'agent-tooling: refresh needs an executable %s\n' "$installer" >&2
     return 1
   }
-  # The bootstrap derives its repository from the working directory, and this script
-  # may be invoked from anywhere — enter the consumer or the installer would adopt
-  # into whichever repository the CALLER happened to stand in.
-  (cd "$repo_root" && AGENT_TOOLING_SYNC_ACTIVE=1 "$installer")
+  AGENT_TOOLING_SYNC_ACTIVE=1 "$installer"
 }
 
 # A hold means there is nothing to poll: just make sure the held revision is the

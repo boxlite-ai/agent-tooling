@@ -19,6 +19,10 @@ set -uo pipefail
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [[ -n "$repo_root" ]] || exit 0
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=../.agents/lib/git-environment.sh
+source "$plugin_root/.agents/lib/git-environment.sh" || exit 0
+tooling_git_clear_repository_environment || exit 0
+cd -- "$repo_root" || exit 0
 
 spawn_refresh() {
   [[ "${AGENT_TOOLING_REFRESH:-1}" != "0" ]] || return 0

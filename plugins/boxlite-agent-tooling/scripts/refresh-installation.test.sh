@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Tests for the refresh lock: scripts/refresh-installation.sh takes it, and
+# Tests for synchronization environment boundaries and the refresh lock:
+# scripts/refresh-installation.sh takes the lock, and
 # scripts/verify-installation.sh reports one that a killed refresh left behind.
 #
 # The refresh cases pin a held revision with .agent-tooling/hold, the one path that reaches
@@ -130,6 +131,59 @@ report "and the report names the path to remove" $named_path "err=$err"
 still_passes=1
 [[ "$rc" == 0 ]] && still_passes=0
 report "the report is a warning, not a new failure" $still_passes "rc=$rc err=$err"
+
+echo "## Environment discovery must succeed before invoking any installer"
+export REAL_GIT
+REAL_GIT="$(command -v git)"
+mkdir "$TMP/bin"
+cat > "$TMP/bin/git" <<'GIT_STUB'
+#!/usr/bin/env bash
+if [[ "$*" == 'rev-parse --local-env-vars' ]]; then
+  case "$ENV_DISCOVERY" in
+    failed) exit 1 ;;
+    empty) exit 0 ;;
+    malformed) printf '%s\n' GIT_DIR --invalid; exit 0 ;;
+  esac
+fi
+exec "$REAL_GIT" "$@"
+GIT_STUB
+chmod +x "$TMP/bin/git"
+for discovery in failed empty malformed; do
+  for entry in refresh sync; do
+    make_consumer
+    err="$(cd "$REPO" && PATH="$TMP/bin:$PATH" ENV_DISCOVERY="$discovery" \
+      bash "$PLUGIN_ROOT/scripts/$entry-installation.sh" "$REPO" 2>&1 >/dev/null)"
+    rc=$?
+    expected_rc=1
+    [[ "$entry" == sync ]] && expected_rc=0
+    [[ "$rc" == "$expected_rc" ]]; report "$entry preserves its exit contract on $discovery discovery" $? "rc=$rc err=$err"
+    installer_ran; report "$entry refuses the installer on $discovery discovery" $((! $?)) "err=$err"
+    [[ "$err" == *'repository-local Git environment'* ]]
+    report "$entry explains $discovery discovery" $? "err=$err"
+    lock_held; report "$entry leaves no lock on $discovery discovery" $((! $?)) "lock=$LOCK"
+  done
+done
+
+echo "## Script boundaries clear repository variables and preserve caller input"
+for entry in refresh sync; do
+  make_consumer
+  cat > "$REPO/.agent-tooling/install.sh" <<'ENV_INSTALLER'
+#!/usr/bin/env bash
+for name in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CONFIG_COUNT GIT_NAMESPACE; do
+  [[ -z "${!name+x}" ]] || exit 42
+done
+[[ "$GIT_CONFIG_GLOBAL" == "$EXPECTED_CONFIG" && "$GIT_SSH_COMMAND" == 'ssh -oBatchMode=yes' ]] || exit 43
+cat > "$(git rev-parse --path-format=absolute --git-common-dir)/agent-tooling/installer-ran"
+ENV_INSTALLER
+  err="$(cd "$REPO" && printf 'caller input\n' | GIT_DIR="$REPO/.git" GIT_WORK_TREE="$REPO" \
+    GIT_INDEX_FILE="$TMP/other-index" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=test.value GIT_CONFIG_VALUE_0=local \
+    GIT_NAMESPACE=consumer GIT_CONFIG_GLOBAL="$TMP/global-config" EXPECTED_CONFIG="$TMP/global-config" \
+    GIT_SSH_COMMAND='ssh -oBatchMode=yes' bash "$PLUGIN_ROOT/scripts/$entry-installation.sh" "$REPO" 2>&1 >/dev/null)"
+  rc=$?
+  report "$entry accepts a valid repository environment" "$rc" "err=$err"
+  [[ "$(cat "$REPO/.git/agent-tooling/installer-ran" 2>/dev/null)" == 'caller input' ]]
+  report "$entry isolates repository variables while preserving input and transport config" $? "err=$err"
+done
 
 echo
 echo "RESULT: $pass passed, $fail failed"
