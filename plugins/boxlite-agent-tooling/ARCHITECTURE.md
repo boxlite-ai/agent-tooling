@@ -28,7 +28,7 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. Above 400 added code lines, asks the user to bypass the guideline or split. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely size choice or typed review answer. Idle expiry never authorizes; size choices cannot satisfy review acknowledgment. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
-| Finishes a plain `make test...` command | `PostToolUse`; `PostToolUseFailure` on Claude Code | `.agents/hooks/record-test-run.sh` | Nothing. A receipt in `.agents/state/test-runs/` that `commit-push-auditor` reads as an observed run. |
+| Finishes a plain `make test...` command | `PostToolUse`; `PostToolUseFailure` on Claude Code | `.agents/hooks/record-test-run.sh` | Nothing. A supported completion result creates a receipt in `.agents/state/test-runs/` for `commit-push-auditor`. |
 | Ends a turn | `Stop` | `.agents/hooks/stop-gate.sh` | At most one TL;DR correction per turn; a reply that leads with a TL;DR is never asked to shorten. Continued replies still reach timed confirmations and verdict checks. See the decision table below. |
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
 | Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
@@ -668,6 +668,22 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   `plugin uninstall --keep-data` and `plugin install`, which resolve this checkout, and
   restores the tracked `.claude/settings.json` byte-for-byte because uninstall edits it.
   A plugin still stale after the reinstall fails closed.
+
+## Test-run receipts
+
+The recorder accepts direct integral signed 32-bit `exit_code` metadata: zero passes,
+nonzero fails, and an explicit interruption records `interrupted`. A non-null session
+or process ID means the result is pending, even if it also contains an exit code.
+
+Claude's successful `PostToolUse` may omit an exit code. Its recognized result has
+string `stdout` and `stderr`, plus optional boolean `interrupted` and `isImage` fields.
+`PostToolUseFailure` retains its separate failure/interruption handling.
+
+Unknown fields or envelopes, invalid exit codes, background jobs, and output-only
+responses leave no receipt. Some native Codex hooks return raw output without exit
+metadata; those runs remain unobserved. Printed JSON or exit-status text cannot
+establish completion. Receipt schema, working-tree binding, and silent hook exit stay
+unchanged. See [design #270](https://github.com/boxlite-ai/agent-tooling/issues/270).
 
 ## Invariants
 

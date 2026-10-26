@@ -13,9 +13,9 @@
 #
 # Only a single `make test...` invocation counts. Behind `;`, `&&`, a pipe or a
 # background job, the status the host reports is no longer the test's. Claude reports
-# success as PostToolUse and failure as PostToolUseFailure; Codex reports both as
-# PostToolUse with an exit code. Every failure path exits 0: a missing receipt only
-# leaves a run unobserved.
+# success as PostToolUse and failure as PostToolUseFailure. Other results require
+# explicit exit metadata: output alone cannot establish success. Every failure path
+# exits 0: a missing receipt only leaves a run unobserved.
 set -uo pipefail
 
 state_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/verdict-audit-state.sh"
@@ -96,11 +96,29 @@ if [[ "$event" == PostToolUseFailure ]]; then
     <<<"$payload" 2>/dev/null || printf 'null')"
   [[ "$exit_code" =~ ^[0-9]{1,3}$ ]] || exit_code="null"
 else
-  exit_code="$(jq -r 'if (.tool_response | type) == "object"
-    and (.tool_response.exit_code | type) == "number"
-    then .tool_response.exit_code else "null" end' <<<"$payload" 2>/dev/null || printf 'null')"
-  [[ "$exit_code" =~ ^[0-9]{1,3}$ ]] || exit_code="null"
-  if [[ "$exit_code" == null || "$exit_code" == 0 ]]; then status=pass; else status=fail; fi
+  # Normalize only known host metadata. Native Codex hooks can contain raw stdout,
+  # including printed JSON; decoding it or searching wrappers would trust test output.
+  outcome="$(jq -ce '
+    .tool_response | select(type == "object")
+    | select(.session_id == null and .process_id == null)
+    | select((has("interrupted") | not) or (.interrupted | type) == "boolean")
+    | if has("exit_code") then
+        select((keys - ["exit_code", "stdout", "stderr", "output", "chunk_id",
+          "wall_time_seconds", "original_token_count", "session_id", "process_id",
+          "interrupted"]) == [])
+        | .exit_code as $code
+        | select($code | type == "number")
+        | select($code == ($code | floor) and $code >= -2147483648 and $code <= 2147483647)
+        | {status: (if .interrupted == true then "interrupted"
+                    elif $code == 0 then "pass" else "fail" end), exit_code: $code}
+      elif (keys - ["stdout", "stderr", "interrupted", "isImage"]) == []
+        and (.stdout | type) == "string" and (.stderr | type) == "string"
+        and ((has("isImage") | not) or (.isImage | type) == "boolean") then
+        {status: (if .interrupted == true then "interrupted" else "pass" end), exit_code: null}
+      else empty end
+  ' <<<"$payload" 2>/dev/null)" || exit 0
+  status="$(jq -r '.status' <<<"$outcome")" || exit 0
+  exit_code="$(jq -r '.exit_code' <<<"$outcome")" || exit 0
 fi
 
 cwd="$(jq -r '.cwd // ""' <<<"$payload" 2>/dev/null || true)"
