@@ -333,6 +333,15 @@ or `AGENT_GATED=1` is in the environment.
 | Runs `git push` | `.githooks/pre-push` | The same installation and guidance checks; spends the receipt to skip re-auditing an identical commit, otherwise audits the pushed range; arms `.agents/watch/pr-watch.sh`. |
 | Checks out, merges or rewrites | `.githooks/post-checkout`, `.githooks/post-merge`, `.githooks/post-rewrite` | `scripts/sync-installation.sh`, then the chained hook. |
 
+New refs use the closest merge-base among the destination's remote-tracking refs,
+measured by commits to the outgoing tip; default branches have no priority.
+For `main -> stack-1 -> stack-2`, with `stack-1` already pushed, the audit starts at
+`stack-1`. Existing refs use Git's advertised old SHA. Without a common ancestor,
+the hook emits full history and an empty-tree diff.
+
+Selection depends on local remote-tracking refs being current. A single-base range
+can still include published side-branch history after merges.
+
 ### Audit producers
 
 Producers for callers with no agent runtime.
