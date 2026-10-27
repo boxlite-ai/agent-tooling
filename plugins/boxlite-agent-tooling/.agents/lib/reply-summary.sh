@@ -93,8 +93,10 @@ reply_summary_word_counts() {  # text -> total largest-paragraph largest-item
         $item_indent = length $prefix;
         $table = 0;
       }
+      # Group each optional outer pipe with its whitespace: without a pipe,
+      # adjacent whitespace runs would retry every split on a failing match.
       if ($line =~ /\|/ && $index < $#lines &&
-          $lines[$index + 1] =~ /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/ &&
+          $lines[$index + 1] =~ /^\s*(?:\|\s*)?:?-+:?\s*(?:\|\s*:?-+:?\s*)*(?:\|\s*)?$/ &&
           table_cells($line) == table_cells($lines[$index + 1])) {
         $finish_block->() unless $is_item;
         $table = 1;

@@ -135,6 +135,13 @@ valid TL;DR skips them, since readers already have the short version; complete
 documents have no total-word cap.
 Fences and tables are excluded from block limits; Chinese/Japanese characters
 count individually. Empty text and inputs over 8000 shell characters fail closed.
+The shared word counter recognizes table delimiters in linear time: each optional
+outer pipe is grouped with its following whitespace, so an absent pipe cannot make
+two runs compete for the same spaces. It retains Unicode whitespace, alignment
+colons, escaped header pipes, and matching header/delimiter cell counts. Table words
+still count toward the total. `.agents/lib/reply-summary.test.sh` checks these
+semantics and rejects delimiter-shaped failures taking two seconds or more
+([#259](https://github.com/boxlite-ai/agent-tooling/issues/259)).
 Denials reuse the `boxlite-writing` skill; clarity remains a reviewer judgment.
 Every inspected body also needs a TL;DR section of at most 39 words, including design
 documents and published PR bodies checked on ready/metadata edits. A comment, close or
