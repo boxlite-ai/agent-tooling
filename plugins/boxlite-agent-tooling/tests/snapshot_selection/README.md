@@ -8,12 +8,13 @@ From the repository root:
 
 ```sh
 make test:plugin TEST_FILTER=snapshot-selection
-python3 plugins/boxlite-agent-tooling/tests/benchmark_snapshot_selection.py --repeats 3
+bash plugins/boxlite-agent-tooling/tests/snapshot-selection.test.sh --benchmark 3
 ```
 
-Python's standard library drives the existing Bash/Perl reader. No production
-dependency changes. Fixtures contain generated Claude/Codex-shaped records, never
-local transcripts; passing them does not verify live host integration.
+One Bash entrypoint runs checks and benchmarks, using the existing `jq` dependency
+for JSON fixtures/assertions and two Perl fixtures for the reference selector and
+encoder probe. Generated Claude/Codex-shaped records contain no local transcripts;
+passing them does not verify live host integration.
 
 ## Selection contract
 
@@ -43,22 +44,23 @@ preview rules change. See the [design](https://github.com/boxlite-ai/agent-tooli
   exact bytes and return status. They include Unicode, escapes, decimal transitions,
   preview stages, zero/full retention, interleaved claims, and invalid input.
 - Benchmark runs exclude tracing and compare identical bytes on every repetition.
-  They report wall-time median/range, input size, retained count, and toolchain.
+  Bash `time` measures complete reader calls. Reports include wall-time median/range,
+  input size, retained count, and toolchain; fixture generation is outside the timer.
   Machine load affects timings; the original issue's private transcript is not a fixture.
 
 ## Measured example
 
-2026-10-27, macOS arm64, Perl 5.34.1 / JSON::PP 4.06; three repetitions,
+2026-10-27, macOS arm64, Bash 3.2.57, Perl 5.34.1 / JSON::PP 4.06; three repetitions,
 256 KiB cap, wall-time medians. Every output matched the linear scan byte-for-byte.
 
 | Tools seen → retained | Linear scan | Binary search |
 | --- | --- | --- |
-| 352 → 236 | 1.911 s | 0.262 s |
-| 400 → 236 | 2.930 s | 0.320 s |
-| 472 → 236 | 4.506 s | 0.293 s |
-| 515 → 236 | 5.484 s | 0.310 s |
+| 352 → 236 | 1.697 s | 0.242 s |
+| 400 → 236 | 2.498 s | 0.250 s |
+| 472 → 236 | 4.098 s | 0.292 s |
+| 515 → 236 | 5.071 s | 0.296 s |
 
-The 515-tool search ranged from 0.300–0.333 s. At a non-dropping 4 MiB cap,
-the same case retained all tools: 0.164 s linear versus 0.179 s current median.
+The 515-tool search ranged from 0.289–0.303 s. At a non-dropping 4 MiB cap,
+the same case retained all tools: 0.147 s median for both selectors.
 These are synthetic reader measurements, not timings from live Claude/Codex sessions
 or the original issue's transcript. Linux and Windows timings remain unverified.
