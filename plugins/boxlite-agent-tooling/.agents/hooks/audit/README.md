@@ -56,13 +56,32 @@ and [state files](../../../ARCHITECTURE.md#state-files).
 
 ## Runners
 
-`run-verdict-audit.sh` uses the first available auditor, with the
+`run-verdict-audit.sh` selects the invoking host's auditor, with the
 [verdict-auditor spec](../../../.claude/agents/verdict-auditor.md) as its procedure:
 
 1. `VERDICT_AUDITOR_CMD`
-2. `claude -p --safe-mode`
-3. `codex exec`, read-only with hooks disabled
-4. None: exit 2
+2. `hook_host_kind`, shared with native subagent dispatch: Claude Code uses
+   `claude -p --safe-mode`; Codex uses read-only `codex exec` with hooks disabled.
+3. Unknown hosts retain availability order: Claude, then Codex.
+4. No matching CLI: exit 2. A known host never falls through to another provider.
+
+Hook manifests set `BOXLITE_HOOK_HOST` per invocation, overriding inherited values.
+This distinguishes Codex's root aliases from nested hosts. Generic hooks set
+`unknown`; unmarked legacy callers retain single-root inference. Claude commands
+prefer their own plugin root when both roots identify different installations.
+
+The classifier uses the same host detector: Claude Haiku on Claude Code, the default
+Codex model on Codex. Unknown hosts retain Claude-or-regex behavior. Explicit
+`VERDICT_CLASSIFIER_CMD` overrides selection. Missing or failed classifiers use the
+existing regex fallback; a failed auditor remains an audit failure.
+
+Codex classification runs in a private scratch directory, read-only and ephemeral,
+with hooks, shell tools, subagents, user config, and project instructions disabled.
+Global Codex instructions can still load. Binary discovery and execution share the
+existing 20-second capture deadline and 4096-byte output limit. Both Stop stages use
+the inert [Codex lookup helper](../../lib/codex-cli.sh), including `CODEX_BIN` and
+desktop discovery. For example, installing Claude alongside Codex no longer changes
+which provider handles Codex Stop checks.
 
 `run-commit-push-audit.sh` runs `codex exec` read-only with hooks disabled. It rejects an
 answer that is malformed or bound to another branch, HEAD, diff, command, or subject.
@@ -87,14 +106,15 @@ It prints `codex audit commit: PASS` or `FAIL`; findings go to stderr.
 
 | Variable | Read by | Default | Effect |
 | --- | --- | --- | --- |
+| `BOXLITE_HOOK_HOST` | Shared host detector | Legacy root inference | Set by each manifest: `claude`, `codex`, or `unknown`; invalid nonempty exported values yield unknown. Routing metadata only. |
 | `VERDICT_AUDITOR_CMD` | `run-verdict-audit.sh` | unset | Replaces the model CLI; reads the audit prompt on stdin and must write the requested dossier. |
 | `VERDICT_AUDITOR_MODEL` | `run-verdict-audit.sh` | `claude-sonnet-5` | Model for the `claude -p` route. |
 | `VERDICT_AUDITOR_TIMEOUT` | `run-verdict-audit.sh` | `900` seconds | Hard limit for one audit. |
 | `COMMIT_PUSH_AUDITOR_TIMEOUT` | `run-commit-push-audit.sh` | `900` seconds | Hard limit for one audit. |
-| `CODEX_BIN` | Both runners | `codex` on `PATH`, then the macOS app bundle | Codex binary. |
+| `CODEX_BIN` | Both runners and Stop classifier | `codex` on `PATH`, then the macOS app bundle | Codex binary; does not override host selection. |
 | `CODEX_COMMIT_PUSH_AUDIT_MODE` | `run-commit-push-audit.sh` | `agentic` | `local` runs offline checks, for tests and diagnostics only. |
 | `AUDITOR_SESSION_SCOPE`, `AUDITOR_PROMPT_EPOCH` | `run-commit-push-audit.sh` | unset | Bind the audit to one session's history and prompt; the gate's command sets both. |
-| `VERDICT_CLASSIFIER_CMD` | `preflight-verdict-check.sh` | `claude -p` with Haiku | Replaces triage: turn text on stdin, `YES` or `NO` on stdout. `false` forces the pattern fallback. |
+| `VERDICT_CLASSIFIER_CMD` | `preflight-verdict-check.sh` | Current host's CLI | Replaces triage: turn text on stdin, `YES` or `NO` on stdout. `false` forces the pattern fallback. |
 | `VERDICT_EXTRACTOR_CMD` | `preflight-verdict-check.sh` | unset | Reads an unsupported transcript format: `$1` is the path; stdout is the turn text. |
 | `VERDICT_GATE_HARD_BLOCK` | `preflight-verdict-check.sh` | `1` | `0` turns blocks into human-only notes, for rollback only. |
 
@@ -111,6 +131,7 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.tes
 | --- | --- |
 | [preflight-verdict-check.test.sh](preflight-verdict-check.test.sh) | Verdict gate: triage, dossier bindings, consumption, and re-entry. |
 | [run-verdict-audit.test.sh](run-verdict-audit.test.sh) | Verdict runner: auditor selection, exit codes, freshness, and cancellation. |
+| [stop-host-routing.test.sh](stop-host-routing.test.sh) | Both Stop stages: host selection, overrides, unavailable providers, and bounded Codex discovery. |
 | [run-verdict-audit-retry.test.sh](run-verdict-audit-retry.test.sh) | Same-generation retries with history and publication interference. |
 | [run-commit-push-audit.test.sh](run-commit-push-audit.test.sh) | Commit/push runner: sandbox flags; malformed or unbound answers land on FAIL. |
 | [preflight-commit-push.test.sh](preflight-commit-push.test.sh) | [../preflight-commit-push.sh](../preflight-commit-push.sh): command matching and dossier checks. |

@@ -67,7 +67,7 @@
 # leave whatever an ancestor exported in place and the guard below would accept it —
 # routing on exactly the inherited state this accessor exists to refuse, which is worse
 # than the missing file it was meant to catch.
-unset -f hook_host_kind hook_host_is_env_root 2>/dev/null || true
+unset -f hook_host_kind hook_host_is_env_root hook_host_is_env_value 2>/dev/null || true
 # shellcheck source=./hook-host.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hook-host.sh" 2>/dev/null || true
 

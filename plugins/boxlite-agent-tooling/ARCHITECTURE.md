@@ -11,7 +11,8 @@
 ## Entry points
 
 Host hook events, wired for both hosts in `hooks/hooks.json` and
-`hooks/codex-hooks.json` unless noted. One script per row.
+`hooks/codex-hooks.json` unless noted. Generic consumers use
+`hooks/generic-hooks.json`, with the same events as the Codex manifest. One script per row.
 
 Registered entry points stay at `.agents/hooks/`; host manifest paths are stable.
 Helper runners, schemas, tests, and fixtures use purpose directories beneath it:
@@ -391,6 +392,21 @@ Producers for callers with no agent runtime.
 An agent with a built-in spawns the auditor itself, `Task` on Claude Code and
 `collaboration.spawn_agent` on Codex, from the specs in `.claude/agents/`.
 
+Stop classification and synchronous verdict auditing reuse that dispatch library's
+`hook_host_kind` detector. Codex hooks use Codex; Claude Code hooks use Claude.
+Each manifest command sets `BOXLITE_HOOK_HOST`, replacing inherited markers.
+Generic hooks set `unknown`. Without a marker, legacy callers use single-root
+inference; both roots remain ambiguous. Codex's compatibility aliases therefore
+cannot redirect a declared Codex hook to Claude.
+Explicit command overrides remain first. A known host never falls through to the
+other provider; classifier failure uses regex and auditor failure blocks completion.
+Unknown callers retain Claude-first availability behavior. The shared
+`.agents/lib/codex-cli.sh` resolves `CODEX_BIN`, PATH, and the desktop binary without
+deciding host identity. Codex classification runs read-only in scratch space with
+hooks, shell tools, subagents, user config, and project instructions disabled;
+global Codex instructions may still load. Its lookup probes and execution share the
+existing bounded-capture deadline and output limit. See [design #287](https://github.com/boxlite-ai/agent-tooling/issues/287).
+
 Host dispatch prose lives in `.agents/prompts/subagent/subagent-*.md`. The library selects
 routes and JSON-encodes values, then renders all selected blocks before publishing
 instructions. Missing, empty, or unresolved templates stop dispatch without partial
@@ -680,7 +696,7 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   those observers have no shutdown work; command groups retain TERM then KILL.
   The launch-cleanup test has an independent deadline and reports owned processes
   before forced teardown, preserving the original cleanup assertion.
-- Host to hook: the host injects its own plugin-root name, `PLUGIN_ROOT` on Codex and `CLAUDE_PLUGIN_ROOT` on Claude Code, and every wired command resolves `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `.agents/lib/hook-host.sh` answers which host is calling from that name alone. Session variables such as `CLAUDECODE` name whatever launched the process tree and are never used for routing.
+- Host to hook: each manifest command sets `BOXLITE_HOOK_HOST` to `codex`, `claude`, or `unknown`. `.agents/lib/hook-host.sh` validates this exported routing value before legacy root inference. Codex exports both root names as aliases; Claude commands prefer `CLAUDE_PLUGIN_ROOT` and Codex/generic commands prefer `PLUGIN_ROOT`, with the other name as fallback. Session markers never decide routing. The explicit marker is not authorization or runtime attestation.
 - Hook to agent: a hook is a bash process and cannot spawn a subagent. It emits text naming the route the calling host has, and the agent takes it. `.agents/lib/subagent.sh:8`
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/audit/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Research verdict: root, branch, design URL, and the SHA-256 of the content the auditor reviewed (`.agents/lib/design-doc.sh`).
@@ -741,7 +757,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A stale or mismatched turn dossier is discarded, never blocked on. `.agents/hooks/audit/preflight-verdict-check.sh:28`
 - A readable snapshot with no assistant text ends unjudged under `blind-allow`; a failed or truncated snapshot requires an audit. `.agents/hooks/audit/preflight-verdict-check.sh:53`
 - A message is never judged twice. `.agents/hooks/audit/preflight-verdict-check.sh:62`
-- A parked FAIL serves only the next audit of the same round. `.agents/hooks/audit/preflight-verdict-check.sh:1754`
+- A parked FAIL serves only the next audit of the same round. `.agents/hooks/audit/preflight-verdict-check.sh:1778`
 - A reply that leads with a valid TL;DR is never asked to shorten; the Stop gate's only writing check is that TL;DR. `.agents/hooks/stop-gate.sh:4`
 - No editor or patch edit lands in a repository before a research PASS for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
@@ -758,7 +774,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A test run counts as observed only through a receipt the host's result hook wrote for one plain `make test...` command. The auditor binds it to the staged tree, or diffs a red run's tree against it. `.agents/hooks/record-test-run.sh:14`
 - A FAIL verdict gets a fresh audit once a test runs after it; otherwise the gate repeats its findings. `.agents/hooks/preflight-commit-push.sh:375`
 - Codex's hook-event set is closed; an unknown key loads no hooks at all. `host-parity.test.sh:24`
-- Every wired command resolves the plugin root as `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`. `host-parity.test.sh:30`
+- Every wired command declares its host and prefers its host's plugin root, with the alternate root as fallback. `host-parity.test.sh:30`
 - A malformed hold fails closed. `templates/install.sh:15`
 - `.agents/state/` is never committed. `.gitignore:1`
 
@@ -773,25 +789,25 @@ one line cites the first.
 | --- | --- | --- | --- |
 | override | overridden-allow | A valid `OVERRIDDEN BY USER` grant exists for this prompt epoch; the use is logged and the gate opens. | 716 |
 | history | exhausted-stop | Failure, attempt, or remaining-capacity exhaustion terminates Stop with INCOMPLETE; no further audit runs. | 737 |
-| extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1828 |
-| extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1835 |
-| extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1838 |
-| cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1852 |
-| dossier | discard-generation | The dossier's generation is not the requested one. | 1930 |
-| dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1936 |
-| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 1979 |
-| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 1989 |
-| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 1997 |
-| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 2010 |
-| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2134 |
-| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2159 |
-| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2191 |
-| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2200 |
-| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2207 |
-| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2216 |
-| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2220 |
-| regex | none-allow | No model reachable and no fallback pattern matched. | 2228 |
-| regex | match-block | No model reachable and a fallback pattern matched. | 2232 |
+| extract | truncated-block | The bounded final-turn snapshot is unreadable or exceeds its byte limit; an independent FAIL dossier is required. | 1852 |
+| extract | blind-allow | The transcript has content but no assistant text after a 2 second wait; the turn ends unjudged. | 1859 |
+| extract | empty-allow | No transcript, or nothing in it; there is nothing to judge. | 1862 |
+| cancellation | discard-generation | A cancellation record exists for the requested generation; a newer prompt revoked it. | 1876 |
+| dossier | discard-generation | The dossier's generation is not the requested one. | 1954 |
+| dossier | discard-stale | Branch, HEAD, tree hash or age no longer match; the dossier is discarded and triage runs. | 1960 |
+| dossier | PASS-allow | A fresh, matching PASS; consumed, and any advisories are shown to the human only. | 2003 |
+| dossier | discard-revoked | A matching dossier whose request could not be consumed because its generation was revoked or replaced. | 2013 |
+| dossier | IN_PROGRESS-allow | Proof deferred while the parent pauses or asks the user; allowed with a note. | 2021 |
+| dossier | FAIL-block | Findings block the turn; advisories stay out of the reason; unchanged text reuses this FAIL instead of re-running the model. | 2034 |
+| audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2158 |
+| race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2183 |
+| harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2215 |
+| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2224 |
+| triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2231 |
+| triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2240 |
+| triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2244 |
+| regex | none-allow | No model reachable and no fallback pattern matched. | 2252 |
+| regex | match-block | No model reachable and a fallback pattern matched. | 2256 |
 
 Dossier shape, from `.claude/agents/verdict-auditor.md`: `branch`, `head`, `tree_hash`,
 `generation`, a `verdict` of `PASS`, `FAIL` or `IN_PROGRESS`, and `findings`. The
@@ -817,7 +833,7 @@ non-blocking `advisories`, which never decide the verdict.
 - **hold**: `.agent-tooling/hold`, one full lowercase SHA that freezes adoption; a malformed hold fails closed.
 - **tooling.ref**: the branch or tag consumers float on; the validated revision they run is recorded in `.git/agent-tooling/current`.
 - **guidance block**: the hash-marked workflow with its named writing-skill reference in a consumer's `AGENTS.md`; missing or edited fails the gates, behind only warns.
-- **twins**: `hooks/hooks.json` and `hooks/codex-hooks.json`, behaviourally identical except `asyncRewake` against `async` and the events only one host has.
+- **twins**: `hooks/hooks.json` and `hooks/codex-hooks.json`, equivalent after normalizing host identity, root preference, background delivery, and host-only events. Generic hooks share the latter's events with explicit unknown identity.
 - **watch**: one run of `.agents/watch/pr-watch.sh` after a push, streaming CI and PR events as JSON lines under one watch id.
 - **wake**: the turn Claude Code starts when an `asyncRewake` hook exits 2; its prompt carries the hook's stderr in a reminder after the host's envelope, and it is internal only while its one-time nonce is unspent.
 - **author review acknowledgment**: a new, unedited `/reviewed <full-head-SHA>` PR comment from the PR author; the CI gate publishes its verdict on that commit.

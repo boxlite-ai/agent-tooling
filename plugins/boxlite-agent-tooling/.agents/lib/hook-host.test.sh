@@ -1,22 +1,15 @@
 #!/usr/bin/env bash
 # Tests for .agents/lib/hook-host.sh
 #
-# Two things are worth guarding here, and only one of them is the truth table.
-#
-#   1. The mapping itself, including the cases a hand-written conditional gets wrong:
-#      both names set at once, and a name exported empty.
-#   2. That the answer never disagrees with the root expression every wired command
-#      uses. Detection and root resolution read the same two variables; if they ever
-#      picked differently, a hook would load its libraries from one host's tree while
-#      announcing the other host's route. The oracle is bash's own parameter
-#      expansion, so this compares production code against the mechanism the
-#      manifests actually rely on rather than against a restatement of the rule.
+# Exercise exported markers, legacy root inference, and actual manifest commands.
+# Aliases and nested installations must select both the intended host and its tree.
 #
 # Run with:  bash .agents/lib/hook-host.test.sh
 # Exits non-zero on any failure.
 set -uo pipefail
 
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+unset BOXLITE_HOOK_HOST
 
 # Sourcing is itself under test: a library that writes to stdout or exits corrupts
 # every hook that loads it, and hooks here speak JSON on stdout.
@@ -46,9 +39,8 @@ with_env() {  # PLUGIN_ROOT CLAUDE_PLUGIN_ROOT command...
   )
 }
 
-# The expansion every wired command in hooks/hooks.json and hooks/codex-hooks.json
-# uses to find the plugin. host-parity.test.sh proves the manifests still spell it
-# this way; this is that same expression, evaluated.
+# Legacy unmarked callers use this root expression. Manifest-specific root
+# preferences are exercised through their actual commands below.
 resolved_root() { printf '%s' "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"; }
 
 echo "## Loading the library is inert"
@@ -56,10 +48,10 @@ check_eq "sourcing writes nothing to stdout or stderr" "$source_output" ""
 check_eq "sourcing succeeds"                           "$source_status" "0"
 
 echo
-echo "## Each host is named by the root it injects"
-check_eq "Claude Code injects only CLAUDE_PLUGIN_ROOT" \
+echo "## Legacy callers use root inference"
+check_eq "a legacy caller exports only CLAUDE_PLUGIN_ROOT" \
   "$(with_env - /claude/root hook_host_kind)" "claude"
-check_eq "Codex injects only PLUGIN_ROOT" \
+check_eq "a legacy caller exports only PLUGIN_ROOT" \
   "$(with_env /codex/root - hook_host_kind)" "codex"
 check_eq "no runtime injects either name" \
   "$(with_env - - hook_host_kind)" "unknown"
@@ -140,9 +132,7 @@ check_eq "a forged entry cannot displace the real exported host" \
 
 echo
 echo "## Cases a hand-written conditional gets wrong"
-# Both names present is the nesting case, not a tie: a hook running under one host
-# inside another inherits the outer host's root alongside its own. Preferring either
-# name hands somebody the other host's route, so neither is named.
+# Without a manifest marker, aliases and nesting are indistinguishable.
 check_eq "both names set names no host" \
   "$(with_env /codex/root /claude/root hook_host_kind)" "unknown"
 # The direction that motivated it: Claude injects its root for a hook it spawned, while
@@ -188,6 +178,64 @@ for codex_root in - '' /codex/root; do
     fi
   done
 done
+
+echo
+echo "## Manifest identity survives aliases and nesting"
+plugin_root="$(cd "$LIB_DIR/../.." && pwd)"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+# The manifest selects a fixture hook, which calls the real detector. A wrong
+# plugin root reaches a different fixture tree and is visible in the result.
+for tree in "inner ' plugin" outer; do
+  fixture="$scratch/$tree"
+  mkdir -p "$fixture/.agents/hooks" "$fixture/.agents/lib"
+  cp "$LIB_DIR/hook-host.sh" "$fixture/.agents/lib/hook-host.sh"
+  while IFS= read -r hook; do
+    cat > "$fixture/.agents/hooks/$hook" <<'HOOK'
+#!/usr/bin/env bash
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$root/.agents/lib/hook-host.sh"
+printf '%s:%s' "$(hook_host_kind)" "$root"
+HOOK
+  done < <(jq -r '.hooks[][].hooks[].command' "$plugin_root/hooks/hooks.json" |
+    sed -n 's,.*\.agents/hooks/\([^"/]*\)".*,\1,p' | sort -u)
+done
+for host in codex claude unknown; do
+  case "$host" in
+    codex) manifest="$plugin_root/hooks/codex-hooks.json" ;;
+    claude) manifest="$plugin_root/hooks/hooks.json" ;;
+    unknown) manifest="$plugin_root/$(jq -r .hooks "$plugin_root/plugin.json")" ;;
+  esac
+  for roots in aliases nested; do
+    while IFS= read -r command; do
+      result="$(
+        export BOXLITE_HOOK_HOST=claude
+        [[ "$host" != claude ]] || export BOXLITE_HOOK_HOST=codex
+        export PLUGIN_ROOT="$scratch/inner ' plugin" CLAUDE_PLUGIN_ROOT="$scratch/inner ' plugin"
+        if [[ "$roots" == nested ]]; then
+          if [[ "$host" == claude ]]; then export PLUGIN_ROOT="$scratch/outer"
+          else export CLAUDE_PLUGIN_ROOT="$scratch/outer"; fi
+        fi
+        bash -c "$command"
+      )"
+      check_eq "$host/$roots manifest selects host and tree" "$result" "$host:$scratch/inner ' plugin"
+    done < <(jq -r '.hooks[][].hooks[].command' "$manifest" | sort -u)
+  done
+done
+
+marker_kind() { # marker, export it?
+  (
+    unset BOXLITE_HOOK_HOST PLUGIN_ROOT CLAUDE_PLUGIN_ROOT
+    BOXLITE_HOOK_HOST="$1"
+    [[ "$2" != exported ]] || export BOXLITE_HOOK_HOST
+    export PLUGIN_ROOT=/legacy/root
+    hook_host_kind
+  )
+}
+check_eq "an explicit generic marker prevents root inference" "$(marker_kind unknown exported)" unknown
+check_eq "an invalid marker cannot name a host" "$(marker_kind invalid exported)" unknown
+check_eq "an empty marker uses legacy root inference" "$(marker_kind '' exported)" codex
+check_eq "a local marker cannot override an exported root" "$(marker_kind claude local)" codex
 
 echo
 echo "RESULT: $pass passed, $fail failed"

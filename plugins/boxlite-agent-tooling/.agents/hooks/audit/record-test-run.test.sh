@@ -27,14 +27,31 @@ git -C "$R" commit -qm base
 RECEIPTS="$R/.agents/state/test-runs"
 
 run_hook() {  # event command [extra JSON merged into the payload]
-  local extra='{}'
+  local extra='{}' before rc
   [[ $# -lt 3 ]] || extra="$3"
+  mkdir -p "$R/.agents/state"
+  before="$(receipt_paths)"
   jq -nc --arg e "$1" --arg c "$2" --arg cwd "$R" --argjson extra "$extra" \
     '{hook_event_name:$e, tool_name:"Bash", cwd:$cwd, tool_input:{command:$c}} + $extra' \
     | (cd "$R" && bash "$HOOK")
+  rc=$?
+  # Persist across check_response's command substitution; keep it outside test-runs
+  # and inside ignored state so receipt counts and working-tree hashes stay intact.
+  LC_ALL=C comm -13 <(printf '%s\n' "$before") <(receipt_paths) \
+    > "$R/.agents/state/last-test-receipt" || return 1
+  return "$rc"
+}
+receipt_paths() {
+  [[ -d "$RECEIPTS" ]] || return 0
+  find "$RECEIPTS" -name '*.json' | LC_ALL=C sort
 }
 receipt_count() { find "$RECEIPTS" -name '*.json' 2>/dev/null | wc -l | tr -d ' '; }
-newest() { jq -r "$1" "$(ls -1 "$RECEIPTS"/*.json | sort -t- -k1,1n -k2,2n | tail -1)"; }
+recorded() {
+  local receipt
+  receipt="$(cat "$R/.agents/state/last-test-receipt")" || return 1
+  [[ -n "$receipt" && "$receipt" != *$'\n'* ]] || return 1
+  jq -r "$1" "$receipt"
+}
 working_tree() {
   local dir; dir="$(mktemp -d)"
   GIT_INDEX_FILE="$dir/index" git -C "$R" read-tree HEAD
@@ -51,7 +68,7 @@ check_response() {  # description, payload fields, expected status/exit or unobs
     check_eq "$1: no receipt" "$(receipt_count)" "$before"
   else
     expected_count=$((before + 1))
-    observed="$(newest '.status + "/" + (.exit_code | tostring)')"
+    observed="$(recorded '.status + "/" + (.exit_code | tostring)')"
     check_eq "$1: receipt outcome" "count=$(receipt_count) $observed" "count=$expected_count $3"
   fi
 }
@@ -60,10 +77,10 @@ echo "## A plain test run leaves a receipt bound to the working files"
 printf 'two\n' > "$R/f"
 run_hook PostToolUse 'make test:unit:rust' '{"tool_response":{"stdout":"ok","stderr":""}}'
 check_eq "a successful Claude run is a pass with no exit code" \
-  "count=$(receipt_count) status=$(newest .status) exit=$(newest .exit_code) command=$(newest .command)" \
+  "count=$(receipt_count) status=$(recorded .status) exit=$(recorded .exit_code) command=$(recorded .command)" \
   "count=1 status=pass exit=null command=make test:unit:rust"
 check_eq "the receipt names HEAD and the tree of the uncommitted working files" \
-  "head=$(newest .head) tree=$(newest .tree)" \
+  "head=$(recorded .head) tree=$(recorded .tree)" \
   "head=$(git -C "$R" rev-parse HEAD) tree=$(working_tree)"
 if git -C "$R" diff --quiet --cached; then ok "the real index is untouched"; else bad "the real index is untouched"; fi
 
@@ -71,21 +88,21 @@ echo "## Failures carry their status"
 run_hook PostToolUseFailure 'GOFLAGS=-count=1 make test:unit:go FILTER=Copy' \
   '{"error":"Exit code 2\nFAIL github.com/x"}'
 check_eq "a Claude failure records fail and the exit code from the error" \
-  "count=$(receipt_count) status=$(newest .status) exit=$(newest .exit_code)" \
+  "count=$(receipt_count) status=$(recorded .status) exit=$(recorded .exit_code)" \
   "count=2 status=fail exit=2"
 run_hook PostToolUse 'make test:unit:c' '{"tool_response":{"exit_code":1,"stdout":""}}'
 check_eq "a Codex non-zero exit code is a fail" \
-  "count=$(receipt_count) status=$(newest .status) exit=$(newest .exit_code)" \
+  "count=$(receipt_count) status=$(recorded .status) exit=$(recorded .exit_code)" \
   "count=3 status=fail exit=1"
 run_hook PostToolUseFailure 'make test:integration:rust FILTER=copy' '{"is_interrupt":true}'
 check_eq "an interrupted run is not a pass" \
-  "count=$(receipt_count) status=$(newest .status)" "count=4 status=interrupted"
+  "count=$(receipt_count) status=$(recorded .status)" "count=4 status=interrupted"
 
 echo "## Env prefixes, assignments and output redirections are still one run"
 run_hook PostToolUse "env -u http_proxy -u https_proxy make test:unit:rust NEXTEST_FILTER_EXPR='not test(~jailer::seccomp)' > /tmp/unit.log 2>&1" \
   '{"tool_response":{"stdout":"","stderr":""}}'
 check_eq "a redirected, env-prefixed run is recorded verbatim" \
-  "count=$(receipt_count) status=$(newest .status)" "count=5 status=pass"
+  "count=$(receipt_count) status=$(recorded .status)" "count=5 status=pass"
 
 echo "## Anything else is not one test run"
 for command in 'make test:unit:rust; echo done' 'make test:unit:rust && echo done' \
@@ -144,6 +161,26 @@ for code in null '"0"' true 1.5 2147483648 -2147483649; do
     "{\"tool_response\":{\"exit_code\":$code,\"stdout\":\"\",\"stderr\":\"\"}}" unobserved
 done
 check_response 'missing response' '{}' unobserved
+
+echo "## Receipt selection follows the invocation, not filename order"
+mv "$RECEIPTS" "$R/.agents/state/previous-receipts"
+mkdir -p "$RECEIPTS" "$R/fixed-time"
+cat > "$R/fixed-time/date" <<'DATE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == +%s ]]; then printf '1700000000\n'
+else exec "$RECEIPT_REAL_DATE" "$@"; fi
+DATE
+chmod +x "$R/fixed-time/date"
+RECEIPT_REAL_DATE="$(command -v date)" PATH="$R/fixed-time:$PATH" \
+  run_hook PostToolUse 'make test:unit:rust' '{"tool_response":{"exit_code":2,"output":"old failure"}}'
+generated="$(find "$RECEIPTS" -name '*.json')"
+mv "$generated" "$RECEIPTS/1700000000-99999-0.json"
+cp "$RECEIPTS/1700000000-99999-0.json" "$RECEIPTS/1700000000-100000-0.json"
+RECEIPT_REAL_DATE="$(command -v date)" PATH="$R/fixed-time:$PATH" \
+  run_hook PostToolUse 'make test:unit:rust' '{"tool_response":{"exit_code":0,"output":"new success"}}'
+check_eq "same-second receipts across PID widths select this invocation" \
+  "$(recorded '.status + "/" + (.exit_code | tostring)')" 'pass/0'
+check_eq "the fixture contains two old receipts and one new receipt" "$(receipt_count)" 3
 
 rm -rf "$R"
 echo

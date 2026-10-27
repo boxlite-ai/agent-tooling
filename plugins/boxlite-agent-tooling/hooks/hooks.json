@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/cancel-verdict-audit.sh\""
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/cancel-verdict-audit.sh\""
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\"",
             "asyncRewake": true,
             "timeout": 3600
           }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\""
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\""
           }
         ]
       }
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/preflight-design-doc.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/preflight-design-doc.sh\"",
             "statusMessage": "Checking design document before code edits",
             "timeout": 45
           }
@@ -49,12 +49,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/preflight-commit-push.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/preflight-commit-push.sh\"",
             "statusMessage": "Checking commit and push audit"
           },
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/preflight-pr-review.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/preflight-pr-review.sh\"",
             "statusMessage": "Checking PR review acknowledgement"
           }
         ]
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
             "timeout": 10
           }
         ]
@@ -76,12 +76,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/post-remote-write-watch.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/post-remote-write-watch.sh\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/record-test-run.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/record-test-run.sh\"",
             "timeout": 15
           }
         ]
@@ -91,7 +91,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
             "timeout": 10
           }
         ]
@@ -103,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/record-test-run.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/record-test-run.sh\"",
             "timeout": 15
           }
         ]
@@ -114,7 +114,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/stop-gate.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/stop-gate.sh\"",
             "statusMessage": "Checking verdict proof",
             "timeout": 3660
           }
@@ -126,12 +126,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/record-api-failure.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/record-api-failure.sh\"",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "/usr/bin/env bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/resume-after-api-failure.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/resume-after-api-failure.sh\"",
             "asyncRewake": true,
             "timeout": 30
           }

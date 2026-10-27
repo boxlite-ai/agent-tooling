@@ -2,7 +2,7 @@
 # Tests for .agents/hooks/audit/run-verdict-audit.sh (the harness-neutral audit runner).
 #
 # Contract:
-#   - resolves VERDICT_AUDITOR_CMD first (stdin = audit prompt), else claude CLI
+#   - resolves VERDICT_AUDITOR_CMD first, else the host CLI (Claude-first if unknown)
 #   - succeeds (exit 0) only when a FRESH, well-formed dossier lands
 #   - exit 1 when the runner ran but produced no dossier
 #   - exit 2 when no runner is available / no transcript arg

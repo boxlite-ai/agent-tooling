@@ -2,25 +2,14 @@
 # Which coding agent is invoking this hook right now.
 # Source this file; it performs no work on load.
 #
-# The signal
-# ----------
-# Each host injects its own name for the plugin root into the environment of the hook
-# process it spawns, and every wired command in hooks/hooks.json and
-# hooks/codex-hooks.json already resolves it the same way:
+# Each host manifest sets BOXLITE_HOOK_HOST on every command, replacing inherited
+# markers. Codex exports both plugin-root names as aliases; roots alone cannot
+# distinguish that from nesting. Claude's manifest prefers its own root when loading
+# scripts. Generic hooks explicitly identify as unknown. This is routing metadata,
+# not authorization or runtime attestation.
 #
-#     ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}      Codex first, Claude Code second
-#
-# The scope is one invocation. The interactive session does not carry these names, so
-# nothing downstream of it — the Bash tool, a git hook, a shelled-out CLI, a nested
-# agent — inherits a value and mistakes itself for its parent.
-#
-# Naming a host requires exactly ONE of those names. The root expression breaks a tie
-# because it must load libraries from somewhere; this must not, because the two
-# questions differ. `${PLUGIN_ROOT:-...}` asks which tree to read. This asks who is
-# calling, and with both names present that is genuinely unanswerable: one host nested
-# inside another leaves its own root in the environment the inner hook inherits, so a
-# preference either way eventually hands someone the other host's route. Answering
-# `unknown` prints every route instead, which every host can act on.
+# Legacy callers without a marker retain single-root inference. Both roots remain
+# unknown there: equal roots can mean either aliases or same-installation nesting.
 #
 # Signals that look right and are not
 # -----------------------------------
@@ -57,7 +46,7 @@
 # with an unexported local of the same name is then routed as the wrong host. A single
 # `declare -p NAME` cannot be forged that way — the value can only appear after the
 # attribute field, never in front of it.
-hook_host_is_env_root() {  # $1 = variable name
+hook_host_is_env_value() {  # $1 = variable name
   local declaration attributes
   [[ -n "${!1:-}" ]] || return 1
   declaration="$(declare -p "$1" 2>/dev/null)" || return 1
@@ -69,14 +58,17 @@ hook_host_is_env_root() {  # $1 = variable name
 
 hook_host_kind() {  # -> claude | codex | unknown
   local codex_root=false claude_root=false
-  hook_host_is_env_root PLUGIN_ROOT && codex_root=true
-  hook_host_is_env_root CLAUDE_PLUGIN_ROOT && claude_root=true
+  if hook_host_is_env_value BOXLITE_HOOK_HOST; then
+    case "$BOXLITE_HOOK_HOST" in
+      claude|codex) printf '%s' "$BOXLITE_HOOK_HOST" ;;
+      *) printf 'unknown' ;;
+    esac
+    return 0
+  fi
+  hook_host_is_env_value PLUGIN_ROOT && codex_root=true
+  hook_host_is_env_value CLAUDE_PLUGIN_ROOT && claude_root=true
   if [[ "$codex_root" == true && "$claude_root" == true ]]; then
-    # Both names exported is not a tie to be broken, it is a caller that cannot be
-    # identified. One host nested inside another leaves its own root in the
-    # environment the inner hook inherits, so whichever name were preferred here
-    # would hand somebody the other host's route — the single failure this accessor
-    # exists to prevent. `unknown` prints every route, which each host can act on.
+    # No manifest marker: aliases and nesting are indistinguishable.
     printf 'unknown'
   elif [[ "$codex_root" == true ]]; then
     printf 'codex'

@@ -39,7 +39,7 @@
 #           whole-line "done.", a line-initial "Verified …") -> block. 10.7% of turns.
 #        C. the model (5-10s)    — everything else. "Is this a conclusion the reader
 #           must take on trust, with nothing shown that produced it?" A
-#           fast model (haiku) answers YES/NO; when no model is reachable the static
+#           host's model answers YES/NO; when no model is reachable the static
 #           pattern list below decides (deterministic fallback, e.g. sessions without
 #           a model CLI). YES -> run the independent audit inside this Stop invocation;
 #           PASS never reaches the model, FAIL blocks with concise findings. NO -> allow
@@ -1183,14 +1183,30 @@ capture_bounded_command() {  # stdin destination max-bytes timeout-seconds fixed
   fi
 }
 
+# shellcheck disable=SC2329 # Invoked by capture_bounded_command through its argv.
+classify_with_codex() { # scratch directory; stdin = triage instructions and turn
+  local codex_bin
+  # Discovery probes run inside capture_bounded_command's deadline and process group.
+  # shellcheck source=../../lib/codex-cli.sh
+  source "$tooling_root/.agents/lib/codex-cli.sh" || return 1
+  codex_bin="$(codex_cli_find)" || return 1
+  "$codex_bin" --ask-for-approval never exec \
+    --disable hooks --disable shell_tool --disable multi_agent \
+    --ignore-user-config --sandbox read-only --ephemeral \
+    --skip-git-repo-check --cd "$1" -c project_doc_max_bytes=0 -
+}
+
 should_audit() {  # stdin-less; uses $1 as the stripped message; echoes YES/NO/UNKNOWN
   local msg="$1" out="" classifier_dir classifier_input classifier_output
-  local classifier_output_identity=""
+  local classifier_output_identity="" audit_host=""
   # An exact `false` override is an explicit offline sentinel: its only possible result
   # is UNKNOWN, so avoid a supervised process launch and its teardown entirely.
   if [[ "${VERDICT_CLASSIFIER_CMD:-}" == false ]]; then
     echo UNKNOWN
     return 0
+  fi
+  if [[ -z "${VERDICT_CLASSIFIER_CMD:-}" ]]; then
+    audit_host="$(hook_host_kind)" || { echo UNKNOWN; return 0; }
   fi
   classifier_dir="$(mktemp -d \
     "${TMPDIR:-/tmp}/boxlite-verdict-classifier.XXXXXX" 2>/dev/null)" || {
@@ -1213,7 +1229,7 @@ should_audit() {  # stdin-less; uses $1 as the stripped message; echoes YES/NO/U
           override bash -c "$VERDICT_CLASSIFIER_CMD"; then
       out="$(classifier_answer <"$classifier_output")"
     fi
-  elif command -v claude >/dev/null 2>&1; then
+  elif [[ "$audit_host" != codex ]] && command -v claude >/dev/null 2>&1; then
     # Safe mode retains OAuth/keychain auth while dropping project/plugin/memory/hook
     # context. The custom system prompt + empty tools keep this a binary classifier;
     # --name also suppresses Claude Code's separate title-generation model request.
@@ -1224,6 +1240,14 @@ should_audit() {  # stdin-less; uses $1 as the stripped message; echoes YES/NO/U
           fixed claude -p --safe-mode --tools "" --system-prompt "$triage_prompt" \
             --effort low --name verdict-classifier --no-session-persistence \
             --model claude-haiku-4-5-20251001; then
+      out="$(classifier_answer <"$classifier_output")"
+    fi
+  elif [[ "$audit_host" == codex ]]; then
+    if printf '%s\n\n<message>\n%s\n</message>\n' "$triage_prompt" "$msg" \
+        | verdict_audit_write_exclusive_regular "$classifier_input" \
+       && capture_bounded_command "$classifier_input" "$classifier_output" \
+          "$classifier_output_max_bytes" "$classifier_timeout_seconds" \
+          fixed classify_with_codex "$classifier_dir"; then
       out="$(classifier_answer <"$classifier_output")"
     fi
   fi

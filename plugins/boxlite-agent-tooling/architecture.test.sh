@@ -23,6 +23,7 @@ DOC="$PLUGIN/ARCHITECTURE.md"
 STOP_GATE_SCRIPTS=("$PLUGIN/.agents/hooks/audit/preflight-verdict-check.sh")
 CLAUDE_HOOKS="$PLUGIN/hooks/hooks.json"
 CODEX_HOOKS="$PLUGIN/hooks/codex-hooks.json"
+GENERIC_HOOKS="$PLUGIN/hooks/generic-hooks.json"
 
 pass=0
 fail=0
@@ -66,7 +67,7 @@ for rel in $(grep -oE '`(\.agents/(hooks|lib|watch|prompts)/[A-Za-z0-9_.-]+(/[A-
 done
 
 echo "== every wired or shipped hook script is on the map =="
-wired="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[]? | .command // empty' "$CLAUDE_HOOKS" "$CODEX_HOOKS" \
+wired="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[]? | .command // empty' "$CLAUDE_HOOKS" "$CODEX_HOOKS" "$GENERIC_HOOKS" \
   | grep -oE '\.agents/hooks/[A-Za-z0-9_./-]+' | sort -u)"
 shipped="$(cd "$PLUGIN" && find .agents/hooks -name '*.sh' ! -name '*.test.sh' | sort -u)"
 for script in $(printf '%s\n%s\n' "$wired" "$shipped" | sort -u); do

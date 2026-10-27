@@ -34,6 +34,10 @@ no-runner cases omit them. An unavailable `CODEX_BIN` disables desktop discovery
 outside PATH, and sentinel commands fail the suite on unintended model calls.
 Add required utilities to the fixture list instead of restoring the host PATH.
 
+Receipt tests select the path added by each hook invocation. Keep that selection
+state under the fixture's ignored directory: timestamp/PID sorting can choose an
+older receipt, and tracked helper files would change the tree being measured.
+
 ## Release maintenance
 
 Bump the generic, Claude, and Codex plugin manifests together with both version
@@ -111,6 +115,13 @@ Reload the plugin or start a new task before using the updated instructions.
 
 Example: a documentation-only PR selects before/after wording from the skill's
 inline illustration table. Verify the active installation exposes that table.
+
+### Current-host Stop rollout
+
+Version 0.1.34 makes Stop classification and auditing use the declared hook host.
+Host manifests replace inherited identity markers; generic consumers remain unknown.
+After adoption, reload the plugin or start a new session so the host loads the
+updated hook commands. See [audit routing](.agents/hooks/audit/README.md#runners).
 
 ### Verification boundaries
 

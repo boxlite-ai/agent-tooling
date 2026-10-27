@@ -17,8 +17,8 @@
 #   - Codex's declared skills/hooks paths reach the SAME files Claude Code's
 #     conventions discover, including after installation omits source symlinks.
 #     Claude/Copilot keep skills -> .agents/skills and agents -> .claude/agents.
-#   - Claude and Codex hook manifests stay behaviorally identical except for their
-#     background-delivery primitive: Claude uses asyncRewake so a 30-second escalation
+#   - Claude and Codex manifests normalize host identity and root preference before
+#     comparison. Their background primitives differ: Claude uses asyncRewake so an escalation
 #     wakes the model, while Codex uses async because its strict schema does not accept
 #     asyncRewake. Unknown keys still make Codex silently load no hooks at all.
 #   - …and except for events Codex has no concept of. Codex's hook-event set is CLOSED,
@@ -27,9 +27,9 @@
 #     CLAUDE_ONLY_EVENTS, wired only in hooks/hooks.json, and excluded from the twin
 #     comparison. Byte-equal twins were the right invariant while every event existed
 #     on both hosts; the moment one does not, enforcing equality is what breaks Codex.
-#   - Every wired command resolves the plugin root as ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}
-#     — Codex exports the first name, Claude Code the second. A bare single-host
-#     variable expands empty on the other host and the hook runs /nonexistent.
+#   - Every command declares its host and prefers that host's plugin root, retaining
+#     the alternate root as a fallback. Generic hooks declare unknown; aliases and
+#     inherited roots must not make a generic consumer impersonate another host.
 #   - Agent specs resolve on every route: Claude Code prefixes the frontmatter `name`
 #     with the plugin name, while Codex gets a schema-safe task name plus the exact
 #     spec path (subagent.sh doctrine). A rename can strand either host silently.
@@ -50,6 +50,7 @@ CLAUDE="$PLUGIN/.claude-plugin/plugin.json"
 CODEX="$PLUGIN/.codex-plugin/plugin.json"
 CLAUDE_HOOKS="$PLUGIN/hooks/hooks.json"
 CODEX_HOOKS="$PLUGIN/hooks/codex-hooks.json"
+GENERIC_HOOKS="$PLUGIN/hooks/generic-hooks.json"
 CLAUDE_MKT="$REPO_ROOT/.claude-plugin/marketplace.json"
 CODEX_MKT="$REPO_ROOT/.agents/plugins/marketplace.json"
 COPILOT_MKT="$REPO_ROOT/.github/plugin/marketplace.json"
@@ -316,20 +317,23 @@ case "$routing" in
 esac
 
 echo
-echo "## Host hooks differ only at the background-delivery boundary"
+echo "## Host hooks preserve behavior across host-specific entry points"
 claude_hooks_file="$(resolve_file "$CLAUDE_HOOKS")"
 [ -n "$claude_hooks_file" ] && ok "conventional hooks/hooks.json exists (claude discovery)" \
                             || bad "conventional hooks/hooks.json exists (claude discovery)"
 codex_hooks_file="$(resolve_file "$CODEX_HOOKS")"
 [ -n "$codex_hooks_file" ] && ok "codex hooks file exists" \
                            || bad "codex hooks file exists"
+generic_hooks_file="$(resolve_file "$GENERIC_HOOKS")"
 for pair in "generic:$(jq -r .hooks "$GENERIC")" "codex:$(jq -r .hooks "$CODEX")"; do
   label="${pair%%:*}"; declared="${pair#*:}"
   got="$(resolve_file "$PLUGIN/$declared")"
-  [ "$got" = "$codex_hooks_file" ] && ok "$label manifest hooks resolve to hooks/codex-hooks.json" \
-                                   || bad "$label manifest hooks resolve to hooks/codex-hooks.json (got: ${got:-unresolvable})"
+  expected="$codex_hooks_file"
+  [[ "$label" != generic ]] || expected="$generic_hooks_file"
+  [ -n "$expected" ] && [ "$got" = "$expected" ] && ok "$label manifest resolves its own hook file" \
+    || bad "$label manifest resolves its own hook file (got: ${got:-unresolvable})"
 done
-for pair in "claude:$CLAUDE_HOOKS:asyncRewake" "codex:$CODEX_HOOKS:async"; do
+for pair in "claude:$CLAUDE_HOOKS:asyncRewake" "codex:$CODEX_HOOKS:async" "unknown:$GENERIC_HOOKS:async"; do
   label="${pair%%:*}"; rest="${pair#*:}"; file="${rest%%:*}"; async_key="${rest##*:}"
   jq -e . "$file" >/dev/null 2>&1 && ok "$label: valid JSON" || bad "$label: valid JSON"
   unknown="$(jq -r --arg async_key "$async_key" '
@@ -399,17 +403,25 @@ else
 fi
 
 # Twin comparison, with the Claude-only events and tool matcher removed: everything Codex CAN run
-# must still be byte-identical after async normalization.
+# must still be byte-identical after host-entry and async normalization.
 claude_normalized="$(jq -Sc --argjson claude_only "$claude_only_json" '
   .hooks |= with_entries(select(.key as $k | $claude_only | index($k) | not))
   | .hooks |= with_entries(.value |= map(select(.matcher != "AskUserQuestion")))
   | .hooks.SubagentStart[].hooks[] |=
     (if has("asyncRewake") then .async = .asyncRewake | del(.asyncRewake) else . end)
+  | (.hooks[][].hooks[].command) |=
+    (sub("BOXLITE_HOOK_HOST=claude"; "BOXLITE_HOOK_HOST=codex")
+     | split("${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}") | join("${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"))
 ' "$CLAUDE_HOOKS")"
 codex_normalized="$(jq -Sc . "$CODEX_HOOKS")"
 [ "$claude_normalized" = "$codex_normalized" ] \
   && ok "hook manifests normalize to the same behavior" \
   || bad "hook manifests normalize to the same behavior"
+generic_normalized="$(jq -Sc '(.hooks[][].hooks[].command) |=
+  sub("BOXLITE_HOOK_HOST=unknown"; "BOXLITE_HOOK_HOST=codex")' "$GENERIC_HOOKS")"
+[ "$generic_normalized" = "$codex_normalized" ] \
+  && ok "generic hooks preserve event, command, and timeout behavior" \
+  || bad "generic hooks preserve event, command, and timeout behavior"
 # The Stop hook now owns the synchronous audit. Its host timeout must outlive the
 # runner's entire lease ceiling, not merely its default model timeout.
 # shellcheck source=.agents/lib/verdict-audit-state.sh
@@ -456,13 +468,20 @@ case "$user_prompt_commands" in
 esac
 
 echo
-echo "## Every wired command runs on either host"
-ROOT_EXPR='${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}'
+echo "## Every wired command declares its host and selects its root"
+for pair in "claude:$CLAUDE_HOOKS" "codex:$CODEX_HOOKS" "unknown:$GENERIC_HOOKS"; do
+label="${pair%%:*}"; file="${pair#*:}"
+if [[ "$label" == claude ]]; then ROOT_EXPR='${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}'
+else ROOT_EXPR='${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}'; fi
 while IFS= read -r cmd; do
   short="$(printf '%s' "$cmd" | sed -n 's/.*\/\.agents\/hooks\///p' | tr -d '"')"
   case "$cmd" in
-    *"$ROOT_EXPR"*) ok "resolves the root for both hosts: ${short:-$cmd}" ;;
-    *)              bad "resolves the root for both hosts (got: $cmd)"; continue ;;
+    *"$ROOT_EXPR"*) ok "$label prefers its own root: ${short:-$cmd}" ;;
+    *)              bad "$label prefers its own root (got: $cmd)"; continue ;;
+  esac
+  case "$cmd" in
+    "/usr/bin/env BOXLITE_HOOK_HOST=$label bash "*) ok "$label overrides inherited host identity" ;;
+    *) bad "$label overrides inherited host identity (got: $cmd)" ;;
   esac
   resolved="${cmd/"$ROOT_EXPR"/$PLUGIN}"
   if [[ "$resolved" =~ \"([^\"]+)\" ]]; then
@@ -472,7 +491,8 @@ while IFS= read -r cmd; do
   else
     bad "command quotes its script path (got: $cmd)"
   fi
-done < <(jq -r '.hooks[][].hooks[].command' "$CLAUDE_HOOKS" "$CODEX_HOOKS" | sort -u)
+done < <(jq -r '.hooks[][].hooks[].command' "$file" | sort -u)
+done
 
 echo
 echo "RESULT: $pass passed, $fail failed"

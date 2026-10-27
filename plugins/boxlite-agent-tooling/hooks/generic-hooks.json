@@ -1,0 +1,93 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/cancel-verdict-audit.sh\""
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\"",
+            "async": true,
+            "timeout": 3600
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Write|Edit|MultiEdit|NotebookEdit|apply_patch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/preflight-design-doc.sh\"",
+            "statusMessage": "Checking design document before code edits",
+            "timeout": 45
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/preflight-commit-push.sh\"",
+            "statusMessage": "Checking commit and push audit"
+          },
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/preflight-pr-review.sh\"",
+            "statusMessage": "Checking PR review acknowledgement"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/post-remote-write-watch.sh\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/record-test-run.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/stop-gate.sh\"",
+            "statusMessage": "Checking verdict proof",
+            "timeout": 3660
+          }
+        ]
+      }
+    ]
+  }
+}

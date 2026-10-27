@@ -14,12 +14,15 @@
 # Model resolution (same seam pattern as the triage classifier):
 #   1. VERDICT_AUDITOR_CMD — full override; invoked with the audit prompt on stdin;
 #      must leave a dossier behind. Per-harness config, tests stub it.
-#   2. claude CLI — headless with the auditor spec as system prompt, tools
+#   2. Current host's CLI, identified by the shared hook_host_kind accessor.
+#      Unknown shell callers retain Claude-then-Codex executable discovery.
+#      A known host never falls through to the other provider.
+#      Claude — headless with the auditor spec as system prompt, tools
 #      whitelisted, hooks disabled (no nested gates), 15-minute cap.
-#   3. Codex CLI — read-only, hooks disabled, ephemeral, same timeout. Codex writes
+#      Codex — read-only, hooks disabled, ephemeral, same timeout. Codex writes
 #      only its final response through the host-owned --output-last-message channel;
 #      the parent runner validates and publishes those bytes.
-#   4. Neither → exit 2 with instructions (the caller sees why).
+#   3. No matching CLI → exit 2 with instructions (the caller sees why).
 #
 # Exit codes: 0 dossier written · 1 audit ran but no dossier · 2 no runner available ·
 #             130 canceled by a newer user prompt/INT · 143 canceled by TERM.
@@ -882,26 +885,6 @@ strip_frontmatter() {  # $1 = spec file
   awk 'BEGIN{fm=0} NR==1 && /^---$/{fm=1; next} fm==1 && /^---$/{fm=2; next} fm!=1' "$1"
 }
 
-find_codex_bin() {
-  if [[ -n "${CODEX_BIN:-}" ]]; then
-    [[ -x "$CODEX_BIN" ]] || return 1
-    "$CODEX_BIN" --version >/dev/null 2>&1 || return 1
-    printf '%s\n' "$CODEX_BIN"
-    return 0
-  fi
-
-  local candidate from_path=""
-  from_path="$(command -v codex 2>/dev/null || true)"
-  for candidate in "$from_path" /Applications/Codex.app/Contents/Resources/codex; do
-    [[ -n "$candidate" && -x "$candidate" ]] || continue
-    if "$candidate" --version >/dev/null 2>&1; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
-
 # Codex's read-only sandbox deliberately cannot create the throwaway Git index used by
 # the auditor procedure. Capture that one write-requiring value in the parent, before
 # launch, so the auditor can keep the whole workspace read-only without guessing the
@@ -937,6 +920,12 @@ if [[ ! -r "$subagent_lib" ]]; then
 fi
 # shellcheck source=../../lib/subagent.sh
 source "$subagent_lib"
+# shellcheck source=../../lib/codex-cli.sh
+source "$tooling_root/.agents/lib/codex-cli.sh" || exit 2
+audit_host="$(hook_host_kind)" || {
+  printf 'run-verdict-audit.sh: shared host detector is unavailable.\n' >&2
+  exit 2
+}
 expected_branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || printf '')"
 expected_head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || printf '')"
 if [[ "$session_scope" != "-" ]]; then
@@ -1197,7 +1186,7 @@ if [[ -n "${VERDICT_AUDITOR_CMD:-}" ]]; then
     echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
     exit 1
   fi
-elif command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
+elif [[ "$audit_host" != codex ]] && command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
   audit_started=true
   remove_owned_verdict
   rm -f "$audit_output_file"
@@ -1217,7 +1206,7 @@ elif command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
     echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
     exit 1
   fi
-elif codex_bin="$(find_codex_bin)" && [[ -r "$spec_file" ]]; then
+elif [[ "$audit_host" != claude ]] && codex_bin="$(codex_cli_find)" && [[ -r "$spec_file" ]]; then
   audit_started=true
   remove_owned_verdict
   rm -f "$audit_output_file"
@@ -1247,10 +1236,11 @@ elif codex_bin="$(find_codex_bin)" && [[ -r "$spec_file" ]]; then
     exit 1
   fi
 else
+  printf 'run-verdict-audit.sh: no auditor runner available for host %s.\n' "$audit_host" >&2
   cat >&2 <<'EOF'
-run-verdict-audit.sh: no auditor runner available.
 Set VERDICT_AUDITOR_CMD (stdin = audit prompt; it must write the requested dossier path)
-or install the Claude or Codex CLI. As a last resort, execute the procedure in
+or install the current host's CLI (Claude or Codex for unknown callers).
+As a last resort, execute the procedure in
 .claude/agents/verdict-auditor.md with any capable model and have IT write the dossier.
 EOF
   exit 2
