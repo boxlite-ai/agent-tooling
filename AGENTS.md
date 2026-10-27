@@ -6,7 +6,7 @@ Read [README](README.md), [Contributing](plugins/boxlite-agent-tooling/CONTRIBUT
 [Architecture](plugins/boxlite-agent-tooling/ARCHITECTURE.md).
 
 Plugin/reusable code: `plugins/boxlite-agent-tooling/`; consumer bootstraps: `templates/`.
-Manifests use symlinks: `skills` → `.agents/skills`, `agents` → `.claude/agents`.
+Aliases: `skills` → `.agents/skills`, `agents` → `.claude/agents`; Codex: `.agents/skills`.
 
 ## Compatibility
 

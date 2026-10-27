@@ -14,9 +14,9 @@
 #   - The three plugin manifests agree on name/version/description, and the
 #     marketplaces advertise the version that actually ships. Versions here are not
 #     cosmetic: consumers pin installations by them.
-#   - Codex's declared skills/hooks paths resolve to the SAME files Claude Code's
-#     conventions discover, through the symlinks AGENTS.md prescribes
-#     (skills -> .agents/skills, agents -> .claude/agents).
+#   - Codex's declared skills/hooks paths reach the SAME files Claude Code's
+#     conventions discover, including after installation omits source symlinks.
+#     Claude/Copilot keep skills -> .agents/skills and agents -> .claude/agents.
 #   - Claude and Codex hook manifests stay behaviorally identical except for their
 #     background-delivery primitive: Claude uses asyncRewake so a 30-second escalation
 #     wakes the model, while Codex uses async because its strict schema does not accept
@@ -153,7 +153,7 @@ done
 
 echo
 echo "## Every host reaches the same skills tree"
-# AGENTS.md: hosts point manifests at the symlink names, never at copies.
+# Hosts share canonical assets; Claude/Copilot reach them through aliases.
 [ "$(readlink "$PLUGIN/skills")" = ".agents/skills" ] \
   && ok "skills is a symlink to .agents/skills" \
   || bad "skills is a symlink to .agents/skills (got: $(readlink "$PLUGIN/skills" || echo 'not a symlink'))"
@@ -241,6 +241,49 @@ shipped_auditors="$(find "$PLUGIN/.claude/agents" -maxdepth 1 -name '*-auditor.m
 jq -e 'has("agents") | not' "$CODEX" >/dev/null 2>&1 \
   && ok "codex manifest declares no agents key (specs travel by path — see header)" \
   || bad "codex manifest declares no agents key (specs travel by path — see header)"
+
+echo
+echo "## Installed Codex assets survive omitted symlinks"
+installed_package="$(mktemp -d)" || exit 2
+trap 'rm -rf -- "$installed_package"' EXIT
+# Match the upstream install boundary: copy regular files, without following links.
+# https://github.com/openai/codex/blob/2cab11ca40aad193382348a7bda46da2fc47596a/codex-rs/core-plugins/src/store.rs#L736-L759
+find "$PLUGIN" -type f -print0 > "$installed_package/source-files" || exit 2
+while IFS= read -r -d '' source_file; do
+  relative_file="${source_file#"$PLUGIN"/}"
+  mkdir -p "$installed_package/$(dirname "$relative_file")" &&
+    cp -p "$source_file" "$installed_package/$relative_file" || exit 2
+done < "$installed_package/source-files"
+if [[ ! -e "$installed_package/skills" && ! -L "$installed_package/skills" &&
+      ! -e "$installed_package/agents" && ! -L "$installed_package/agents" ]]; then
+  ok "installed fixture has neither source alias"
+else
+  bad "installed fixture has neither source alias"
+fi
+installed_skills="$(jq -er '.skills | strings' "$installed_package/.codex-plugin/plugin.json")" || exit 2
+for skill_dir in "$PLUGIN"/.agents/skills/*/; do
+  [[ -d "$skill_dir" ]] || continue
+  skill_name="$(basename "$skill_dir")"
+  if diff -r "$skill_dir" "$installed_package/$installed_skills/$skill_name" >/dev/null 2>&1; then
+    ok "installed Codex skill and resources match: $skill_name"
+  else
+    bad "installed Codex skill and resources match: $skill_name"
+  fi
+done
+for source_auditor in "$PLUGIN"/.claude/agents/*.md; do
+  [[ -f "$source_auditor" ]] || continue
+  stem="$(basename "$source_auditor" .md)"
+  installed_spec="$(
+    # shellcheck source=.agents/lib/subagent.sh
+    source "$installed_package/.agents/lib/subagent.sh"
+    subagent_spec_path "$stem" "$installed_package"
+  )" || exit 2
+  if cmp -s "$source_auditor" "$installed_spec"; then
+    ok "installed Codex auditor resolves without alias: $stem"
+  else
+    bad "installed Codex auditor resolves without alias: $stem"
+  fi
+done
 
 plugin_name="$(jq -r .name "$CLAUDE")"
 routing="$(

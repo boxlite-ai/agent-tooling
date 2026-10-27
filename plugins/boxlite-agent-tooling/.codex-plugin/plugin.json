@@ -9,7 +9,7 @@
   "repository": "https://github.com/boxlite-ai/agent-tooling",
   "license": "Apache-2.0",
   "keywords": ["agent-tooling", "boxlite", "codex", "claude", "copilot"],
-  "skills": "./skills/",
+  "skills": "./.agents/skills/",
   "hooks": "./hooks/codex-hooks.json",
   "interface": {
     "displayName": "BoxLite Agent Tooling",

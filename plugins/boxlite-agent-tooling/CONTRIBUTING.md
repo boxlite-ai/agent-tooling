@@ -57,6 +57,11 @@ them. Compare `.agent-tooling/install.sh`, `claude-plugin-bootstrap.sh`, and
 changes while preserving consumer customizations. Verify Claude records by exact
 `projectPath`: a successful update in one linked worktree can leave another stale.
 
+For Codex packaging changes, run host parity's copy-without-symlinks checks, then
+install with the real CLI in an empty isolated Codex home. Verify fresh
+`skills/list` and `hooks/list` results against shipped assets; repeat after
+reinstall without editing the installed cache.
+
 ### PR-size choice rollout
 
 Version 0.1.29 packages the **Bypass limit** / **Split PR** flow. Verify both adopted

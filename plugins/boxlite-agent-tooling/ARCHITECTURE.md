@@ -849,10 +849,17 @@ paths; for example, "Use boxlite-visualize to show the cloud deployment architec
 The skill produces `diagram.md` and `evidence.json`, then validates rendering, fit,
 and source traceability into `validation.json` before visual inspection.
 
+Skills live in `.agents/skills/`; Claude and Copilot use the `skills/` symlink.
+Codex declares the canonical directory directly so skills and references survive
+cache installation without symlinks. Its auditor routes already use
+`.claude/agents/` directly; Claude and Copilot keep the `agents/` alias.
+`host-parity.test.sh` checks both source resolution and a copy containing only
+regular files, including each skill's resources and canonical auditor paths.
+
 The `boxlite-clean-code` skill keeps essential coding decisions, a reversible
 refactoring loop, and verification guidance in a compact `SKILL.md`. Its example
-index loads topic addons under `references/` only when relevant. The existing
-`skills/` symlink exposes the complete directory to plugin hosts; standalone
+index loads topic addons under `references/` only when relevant. Host skill paths
+expose the complete directory; standalone
 sharing copies that directory, including references. It preserves the receiving
 repository's workflow and permission boundaries and needs no plugin scripts.
 Shared workflow, shell guidance, fixer prompts, and audit criteria reference it by
@@ -865,12 +872,12 @@ highlighting, guarded batch application, and reviewed-plan caching. Long scopes 
 use authorized text-only workers; one owner controls the destination. Cached plans
 require matching live text, sentence fingerprints, scope, and selection settings;
 they contain data and do not automatically restore marks after reload.
-The shared `skills/` alias exposes both. Codex UI
+The shared skill directory exposes both. Codex UI
 metadata uses the same skill name. No browser tool or runtime dependency is required
 for text selection.
 
 `boxlite-design-doc` owns research requirements, the design outline, and design review.
-Hosts discover it through the same `skills/` alias; consumers name the skill without
+Hosts discover it through their skill paths; consumers name the skill without
 copying its rules. The full Test section and reproduce-before-fix remain in workflow guidance.
 
 `boxlite-pr-preparation` keeps four steps in one entrypoint: inspect inputs, choose
