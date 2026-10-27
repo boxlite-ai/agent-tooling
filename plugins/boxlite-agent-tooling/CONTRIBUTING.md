@@ -1,15 +1,21 @@
 # Contributing
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for entry points, invariants, and vocabulary.
+
+## Instruction ownership
+
 Follow these shared sources; this guide adds contributor commands and examples:
 
 | Required guidance | Canonical source |
 | --- | --- |
 | Research and design docs | [boxlite-design-doc](.agents/skills/boxlite-design-doc/SKILL.md) |
-| PR size, splitting, stacks, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
+| PR size, splitting, stacks, documentation, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
 | Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
 | PR preparation and examples | [boxlite-pr-preparation](.agents/skills/boxlite-pr-preparation/SKILL.md) |
+| PR output outline | [PR template](../../.github/PULL_REQUEST_TEMPLATE.md) |
+| PR structure validation | [Description checker](.agents/lib/pr-description.sh); [contract](ARCHITECTURE.md#design-documents) |
+| Explanation review | [Shared review question](.agents/prompts/pr/pr-review-question.md) |
 
 Reference skills by name; do not copy their rules into other
 documents or hook messages. Keep task-specific requirements with their tasks, and regenerate
@@ -113,19 +119,9 @@ The preflight hook's denials point here as `CONTRIBUTING.md #commit--pr-messages
 
 ### Pull request size
 
-Above 400 added code lines, ask the user to choose **Bypass limit** or **Split PR**.
-Bypass requires no written justification and permits the current diff through the
-size check. Design, writing, and human-review checks still apply. Use the
-[tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md)
-when splitting; see [size enforcement](ARCHITECTURE.md#pr-size-and-stacks) for hook coverage.
-
-The 400-line guideline counts added code, including scripts, configuration, and generated
-source. Deletions, `*.spec.ts`, `*_test.go`, files under `tests` directories,
-recognized documentation, assets/data, and lockfiles are excluded; unfamiliar
-files count. A PR with 400 added code lines and 2,000 Markdown lines fits;
-401 added code lines trigger the choice. No response within five minutes defaults
-to splitting. A split choice persists without repeated questions; only an explicit
-human request permits reconsideration. Changes to the diff require a fresh choice.
+Read and apply the [PR-size policy](guidance/workflow.md#pr-size-and-decomposition).
+Use the [tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md) when
+splitting; see [size enforcement](ARCHITECTURE.md#pr-size-and-stacks) for hook coverage.
 
 For managed native questions in local Claude sessions, launch with:
 
@@ -138,8 +134,6 @@ for supported modes, fallback questions, deadlines, and renewal behavior.
 
 Example: a 612-line PR presents **Bypass limit** and **Split PR**. Selecting bypass
 records that choice for its exact diff; no explanation is required.
-
-Never pre-fill or invent the user's selection.
 
 ### Pull request descriptions
 
@@ -160,13 +154,9 @@ Notion designs must keep their text in top-level blocks; unread child blocks are
 Use the full registered URL in the PR body as plain text or a Markdown link.
 See [design-document enforcement](ARCHITECTURE.md#design-documents) for validation and tool boundaries.
 
-- Apply [boxlite-pr-preparation](.agents/skills/boxlite-pr-preparation/SKILL.md)
-  for descriptions, including drafts and revisions. It owns example selection,
-  verification reporting, and the check against the current diff.
-- The local PR gate checks for a populated level-two **How it works** section.
-  Hidden comments, quoted sections, empty sections, and placeholder-only text such
-  as `TBD` fail, including repeated or mixed placeholders. If headings repeat, one
-  section must qualify independently. Reviewers assess example relevance and accuracy.
+Read and apply [boxlite-pr-preparation](.agents/skills/boxlite-pr-preparation/SKILL.md)
+for descriptions, including drafts and revisions. See the [structural checker
+contract](ARCHITECTURE.md#design-documents) for publication checks and their limits.
 
 Start from the [PR template](../../.github/PULL_REQUEST_TEMPLATE.md) when useful.
 Prepare generated text first, then pass literal inline text using safe shell quoting:
@@ -175,9 +165,8 @@ See [GitHub writing enforcement](ARCHITECTURE.md#github-writing) for accepted in
 
 ### Examples for review
 
-The [illustration table](.agents/skills/boxlite-pr-preparation/SKILL.md#2-choose-the-smallest-useful-illustration)
-covers fixes, features/APIs, refactors, UI, configuration/CI, and documentation.
-The skill owns this guidance; this anchor remains for existing links.
+Read the [illustration table](.agents/skills/boxlite-pr-preparation/SKILL.md#2-choose-the-smallest-useful-illustration)
+when choosing an example. This anchor remains for existing links.
 
 ### Author review acknowledgment
 

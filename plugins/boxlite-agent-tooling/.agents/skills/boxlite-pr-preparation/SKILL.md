@@ -8,8 +8,9 @@ description: Draft or revise PR descriptions with concrete examples and honest v
 ## Purpose and scope
 
 Help reviewers understand why the change exists, how it works, and what evidence
-supports it. Apply `boxlite-writing` and the repository workflow to drafts, ready
-PRs, and description revisions. Keep review-only requests read-only.
+supports it. Apply `boxlite-writing`. For drafts, ready PRs, and description
+revisions, read and apply the [shared workflow](../../../guidance/workflow.md)
+and repository instructions before these steps. Keep review-only requests read-only.
 
 ## 1. Inspect the inputs
 
@@ -18,11 +19,8 @@ PRs, and description revisions. Keep review-only requests read-only.
 | Intended base and current diff | Exact scope of the change |
 | Relevant source and tests | Actual mechanism and resulting behavior |
 | Bound design | Intended outcome, constraints, and rationale |
-| Updated project documentation | Meaningful documentation matching the change |
+| Updated project documentation | Changed sections and their links |
 | Verification evidence | Commands, observed results, and coverage gaps |
-
-Measure the diff under the repository's PR-size policy before creation or update;
-resolve any required size choice. Early estimation remains part of implementation.
 
 ## 2. Choose the smallest useful illustration
 
@@ -58,7 +56,7 @@ Adapt these contents to the repository template:
 | Verification | Decisive command → observed result, including missing coverage |
 | Links | Full registered design URL, relevant source/tests, and changed project docs |
 
-For fixes, include the repository-required full-revert failure and restored-fix
+For fixes, report the workflow's full-revert failure and restored-fix
 result; disclose missing proof. Never present expected output as observed or reuse
 stale verification.
 
@@ -68,17 +66,16 @@ test counts.
 
 ## 4. Verify before delivery
 
-- Recheck explanation, illustration, links, and evidence against the final diff,
-  including drafts and description edits. Remove placeholders and superseded claims.
-- Check that linked project docs explain the changed behavior, usage, contracts,
-  or maintenance rationale.
+- Recheck explanation, illustration, linked source/tests/docs, and evidence against
+  the final diff, including drafts and description edits. Remove placeholders and
+  superseded claims.
 - Use `Fixes #<n>` only when the PR meets that issue's agreed acceptance criteria.
   Intermediate slices reference the tracking issue without closing it.
-- Apply the [review question](../../prompts/pr/pr-review-question.md).
+- Read and apply the [review question](../../prompts/pr/pr-review-question.md).
   Self-review cannot supply the human's acknowledgment.
 
 ## Authority
 
 Preparing a description grants no permission to commit, push, publish, or approve.
-For authorized publication, follow the existing [publication and acknowledgment
-procedures](../../../CONTRIBUTING.md#pull-request-descriptions) and disclosure rules.
+For authorized publication, read and apply the [publication and acknowledgment
+procedures](../../../CONTRIBUTING.md#pull-request-descriptions).
