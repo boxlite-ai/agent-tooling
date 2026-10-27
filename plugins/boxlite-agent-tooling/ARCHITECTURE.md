@@ -667,9 +667,13 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   Unexpected stream endings reconcile durable intent; degraded coverage is
   reported while bounded retries continue. Reuse only confirmed task-local PR schedules;
   preserve unrelated automations, explicit pauses, mutes, cancellations, and deadlines.
-  Missing scheduling support retains foreground delivery and reconciliation. Empty replies
-  and alert muting do not prevent scheduled task inputs. Registration and pending storage alone
-  do not prove delivery. New events get concise human-facing summaries.
+  Missing scheduling support retains foreground delivery and reconciliation. Consumers
+  omit routine status and acknowledgment prose when nothing new needs attention.
+  Host quiet completion and rendered reply suppression require separate verification;
+  empty script output alone proves neither. [#282](https://github.com/boxlite-ai/agent-tooling/issues/282)
+  tracks native-host delivery and silence. Empty replies and alert muting do not prevent
+  scheduled task inputs. Registration and pending storage alone do not prove delivery.
+  New events get concise human-facing summaries.
   Text-contract tests guard required instructions, not model obedience or live delivery.
 - Watcher to commands: `.agents/watch/pr-watch.sh` owns the external command group
   and its timeout/output monitors. Monitor cancellation uses KILL and wait because
