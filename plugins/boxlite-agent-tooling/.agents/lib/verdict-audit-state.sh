@@ -671,10 +671,26 @@ _verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-m
       $manifest = $build_manifest->(0, $keep_tools, $result_preview, $call_preview);
       $output = encode_utf8($encoder->encode($manifest));
     }
-    while (length($output) + 1 > $max_snapshot && $keep_tools > 0) {
-      $keep_tools--;
+    if (length($output) + 1 > $max_snapshot && $keep_tools > 0) {
+      my $too_many = $keep_tools;
+      $keep_tools = 0;
       $manifest = $build_manifest->(0, $keep_tools, $result_preview, $call_preview);
       $output = encode_utf8($encoder->encode($manifest));
+      # Each added record outweighs shrinking omission counters; fixed-preview
+      # sizes increase with the prefix. Keep the largest fitting encoded candidate.
+      if (length($output) + 1 <= $max_snapshot) {
+        while ($too_many - $keep_tools > 1) {
+          my $candidate = $keep_tools + int(($too_many - $keep_tools) / 2);
+          my $candidate_output = encode_utf8($encoder->encode(
+            $build_manifest->(0, $candidate, $result_preview, $call_preview)));
+          if (length($candidate_output) + 1 <= $max_snapshot) {
+            $keep_tools = $candidate;
+            $output = $candidate_output;
+          } else {
+            $too_many = $candidate;
+          }
+        }
+      }
     }
     if (length($output) + 1 > $max_snapshot) {
       $manifest = $build_manifest->(1, 0, $result_preview, $call_preview);
