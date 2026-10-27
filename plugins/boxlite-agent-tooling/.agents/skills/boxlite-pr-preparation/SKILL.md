@@ -5,43 +5,80 @@ description: Draft or revise PR descriptions with concrete examples and honest v
 
 # BoxLite PR Preparation
 
-Apply `boxlite-writing`. Prepare descriptions for drafts, ready PRs, and revisions.
-Keep review-only requests read-only; this workflow does not authorize publication.
+## Purpose and scope
 
-## Inspect
+Help reviewers understand why the change exists, how it works, and what evidence
+supports it. Apply `boxlite-writing` and the repository workflow to drafts, ready
+PRs, and description revisions. Keep review-only requests read-only.
 
-- Establish the intended base; read the current diff and relevant source/tests.
-  Identify the problem, resulting behavior, and mechanism or rationale.
-- Measure the diff under the repository's PR-size policy before creation or update;
-  resolve any required size choice. Early estimation remains part of implementation.
-- Find the bound design and meaningful project documentation changed by this PR.
-  Check the linked sections against the final diff.
+## 1. Inspect the inputs
 
-## Draft
+| Input | What to establish |
+| --- | --- |
+| Intended base and current diff | Exact scope of the change |
+| Relevant source and tests | Actual mechanism and resulting behavior |
+| Bound design | Intended outcome, constraints, and rationale |
+| Updated project documentation | Meaningful documentation matching the change |
+| Verification evidence | Commands, observed results, and coverage gaps |
 
-- State the problem and resulting behavior once; a file list does not explain a change.
-- Populate **How it works** with a minimal, concrete example explaining the mechanism
-  or rationale. Read [example formats](references/examples.md) when drafting this section.
-  For runnable examples, include prerequisites and the exact invocation.
-- Link relevant source/tests, the full registered design URL, and the changed project
-  documentation. Keep enough context in the description to understand the example.
-  Use repository-relative paths or verified repository URLs in the PR body;
-  keep machine-local evidence paths in the private handoff.
-- Report decisive verification as command → observed result. Label unrun examples
-  and expected output; never turn them into execution claims or reuse stale results.
-  For fixes, include the required full-revert failure and restored-fix result;
-  disclose missing proof.
-- Adapt the repository template. Omit work logs and exhaustive test counts.
-  Use `Fixes #<n>` only when this PR closes that issue; intermediate slices reference
-  the tracking issue without closing it. Close tracking issues only after their
-  agreed acceptance criteria are met.
+Measure the diff under the repository's PR-size policy before creation or update;
+resolve any required size choice. Early estimation remains part of implementation.
 
-## Before delivery
+## 2. Choose the smallest useful illustration
 
-- Recheck explanation, example, links, and verification against the final diff,
+Show **input or starting state → action → result**. Explain why the result follows;
+keep enough context in the description to understand the example.
+
+| PR type | Minimum useful illustration |
+| --- | --- |
+| Bug fix | Reproducer or focused test showing failure before and success after |
+| Feature/API | Small working invocation with expected output |
+| Refactor | Same input/output, plus the changed internal path or preserved invariant |
+| UI | Before/after screenshots and interaction steps |
+| Configuration/CI | Concrete configuration or event → resulting behavior |
+| Documentation | Before/after wording or corrected usage |
+
+- Prefer runnable project calls or existing focused tests for behavior changes;
+  do not reimplement the change in a separate demo.
+- For runnable examples, include prerequisites, the exact invocation, and expected results.
+- Label illustrative or unrun examples. Examples explain the change; they do not
+  replace verification. No fixed code length or new test is required.
+
+Illustrative documentation case: `recieve` → `receive`, linked to the corrected
+section. A runnable sample adds nothing to that spelling correction.
+
+## 3. Write the PR description
+
+Adapt these contents to the repository template:
+
+| Content | Required explanation |
+| --- | --- |
+| Summary | Problem and resulting behavior, once |
+| How it works | Mechanism or rationale with the selected illustration |
+| Verification | Decisive command → observed result, including missing coverage |
+| Links | Full registered design URL, relevant source/tests, and changed project docs |
+
+For fixes, include the repository-required full-revert failure and restored-fix
+result; disclose missing proof. Never present expected output as observed or reuse
+stale verification.
+
+Use repository-relative paths or verified repository URLs in the PR body;
+keep machine-local evidence in the private handoff. Omit work logs and exhaustive
+test counts.
+
+## 4. Verify before delivery
+
+- Recheck explanation, illustration, links, and evidence against the final diff,
   including drafts and description edits. Remove placeholders and superseded claims.
+- Check that linked project docs explain the changed behavior, usage, contracts,
+  or maintenance rationale.
+- Use `Fixes #<n>` only when the PR meets that issue's agreed acceptance criteria.
+  Intermediate slices reference the tracking issue without closing it.
 - Apply the [review question](../../prompts/pr/pr-review-question.md).
   Self-review cannot supply the human's acknowledgment.
-- For authorized publication, follow the existing [publication and acknowledgment
-  procedures](../../../CONTRIBUTING.md#pull-request-descriptions) and disclosure rules.
-  Preparing a description grants no permission to commit, push, publish, or approve.
+
+## Authority
+
+Preparing a description grants no permission to commit, push, publish, or approve.
+For authorized publication, follow the existing [publication and acknowledgment
+procedures](../../../CONTRIBUTING.md#pull-request-descriptions) and disclosure rules.

@@ -121,7 +121,7 @@ and browser PR writes remain outside this CLI check. Structural failures leave
 the author-review acknowledgment untouched. Other peer-review artifacts follow the shared writing
 rule; their classification and explanation accuracy remain review responsibilities.
 `boxlite-pr-preparation` owns PR authoring, including a minimal, concrete example
-matched to the change ([formats](.agents/skills/boxlite-pr-preparation/references/examples.md)).
+matched to the change ([illustration table](.agents/skills/boxlite-pr-preparation/SKILL.md#2-choose-the-smallest-useful-illustration)).
 The workflow, template, contributor guide, and PR-body denials route authors to it.
 The structural checker does not judge example relevance or accuracy.
 
@@ -459,7 +459,7 @@ The PR template, authoring guidance, and both review prompts direct authors and
 reviewers to apply `boxlite-writing` to the description, including drafts
 and revisions. The shared question asks whether a minimal, concrete example in
 How it works explains the current diff's mechanism or rationale. The preparation
-skill's reference defines example formats; the contributor guide links to it,
+skill's inline table defines illustration forms; the contributor guide links to it,
 and the workflow routes consumers to the skill.
 Acknowledgment remains bound to the commit SHA and does not certify description quality
 or expire on body edits.
@@ -800,8 +800,10 @@ for text selection.
 Hosts discover it through the same `skills/` alias; consumers name the skill without
 copying its rules. The full Test section and reproduce-before-fix remain in workflow guidance.
 
-`boxlite-pr-preparation` owns description preparation and loads its example reference
-when drafting How it works. Early size estimation and global documentation,
-disclosure, and testing rules remain in the workflow. Contributor instructions retain
+`boxlite-pr-preparation` keeps four steps in one entrypoint: inspect inputs, choose
+an illustration, write the description, and verify delivery. Input, illustration,
+and description tables support those steps. The short selection table is core
+guidance used for every description, so it stays inline. Early size estimation and
+global documentation, disclosure, and testing rules remain in the workflow. Contributor instructions retain
 publication commands and acknowledgment mechanics; hooks retain their registration,
 validation, and state. Skill invocation grants no publication or approval authority.

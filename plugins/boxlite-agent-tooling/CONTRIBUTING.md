@@ -175,8 +175,8 @@ See [GitHub writing enforcement](ARCHITECTURE.md#github-writing) for accepted in
 
 ### Examples for review
 
-The [example formats](.agents/skills/boxlite-pr-preparation/references/examples.md)
-cover fixes, features/APIs, refactors, UI, configuration/CI, and documentation.
+The [illustration table](.agents/skills/boxlite-pr-preparation/SKILL.md#2-choose-the-smallest-useful-illustration)
+covers fixes, features/APIs, refactors, UI, configuration/CI, and documentation.
 The skill owns this guidance; this anchor remains for existing links.
 
 ### Author review acknowledgment
