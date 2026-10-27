@@ -64,4 +64,4 @@ Public artifacts/delegates: public evidence or disclosure approval for exact con
 
 Apply the `boxlite-writing` skill.
 
-- Check PR explanations against the diff, including drafts and description edits. State the problem, resulting behavior, and decisive verification once; file lists alone do not explain a change. Omit work logs and exhaustive test counts. Adapt repository templates.
+- Apply `boxlite-pr-preparation` for every PR, including drafts and description edits.

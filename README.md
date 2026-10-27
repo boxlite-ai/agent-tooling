@@ -152,7 +152,8 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 | Implement a Bash hook or gate | [shell-engineering](plugins/boxlite-agent-tooling/.agents/skills/shell-engineering/SKILL.md) |
 | Iterate on design-review findings | [adversarial-iteration](plugins/boxlite-agent-tooling/.agents/skills/adversarial-iteration/SKILL.md) |
 | Register a design before implementation | [Design registration](plugins/boxlite-agent-tooling/CONTRIBUTING.md#pull-request-descriptions) |
-| Prepare a PR for human review | [Author acknowledgment](plugins/boxlite-agent-tooling/CONTRIBUTING.md#author-review-acknowledgment) |
+| Prepare or revise a PR description | [boxlite-pr-preparation](plugins/boxlite-agent-tooling/.agents/skills/boxlite-pr-preparation/SKILL.md) |
+| Acknowledge the current PR diff | [Author acknowledgment](plugins/boxlite-agent-tooling/CONTRIBUTING.md#author-review-acknowledgment) |
 
 Workflow and writing reminders reference `boxlite-writing` by name; the host loads
 its instructions. Try: "Use boxlite-writing to shorten this PR description."

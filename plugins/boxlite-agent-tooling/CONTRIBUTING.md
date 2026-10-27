@@ -9,7 +9,7 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | PR size, splitting, stacks, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
 | Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
-| PR explanations | [Description guidance](.agents/prompts/pr/pr-description-guidance.md) |
+| PR preparation and examples | [boxlite-pr-preparation](.agents/skills/boxlite-pr-preparation/SKILL.md) |
 
 Reference skills by name; do not copy their rules into other
 documents or hook messages. Keep task-specific requirements with their tasks, and regenerate
@@ -160,25 +160,24 @@ Notion designs must keep their text in top-level blocks; unread child blocks are
 Use the full registered URL in the PR body as plain text or a Markdown link.
 See [design-document enforcement](ARCHITECTURE.md#design-documents) for validation and tool boundaries.
 
-- Apply the shared description guidance and [review question](.agents/prompts/pr/pr-review-question.md)
-  before publishing, including drafts and description edits.
-- The local PR gate requires a level-two **How it works** heading with content.
-  Explain the causal path or rationale beneath it; a short sentence is sufficient
-  for a simple change. Hidden comments, quoted examples, empty sections, and
-  placeholder-only text such as `TBD` are rejected, including repeated or mixed
-  placeholders. If headings repeat, at least one section must qualify on its own.
-  Reviewers check accuracy.
-- Include decisive verification as `command → observed result`. For a fix, briefly
-  report the failure with all production changes reverted and the pass with the
-  complete fix restored. Do not present old results as newly verified.
-- Link the design doc in every PR. Use `Fixes #<n>` only when the PR closes that
-  GitHub issue. Intermediate slices reference the tracking issue without closing it;
-  close it only when its agreed acceptance criteria are met. No inline bug marker is required.
+- Apply [boxlite-pr-preparation](.agents/skills/boxlite-pr-preparation/SKILL.md)
+  for descriptions, including drafts and revisions. It owns example selection,
+  verification reporting, and the check against the current diff.
+- The local PR gate checks for a populated level-two **How it works** section.
+  Hidden comments, quoted sections, empty sections, and placeholder-only text such
+  as `TBD` fail, including repeated or mixed placeholders. If headings repeat, one
+  section must qualify independently. Reviewers assess example relevance and accuracy.
 
 Start from the [PR template](../../.github/PULL_REQUEST_TEMPLATE.md) when useful.
 Prepare generated text first, then pass literal inline text using safe shell quoting:
 Markdown backticks inside double quotes can execute as command substitutions.
 See [GitHub writing enforcement](ARCHITECTURE.md#github-writing) for accepted inputs and limits.
+
+### Examples for review
+
+The [example formats](.agents/skills/boxlite-pr-preparation/references/examples.md)
+cover fixes, features/APIs, refactors, UI, configuration/CI, and documentation.
+The skill owns this guidance; this anchor remains for existing links.
 
 ### Author review acknowledgment
 
@@ -209,8 +208,9 @@ Documentation: [SDK CI matrix](docs/ci.md#sdk-matrix).
 
 - The workflow selects a reduced SDK matrix for PRs and the full matrix for weekly
   and manual runs.
-- PR changing both SDKs: 21 jobs → 11.
+- Example: `pull_request` changing both SDKs → reduced matrix → 11 jobs (previously 21).
 - Every supported version still runs on Linux x64; macOS/ARM use the latest version.
+- Source: [matrix selection](.github/workflows/sdk-ci.yml).
 
 ## Verification
 

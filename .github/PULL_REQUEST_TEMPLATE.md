@@ -1,4 +1,6 @@
 <!-- Read and apply
+[boxlite-pr-preparation](https://github.com/boxlite-ai/agent-tooling/blob/main/plugins/boxlite-agent-tooling/.agents/skills/boxlite-pr-preparation/SKILL.md)
+and
 [boxlite-writing](https://github.com/boxlite-ai/agent-tooling/blob/main/plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md)
 to the PR description, including drafts and revisions.
 Follow the contributor guide before filling in this template:
@@ -15,7 +17,9 @@ prefer existing docs. -->
 
 ## How it works
 
-<!-- Describe the mechanism or rationale. -->
+<!-- Show a minimal, concrete example: input/state → action → result.
+Explain the mechanism or rationale; link relevant source/tests.
+Use boxlite-pr-preparation for the form and evidence requirements. -->
 
 ## Verification
 
