@@ -41,11 +41,13 @@ cat > "$TMP/gh-bin/gh" <<'GH'
 case "$*" in
   'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
   'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
-  'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
-  'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
-  'api repos/example/repo/compare/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[]}' ;;
+  'repo view --json nameWithOwner,defaultBranchRef,url') printf '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}' ;;
+  'api --hostname github.com repos/example/repo/git/ref/heads/main') jq -nc --arg sha "$(git rev-parse HEAD)" '{object:{type:"commit",sha:$sha}}' ;;
+  'api --hostname github.com repos/example/repo/compare/'*'...refs%2Fheads%2Ffeature')
+    jq -nc --arg sha "$(git rev-parse HEAD)" '{status:"identical",ahead_by:0,behind_by:0,base_commit:{sha:$sha},merge_base_commit:{sha:$sha}}' ;;
+  'api --hostname github.com repos/example/repo/compare/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[]}' ;;
   'pr view '*) jq -nc --arg sha "$(git rev-parse HEAD)" --arg branch "$(git branch --show-current)" \
-    '{baseRefOid:$sha,headRefOid:$sha,headRefName:$branch,additions:0,deletions:0,body:"## TL;DR\n\nFixture summary.\n\n## How it works\n\nRetry failed calls once.\n\nhttps://github.com/example/repo/issues/123"}' ;;
+    '{number:42,url:"https://github.com/example/repo/pull/42",baseRefName:"main",baseRefOid:$sha,headRefOid:$sha,headRefName:$branch,headRepositoryOwner:{login:"example"},headRepository:{name:"repo"},additions:0,deletions:0,body:"## TL;DR\n\nFixture summary.\n\n## How it works\n\nRetry failed calls once.\n\nhttps://github.com/example/repo/issues/123"}' ;;
   *) exit 2 ;;
 esac
 GH
@@ -77,12 +79,13 @@ run() {
 }
 
 write_marker() {
-  local message="$1" spec request_id
+  local message="$1" request_id prime='gh pr ready 42'
   rm -f "$TMP/.agents/state/pr-review-request.json"
-  spec="$(jq -nc --arg repo "$(git rev-parse --show-toplevel)" --arg branch "$BRANCH" --arg head "$HEAD_SHA" \
-    '{binding:{repo:$repo,branch:$branch,head:$head,session:""},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}')"
-  request_id="$(bash "$REPO_ROOT/scripts/timed-user-prompt.sh" request \
-    "$TMP/.agents/state/pr-review-request.json" "$spec" | jq -r .id)"
+  if [[ "${2:-}" == *create* ]]; then
+    prime="gh pr create --title 'fix: prepare review' --body '$DOC_LINK'"
+  fi
+  jq -nc --arg command "$prime" '{tool_input:{command:$command}}' | "$HOOK" >/dev/null
+  request_id="$(jq -r .id "$TMP/.agents/state/pr-review-request.json")"
   jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" --arg m "$message" --arg r "$request_id" \
         '{branch:$b, head:$h, message:$m,request:$r}' \
         > "$TMP/.agents/state/pr-reviewed.json"
@@ -308,7 +311,7 @@ run_hard_deny() { # description command
 
 run_allow_consumes() { # description command
   local desc="$1" cmd="$2" out decision marker_state
-  write_marker "reviewed: one literal wrapped operation"
+  write_marker "reviewed: one literal wrapped operation" "$cmd"
   out="$(printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | "$HOOK")"
   [[ -z "$out" ]] && decision=passthrough || decision=deny
   [[ -f "$TMP/.agents/state/pr-reviewed.json" ]] \
@@ -594,7 +597,7 @@ echo
 echo "## Title check: every supplied title spelling must be a Conventional-Commit subject <=72"
 TITLE_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\n\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'"$DOC_LINK"
 run_title() {
-  write_marker "reviewed: title case"
+  write_marker "reviewed: title case" create
   run "$@"
 }
 run_title "bad --title (no type prefix) → deny"  "gh pr create --title \"add a cool thing\" --body '$TITLE_GRAPH'"  "deny"
@@ -615,15 +618,15 @@ run_title "dynamic mixed fill/title cluster fails closed" \
   "gh pr create -ft \"\$PR_TITLE\" --body '$TITLE_GRAPH'" "deny"
 run_title "title value named --draft is not a draft flag" \
   "gh pr create --title \"--draft\" --body '$TITLE_GRAPH'" "deny"
-run_title "metadata before title is outside canonical create prefix" \
-  "gh pr create --base main --title \"feat(api): graph\" --body '$TITLE_GRAPH'" "deny"
-write_marker "reviewed: long title case"
+run_title "base before title uses the same canonical target" \
+  "gh pr create --base main --title \"feat(api): graph\" --body '$TITLE_GRAPH'" "passthrough"
+write_marker "reviewed: long title case" create
 run "good --title + valid marker → allow"  "gh pr create --title \"feat(api): add a cool thing\" --body '$TITLE_GRAPH'"  "passthrough"
 run "marker consumed after allow → deny"   "gh pr create --title \"feat(api): add a cool thing\" --body '$TITLE_GRAPH'"  "deny"
-write_marker "reviewed: short title case"
+write_marker "reviewed: short title case" create
 run "good short title + valid marker → allow" \
   "gh pr create -t \"feat(api): add a cool thing\" --body '$TITLE_GRAPH'" "passthrough"
-write_marker "reviewed: equals title case"
+write_marker "reviewed: equals title case" create
 run "good -t= title + valid marker → allow" \
   "gh pr create -t=\"feat(api): add a cool thing\" --body '$TITLE_GRAPH'" "passthrough"
 
@@ -677,7 +680,7 @@ printf 'Adds a thing. Tested locally.\n' > "$TMP/prose.md"
 # A fresh marker for every case ensures content checks, not stale review state,
 # decide whether the body is accepted.
 run_body() {
-  write_marker "reviewed: body cases"
+  write_marker "reviewed: body cases" "$2"
   run "$@"
 }
 
@@ -701,7 +704,7 @@ run_body "81 Chinese characters → deny" "gh pr create $FEAT --body '$OVER_CHAR
 run_body "2000 four-byte characters plus summary → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
 run_body "oversized argument → deny" "gh pr create $FEAT --body '$HUGE_BODY'" "deny"
 run_body "long body edit → deny" "gh pr edit 42 $FEAT --body '$LONG_BODY'" "deny"
-write_marker "reviewed: shorten description"
+write_marker "reviewed: shorten description" create
 run "size rejection → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"
 run "size rejection preserves acknowledgment for corrected body" "gh pr create $FEAT --body '$BULLET_BODY'" "passthrough"
 run "corrected body consumes acknowledgment" "gh pr create $FEAT --body '$BULLET_BODY'" "deny"
@@ -828,7 +831,7 @@ run_body "metadata may consume a body-looking value" \
   "gh pr create $FEAT --body '$GRAPH' --label --body=prose"                                                "passthrough"
 run_body "metadata may consume a body-file-looking value" \
   "gh pr create $FEAT --body '$GRAPH' --label -Fmissing"                                                   "passthrough"
-write_marker "reviewed: dash-prefixed label value"
+write_marker "reviewed: dash-prefixed label value" create
 run "dash-prefixed metadata value does not exempt the create" \
   "gh pr create $FEAT --body '$GRAPH' --label --draft"                                                     "passthrough"
 run "dash-prefixed metadata value still consumes the marker" \
@@ -915,7 +918,7 @@ echo "## Review prompts are loaded at the public hook boundary"
 fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks/pr" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
-cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-target,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
 cp "$REPO_ROOT/.agents/lib/pr-size.jq" "$fixture_plugin/.agents/lib/"
 mkdir -p "$fixture_plugin/.agents/skills/boxlite-writing"
 cp "$REPO_ROOT/.agents/skills/boxlite-writing/SKILL.md" "$fixture_plugin/.agents/skills/boxlite-writing/"

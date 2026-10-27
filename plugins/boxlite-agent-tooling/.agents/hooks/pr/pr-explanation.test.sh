@@ -17,11 +17,13 @@ case "$*" in
     jq -er --arg body "${8#text=}" 'select(.body == $body) | .html' "$EXPLANATION_FIXTURE" ;;
   'api --hostname github.com repos/example/repo/issues/1')
     jq -nc '{html_url:"https://github.com/example/repo/issues/1",body:"## TL;DR\n\nDesign the change."}' ;;
-  'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
-  'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
-  'api repos/example/repo/compare/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[]}' ;;
+  'repo view --json nameWithOwner,defaultBranchRef,url') printf '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}' ;;
+  'api --hostname github.com repos/example/repo/git/ref/heads/main') jq -nc --arg sha "$(git rev-parse HEAD)" '{object:{type:"commit",sha:$sha}}' ;;
+  'api --hostname github.com repos/example/repo/compare/'*'...refs%2Fheads%2Ffeature')
+    jq -nc --arg sha "$(git rev-parse HEAD)" '{status:"identical",ahead_by:0,behind_by:0,base_commit:{sha:$sha},merge_base_commit:{sha:$sha}}' ;;
+  'api --hostname github.com repos/example/repo/compare/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[]}' ;;
   'pr view '*) jq -c --arg sha "$(git rev-parse HEAD)" \
-    '{body,baseRefOid:$sha,headRefOid:$sha,headRefName:"feature",additions:0,deletions:0}' "$EXPLANATION_FIXTURE" ;;
+    '{body,number:1,url:"https://github.com/example/repo/pull/1",baseRefName:"main",baseRefOid:$sha,headRefOid:$sha,headRefName:"feature",headRepositoryOwner:{login:"example"},headRepository:{name:"repo"},additions:0,deletions:0}' "$EXPLANATION_FIXTURE" ;;
   *) exit 2 ;;
 esac
 SH

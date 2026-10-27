@@ -225,7 +225,7 @@ resolved_protected_operation() { # argv start index
 
 inspect_simple_command() {
   local word_count="${#shell_words[@]}" command_index=0 index token subcmd executable
-  local subcmd_index=0
+  local subcmd_index=0 github_group_index=0
   local command_slot draft=0 first_arg="" next_value="" next_quoted=0 next_dynamic=0
   local next_unquoted_glob=0
   local create_prefix_valid=1 create_scan_start=0 content_record_end="$word_count"
@@ -233,7 +233,13 @@ inspect_simple_command() {
   local draft_scan_index=0
   local payload="" payload_index=0 payload_dynamic=0 wrapper="" option_flags=""
   local option_index=0 option_char="" option_needs_value=0
+  local target_index=0 target_width=0 target_flag=0
+  local -a target_prefix=() target_remove=()
   (( word_count > 0 )) || return 0
+  # Normalize target options locally; recursive/other command scans retain their tokens.
+  local -a shell_words=("${shell_words[@]}") shell_word_quotes=("${shell_word_quotes[@]}")
+  local -a shell_word_dynamics=("${shell_word_dynamics[@]}") shell_word_unquoted_dynamics=("${shell_word_unquoted_dynamics[@]}")
+  local -a shell_word_unquoted_globs=("${shell_word_unquoted_globs[@]}") shell_word_redirections=("${shell_word_redirections[@]}")
   parsed_simple_count=$((parsed_simple_count + 1))
 
   # This is deliberately a narrow recognizer, not a Bash interpreter. A single
@@ -555,12 +561,29 @@ inspect_simple_command() {
     (( index < word_count )) || break
     token="${shell_words[$index]}"
     case "$token" in
-      --repo|--hostname|-R)
+      --repo|-R)
+        if (( index + 1 >= word_count )); then
+          unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        else
+          target_prefix+=("$token" "${shell_words[$((index + 1))]}")
+          if (( shell_word_dynamics[$index] || shell_word_unquoted_globs[$index]
+            || shell_word_dynamics[$((index + 1))] || shell_word_unquoted_globs[$((index + 1))] )); then
+            unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+          fi
+        fi
+        index=$((index + 2)); continue ;;
+      --repo=*|-R?*)
+        target_prefix+=("$token")
+        if (( shell_word_dynamics[$index] || shell_word_unquoted_globs[$index] )); then
+          unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        fi
+        index=$((index + 1)); continue ;;
+      --hostname)
         unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
         index=$((index + 2))
         continue
         ;;
-      --repo=*|--hostname=*|-R?*)
+      --hostname=*)
         unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
         index=$((index + 1))
         continue
@@ -575,8 +598,11 @@ inspect_simple_command() {
     opaque_protected_count=$((opaque_protected_count + 1))
     return 0
   fi
-  inspect_github_writing "$index"
-  [[ "${shell_words[$index]}" == pr ]] || return 0
+  github_group_index="$index"
+  if [[ "${shell_words[$index]}" != pr ]]; then
+    inspect_github_writing "$index"
+    return 0
+  fi
   subcmd_index=$((index + 1))
   while (( subcmd_index < word_count )); do
     skip_shell_redirections "$subcmd_index"
@@ -584,11 +610,28 @@ inspect_simple_command() {
     (( subcmd_index < word_count )) || break
     token="${shell_words[$subcmd_index]}"
     case "$token" in
-      --repo|--hostname|-R)
+      --repo|-R)
+        if (( subcmd_index + 1 >= word_count )); then
+          unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        else
+          target_prefix+=("$token" "${shell_words[$((subcmd_index + 1))]}")
+          if (( shell_word_dynamics[$subcmd_index] || shell_word_unquoted_globs[$subcmd_index]
+            || shell_word_dynamics[$((subcmd_index + 1))] || shell_word_unquoted_globs[$((subcmd_index + 1))] )); then
+            unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+          fi
+        fi
+        subcmd_index=$((subcmd_index + 2)) ;;
+      --repo=*|-R?*)
+        target_prefix+=("$token")
+        if (( shell_word_dynamics[$subcmd_index] || shell_word_unquoted_globs[$subcmd_index] )); then
+          unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        fi
+        subcmd_index=$((subcmd_index + 1)) ;;
+      --hostname)
         unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
         subcmd_index=$((subcmd_index + 2))
         ;;
-      --repo=*|--hostname=*|-R?*)
+      --hostname=*)
         unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
         subcmd_index=$((subcmd_index + 1))
         ;;
@@ -602,10 +645,49 @@ inspect_simple_command() {
     return 0
   fi
   subcmd="${shell_words[$subcmd_index]}"
-  [[ "$subcmd" == create || "$subcmd" == edit || "$subcmd" == ready ]] \
-    || return 0
+  if [[ "$subcmd" != create && "$subcmd" != edit && "$subcmd" != ready ]]; then
+    inspect_github_writing "$github_group_index"
+    return 0
+  fi
 
-  protected_size_args=("${shell_words[@]:$subcmd_index}")
+  protected_size_args=("$subcmd" ${target_prefix[@]+"${target_prefix[@]}"} "${shell_words[@]:$((subcmd_index + 1))}")
+  # Target options may occur anywhere, but a metadata/body operand is never an option.
+  target_index=$((subcmd_index + 1))
+  while (( target_index < word_count )); do
+    skip_shell_redirections "$target_index"
+    target_index="$redirection_skip_index"
+    (( target_index < word_count )) || break
+    token="${shell_words[$target_index]}"; target_width=1; target_flag=0
+    case "$token" in
+      --repo|-R|--base|-B|--head|-H) target_width=2; target_flag=1 ;;
+      --repo=*|-R?*|--base=*|-B?*|--head=*|-H?*) target_flag=1 ;;
+      --title|-t|--body|-b|--body-file|-F|--assignee|-a|--label|-l|--milestone|-m|--project|-p|--reviewer|-r|--add-assignee|--add-label|--add-project|--add-reviewer|--remove-assignee|--remove-label|--remove-project|--remove-reviewer) target_width=2 ;;
+    esac
+    if (( target_flag )); then
+      case "$token" in
+        --base*|-B*|--head*|-H*) [[ "$subcmd" == create ]] || target_flag=0 ;;
+      esac
+    fi
+    if (( target_flag )); then
+      for (( index=target_index; index<target_index+target_width; index++ )); do
+        if (( index >= word_count || shell_word_dynamics[$index] || shell_word_unquoted_globs[$index] )); then
+          unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+        fi
+        target_remove+=("$index")
+      done
+    fi
+    target_index=$((target_index + target_width))
+  done
+  for index in ${target_remove[@]+"${target_remove[@]}"}; do
+    unset 'shell_words[index]' 'shell_word_quotes[index]' 'shell_word_dynamics[index]' \
+      'shell_word_unquoted_dynamics[index]' 'shell_word_unquoted_globs[index]' 'shell_word_redirections[index]'
+  done
+  shell_words=("${shell_words[@]}"); shell_word_quotes=("${shell_word_quotes[@]}")
+  shell_word_dynamics=("${shell_word_dynamics[@]}"); shell_word_unquoted_dynamics=("${shell_word_unquoted_dynamics[@]}")
+  shell_word_unquoted_globs=("${shell_word_unquoted_globs[@]}"); shell_word_redirections=("${shell_word_redirections[@]}")
+  word_count="${#shell_words[@]}"; content_record_end="$word_count"
+  # Writing and review must see the same draft prefix after target normalization.
+  inspect_github_writing "$github_group_index"
   command_slot="$protected_count"
   index=$((subcmd_index + 1))
 
@@ -853,9 +935,7 @@ inspect_simple_command() {
     (( edit_prefix_valid )) || invalid_edit_contract_count=$((invalid_edit_contract_count + 1))
     index="$edit_scan_start"
   elif [[ "$subcmd" == ready ]]; then
-    # Ready has one literal optional selector and one optional boolean. Persistent
-    # repository flags, extra operands, and expansions can retarget the operation
-    # after the branch/HEAD acknowledgment and therefore stay outside the gate.
+    # Target options are normalized above. Ready retains one literal selector and boolean.
     if (( index < word_count )) && [[ "${shell_words[$index]}" != --undo ]]; then
       if [[ "${shell_words[$index]}" == -* \
          || "${shell_words[$index]}" == *://* ]] \
@@ -1601,6 +1681,9 @@ timed_lib="$tooling_root/.agents/lib/timed-user-prompt.sh"
 [[ -r "$timed_lib" ]] || { printf 'preflight-pr-review: timed prompt library missing\n' >&2; exit 2; }
 # shellcheck source=../lib/timed-user-prompt.sh
 source "$timed_lib"
+[[ -r "$tooling_root/.agents/lib/pr-target.sh" ]] || { printf 'preflight-pr-review: PR target library missing\n' >&2; exit 2; }
+# shellcheck source=../lib/pr-target.sh
+source "$tooling_root/.agents/lib/pr-target.sh"
 size_lib="$tooling_root/.agents/lib/pr-size.sh"
 [[ -r "$size_lib" ]] || { printf 'preflight-pr-review: PR size library missing\n' >&2; exit 2; }
 # shellcheck source=../lib/pr-size.sh
@@ -1666,14 +1749,14 @@ $bounded_ack_recovery"
 }
 
 # The acknowledgment binds the current checkout's branch and HEAD. Inline
-# assignments, env mutations, gh target flags, and inherited explicit selectors
+# assignments, env mutations, dynamic target flags, and inherited explicit selectors
 # can make the eventual executable or remote differ from that reviewed state.
 if (( unsafe_authorization_context_count > 0 )) \
    || [[ -n "${GH_REPO:-}" || -n "${GH_HOST:-}" \
       || -n "${GIT_DIR:-}" || -n "${GIT_WORK_TREE:-}" ]]; then
   deny "A protected gh pr command changes or inherits execution/target context that is not bound to the review acknowledgment.
 Run it from the reviewed checkout with no inline assignments, unsupported env options,
-gh --repo/--hostname flags, or inherited GH_REPO, GH_HOST, GIT_DIR, or GIT_WORK_TREE."
+dynamic target/--hostname flags, or inherited GH_REPO, GH_HOST, GIT_DIR, or GIT_WORK_TREE."
 fi
 
 # An expansion in the executable, `pr`, or protected-subcommand position can
@@ -1710,7 +1793,7 @@ fi
 if (( invalid_ready_contract_count > 0 )); then
   deny "A gh pr ready command has an unbound selector, option, or expansion.
 Use: gh pr ready [literal-selector] [--undo]
-Repository overrides and dynamic argv splitting are outside this branch/HEAD-bound gate."
+Dynamic argv splitting and URL selectors are outside this target-bound gate."
 fi
 
 # One typed marker is a one-operation capability. A shell tool call containing
@@ -1802,8 +1885,11 @@ fi
 size_context="$(jq -nc --arg root "$repo_root" --arg project "$project_dir" --arg tooling "$tooling_root" \
   --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
   '{root:$root,project:$project,tooling:$tooling,session:$session}')"
+pr_target="$(pr_target_resolve "${protected_size_args[@]}")" || deny 'Cannot determine the exact PR size or target. Publish the selected head and resolve repository, ref, or API errors before retrying.'
+[[ "$(jq -r .branch <<<"$pr_target")" == "$branch" && "$(jq -r .head <<<"$pr_target")" == "$head" ]] \
+  || deny 'The checkout changed during PR target resolution; retry from the current branch.'
 size_status=0
-size_reason="$(pr_size_check "$size_context" "${protected_size_args[@]}")" || size_status=$?
+size_reason="$(pr_size_check "$size_context" "$pr_target" "${protected_size_args[@]}")" || size_status=$?
 if (( size_status )); then
   [[ -n "$size_reason" ]] || size_reason="PR size check failed; nothing was authorized."
   # Size prompts have their own recovery; never replace them with review approval.
@@ -1818,16 +1904,21 @@ done
 source "$tooling_root/.agents/lib/design-doc.sh"
 # shellcheck source=../lib/pr-description.sh
 source "$tooling_root/.agents/lib/pr-description.sh"
-description_reason="$(pr_description_check "$repo_root" "${protected_size_args[@]}")" || {
+description_reason="$(pr_description_check "$repo_root" "$pr_target" "${protected_size_args[@]}")" || {
   deny "${description_reason:-The PR description check failed; nothing was authorized.}"
 }
 
-(( protected_ack_count > 0 )) || exit 0
+if (( protected_ack_count == 0 )); then
+  current_target="$(pr_target_resolve "${protected_size_args[@]}")" \
+    && [[ "$current_target" == "$pr_target" ]] || deny 'PR target changed during validation; retry with the current refs.'
+  exit 0
+fi
 
 mkdir -p "$project_dir/.agents/state" || exit 2
 request_spec="$(jq -nc --arg repo "$repo_root" --arg branch "$branch" --arg head "$head" \
+  --argjson target "$(pr_target_binding "$pr_target")" \
   --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
-  '{binding:{repo:$repo,branch:$branch,head:$head,session:$session},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}')"
+  '{binding:{repo:$repo,branch:$branch,head:$head,session:$session,target:$target},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}')"
 review_request="$(timed_user_prompt request "$request_file" "$request_spec")" || exit 2
 request_id="$(jq -r .id <<<"$review_request")"
 request_status="$(jq -r .status <<<"$review_request")"
@@ -1901,7 +1992,9 @@ fi
 [[ "$(jq -r .response <<<"$review_request")" == "$marker_message" ]] \
   || deny "Review response changed after acceptance. $ack_instruction"
 
-# Marker is valid for this exact branch+HEAD. Consume it so the next
+current_target="$(pr_target_resolve "${protected_size_args[@]}")" \
+  && [[ "$current_target" == "$pr_target" ]] || deny 'PR target changed after review; retry and review the current refs.'
+# Marker is valid for this exact target. Consume it so the next
 # gh pr create/edit/ready forces a fresh ack.
 consume_status=0
 verdict_audit_unlink_if_identity \

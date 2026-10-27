@@ -86,10 +86,29 @@ for choice in 'Bypass limit' 'Split PR'; do
 done
 
 # A native review response produces the marker consumed by the existing PR gate.
+cat > "$scratch/bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [[ "$1" == repo ]]; then
+  printf '%s' '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}'
+elif [[ "$*" == 'api --hostname github.com markdown -f mode=gfm -f text='* ]]; then
+  [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2
+  printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>'
+elif [[ "$*" == 'api --hostname github.com repos/example/repo/compare/'* ]]; then
+  jq -nc --arg head "$(git rev-parse HEAD)" \
+    '{base_commit:{sha:$head},files:[{filename:"src/main.sh",additions:1,deletions:0}]}'
+elif [[ "$1" == api ]]; then
+  printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}'
+else
+  jq -nc --arg head "$(git rev-parse HEAD)" \
+    '{number:42,url:"https://github.com/example/repo/pull/42",baseRefName:"main",baseRefOid:$head,headRefOid:$head,headRefName:"feature",headRepositoryOwner:{login:"example"},headRepository:{name:"repo"},additions:1,deletions:0,body:"## TL;DR\n\nFixture summary.\n\n## How it works\n\nRetry failed calls once.\n\nhttps://github.com/example/repo/issues/123"}'
+fi
+GH
+chmod +x "$scratch/bin/gh"
+PATH="$scratch/bin:$PATH" bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/123 >/dev/null
 state="$repo/.agents/state/pr-review-request.json"
-spec="$(jq '.prefix="reviewed:" | .fallback="keep-draft" | .minimum_words=1 |
-  .binding.repo=.binding.root | del(.binding.root)' <<<"$spec")"
-bash "$cli" request "$state" "$spec" >/dev/null
+printf '%s' '{"session_id":"native","tool_input":{"command":"gh pr ready"}}' \
+  | PATH="$scratch/bin:$PATH" bash "$plugin/.agents/hooks/preflight-pr-review.sh" >/dev/null
+spec="$(jq -c .spec "$state")"
 id="$(jq -r .id "$state")"
 question="$(bash "$cli" question "$state" "$id")"
 key="$(jq -r '.questions[0].question' <<<"$question")"
@@ -98,25 +117,6 @@ reject call_hook PostToolUse "$(reply 'Bypass limit')"
 reject call_hook PostToolUse "$(reply 'Split PR')"
 call_hook PostToolUse '{"answers":{},"response":"reviewed: deadlines bind the typed reply to the presented diff"}'
 jq -e --arg id "$id" '.request==$id and (.message|startswith("reviewed: deadlines"))' .agents/state/pr-reviewed.json >/dev/null
-cat > "$scratch/bin/gh" <<'GH'
-#!/usr/bin/env bash
-if [[ "$1" == repo ]]; then
-  printf '%s' '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}'
-elif [[ "$*" == 'api --hostname github.com markdown -f mode=gfm -f text='* ]]; then
-  [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2
-  printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>'
-elif [[ "$*" == 'api repos/example/repo/compare/'* ]]; then
-  jq -nc --arg head "$(git rev-parse HEAD)" \
-    '{base_commit:{sha:$head},files:[{filename:"src/main.sh",additions:1,deletions:0}]}'
-elif [[ "$1" == api ]]; then
-  printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}'
-else
-  jq -nc --arg head "$(git rev-parse HEAD)" \
-    '{baseRefOid:$head,headRefOid:$head,headRefName:"feature",additions:1,deletions:0,body:"## TL;DR\n\nFixture summary.\n\n## How it works\n\nRetry failed calls once.\n\nhttps://github.com/example/repo/issues/123"}'
-fi
-GH
-chmod +x "$scratch/bin/gh"
-PATH="$scratch/bin:$PATH" bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/123 >/dev/null
 out="$(printf '%s' '{"session_id":"native","tool_input":{"command":"gh pr ready"}}' \
   | PATH="$scratch/bin:$PATH" bash "$plugin/.agents/hooks/preflight-pr-review.sh")"
 [[ -z "$out" && "$(jq -r .status "$state")" == consumed ]]

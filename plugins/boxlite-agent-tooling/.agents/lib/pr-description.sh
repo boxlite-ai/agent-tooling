@@ -55,9 +55,9 @@ _pr_description_check_explanation() { # bounded GitHub-rendered HTML
   fi
 }
 
-pr_description_check() { # root, create|edit|ready, validated gh PR arguments
-  local root="$1" operation="$2" token body="" count=0 selector="" url response
-  shift 2
+pr_description_check() { # root, resolved target, create|edit|ready, validated gh PR arguments
+  local root="$1" target="$2" operation="$3" token body="" count=0 selector="" url response
+  shift 3
   while (( $# )); do
     token="$1"; shift
     case "$token" in
@@ -66,11 +66,11 @@ pr_description_check() { # root, create|edit|ready, validated gh PR arguments
         body="$1"; shift; count=$((count+1)) ;;
       --body=*|-b=*) body="${token#*=}"; count=$((count+1)) ;;
       -b?*) body="${token#-b}"; count=$((count+1)) ;;
-      --title|-t|--base|-B|--head|-H|--assignee|-a|--label|-l|--milestone|-m|--project|-p|--reviewer|-r|--add-assignee|--add-label|--add-project|--add-reviewer|--remove-assignee|--remove-label|--remove-project|--remove-reviewer)
+      --repo|-R|--title|-t|--base|-B|--head|-H|--assignee|-a|--label|-l|--milestone|-m|--project|-p|--reviewer|-r|--add-assignee|--add-label|--add-project|--add-reviewer|--remove-assignee|--remove-label|--remove-project|--remove-reviewer)
         (( $# )) || return 1
         shift ;;
       --draft|-d|--draft=true|-d=true|--dry-run|--no-maintainer-edit|--remove-milestone|--undo) ;;
-      --title=*|--base=*|--head=*|--assignee=*|--label=*|--milestone=*|--project=*|--reviewer=*|--add-*=*|--remove-*=*|-t?*|-B?*|-H?*|-a?*|-l?*|-m?*|-p?*|-r?*) ;;
+      --repo=*|-R?*|--title=*|--base=*|--head=*|--assignee=*|--label=*|--milestone=*|--project=*|--reviewer=*|--add-*=*|--remove-*=*|-t?*|-B?*|-H?*|-a?*|-l?*|-m?*|-p?*|-r?*) ;;
       -*) printf 'The design doc check requires literal inline PR text.'; return 1 ;;
       *) [[ "$operation" != create && -z "$selector" ]] || return 1; selector="$token" ;;
     esac
@@ -82,22 +82,12 @@ pr_description_check() { # root, create|edit|ready, validated gh PR arguments
     printf 'Cannot verify the registered design doc; register a readable document before publishing.'; return 1;
   }
   if (( count == 0 )); then
-    # cli/cli pkg/cmd/pr/view/view.go:45-51,78: explicit selectors and JSON fields.
-    response="$(perl -e 'alarm 20; exec @ARGV' gh pr view \
-      "${selector:-$(git -C "$root" branch --show-current)}" \
-      --json body,headRefName,headRefOid | head -c 65537)" || return 1
-    (( ${#response} <= 65536 )) || return 1
-    body="$(jq -er --arg branch "$(git -C "$root" branch --show-current)" \
-      --arg head "$(git -C "$root" rev-parse HEAD)" \
-      'select(.headRefName == $branch and .headRefOid == $head) | .body | strings' \
-      <<<"$response")" || {
-      printf 'Cannot bind the published design doc link to this branch and HEAD.'; return 1;
-    }
+    body="$(jq -er .body <<<"$target")" || return 1
     concise_writing_check_summary "$body" || return 1
   fi
   # GitHub owns Markdown semantics; inspect its sanitized HTML, not source tokens.
   # API contract: https://docs.github.com/en/rest/markdown/markdown#render-a-markdown-document
-  response="$(perl -e 'alarm 20; exec @ARGV' gh api --hostname github.com markdown \
+  response="$(perl -e 'alarm 20; exec @ARGV' gh api --hostname "$(jq -r .host <<<"$target")" markdown \
     -f mode=gfm -f "text=$body" | head -c 65537 | \
     perl -0777 -ne 'length($_) <= 65536 or exit 1; print')" || {
     printf 'Cannot render the PR body to verify its design doc link.'; return 1;

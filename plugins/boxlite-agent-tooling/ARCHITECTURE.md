@@ -197,10 +197,29 @@ The size policy in [the shared workflow](guidance/workflow.md#workflow) is enfor
 published comparison for creation, editing, and readiness, summing code additions
 through `.agents/lib/pr-size.jq`. Source, scripts, configuration, and generated
 code count, including comments and blank lines within those files.
-Creation requires a published branch;
-Base-changing edits, fork creation, and opaque invocations are unsupported.
+Creation requires a published branch. Literal `--repo`/`-R` options support
+`[HOST/]OWNER/REPO` before or after the subcommand. Creation also accepts
+`--base`/`-B` and `--head`/`-H`, including `owner:branch`; separated,
+equals, and attached short forms work. Duplicate or dynamic target options,
+URL selectors, base-changing edits, and environment overrides remain unsupported.
 Git pushes, direct API calls, and browser writes are outside this size check;
 it is not a repository-wide enforcement boundary.
+
+`.agents/lib/pr-target.sh` resolves one target for size, description, and review.
+For creation, GitHub resolves the selected head across its fork network;
+the hook requires it to match local HEAD, then compares pinned base/head SHAs.
+Base selection follows the explicit option, the selected head branch's
+`gh-merge-base` setting, then the repository default.
+It does not infer a fork's repository name. For edit/readiness, the resolved PR
+supplies its refs, repository, number, and body. Omitted selectors stay omitted
+so GitHub CLI can use branch tracking; remote and local branch names may differ
+when their commits match.
+
+Size exceptions and review requests bind the host, repository, refs, commits,
+and PR identity. Changing the target, including creation becoming an existing PR,
+requires a new approval. Targets are rechecked after authorization and before
+allowing publication. This narrows ref-movement races; it cannot make the later
+GitHub write atomic with the hook. See [the target-resolution design](https://github.com/boxlite-ai/agent-tooling/issues/269).
 
 The classifier excludes `*.spec.ts`, `*_test.go`, files under `tests` directories,
 recognized prose names/formats, assets, tabular/log data, and dependency lockfiles.

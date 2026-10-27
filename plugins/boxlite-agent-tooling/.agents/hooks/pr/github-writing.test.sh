@@ -15,9 +15,11 @@ cat > "$scratch/bin/gh" <<'GH'
 case "$*" in
   'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
   'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
-  'repo view '*) printf '{"nameWithOwner":"example/repo","defaultBranchRef":{"name":"main"}}' ;;
-  'api repos/example/repo/commits/'*) jq -nc --arg sha "$(git rev-parse HEAD)" '{sha:$sha}' ;;
-  'api repos/example/repo/compare/'*)
+  'repo view --json nameWithOwner,defaultBranchRef,url') printf '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}' ;;
+  'api --hostname github.com repos/example/repo/git/ref/heads/main') jq -nc --arg sha "$(git rev-parse HEAD)" '{object:{type:"commit",sha:$sha}}' ;;
+  'api --hostname github.com repos/example/repo/compare/'*'...refs%2Fheads%2Ffeature')
+    jq -nc --arg sha "$(git rev-parse HEAD)" '{status:"identical",ahead_by:0,behind_by:0,base_commit:{sha:$sha},merge_base_commit:{sha:$sha}}' ;;
+  'api --hostname github.com repos/example/repo/compare/'*)
     jq -nc --arg sha "$(git rev-parse HEAD)" '{base_commit:{sha:$sha},files:[{filename:"src/main.sh",additions:1,deletions:0}]}' ;;
   *) exit 2 ;;
 esac
@@ -279,10 +281,9 @@ check 'ordinary title needs no summary heading' "gh issue edit 7 --title 'Fix va
 check 'read-only REST does not publish private parameters' \
   "gh api repos/o/r/issues -X GET -f 'title=$private_text'" allow
 mkdir -p .agents/state
-spec="$(jq -nc --arg repo "$(git rev-parse --show-toplevel)" --arg head "$(git rev-parse HEAD)" \
-  '{binding:{repo:$repo,branch:"feature",head:$head,session:""},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}')"
-request_id="$(bash "$PLUGIN/scripts/timed-user-prompt.sh" request \
-  .agents/state/pr-review-request.json "$spec" | jq -r .id)"
+jq -nc --arg command "gh pr create --title 'fix: validation' --body '$structured'" \
+  '{tool_input:{command:$command}}' | bash "$HOOK" >/dev/null
+request_id="$(jq -r .id .agents/state/pr-review-request.json)"
 marker="$(jq -nc --arg head "$(git rev-parse HEAD)" --arg request "$request_id" \
   '{branch:"feature",head:$head,message:"reviewed: fixture validation",request:$request}')"
 printf '%s\n' "$marker" > .agents/state/pr-reviewed.json
