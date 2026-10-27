@@ -99,6 +99,19 @@ Version 0.1.32 ships two behavior changes:
   and longer text still do.
 - Reload or start a new session to replace already-loaded hooks and prompts.
 
+### PR preparation and skill discovery rollout
+
+Version 0.1.33 packages `boxlite-pr-preparation` and direct skill-directory discovery,
+plus the merged audit, publication, watcher, and instruction-parsing fixes.
+
+After adoption, check the installed version and fresh skill/hook discovery. The
+runtime must discover `boxlite-pr-preparation`; its presence in the source tree
+alone is insufficient. Generated guidance must route PR descriptions to that skill.
+Reload the plugin or start a new task before using the updated instructions.
+
+Example: a documentation-only PR selects before/after wording from the skill's
+inline illustration table. Verify the active installation exposes that table.
+
 ### Verification boundaries
 
 In lifecycle tests, wait for the observed phase before injecting a signal. A
