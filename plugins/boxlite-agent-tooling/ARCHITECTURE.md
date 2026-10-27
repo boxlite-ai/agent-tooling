@@ -180,7 +180,9 @@ its body, so a missing local skill file does not prevent emitting the reference.
 
 The repository's [Writing ownership workflow](../../.github/workflows/writing-ownership.yml)
 runs `scripts/check-writing-ownership.sh`, the reference-delivery tests, and
-`.agents/lib/concise-writing.test.sh` for the TL;DR summary rules on Linux. The gate uses
+`.agents/lib/concise-writing.test.sh` for the TL;DR summary rules on Linux.
+`.agents/lib/reply-summary.test.sh` covers word counts and delimiter performance there.
+The gate uses
 `sync-guidance.sh --check-current` to reject stale output; ordinary consumer
 `--check` keeps its warning behavior. It scans tracked and untracked Markdown for
 eight-word matches or complete five-to-seven-word rules from the `boxlite-writing` skill,

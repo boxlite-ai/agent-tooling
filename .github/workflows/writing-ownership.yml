@@ -41,3 +41,4 @@ jobs:
           bash plugins/boxlite-agent-tooling/.agents/hooks/pr/preflight-pr-review.test.sh
           bash plugins/boxlite-agent-tooling/.agents/hooks/session/stop-gate.test.sh
           bash plugins/boxlite-agent-tooling/.agents/lib/concise-writing.test.sh
+          bash plugins/boxlite-agent-tooling/.agents/lib/reply-summary.test.sh
