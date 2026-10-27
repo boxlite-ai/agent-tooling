@@ -7,7 +7,13 @@ API_SHELL := $(P)/scripts/api-compatibility.sh \
   $(P)/.githooks/pre-push $(P)/.githooks/githooks.test.sh
 
 .PHONY: test\:subagent test\:verdict test\:architecture test\:parity test\:guidance test\:writing
-.PHONY: test\:api-compatibility test\:plugin test\:api-lint test\:guidance-check
+.PHONY: test\:api-compatibility test\:plugin test\:api-lint test\:guidance-check test\:bootstrap
+
+test\:bootstrap:
+	@for suite in templates/install.test.sh templates/claude-plugin-bootstrap.test.sh templates/codex-plugin-bootstrap.test.sh; do \
+	  case "$$suite" in *"$(TEST_FILTER)"*) ;; *) continue ;; esac; \
+	  echo "Running $$suite"; bash "$$suite" || exit $$?; \
+	done
 
 test\:subagent:
 	bash $(P)/.agents/lib/subagent.test.sh

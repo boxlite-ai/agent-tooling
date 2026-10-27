@@ -51,14 +51,24 @@ wrappers validate arguments and dependencies, then call libraries under
 | [setup.sh](setup.sh) `[repo-root]` | Validate the profile, synchronize instructions, and configure worktree-local Git hooks. The installer owns revision adoption. |
 | [verify-installation.sh](verify-installation.sh) `[repo-root]` | Check the recorded revision, hold, cache, and hook path locally; report stale refresh locks without removing them. |
 | [sync-installation.sh](sync-installation.sh) | Git lifecycle entry point: repair broken adoption in the foreground, otherwise schedule a throttled background refresh. Failures do not block lifecycle events. |
-| [refresh-installation.sh](refresh-installation.sh) `[repo-root]` | Under a refresh lock, ask the consumer installer to adopt the configured branch; honor holds and report refresh results. |
+| [install.sh](install.sh) | Adopt a validated revision; the consumer installer delegates here after initial setup. |
+| [claude-plugin-bootstrap.sh](claude-plugin-bootstrap.sh), [codex-plugin-bootstrap.sh](codex-plugin-bootstrap.sh) | Shared host startup implementations selected by consumer loaders; check releases, reconcile the current host, and report reload requirements. |
+| [refresh-installation.sh](refresh-installation.sh) `[--if-due] [repo-root]` | Serialize refresh and adoption. `--if-due` also honors refresh opt-out and the polling interval. |
 | [sync-guidance.sh](sync-guidance.sh) `[--check\|--check-current\|--force] [repo-root]` | Splice canonical workflow into consumer instructions. `--check` validates integrity; `--check-current` also rejects stale content; `--force` permits updating modified instruction files. |
 | [check-writing-ownership.sh](check-writing-ownership.sh) `[repo-root]` | Check generated guidance and scan repository Markdown for copied rules owned by `boxlite-writing`. |
 
 Lifecycle-triggered installs defer instruction edits. Run the consumer installer
 explicitly to update committed guidance. Lifecycle events attempt background
-refresh at most once every 15 minutes; `AGENT_TOOLING_REFRESH=0` disables it and
-`AGENT_TOOLING_REFRESH_MINUTES` changes the interval.
+refresh at most once every 15 minutes, sharing the stamp with session startups.
+`AGENT_TOOLING_REFRESH=0` disables automatic checks and
+`AGENT_TOOLING_REFRESH_MINUTES` changes the interval. Failed network attempts back
+off too; invalid profiles fail. A busy refresh skips without breaking its lock.
+
+Network commands have 30-second limits within a 30-second refresh or 120-second
+host phase. `AGENT_TOOLING_COMMAND_TIMEOUT_SECONDS` can shorten each command's
+limit to 1–30 seconds. The standalone first-install fallback still relies on its
+caller's deadline. Native CLI failures are visible; an updated repository and a
+host installation are separate transactions.
 
 ## Design, review, and audit history
 
@@ -107,6 +117,7 @@ Run suites from the repository root, for example:
 bash plugins/boxlite-agent-tooling/scripts/design-doc.test.sh
 bash plugins/boxlite-agent-tooling/scripts/sync-guidance.test.sh
 bash plugins/boxlite-agent-tooling/scripts/refresh-installation.test.sh
+make test:bootstrap
 ```
 
 Most commands have adjacent `*.test.sh` suites. Installation also uses

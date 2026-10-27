@@ -186,5 +186,62 @@ ENV_INSTALLER
 done
 
 echo
+echo "## Startup and lifecycle polling share one throttled lock owner"
+make_installed_consumer
+export REFRESH_POLL_LOG REFRESH_POLL_SHA REFRESH_CHILD
+REFRESH_POLL_LOG="$TMP/polls"
+REFRESH_CHILD="$TMP/remote-child"
+REFRESH_POLL_SHA="$(head -n1 "$REPO/.git/agent-tooling/current")"
+cat > "$TMP/bin/git" <<'REMOTE_GIT'
+#!/usr/bin/env bash
+if [[ "$1" == ls-remote ]]; then
+  printf 'poll\n' >> "$REFRESH_POLL_LOG"
+  if [[ "${REFRESH_DETACH:-0}" == 1 ]]; then
+    (sleep 3; printf 'late output\n') &
+    exit 0
+  fi
+  if [[ "${REFRESH_STALL:-0}" == 1 ]]; then
+    trap '' TERM
+    sleep 3 &
+    printf '%s\n' "$!" > "$REFRESH_CHILD"
+    wait
+    exit 128
+  fi
+  printf '%s\trefs/heads/main\n' "$REFRESH_POLL_SHA"
+else
+  exec "$REAL_GIT" "$@"
+fi
+REMOTE_GIT
+chmod +x "$TMP/bin/git"
+run_due_refresh() {
+  PATH="$TMP/bin:$PATH" bash "$SCRIPT" --if-due "$REPO" > "$TMP/refresh-out" 2> "$TMP/refresh-err"
+}
+touch "$REPO/.git/agent-tooling/last-check"
+run_due_refresh
+[[ ! -e "$REFRESH_POLL_LOG" ]]; report "fresh stamp skips the remote inside the lock" $? "$(cat "$TMP/refresh-err")"
+AGENT_TOOLING_REFRESH=0 AGENT_TOOLING_REFRESH_MINUTES=0 run_due_refresh
+[[ ! -e "$REFRESH_POLL_LOG" ]]; report "refresh opt-out skips the remote" $? "$(cat "$TMP/refresh-err")"
+touch -t 200001010000 "$REPO/.git/agent-tooling/last-check"
+run_due_refresh
+[[ "$(cat "$REFRESH_POLL_LOG" 2>/dev/null)" == poll ]]; report "expired stamp polls once" $? "$(cat "$TMP/refresh-err")"
+run_due_refresh
+[[ "$(cat "$REFRESH_POLL_LOG" 2>/dev/null)" == poll ]]; report "successful poll throttles the next caller" $? "$(cat "$TMP/refresh-err")"
+AGENT_TOOLING_REFRESH_MINUTES=invalid run_due_refresh
+[[ "$?" == 1 ]]; report "invalid interval fails closed" $? "$(cat "$TMP/refresh-err")"
+started="$(date +%s)"
+AGENT_TOOLING_COMMAND_TIMEOUT_SECONDS=1 AGENT_TOOLING_REFRESH_MINUTES=0 REFRESH_STALL=1 run_due_refresh
+rc=$?
+elapsed=$(( $(date +%s) - started ))
+[[ "$rc" == 0 && "$elapsed" -le 2 ]]; report "stalled remote is bounded and retains the record" $? "rc=$rc elapsed=$elapsed"
+[[ "$(head -n1 "$REPO/.git/agent-tooling/current")" == "$REFRESH_POLL_SHA" ]]
+report "timeout does not advance the record" $? "record changed"
+lock_held; report "timeout releases its refresh lock" $((! $?)) "lock remains"
+child="$(cat "$REFRESH_CHILD")"
+kill -0 "$child" 2>/dev/null
+report "timeout stops the remote's descendant" $((! $?)) "child $child remains"
+started="$(date +%s)"
+AGENT_TOOLING_COMMAND_TIMEOUT_SECONDS=1 AGENT_TOOLING_REFRESH_MINUTES=0 REFRESH_DETACH=1 run_due_refresh
+elapsed=$(( $(date +%s) - started ))
+[[ "$elapsed" -le 2 ]]; report "deadline also stops inherited pipes after the direct child exits" $? "elapsed=$elapsed"
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

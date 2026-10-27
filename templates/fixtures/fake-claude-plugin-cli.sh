@@ -86,6 +86,11 @@ elif [[ "$1 $2" == "plugin install" ]]; then
     printf 'fixture plugin failure\n' >&2
     exit 1
   }
+  if [[ "${FAKE_CLAUDE_STALL_REINSTALL:-0}" == 1 && -e "$state/reinstalling" ]]; then
+    trap '' TERM
+    printf '%s\n' "$$" > "$state/stalled-cli"
+    sleep 3
+  fi
   # Like Claude Code, installing over this checkout's own record changes nothing.
   if [[ -e "$state/plugin-installed" && -e "$state/plugin-installed-here" ]]; then
     printf 'Plugin is already installed\n'
@@ -106,6 +111,7 @@ elif [[ "$1 $2" == "plugin uninstall" ]]; then
   [[ "$4" == "--scope" && "$5" == "project" && "$6" == "--keep-data" ]]
   [[ -e "$state/plugin-installed" && -e "$state/plugin-installed-here" ]]
   rm -f "$state/plugin-installed" "$state/plugin-installed-here"
+  touch "$state/reinstalling"
   # Claude Code also drops the plugin from the tracked project settings.
   settings="${FAKE_CLAUDE_PROJECT_PATH:?}/.claude/settings.json"
   jq -c 'del(.enabledPlugins["boxlite-agent-tooling@boxlite-agent-tooling"])' "$settings" \

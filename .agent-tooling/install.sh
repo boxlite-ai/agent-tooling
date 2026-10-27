@@ -25,6 +25,15 @@ profile_file="$repo_root/.agent-tooling/profile.json"
 command -v jq >/dev/null 2>&1 || { printf 'agent-tooling: jq is required\n' >&2; exit 1; }
 command -v perl >/dev/null 2>&1 || { printf 'agent-tooling: perl is required\n' >&2; exit 1; }
 
+# Once installed, future adoption fixes come from the recorded package. The rest
+# of this file is the self-contained first-install/older-release fallback.
+bootstrap_common="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
+bootstrap_revision="$(head -n1 "$bootstrap_common/agent-tooling/current" 2>/dev/null || true)"
+if [[ "$bootstrap_revision" =~ ^[0-9a-f]{40}$ ]]; then
+  bootstrap_runtime="$bootstrap_common/agent-tooling/$bootstrap_revision/plugins/boxlite-agent-tooling/scripts/install.sh"
+  [[ ! -x "$bootstrap_runtime" ]] || exec bash "$bootstrap_runtime" "$@"
+fi
+
 tooling_repo="$(jq -er '.tooling.repository | select(type == "string" and length > 0)' "$profile_file")" || {
   printf 'agent-tooling: tooling.repository is required\n' >&2
   exit 1

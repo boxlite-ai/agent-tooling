@@ -246,19 +246,27 @@ fi
 
 ## Updates and troubleshooting
 
-Consumers follow the branch in `tooling.ref`. The installer validates a fetched revision before recording it as adopted; offline verification uses that recorded cache. Host plugins refresh separately, so an adopted Git-hook revision does not prove a running session has reloaded.
+Consumers follow the branch in `tooling.ref`. Startup/resume and Git lifecycle events share a 15-minute release check, even when the repository and host plugin have matching versions. The installer validates a fetched revision before adopting it; offline refresh keeps a valid recorded installation.
+
+For example, repository tooling and the installed plugin can both be at 0.1.35 while the branch publishes 0.1.36. The next eligible startup adopts that release and reconciles the current host's plugin. Already loaded sessions still need a reload or a new task.
 
 | Need | Action |
 | --- | --- |
 | Refresh tooling and shared instructions | Run `./.agent-tooling/install.sh` explicitly. |
 | Inspect the adopted revision | Read `agent-tooling/current` under `git rev-parse --git-common-dir`; `agent-tooling/history.log` records adoptions. |
-| Pause background polling | Set `AGENT_TOOLING_REFRESH=0`; `AGENT_TOOLING_REFRESH_MINUTES` controls its interval. |
+| Pause automatic release checks | Set `AGENT_TOOLING_REFRESH=0`; a mismatched host version then requires explicit repair. `AGENT_TOOLING_REFRESH_MINUTES` sets the interval (0–99999; zero checks every time). |
 | Freeze repository tooling | Put one full lowercase commit SHA in `.agent-tooling/hold`, then run the installer. Remove it and reinstall to resume following the branch. |
 | Repair missing or stale Git hooks | Rerun the installer; it can repair from an existing valid cache offline. |
 | Load newly installed host resources | Reload Claude plugins or start a new Codex task; check hook trust. |
 | Resolve a blocked action | Follow the gate's diagnostic; [architecture](plugins/boxlite-agent-tooling/ARCHITECTURE.md#entry-points) maps each gate to its evidence and recovery path. |
 
-A hold constrains repository tooling; it does not silently roll back host plugins. A mismatched host-plugin version fails bootstrap. Consumer installer and bootstrap scripts are committed copies: refresh them from `templates/` when adopting fixes to those scripts.
+A hold constrains repository tooling; it does not silently roll back host plugins. A mismatched host-plugin version fails bootstrap. Disabled plugins stay disabled; installing files does not grant hook trust.
+
+### Migrate existing consumers once
+
+After 0.1.35 merges, run the existing installer, then replace all three `.agent-tooling/*.sh` files listed above with the released templates. Review and commit the consumer changes; merge customizations explicitly. Keep the older scripts for a hold pinned below 0.1.35.
+
+The host scripts become loaders for the adopted package. The consumer installer delegates later adoptions to that package too, retaining its self-contained first-install fallback. Later updater fixes arrive with releases; automatic refresh leaves tracked scripts and guidance alone. A missing compatible runtime fails with migration instructions.
 
 ## Develop and contribute
 

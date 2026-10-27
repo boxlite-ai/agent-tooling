@@ -25,6 +25,9 @@ tooling_version="${FAKE_AGENT_TOOLING_VERSION:-${recorded_version:-0.1.5}}"
 plugin_dir="$common_git_dir/agent-tooling/$tooling_sha/plugins/boxlite-agent-tooling"
 verify_dir="$plugin_dir/scripts"
 mkdir -p "$verify_dir"
+# Exercise the real shared runtime selected by the consumer loader.
+fixture_root="$(cd "$(dirname "${FAKE_AGENT_TOOLING_VERIFY:?}")/../.." && pwd)"
+cp -R "$fixture_root/plugins/boxlite-agent-tooling/." "$plugin_dir/"
 cp "${FAKE_AGENT_TOOLING_VERIFY:?}" "$verify_dir/verify-installation.sh"
 chmod +x "$verify_dir/verify-installation.sh"
 jq -nc --arg version "$tooling_version" \
@@ -36,6 +39,7 @@ jq -nc --arg version "$tooling_version" \
   '{name:"boxlite-agent-tooling",version:$version}' \
   > "$plugin_dir/.codex-plugin/plugin.json"
 printf '%s\n' "$tooling_sha" > "$record_file"
+touch "$common_git_dir/agent-tooling/last-check"
 if [[ "${FAKE_AGENT_TOOLING_INVALID_INSTALL:-0}" == 1 ]]; then
   touch "$state/invalid-install"
   printf 'fixture network unavailable; keeping cached revision\n' >&2

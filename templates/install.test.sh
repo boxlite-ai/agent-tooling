@@ -540,5 +540,31 @@ for lifecycle_mode in foreground background warm direct; do
 done
 
 echo
+echo "## Failed downloads keep a validated installation usable"
+CONSUMER="$TMP/download-failure"
+make_consumer "$CONSUMER"
+CACHE="$CONSUMER/.git/agent-tooling"
+RECORD="$CACHE/current"
+run_install > "$TMP/out" 2> "$TMP/err"
+check_eq "download fixture starts installed" "$?" 0
+baseline="$(record)"
+advance_remote >/dev/null
+mkdir "$TMP/download-bin"
+export DOWNLOAD_REAL_GIT
+DOWNLOAD_REAL_GIT="$(command -v git)"
+cat > "$TMP/download-bin/git" <<'DOWNLOAD_GIT'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  [[ "$arg" != fetch ]] || { printf 'fixture download unavailable\n' >&2; exit 128; }
+done
+exec "$DOWNLOAD_REAL_GIT" "$@"
+DOWNLOAD_GIT
+chmod +x "$TMP/download-bin/git"
+PATH="$TMP/download-bin:$PATH" bash "$(installed_plugin "$baseline")/scripts/refresh-installation.sh" "$CONSUMER" \
+  > "$TMP/out" 2> "$TMP/err"
+check_eq "failed download retains a valid installation without blocking startup" "$?" 0
+check_eq "failed download does not publish a new revision" "$(record)" "$baseline"
+run_verify > "$TMP/out" 2> "$TMP/err"
+check_eq "previous installation remains valid after download failure" "$?" 0
 printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
 exit $(( fail > 0 ? 1 : 0 ))

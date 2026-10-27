@@ -721,16 +721,45 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   the installation lock, cache revision check, and `scripts/setup.sh`, then runs
   `scripts/verify-installation.sh` before success. This repairs worktree-local hooks
   without changing the shared record, adoption history, or last-check stamp. An invalid
-  cache or profile fails closed. `templates/codex-plugin-bootstrap.sh` and
-  `templates/claude-plugin-bootstrap.sh` keep the initial validity probe quiet, but
+  cache or profile fails closed. `scripts/codex-plugin-bootstrap.sh` and
+  `scripts/claude-plugin-bootstrap.sh` keep the initial validity probe quiet, but
   report verifier and installer diagnostics if repair or pre-upgrade refresh fails.
 
 - Linked-worktree plugin repair: Claude Code's project-scoped `plugin update` resolves
   the main checkout's record, so in a linked worktree it can succeed while this
-  checkout's record stays stale. `templates/claude-plugin-bootstrap.sh` then runs
+  checkout's record stays stale. `scripts/claude-plugin-bootstrap.sh` then runs
   `plugin uninstall --keep-data` and `plugin install`, which resolve this checkout, and
   restores the tracked `.claude/settings.json` byte-for-byte because uninstall edits it.
   A plugin still stale after the reinstall fails closed.
+
+### Startup updates
+
+The consumer host templates load `scripts/claude-plugin-bootstrap.sh` or
+`scripts/codex-plugin-bootstrap.sh` from the recorded SHA. The consumer installer
+also delegates to `scripts/install.sh` once present; its standalone fallback can
+bootstrap an empty cache. Migration requires tooling 0.1.35 and all three released
+consumer templates. Automatic runs never overwrite those tracked files.
+
+`.agents/lib/plugin-bootstrap.sh` shares the release check and adopted-runtime
+lookup. The host initializes failure state before refresh, then transfers to the
+newly adopted host implementation with the original input. Claude `--check` reads
+session state only. Both equal-old versions and a host updated ahead of repository
+tooling are reconciled; refresh opt-out requires explicit repair on disagreement.
+
+`refresh-installation.sh --if-due` owns the polling timestamp under its refresh
+lock, shared with Git lifecycle callers. Failed attempts are stamped too. It
+retains an old installation after a failed download only when profile and
+installation validation both succeed. A busy lock skips; abandoned locks retain
+the existing warning and manual recovery path.
+
+`.agents/lib/tooling-command.sh` bounds individual Git and native host commands
+using a child process group, TERM, a brief KILL grace, and reaping before returning.
+Polling/adoption gets 30 seconds; host reconciliation gets 120 seconds, including
+mismatch repair. Shell owners release their own locks on EXIT and terminate on
+INT/TERM. Claude arms settings restoration before uninstall, restores bytes before
+reporting success/failure, and keeps failed sessions blocked. A restoration error
+retains and names the backup. External SIGKILL can prevent cleanup; no automatic
+recovery or hot replacement of already loaded sessions is claimed.
 
 ## Test-run receipts
 

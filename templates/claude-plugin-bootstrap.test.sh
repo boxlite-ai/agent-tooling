@@ -580,5 +580,8 @@ start_status="$?"
 check_failed_start "invalid plugin JSON" 'invalid plugin list' "$start_status"
 
 echo
+startup_host=claude
+# shellcheck source=fixtures/startup-refresh-cases.sh
+source "$REPO_ROOT/templates/fixtures/startup-refresh-cases.sh"
 printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
 exit $(( fail > 0 ? 1 : 0 ))

@@ -55,11 +55,11 @@ guidance, and installed plugin version separately. Preserve explicit holds and
 unrelated worktree changes. Existing sessions need a plugin reload or a new task
 to load the updated resources.
 
-Consumer bootstrap scripts are committed snapshots; installation does not rewrite
-them. Compare `.agent-tooling/install.sh`, `claude-plugin-bootstrap.sh`, and
-`codex-plugin-bootstrap.sh` with the released templates. Propagate applicable
-changes while preserving consumer customizations. Verify Claude records by exact
-`projectPath`: a successful update in one linked worktree can leave another stale.
+Version 0.1.35 moves host reconciliation and subsequent installation into the
+adopted package. Migrate existing consumers once using the [release instructions](../../README.md#migrate-existing-consumers-once).
+Installation never rewrites tracked loaders; preserve customizations and older
+held releases. Verify Claude records by exact `projectPath`: a successful update
+in one linked worktree can leave another stale.
 
 For Codex packaging changes, run host parity's copy-without-symlinks checks, then
 install with the real CLI in an empty isolated Codex home. Verify fresh

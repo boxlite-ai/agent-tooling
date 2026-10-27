@@ -488,5 +488,8 @@ else
 fi
 
 echo
+startup_host=codex
+# shellcheck source=fixtures/startup-refresh-cases.sh
+source "$REPO_ROOT/templates/fixtures/startup-refresh-cases.sh"
 printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
 exit $(( fail > 0 ? 1 : 0 ))
