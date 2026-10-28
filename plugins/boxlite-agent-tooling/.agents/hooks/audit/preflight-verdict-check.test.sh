@@ -191,13 +191,14 @@ printf "%s\n" "$task_input_json" \
   > "$CLAUDE_PROJECT_DIR/.agents/state/SYNC_AUDIT_TASK_INPUT"
 previous_path="$(printf "%s" "$task_input_json" \
   | jq -r ".previous_dossier_path // empty")"
-transcript_path="$(printf "%s" "$task_input_json" \
-  | jq -r ".transcript_path // empty")"
+history_path="$(printf "%s" "$task_input_json" \
+  | jq -r ".history_path // empty")"
 if [[ -n "$previous_path" && -r "$previous_path" ]]; then
   cp "$previous_path" "$CLAUDE_PROJECT_DIR/.agents/state/SYNC_AUDIT_PREVIOUS"
 fi
-if [[ -n "$transcript_path" && -r "$transcript_path" ]]; then
-  cp "$transcript_path" "$CLAUDE_PROJECT_DIR/.agents/state/SYNC_AUDIT_TRANSCRIPT"
+if [[ -n "$history_path" && -r "$history_path" ]]; then
+  jq '\''.attempts[-1].input.snapshot.transcript[0]'\'' "$history_path" \
+    > "$CLAUDE_PROJECT_DIR/.agents/state/SYNC_AUDIT_TRANSCRIPT"
 fi
 touch "$CLAUDE_PROJECT_DIR/.agents/state/SYNC_AUDIT_RAN"
 printf "run\\n" >> "$CLAUDE_PROJECT_DIR/.agents/state/SYNC_AUDIT_RUNS"
@@ -483,28 +484,28 @@ perl -e '
   print qq|{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"TOOL_EVIDENCE"}]}}\n|;
 ' > "$R/transcript.jsonl"
 history_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p, hook_event_name:"Stop"}')"
+  '{transcript_path:$p, hook_event_name:"Stop",session_id:"history-session"}')"
 history_out="$(run_payload_hook "$R" "$history_payload")"
 history_snapshot="$R/.agents/state/SYNC_AUDIT_TRANSCRIPT"
 history_task_input="$R/.agents/state/SYNC_AUDIT_TASK_INPUT"
-history_complete=no
-if [[ "$(shasum -a 256 "$R/transcript.jsonl" | cut -d ' ' -f 1)" \
-   == "$(shasum -a 256 "$history_snapshot" 2>/dev/null | cut -d ' ' -f 1)" ]]; then
-  history_complete=yes
+history_bounded=no
+if [[ -f "$history_snapshot" && "$(wc -c < "$history_snapshot")" -lt 262144 ]] \
+   && jq -e '.type == "verdict_final_turn_snapshot"' "$history_snapshot" >/dev/null; then
+  history_bounded=yes
 fi
-history_recorded_path="$(jq -r '.transcript_path // empty' \
-  "$history_task_input" 2>/dev/null || true)"
+history_context="$(jq -r '(has("transcript_path") | not) and
+  .parent_session_id == "history-session"' "$history_task_input" 2>/dev/null || true)"
 history_snapshot_state="decision=$(decision_from_output "$history_out")"
-history_snapshot_state="$history_snapshot_state complete=$history_complete"
+history_snapshot_state="$history_snapshot_state bounded=$history_bounded"
 history_snapshot_state="$history_snapshot_state final=$(grep -q 'FINAL_SMALL' "$history_snapshot" 2>/dev/null && echo yes || echo no)"
 history_snapshot_state="$history_snapshot_state tool=$(grep -q 'TOOL_EVIDENCE' "$history_snapshot" 2>/dev/null && echo yes || echo no)"
 history_snapshot_state="$history_snapshot_state old=$(grep -q 'OLD_HISTORY_' "$history_snapshot" 2>/dev/null && echo yes || echo no)"
-history_snapshot_state="$history_snapshot_state routed=$([[ -n "$history_recorded_path" ]] && echo yes || echo no)"
-if [[ "$history_snapshot_state" == "decision=block complete=yes final=yes tool=yes old=yes routed=yes" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "synchronous route supplies the complete native transcript"
+history_snapshot_state="$history_snapshot_state context=$history_context"
+if [[ "$history_snapshot_state" == "decision=block bounded=yes final=yes tool=yes old=no context=true" ]]; then
+  pass=$((pass+1)); printf '  PASS  %s\n' "synchronous route separates bounded history from transcript discovery"
 else
   fail=$((fail+1)); printf '  FAIL  %s  (%s)\n' \
-    "synchronous route lost native transcript bytes" "$history_snapshot_state"
+    "synchronous route discovery handoff" "$history_snapshot_state"
 fi
 rm -rf "$R"
 
@@ -966,20 +967,17 @@ fallback_transcript="$R/.agents/state/verdict-stop-message.jsonl"
 fallback_transcript="$(cd "$R" && pwd -P)/.agents/state/verdict-stop-message.jsonl"
 fallback_text="$(jq -r '[.records[]? | select(.kind == "assistant") | .texts[]?] | join("\n\n")' \
   "$fallback_transcript" 2>/dev/null || echo MISSING)"
-runner_text="$(jq -r '[.records[]? | select(.kind == "assistant") | .texts[]?] | join("\n\n")' \
-  "$R/.agents/state/SYNC_AUDIT_TRANSCRIPT" 2>/dev/null || echo MISSING)"
-runner_transcript_path="$(jq -r '.transcript_path // empty' \
+runner_context="$(jq -r '(has("transcript_path") | not) and has("parent_session_id")' \
   "$R/.agents/state/SYNC_AUDIT_TASK_INPUT" 2>/dev/null || true)"
 if [[ "$got" == "block" && "$recorded_id" == "$expected_id" \
    && "$fallback_text" == "All tests pass." \
-   && "$runner_text" == "All tests pass." \
-   && -n "$runner_transcript_path" ]]; then
+   && "$runner_context" == true ]]; then
   pass=$((pass+1)); printf '  PASS  %s\n' \
-    "null transcript + Stop message → block with content identity and auditable handoff"
+    "null transcript + Stop message → block with content identity and discovery context"
 else
   fail=$((fail+1)); printf '  FAIL  %s  (got=%s id=%s expected=%s fallback=%s handed-off=%s)\n' \
     "null transcript fallback" "$got" "$recorded_id" "$expected_id" "$fallback_text" \
-    "$([[ "$runner_text" == "All tests pass." && -n "$runner_transcript_path" ]] && echo yes || echo no)"
+    "$runner_context"
 fi
 
 # A recursive Stop for the message just judged is stale, but only when Codex marks
@@ -4417,8 +4415,10 @@ RETRY_ENV
     retry_state="decision=$retry_decision boundary=missed evidence=missing dossier=missing"
     [[ -e "$R/.agents/state/retry-boundary-hit" ]] \
       && retry_state="${retry_state/boundary=missed/boundary=hit}"
+    retry_snapshot="$(session_state_path "$R" verdict-stop-message.jsonl "$retry_session")"
+    [[ -n "$retry_session" ]] || retry_snapshot="$R/.agents/state/verdict-stop-message.jsonl"
     if jq -e '.truncated == true and .source_bytes == 0' \
-        "$R/.agents/state/SYNC_AUDIT_TRANSCRIPT" >/dev/null 2>&1; then
+        "$retry_snapshot" >/dev/null 2>&1; then
       retry_state="${retry_state/evidence=missing/evidence=incomplete}"
     fi
     if [[ "$retry_out" == *"independent audit finding"* ]] \

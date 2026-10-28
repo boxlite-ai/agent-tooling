@@ -9,7 +9,7 @@ Gates read dossiers; auditors write them. Full contracts: [audit producers](../.
 | File | Called by, with | Result |
 | --- | --- | --- |
 | [preflight-verdict-check.sh](preflight-verdict-check.sh) | [stop-gate.sh](../stop-gate.sh); `Stop` JSON on stdin | Blocks with findings or allows; consumes the turn dossier. |
-| [run-verdict-audit.sh](run-verdict-audit.sh) | The verdict gate, inside the same Stop; `<transcript_path> [session_id] [generation] [session_scope]` | The session's `last-verdict.json`, judged by an independent model CLI. |
+| [run-verdict-audit.sh](run-verdict-audit.sh) | The verdict gate, inside the same Stop; `<bookkeeping_path\|-> [session_id] [generation] [session_scope]` | The session's `last-verdict.json`, judged by an independent model CLI. |
 | [run-commit-push-audit.sh](run-commit-push-audit.sh) | CI, a plain shell, or an agent on an unidentified host; [preflight-commit-push.sh](../preflight-commit-push.sh) for a delegated Codex push; `<commit\|push> <command>` | `last-audit.json`, the dossier the `commit-push-auditor` subagent also writes. |
 | [commit-push-audit.schema.json](commit-push-audit.schema.json) | `codex exec --output-schema` in the commit/push runner | The JSON shape the Codex auditor must answer in. |
 
@@ -64,6 +64,13 @@ and [state files](../../../ARCHITECTURE.md#state-files).
    `claude -p --safe-mode`; Codex uses read-only `codex exec` with hooks disabled.
 3. Unknown hosts retain availability order: Claude, then Codex.
 4. No matching CLI: exit 2. A known host never falls through to another provider.
+
+The model task supplies parent session ID, host, repository, request time, and dossier
+bindings. The auditor discovers the transcript using the skill's host hints or its own
+investigation, verifies parent identity, and revalidates a fixed evidence boundary.
+The first runner argument supplies bounded bookkeeping only; `-` marks it unavailable.
+For example, a native auditor can receive a parent session ID without any transcript path.
+Unknown-host discovery does not change how the independent auditor is launched.
 
 Hook manifests set `BOXLITE_HOOK_HOST` per invocation, overriding inherited values.
 This distinguishes Codex's root aliases from nested hosts. Generic hooks set
@@ -129,6 +136,7 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.tes
 
 | Suite | Covers |
 | --- | --- |
+| [full-transcript.test.sh](full-transcript.test.sh) | Parent-context handoff without a transcript path, known/unknown hosts, complete evidence access through stubs, bounded history, and cleanup. |
 | [preflight-verdict-check.test.sh](preflight-verdict-check.test.sh) | Verdict gate: triage, dossier bindings, consumption, and re-entry. |
 | [run-verdict-audit.test.sh](run-verdict-audit.test.sh) | Verdict runner: auditor selection, exit codes, freshness, and cancellation. |
 | [stop-host-routing.test.sh](stop-host-routing.test.sh) | Both Stop stages: host selection, overrides, unavailable providers, and bounded Codex discovery. |

@@ -1731,14 +1731,10 @@ block_audit_infrastructure_failure() {  # reason
 }
 
 audit_before_stop() {  # trigger-reason
-  local trigger_reason="$1" audit_transcript_path="$transcript_path"
+  local trigger_reason="$1"
   local runner="$tooling_root/.agents/hooks/audit/run-verdict-audit.sh"
   local runner_status=0 runner_failure=""
-  # Triage's bounded snapshot is not the auditor's evidence source.
-  if [[ "$AUDIT_TRANSCRIPT_SOURCE_KIND" == transcript \
-     && -n "$AUDIT_TRANSCRIPT_SOURCE_PATH" ]]; then
-    audit_transcript_path="$AUDIT_TRANSCRIPT_SOURCE_PATH"
-  fi
+  # The runner records this bounded summary in history; the auditor finds evidence.
   require_audit_reflection
   if ! ensure_verdict_request; then
     block_audit_infrastructure_failure "${trigger_reason}
@@ -1751,7 +1747,7 @@ Verdict audit could not start because its generation-bound request was not recor
 
 Verdict audit runner is unavailable at ${runner}."
   fi
-  CLAUDE_PROJECT_DIR="$project_dir" bash "$runner" "$audit_transcript_path" \
+  CLAUDE_PROJECT_DIR="$project_dir" bash "$runner" "${transcript_path:--}" \
     "$session_id" "$audit_generation" "$session_scope" >/dev/null 2>&1 \
     || runner_status=$?
   prompt_epoch_is_current || allow

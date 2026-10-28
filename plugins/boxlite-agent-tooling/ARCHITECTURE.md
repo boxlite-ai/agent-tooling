@@ -701,21 +701,27 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/audit/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Research verdict: root, branch, design URL, and the SHA-256 of the content the auditor reviewed (`.agents/lib/design-doc.sh`).
 - Incomplete evidence: a missing or empty source during refresh retains the published failed snapshot. Audit re-entry reads and validates that bounded snapshot before consuming the dossier; loss of the original source cannot become `empty-allow`. An initially absent or empty transcript still has nothing to judge.
-- Auditor transcript: after native extraction succeeds, Stop passes the native source
-  to the runner. `verdict_audit_copy_regular_state` freezes every byte in a private
-  regular file, using the source size as its copy bound and rejecting source changes.
-  The auditor's `transcript_path` names that copy; cleanup removes it. Missing native
-  sources, failed extraction, and custom extractors retain explicit fallback snapshots.
+- Auditor transcript: the task supplies `parent_session_id`, `parent_host`, and
+  `audit_started_at` with the existing repository and dossier bindings. The auditor
+  discovers the full source; no transcript path is supplied. Known hosts have storage
+  hints; unknown hosts investigate available tools, metadata, configuration, and storage.
+  Parent identity, repository, and target turn must match. Missing legacy session IDs
+  require verified parent linkage; unresolved identity or completeness requires FAIL.
+  Local evidence uses a recorded file identity and prefix length/digest, checked again
+  before delivery. API evidence uses complete records through a fixed item boundary,
+  with ordered IDs and content/version revalidation; unchanged IDs alone are insufficient.
   [boxlite-verdict-audit](.agents/skills/boxlite-verdict-audit/SKILL.md) owns the complete
   procedure, including input validation, proof standards, verdicts, and dossier output.
   The agent definition retains launch metadata and a read-and-apply link. The runner
-  loads the skill explicitly for override, Claude, and Codex launches; missing skill
+  loads the skill explicitly for override, Claude, and Codex launches and identifies
+  its source location so relative references resolve. Missing skill or discovery guide
   fails closed. Native agents follow the same link without duplicating audit rules.
   The skill guides native-record search and command/result linkage with 64 KiB outputs
   and no cumulative transcript-read ceiling; the audit deadline still applies.
-  For example, a late test result omitted from the summary remains in the full file,
-  along with earlier turns. No claim JSON or retrieval service is required ([#293](https://github.com/boxlite-ai/agent-tooling/issues/293)).
-- Final-turn bookkeeping reader: `.agents/lib/verdict-audit-state.sh` reads a transcript back from its end to the last real user message and decodes at most `verdict_audit_final_turn_max_bytes` (64 MiB) of it. Earlier history is only hashed into `source_sha256` for this summary; the reader's 15 s alarm bounds the rest ([#262](https://github.com/boxlite-ai/agent-tooling/issues/262)). The runner builds this bounded summary from its frozen copy for audit-history serialization, separately from the auditor's full file.
+  For example, the auditor can find a late test result and earlier execution records in
+  the discovered source despite their omission from history previews. No claim JSON or
+  retrieval service is required ([#293](https://github.com/boxlite-ai/agent-tooling/issues/293)).
+- Final-turn bookkeeping reader: `.agents/lib/verdict-audit-state.sh` reads a transcript back from its end to the last real user message and decodes at most `verdict_audit_final_turn_max_bytes` (64 MiB) of it. Earlier history is only hashed into `source_sha256` for this summary; the reader's 15 s alarm bounds the rest ([#262](https://github.com/boxlite-ai/agent-tooling/issues/262)). Stop passes its bounded snapshot to the runner for history. Direct runner callers may supply a bookkeeping source or `-` for an explicit incomplete snapshot. The runner retains only a private bounded history file and cleans it up; it does not copy the full transcript. History is context for discovery, never substitute execution proof.
 - Bookkeeping snapshot selection: after the existing preview reductions, binary search retains
   the largest earliest-tool prefix fitting the cap, including the final LF. Claims
   remain whole or use the existing truncated fallback. Fixed-preview sizes increase:

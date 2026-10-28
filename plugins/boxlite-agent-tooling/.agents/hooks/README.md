@@ -19,7 +19,7 @@ See [host wiring](../../hooks/README.md) for events and host differences,
 | [post-remote-write-watch.sh](post-remote-write-watch.sh) | Shell `PostToolUse` JSON | Connect successful remote writes and pending events to the host's watch consumer. |
 | [stop-gate.sh](stop-gate.sh) | `Stop` JSON | Sequence timed confirmations, writing checks, and verdict validation. |
 | [preflight-verdict-check.sh](audit/preflight-verdict-check.sh) | Stop payload forwarded by `stop-gate.sh` | Inspect the whole final turn and validate a dossier or request an independent audit. |
-| [run-verdict-audit.sh](audit/run-verdict-audit.sh) | `<transcript_path> [session_id] [generation] [session_scope]` | Run an independent model CLI and publish the validated turn dossier. |
+| [run-verdict-audit.sh](audit/run-verdict-audit.sh) | `<bookkeeping_path\|-> [session_id] [generation] [session_scope]` | Pass parent context to an independent auditor and publish its validated dossier. |
 | [run-commit-push-audit.sh](audit/run-commit-push-audit.sh) | `<commit\|push> <command>` | Produce a commit/push dossier for callers without a native agent runtime. |
 | [record-api-failure.sh](record-api-failure.sh) | Claude `StopFailure` JSON | Best-effort failure-kind recording for the unattended recovery wrapper. |
 | [resume-after-api-failure.sh](resume-after-api-failure.sh) | Claude `StopFailure` JSON | Request a bounded interactive resume through `asyncRewake` for eligible failures. |
@@ -59,8 +59,8 @@ then passes the payload to `preflight-verdict-check.sh`. The verdict gate captur
 the final turn, checks existing evidence, and runs an independent auditor when
 needed. A matching result determines whether the reply can finish.
 
-The original transcript records the conversation, the snapshot supplies audit input,
-and the dossier records the auditor's decision.
+The auditor discovers the full parent transcript. Bounded snapshots support triage
+and retry history; the dossier records the auditor's decision.
 
 Registered hook entry points stay in this directory. Supporting files are grouped
 by purpose:
