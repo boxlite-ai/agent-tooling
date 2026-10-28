@@ -1,11 +1,52 @@
 ## TL;DR
 
-Useful comments explain intent and constraints that code cannot express, while stale narration obscures the current contract.
+Explain models, contracts, and reasoning that code does not make obvious. Use diagrams and worked examples when they improve understanding.
 
 ## How it works
 
-These adaptations distinguish useful explanation from stale narration. Fragments
-illustrate review decisions; they are not complete implementations.
+Write for readers who know the language but are new to the subsystem.
+
+- Explain purpose and the overall model before local details.
+- State relevant contracts: inputs, outputs, units, boundaries, ownership, failures.
+  Put caller contracts in API documentation and mechanisms beside implementation.
+- Explain constraints and what breaks if they change. Distinguish requirements
+  from guarantees the code actually enforces.
+- Use the implementation's names, units, and indexing conventions.
+- Keep explanations beside their owner; link longer background or proofs.
+- Prefer clarity over comment-length limits. Skip obvious narration, decorative
+  diagrams, and examples that reveal nothing. No diagram quota per function.
+
+## Choose the representation
+
+| Explain | Useful form |
+| --- | --- |
+| Memory regions, packets, register fields | ASCII layout: addresses/offsets, sizes, units, boundaries, ownership |
+| Calls, events, data movement | Flow/sequence: actors, operations, completion |
+| Trees, links, ownership changes | Before/after diagram |
+| Algorithms | Concrete input → important intermediate states → result |
+| Correctness and termination | Preconditions, invariant, progress, stopping condition |
+| States and exceptional behavior | State/event/condition/action/next-state table |
+| Arithmetic, alignment, bit operations | Worked calculation with assumptions |
+| Concurrency | Required ordering and a concrete failure scenario |
+
+## Trace an algorithm
+
+Use a small input that exposes the important decisions: duplicates, wraparound,
+alignment, overlapping ranges, or another meaningful boundary.
+
+1. State the goal and assumptions.
+2. Trace important state changes with consistent names; omit mechanical steps.
+3. Show the result and why it follows; include an invariant and progress when useful.
+4. Add a boundary or counterexample when it prevents a likely misunderstanding.
+
+## Verify the explanation
+
+Check values, arrows, ranges, ownership, and ordering against implementation.
+Mark illustrative values and schematic omissions. Examples illustrate behavior;
+they do not prove correctness or complexity. Use existing documentation-test
+facilities for runnable examples. Update explanations when behavior changes.
+
+The examples below illustrate review decisions, not complete implementations.
 
 ## C1 — Benefits eligibility becomes a named predicate
 
@@ -192,3 +233,86 @@ day, and year, alongside the pattern or within a dedicated date-format abstracti
 This differs from C2's detached HTTP-date example: the concern here is explaining
 syntax that a name alone does not reveal. Check the actual formatter/parser pair;
 a sample shape does not establish range validation or a timezone contract.
+
+## C24 — Show the layout before constructing it
+
+Before: scattered addresses and writes make readers reconstruct the arrangement.
+After: show regions and their roles before the assignments.
+
+```c
+/*
+ * Planned guest RAM layout, high addresses first.
+ * Schematic: smaller regions and gaps are grouped.
+ *
+ * RAM_SIZE        +-------------------------------+
+ *                 | initramfs + alignment padding | loader -> kernel
+ * initramfs_start +-------------------------------+
+ *                 | kernel image and workspace   | loader / kernel
+ * KERNEL_START    +-------------------------------+
+ *                 | boot metadata, reserved gaps | loader -> kernel
+ * 0               +-------------------------------+
+ *
+ * Keep the archive outside the kernel's required working region.
+ */
+```
+
+Use actual ranges and identify each writer/reader. Check alignment and reserved
+extents against the implementation; a planned layout does not prove bounds checks
+exist. Distinguish metadata describing memory from the memory it describes.
+
+## C25 — Trace the decisions that distinguish an algorithm
+
+Before: "binary search" names the algorithm but leaves its equality behavior unclear.
+After: use duplicates to show why equality continues searching left.
+
+```c
+/*
+ * Find the first index with value >= target.
+ * Input must be sorted ascending; return n (array length) if none qualifies.
+ * lo/hi bound the unresolved positions [lo, hi); mid = floor((lo + hi) / 2).
+ *
+ * Example: a = [2, 4, 4, 7, 9], target = 4
+ *
+ *   lo  hi  mid  a[mid]  update
+ *    0   5    2       4  hi = 2
+ *    0   2    1       4  hi = 1
+ *    0   1    0       2  lo = 1
+ *
+ * Result: lo == hi == 1, the first matching position.
+ *
+ * Invariant: values before lo are < target; values at or after
+ * hi are >= target. Each step shrinks the unresolved range.
+ * On equality, moving hi left preserves earlier equal values.
+ *
+ * Boundaries: an empty array returns 0; target 10 above returns 5.
+ */
+```
+
+The midpoint formula describes the trace; use the implementation's overflow-safe
+arithmetic. Preserve its actual interval convention and comparison. A first-match
+trace would misdescribe a search allowed to return any equal element.
+
+## C26 — Derive the calculation and explain its direction
+
+Before: a mask clears bits without explaining the placement constraint.
+After: calculate a representative case and show why rounding upward fails.
+
+```c
+/*
+ * Round the archive's start downward to a 4 KiB boundary.
+ * Clearing the lowest 12 bits performs this alignment.
+ *
+ * Illustrative values:
+ *   RAM end - archive size:
+ *   0x20000000 - 0x12345 = 0x1ffedcbb
+ *
+ *   align downward -> 0x1ffed000
+ *
+ * Rounding upward would make the archive end at 0x20000345,
+ * beyond RAM. The mask requires a power-of-two page size.
+ */
+```
+
+Check size <= available RAM before subtraction and verify the final extent against
+other reserved regions. The calculation explains alignment; it does not establish
+that the surrounding loader validates input size or prevents overlap.

@@ -13,7 +13,7 @@ contracts instead of copying a historical mechanism mechanically.
 | --- | --- |
 | Intent, units, vocabulary, and context | [Names](names.md) |
 | Abstraction, arguments, sequencing, and side effects | [Functions](functions.md) |
-| Rationale, misleading prose, warnings, and dead comments | [Comments](comments.md) |
+| Intent, contracts, mechanisms, diagrams, and worked algorithm examples | [Comments](comments.md) |
 | Proximity, spacing, scopes, and team formatting | [Layout](layout-examples.md) |
 | Representation, data records, polymorphism, and service traversal | [Objects and data](objects-data-examples.md) |
 | Exceptions, recovery, cleanup, nulls, and failure context | [Errors](error-examples.md) |

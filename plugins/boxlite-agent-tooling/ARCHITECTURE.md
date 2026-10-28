@@ -903,8 +903,11 @@ regular files, including each skill's resources and canonical auditor paths.
 
 The `boxlite-clean-code` skill keeps essential coding decisions, a reversible
 refactoring loop, and verification guidance in a compact `SKILL.md`. Its example
-index loads topic addons under `references/` only when relevant. Host skill paths
-expose the complete directory; standalone
+index loads topic addons under `references/` only when relevant. The entrypoint
+also directs implementation/review of non-obvious algorithms, layouts, protocols,
+ownership, or concurrency to the comment reference. It teaches visual models,
+worked traces, and example verification; this is agent guidance, not a runtime
+gate. Host skill paths expose the complete directory; standalone
 sharing copies that directory, including references. It preserves the receiving
 repository's workflow and permission boundaries and needs no plugin scripts.
 Shared workflow, shell guidance, fixer prompts, and audit criteria reference it by

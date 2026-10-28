@@ -183,6 +183,11 @@ Use `boxlite-clean-code` to connect concrete maintainability problems to small c
 while preserving contracts, resource ownership, and repository conventions.
 Try: "Use boxlite-clean-code to review this module's error handling without editing it."
 
+For non-obvious algorithms, layouts, protocols, ownership, or concurrency, the
+skill directs agents to its comment guidance before implementation or review.
+That guidance teaches visual layouts, algorithm traces, and worked calculations.
+Try: "Implement this search and explain duplicate handling with a worked trace."
+
 The plugin exposes the skill through its existing shared skills directory.
 For standalone sharing, copy the entire `boxlite-clean-code` directory into a skill
 location supported by your agent, including its `references/` directory. The core
