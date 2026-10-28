@@ -880,7 +880,7 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         boxlite-design-doc, boxlite-clean-code, boxlite-pr-preparation, shell-engineering, boxlite-visualize, boxlite-examples, adversarial-iteration, boxlite-writing
+.agents/skills/         boxlite-design-doc, boxlite-clean-code, boxlite-pr-preparation, shell-engineering, boxlite-visualize, boxlite-examples, boxlite-distill, adversarial-iteration, boxlite-writing
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
@@ -920,6 +920,23 @@ they contain data and do not automatically restore marks after reload.
 The shared skill directory exposes both. Codex UI
 metadata uses the same skill name. No browser tool or runtime dependency is required
 for text selection.
+
+`boxlite-distill` owns the shared scope, removal test, output fields, and sufficiency
+review for extracting essential knowledge or a minimal working implementation.
+It preserves the requested boundary and defining behavior, separates overview
+coverage from selective depth, and keeps the main lesson distinct from detailed evidence.
+Its entrypoint loads only the relevant knowledge or implementation guide from
+`references/`, plus the code-design guide for codebase or architecture explanations.
+That guide owns major-area coverage, source responsibility, ownership, interfaces,
+collaboration, and lifecycle. The implementation guide owns the reduction map and
+requires a complete path through the requested behavior with audience-appropriate
+notation. Coverage, fidelity, execution, reader sufficiency, and evidence completeness
+have separate outcomes; incomplete required checks prevent a complete verdict.
+The evaluation runbook and raw knowledge fixture in `tests/boxlite_distill/` own
+test isolation, frozen inputs, comparisons, and caller-specific evidence budgets;
+they are not loaded by ordinary skill use. Existing skill discovery exposes the
+whole directory; Codex UI metadata uses the same skill name. No runtime or hook is
+added. Original source is preserved unless modification was requested.
 
 `boxlite-design-doc` owns research requirements, the design outline, and design review.
 Hosts discover it through their skill paths; consumers name the skill without

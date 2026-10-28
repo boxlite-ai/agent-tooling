@@ -1,0 +1,5 @@
+A request may be retried only after a known failure and only when it is marked idempotent.
+Allow no more than four total attempts, including the first.
+Stop immediately after success.
+A timeout with an unknown outcome does not qualify as a known failure; resolve the outcome before retrying.
+The dashboard paints completed requests green.

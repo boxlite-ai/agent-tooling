@@ -149,6 +149,7 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 | Explain a subsystem with a concrete example | “Use `boxlite-examples` to explain how this subsystem works.” |
 | Draw a diagram grounded in source | [boxlite-visualize](plugins/boxlite-agent-tooling/.agents/skills/boxlite-visualize/SKILL.md) |
 | Highlight essential phrases while preserving meaning | [boxlite-reading-highlights](plugins/boxlite-agent-tooling/.agents/skills/boxlite-reading-highlights/SKILL.md) |
+| Extract essential knowledge or a minimal working example | [boxlite-distill](plugins/boxlite-agent-tooling/.agents/skills/boxlite-distill/SKILL.md) |
 | Implement a Bash hook or gate | [shell-engineering](plugins/boxlite-agent-tooling/.agents/skills/shell-engineering/SKILL.md) |
 | Iterate on design-review findings | [adversarial-iteration](plugins/boxlite-agent-tooling/.agents/skills/adversarial-iteration/SKILL.md) |
 | Register a design before implementation | [Design registration](plugins/boxlite-agent-tooling/CONTRIBUTING.md#pull-request-descriptions) |
@@ -208,6 +209,31 @@ extraction and supports bounded text-only workers when authorized. Browser
 application checks live text and sentence fingerprints before applying ranges in
 batches. Cached plans can be reused after validation; refreshing clears temporary
 marks, and cache data does not automatically restore them.
+
+### Distill knowledge and implementations
+
+Use `boxlite-distill` to reduce a topic or system to the core needed to understand
+or reproduce one behavior. It retains an element when removing it would break the
+explanation, a necessary condition, or that behavior. A whole-system request gets
+an overview of its major responsibilities and connections; selected deep dives
+do not replace that coverage. A requested implementation preserves one complete
+instance of the system's defining behavior. An explicitly requested subsystem
+stays narrow. For codebases, actual types or modules explain responsibilities,
+important state, interfaces, and collaboration, then map to the reduced example.
+
+Try: "Use boxlite-distill to explain this module's core mechanism," or
+"Extract a minimal runnable example with boxlite-distill."
+The skill selects a knowledge guide, an implementation guide, or both, then returns
+the goal, essential core, demonstration, omissions, and verification. Code inputs
+can be explained without generating code; requested implementations are separate
+learning artifacts unless source modification was requested. Unavailable runtimes
+remain explicit verification gaps. Representations match the reader's background;
+unfamiliar syntax is explained. The main lesson retains essential roles, a causal
+example, run commands, and limits; deeper internals, layouts, encodings, and proof
+sit behind links. Coverage, fidelity, execution, reader sufficiency, and evidence
+completeness have separate results. Missing required checks prevent a complete
+verdict. The [usage evaluation workflow](plugins/boxlite-agent-tooling/tests/boxlite_distill/README.md)
+keeps source fixtures, frozen artifacts, and evidence budgets outside the skill.
 
 ### Optional prompt reminders
 

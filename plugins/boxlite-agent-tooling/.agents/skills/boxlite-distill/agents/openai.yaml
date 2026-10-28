@@ -1,0 +1,4 @@
+interface:
+  display_name: "BoxLite Distill"
+  short_description: "Essential knowledge and minimal working examples"
+  default_prompt: "Use $boxlite-distill to extract the essential knowledge or minimal working implementation from this source, showing what must stay, what can go, and how to verify the result."
