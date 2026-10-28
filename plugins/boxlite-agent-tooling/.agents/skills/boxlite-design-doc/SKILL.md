@@ -11,6 +11,7 @@ Finish before implementation (tests/shell included); never backfill.
 **What is the best practice for this work, and why?**
 
 - Inspect code/callers/tests → effects/failures/reuse; official guidance/standards/mature implementations.
+- For complex source material, use `boxlite-distill` in knowledge mode to clarify mechanisms and prerequisites. Preserve decision-relevant alternatives, counterevidence, constraints, and citations. Keep this skill's design outline.
 - Questions → sources → mechanisms/failures → constraint differences → adopt/adapt/reject reasons. Compare alternatives/counterevidence; justify local fit/deviations; never invent consensus.
 - Open originals; cite exact sections or `file:line` (prefer commit-pinned). Separate observations/inferences. Snippets/memory/link lists/generic claims insufficient.
 - Depth follows impact/uncertainty; no citation quotas. Revalidate reused research against current code/constraints; log unsuitable searches/reasons.

@@ -942,6 +942,7 @@ whole directory; Codex UI metadata uses the same skill name. No runtime or hook 
 added. Original source is preserved unless modification was requested.
 
 `boxlite-design-doc` owns research requirements, the design outline, and design review.
+For complex sources, its Research section uses `boxlite-distill` in knowledge mode while retaining decision-relevant evidence and the design outline.
 Hosts discover it through their skill paths; consumers name the skill without
 copying its rules. The full Test section and reproduce-before-fix remain in workflow guidance.
 
