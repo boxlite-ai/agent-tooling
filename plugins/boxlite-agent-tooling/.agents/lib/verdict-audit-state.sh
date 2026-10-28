@@ -250,8 +250,8 @@ verdict_audit_copy_regular_state() {  # source destination max-bytes
 # not the session; earlier history is only hashed. Historical turns and harness envelopes
 # never enter the model-visible snapshot. Assistant claims stay whole; large tool events
 # become bounded previews plus size/hash metadata. Claim truncation is fail-closed.
-# Summarized evidence remains usable only when the auditor can independently reproduce
-# what a claim depends on.
+# This bounded representation serves triage and history bookkeeping. Auditors receive
+# a separate complete source copy when available; previews alone are not proof.
 _verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-max emit-identity
   local source="$1" destination="$2" max_turn_bytes="$3" max_snapshot_bytes="$4"
   local emit_identity="$5" source_identity snapshot_identity="" snapshot_bytes

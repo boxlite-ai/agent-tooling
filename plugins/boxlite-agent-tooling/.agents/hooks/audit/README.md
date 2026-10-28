@@ -57,7 +57,7 @@ and [state files](../../../ARCHITECTURE.md#state-files).
 ## Runners
 
 `run-verdict-audit.sh` selects the invoking host's auditor, with the
-[verdict-auditor spec](../../../.claude/agents/verdict-auditor.md) as its procedure:
+[boxlite-verdict-audit](../../skills/boxlite-verdict-audit/SKILL.md) as its complete procedure:
 
 1. `VERDICT_AUDITOR_CMD`
 2. `hook_host_kind`, shared with native subagent dispatch: Claude Code uses

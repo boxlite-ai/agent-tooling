@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop hook: gate the end of a turn on an audited verdict
-# (see .claude/agents/verdict-auditor.md).
+# (see the boxlite-verdict-audit skill).
 #
 # DETECTION-TRIGGERED, finding-driven loops only. The trigger is the WHOLE FINAL
 # TURN — every assistant text since the last real user message, read deterministically
@@ -691,7 +691,7 @@ fi
 
 # Content-addressed hash of the full working tree (tracked + untracked, full
 # content), via a throwaway index. Deterministic and read-only w.r.t. the real
-# index/tree. Keep IDENTICAL to the snippet in verdict-auditor.md.
+# index/tree. Keep IDENTICAL to the snippet in boxlite-verdict-audit.
 compute_tree_hash() {
   local idx; idx="$(mktemp)"
   GIT_INDEX_FILE="$idx" git -C "$repo_root" read-tree HEAD >/dev/null 2>&1
@@ -1734,6 +1734,11 @@ audit_before_stop() {  # trigger-reason
   local trigger_reason="$1" audit_transcript_path="$transcript_path"
   local runner="$tooling_root/.agents/hooks/audit/run-verdict-audit.sh"
   local runner_status=0 runner_failure=""
+  # Triage's bounded snapshot is not the auditor's evidence source.
+  if [[ "$AUDIT_TRANSCRIPT_SOURCE_KIND" == transcript \
+     && -n "$AUDIT_TRANSCRIPT_SOURCE_PATH" ]]; then
+    audit_transcript_path="$AUDIT_TRANSCRIPT_SOURCE_PATH"
+  fi
   require_audit_reflection
   if ! ensure_verdict_request; then
     block_audit_infrastructure_failure "${trigger_reason}

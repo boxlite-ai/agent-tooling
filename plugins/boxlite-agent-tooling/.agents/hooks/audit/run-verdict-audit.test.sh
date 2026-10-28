@@ -157,8 +157,8 @@ captured_transcript_path="$(printf '%s' "$prompt_record" | jq -r '.transcript_pa
 prompt_input_state="$prompt_input_state clean=$([[ -n "$captured_transcript_path" && ! -e "$captured_transcript_path" ]] && echo yes || echo no)"
 check_eq "newline transcript path is encoded in one untrusted JSON record" \
   "$prompt_input_state" "json=yes snapshot=yes prior_absence=yes injected=no clean=yes"
-spec_line="$(grep -nF 'You are an independent proof auditor.' "$R/audit-prompt" 2>/dev/null | head -1 | cut -d: -f1)"
-task_line="$(grep -nF 'Apply the loaded verdict-auditor spec to one cold, independent audit.' "$R/audit-prompt" 2>/dev/null | head -1 | cut -d: -f1)"
+spec_line="$(grep -nF 'Audit claims against direct evidence.' "$R/audit-prompt" 2>/dev/null | head -1 | cut -d: -f1)"
+task_line="$(grep -nF 'Apply the loaded boxlite-verdict-audit skill to one cold, independent audit.' "$R/audit-prompt" 2>/dev/null | head -1 | cut -d: -f1)"
 headless_spec_state="missing"
 if [[ "$spec_line" =~ ^[1-9][0-9]*$ && "$task_line" =~ ^[1-9][0-9]*$ \
    && "$spec_line" -lt "$task_line" \
@@ -230,7 +230,7 @@ for transcript_case in missing fifo symlink oversized oversized_prebuilt_snapsho
 done
 
 echo
-echo "## Old session history does not consume final-turn evidence budget"
+echo "## Complete transcripts remain available to the auditor"
 R="$(setup)"
 perl -e '
   print qq|{"type":"assistant","message":{"content":[{"type":"text","text":"|;
@@ -243,9 +243,9 @@ FINAL_TURN_STUB='prompt="$(cat)"
 record="$(printf "%s\n" "$prompt" | sed -n "/^UNTRUSTED_TASK_INPUT_JSON:$/ { n; p; q; }")"
 snapshot="$(printf "%s" "$record" | jq -r ".transcript_path // empty")"
 bytes="$(wc -c < "$snapshot" | tr -d " ")"
-if [[ -f "$snapshot" && "$bytes" -le 262144 ]] \
+if [[ -f "$snapshot" && "$bytes" -gt 1048576 ]] \
    && grep -q "FINAL_SMALL" "$snapshot" \
-   && ! grep -q "OLD_HISTORY_" "$snapshot"; then
+   && grep -q "OLD_HISTORY_" "$snapshot"; then
   touch "$CLAUDE_PROJECT_DIR/final-snapshot-ok"
 fi
 mkdir -p "$CLAUDE_PROJECT_DIR/.agents/state"
@@ -254,7 +254,7 @@ printf "{\"branch\":\"main\",\"head\":\"h\",\"tree_hash\":\"t\",\"verdict\":\"PA
     bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
 history_rc=$?
 history_state="rc=$history_rc snapshot=$([[ -e "$R/final-snapshot-ok" ]] && echo yes || echo no)"
-check_eq "large old history yields one bounded complete final-turn snapshot" \
+check_eq "large old history and final turn both reach the auditor" \
   "$history_state" "rc=0 snapshot=yes"
 rm -rf "$R"
 
@@ -274,30 +274,27 @@ perl -MJSON::PP -e '
        content => "RESULT_HEAD_${index}_" . ("x" x 10000) . "_RESULT_TAIL_${index}"}]}}), "\n";
   }
 ' > "$R/transcript.jsonl"
-COMPACT_EVIDENCE_STUB='prompt="$(cat)"
+COMPLETE_EVIDENCE_STUB='prompt="$(cat)"
 record="$(printf "%s\n" "$prompt" | sed -n "/^UNTRUSTED_TASK_INPUT_JSON:$/ { n; p; q; }")"
 snapshot="$(printf "%s" "$record" | jq -r ".transcript_path // empty")"
 bytes="$(wc -c < "$snapshot" | tr -d " ")"
-if [[ -f "$snapshot" && "$bytes" -le 262144 ]] \
-   && jq -e '\''
-      .truncated == false and .evidence_truncated == true
-      and .evidence_summary.seen == 201
-      and .evidence_summary.retained <= .evidence_summary.seen
-      and ([.records[] | select(.kind == "assistant") | .texts[]]
-           == ["CLAIM_SURVIVES"])
-      and ([.records[] | select(.kind == "tool") | .tools[]
-            | select(.content_truncated == true)] | length) > 0
+if [[ -f "$snapshot" && "$bytes" -gt 1048576 ]] \
+   && jq -se '\''
+      ([.[] | select(.type == "assistant") | .message.content[]
+         | select(.type == "text") | .text] == ["CLAIM_SURVIVES"])
+      and ([.[] | .message.content[] | select(.type == "tool_result")]
+           | length == 200 and all(.[]; (.content | length) > 10000))
     '\'' "$snapshot" >/dev/null; then
-  touch "$CLAUDE_PROJECT_DIR/compact-evidence-ok"
+  touch "$CLAUDE_PROJECT_DIR/complete-evidence-ok"
 fi
 mkdir -p "$CLAUDE_PROJECT_DIR/.agents/state"
 printf "{\"branch\":\"main\",\"head\":\"h\",\"tree_hash\":\"t\",\"verdict\":\"PASS\",\"proof\":[],\"findings\":[]}" > "$CLAUDE_PROJECT_DIR/.agents/state/last-verdict.json"'
-( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_AUDITOR_CMD="$COMPACT_EVIDENCE_STUB" \
+( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_AUDITOR_CMD="$COMPLETE_EVIDENCE_STUB" \
     bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
-compact_rc=$?
-compact_state="rc=$compact_rc bounded=$([[ -e "$R/compact-evidence-ok" ]] && echo yes || echo no)"
-check_eq "huge tool output stays bounded without losing assistant claims" \
-  "$compact_state" "rc=0 bounded=yes"
+complete_rc=$?
+complete_state="rc=$complete_rc complete=$([[ -e "$R/complete-evidence-ok" ]] && echo yes || echo no)"
+check_eq "large tool results and assistant claims arrive whole" \
+  "$complete_state" "rc=0 complete=yes"
 rm -rf "$R"
 
 echo
@@ -2709,13 +2706,16 @@ body_ok="no"; grep -q '^## Procedure' "$CAP" 2>/dev/null && body_ok="yes"
 check_eq "...while the procedure body survives"              "$body_ok" "yes"
 path_contract="dossier=$([[ $(grep -cF 'Write only `dossier_path`' "$CAP" 2>/dev/null) -gt 0 ]] && echo yes || echo no)"
 path_contract="$path_contract legacy=$([[ $(grep -cF '`verdict_file`' "$CAP" 2>/dev/null) -gt 0 ]] && echo yes || echo no)"
-check_eq "auditor spec uses the accepted dossier-path field consistently" \
+check_eq "audit skill uses the accepted dossier-path field consistently" \
   "$path_contract" "dossier=yes legacy=no"
 evidence_budget="chunk=$([[ $(grep -cF '65536 bytes' "$CAP" 2>/dev/null) -gt 0 ]] && echo yes || echo no)"
 evidence_budget="$evidence_budget total=$([[ $(grep -cF '1048576 bytes' "$CAP" 2>/dev/null) -gt 0 ]] && echo yes || echo no)"
 evidence_budget="$evidence_budget full_diff=$([[ $(grep -cF 'git diff HEAD' "$CAP" 2>/dev/null) -gt 0 ]] && echo yes || echo no)"
-check_eq "auditor spec bounds transcript and tree evidence consumption" \
+check_eq "auditor bounds individual reads and total tree evidence" \
   "$evidence_budget" "chunk=yes total=yes full_diff=no"
+skill_loaded=no
+grep -q '^## Read the transcript' "$CAP" && skill_loaded=yes
+check_eq "Claude system prompt includes the audit skill's transcript procedure" "$skill_loaded" yes
 headless_request_bytes="$(wc -c < "$REQUEST_CAP" | tr -d ' ')"
 headless_system_bytes="$(jq -r '.system | length' "$REQUEST_CAP")"
 headless_tool_count="$(jq -r '.tools | length' "$REQUEST_CAP")"
@@ -2823,6 +2823,9 @@ grep -q 'Do not write or modify any file' "$CAP" 2>/dev/null \
 check_eq "Codex-only fallback is read-only and returns JSON through a host-owned channel" \
   "$codex_fallback_contract" \
   "rc=0 hooks=yes config=yes readonly=yes capture=yes ephemeral=yes approval=yes body=yes frontmatter=yes delivery=yes"
+skill_loaded=no
+grep -q '^## Read the transcript' "$CAP" && skill_loaded=yes
+check_eq "Codex prompt includes the audit skill's transcript procedure" "$skill_loaded" yes
 
 D="$(mktemp -d)"
 git -C "$D" init -q

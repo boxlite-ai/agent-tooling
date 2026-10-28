@@ -31,7 +31,7 @@ rule to every script. Shared state and parsing live in [`../lib/`](../lib/).
 
 Gates consume evidence; auditors produce it. The commit/push dossier shape is in
 [commit-push-audit.schema.json](audit/commit-push-audit.schema.json), and the verdict
-procedure is in the [auditor spec](../../.claude/agents/verdict-auditor.md).
+procedure is in [boxlite-verdict-audit](../skills/boxlite-verdict-audit/SKILL.md).
 Runtime files live under the consumer's ignored `.agents/state/` directory.
 
 ## Tests
@@ -133,7 +133,7 @@ The regression test follows this sequence:
 3. The test deletes the **original transcript**.
 4. The fix preserves the snapshot through retries and reloads it during **gate re-entry**.
 5. The auditor's instructions require a **FAIL dossier** for that incomplete marker,
-   which the gate uses to block. [Auditor rule](../../.claude/agents/verdict-auditor.md#L24)
+   which the gate uses to block. [Auditor rule](../skills/boxlite-verdict-audit/SKILL.md#fallback-snapshots)
 
 Previously, step 4 could reopen the deleted original, conclude "nothing to judge,"
 and allow **before checking the dossier**.

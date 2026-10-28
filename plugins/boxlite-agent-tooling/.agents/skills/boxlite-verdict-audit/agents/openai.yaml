@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verdict Audit"
+  short_description: "Independently verify claims and produce a verdict"
+  default_prompt: "Use $boxlite-verdict-audit to verify claims against the transcript and repository evidence."

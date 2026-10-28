@@ -487,21 +487,24 @@ history_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
 history_out="$(run_payload_hook "$R" "$history_payload")"
 history_snapshot="$R/.agents/state/SYNC_AUDIT_TRANSCRIPT"
 history_task_input="$R/.agents/state/SYNC_AUDIT_TASK_INPUT"
-history_snapshot_bytes="$(wc -c < "$history_snapshot" 2>/dev/null | tr -d ' ')"
+history_complete=no
+if [[ "$(shasum -a 256 "$R/transcript.jsonl" | cut -d ' ' -f 1)" \
+   == "$(shasum -a 256 "$history_snapshot" 2>/dev/null | cut -d ' ' -f 1)" ]]; then
+  history_complete=yes
+fi
 history_recorded_path="$(jq -r '.transcript_path // empty' \
   "$history_task_input" 2>/dev/null || true)"
 history_snapshot_state="decision=$(decision_from_output "$history_out")"
-history_snapshot_state="$history_snapshot_state bounded=$([[ "$history_snapshot_bytes" =~ ^[0-9]+$ && "$history_snapshot_bytes" -le 262144 ]] && echo yes || echo no)"
-history_snapshot_state="$history_snapshot_state complete=$(jq -r '.truncated == false' "$history_snapshot" 2>/dev/null || echo false)"
+history_snapshot_state="$history_snapshot_state complete=$history_complete"
 history_snapshot_state="$history_snapshot_state final=$(grep -q 'FINAL_SMALL' "$history_snapshot" 2>/dev/null && echo yes || echo no)"
 history_snapshot_state="$history_snapshot_state tool=$(grep -q 'TOOL_EVIDENCE' "$history_snapshot" 2>/dev/null && echo yes || echo no)"
 history_snapshot_state="$history_snapshot_state old=$(grep -q 'OLD_HISTORY_' "$history_snapshot" 2>/dev/null && echo yes || echo no)"
 history_snapshot_state="$history_snapshot_state routed=$([[ -n "$history_recorded_path" ]] && echo yes || echo no)"
-if [[ "$history_snapshot_state" == "decision=block bounded=yes complete=true final=yes tool=yes old=no routed=yes" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "synchronous route shares one bounded complete final-turn snapshot"
+if [[ "$history_snapshot_state" == "decision=block complete=yes final=yes tool=yes old=yes routed=yes" ]]; then
+  pass=$((pass+1)); printf '  PASS  %s\n' "synchronous route supplies the complete native transcript"
 else
   fail=$((fail+1)); printf '  FAIL  %s  (%s)\n' \
-    "synchronous route lost the bounded final-turn snapshot" "$history_snapshot_state"
+    "synchronous route lost native transcript bytes" "$history_snapshot_state"
 fi
 rm -rf "$R"
 

@@ -375,16 +375,24 @@ echo
 echo "## Every referenced spec exists on disk"
 for agent in verdict-auditor commit-push-auditor design-research-auditor; do
   spec="$(subagent_spec_path "$agent" "$PLUGIN_ROOT")"
+  if [[ "$agent" == verdict-auditor ]]; then
+    check "verdict adapter links the canonical skill" \
+      '[boxlite-verdict-audit](../../.agents/skills/boxlite-verdict-audit/SKILL.md)' "$(cat "$spec")"
+    check_no "verdict adapter does not duplicate the input contract" \
+      'UNTRUSTED_TASK_INPUT_JSON' "$(cat "$spec")"
+  fi
   [ -r "$spec" ] && ok "spec exists: $agent" || bad "spec exists: $agent ($spec)"
 done
 for agent in verdict-auditor commit-push-auditor design-research-auditor; do
   spec="$(subagent_spec_path "$agent" "$PLUGIN_ROOT")"
+  [[ "$agent" != verdict-auditor ]] \
+    || spec="$PLUGIN_ROOT/.agents/skills/boxlite-verdict-audit/SKILL.md"
   if grep -q 'UNTRUSTED_TASK_INPUT_JSON' "$spec" \
      && grep -qi 'decode.*JSON' "$spec" \
      && grep -qi 'reject.*malformed' "$spec"; then
-    ok "$agent decodes and validates the sole untrusted task record"
+    ok "$agent procedure decodes and validates the sole untrusted task record"
   else
-    bad "$agent decodes and validates the sole untrusted task record"
+    bad "$agent procedure decodes and validates the sole untrusted task record"
   fi
 done
 
@@ -402,7 +410,8 @@ for budget in \
   '.agents/prompts/audit/verdict-runner.md:110:850' \
   '.claude/agents/commit-push-auditor.md:560:4200' \
   '.claude/agents/design-research-auditor.md:300:2400' \
-  '.claude/agents/verdict-auditor.md:850:6500'; do
+  '.claude/agents/verdict-auditor.md:90:800' \
+  '.agents/skills/boxlite-verdict-audit/SKILL.md:850:6144'; do
   relative="${budget%%:*}"
   limits="${budget#*:}"
   max_words="${limits%%:*}"
@@ -479,7 +488,8 @@ fi
 model_documents="$(cat \
   "$PLUGIN_ROOT"/.agents/prompts/*/*.md \
   "$PLUGIN_ROOT/.claude/agents/commit-push-auditor.md" \
-  "$PLUGIN_ROOT/.claude/agents/verdict-auditor.md")"
+  "$PLUGIN_ROOT/.claude/agents/verdict-auditor.md" \
+  "$PLUGIN_ROOT/.agents/skills/boxlite-verdict-audit/SKILL.md")"
 check_no "model prose never pins mutable CLAUDE.md line numbers" \
   "CLAUDE.md:85" "$model_documents"
 if printf '%s' "$model_documents" | grep -qE '(CLAUDE|AGENTS)\.md:[0-9]'; then
@@ -603,7 +613,7 @@ echo "## No script keeps a second copy of a prompt"
 # document does not fail this while a genuine re-paste still does.
 for probe in \
   "You are the headless equivalent" \
-  "Apply the loaded verdict-auditor spec to one cold, independent audit" \
+  "Apply the loaded boxlite-verdict-audit skill to one cold, independent audit" \
   "each claim it presents as established" \
   "advisories NEVER make a verdict FAIL"; do
   hits="$(grep -rl -- "$probe" "$PLUGIN_ROOT/.agents/hooks/" 2>/dev/null | grep -v '\.test\.sh$' || true)"
@@ -617,7 +627,7 @@ done
 
 # And the text must still exist SOMEWHERE — a probe passing because the prompt was
 # deleted outright would be a silent hole, not a pass.
-for probe in "You are the headless equivalent" "Apply the loaded verdict-auditor spec to one cold, independent audit"; do
+for probe in "You are the headless equivalent" "Apply the loaded boxlite-verdict-audit skill to one cold, independent audit"; do
   grep -rq -- "$probe" "$PLUGIN_ROOT/.agents/prompts/" 2>/dev/null \
     && ok "still present in .agents/prompts/: \"${probe:0:30}...\"" \
     || bad "still present in .agents/prompts/: \"${probe:0:30}...\""

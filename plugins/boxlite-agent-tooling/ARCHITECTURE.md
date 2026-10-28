@@ -386,7 +386,7 @@ Producers for callers with no agent runtime.
 
 | Who needs a verdict | Producer | What it does |
 | --- | --- | --- |
-| The Stop gate, synchronously | `.agents/hooks/audit/run-verdict-audit.sh` | Feeds `.claude/agents/verdict-auditor.md` to a model CLI with audit and native timer tools, which writes the turn's dossier. |
+| The Stop gate, synchronously | `.agents/hooks/audit/run-verdict-audit.sh` | Loads `boxlite-verdict-audit` into a model CLI with audit and native timer tools, which writes the turn's dossier. |
 | A Git gate, CI or a plain shell | `.agents/hooks/audit/run-commit-push-audit.sh` | Runs `codex exec` read-only with hooks disabled and writes the same `last-audit.json` the `commit-push-auditor` subagent writes. |
 
 An agent with a built-in spawns the auditor itself, `Task` on Claude Code and
@@ -701,8 +701,22 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
 - Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/audit/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Research verdict: root, branch, design URL, and the SHA-256 of the content the auditor reviewed (`.agents/lib/design-doc.sh`).
 - Incomplete evidence: a missing or empty source during refresh retains the published failed snapshot. Audit re-entry reads and validates that bounded snapshot before consuming the dossier; loss of the original source cannot become `empty-allow`. An initially absent or empty transcript still has nothing to judge.
-- Final-turn reader: `.agents/lib/verdict-audit-state.sh` reads a transcript back from its end to the last real user message and decodes at most `verdict_audit_final_turn_max_bytes` (64 MiB) of it. Earlier history is only hashed into `source_sha256`, so session length alone never makes evidence incomplete; the reader's 15 s alarm bounds the rest ([#262](https://github.com/boxlite-ai/agent-tooling/issues/262)).
-- Snapshot selection: after the existing preview reductions, binary search retains
+- Auditor transcript: after native extraction succeeds, Stop passes the native source
+  to the runner. `verdict_audit_copy_regular_state` freezes every byte in a private
+  regular file, using the source size as its copy bound and rejecting source changes.
+  The auditor's `transcript_path` names that copy; cleanup removes it. Missing native
+  sources, failed extraction, and custom extractors retain explicit fallback snapshots.
+  [boxlite-verdict-audit](.agents/skills/boxlite-verdict-audit/SKILL.md) owns the complete
+  procedure, including input validation, proof standards, verdicts, and dossier output.
+  The agent definition retains launch metadata and a read-and-apply link. The runner
+  loads the skill explicitly for override, Claude, and Codex launches; missing skill
+  fails closed. Native agents follow the same link without duplicating audit rules.
+  The skill guides native-record search and command/result linkage with 64 KiB outputs
+  and no cumulative transcript-read ceiling; the audit deadline still applies.
+  For example, a late test result omitted from the summary remains in the full file,
+  along with earlier turns. No claim JSON or retrieval service is required ([#293](https://github.com/boxlite-ai/agent-tooling/issues/293)).
+- Final-turn bookkeeping reader: `.agents/lib/verdict-audit-state.sh` reads a transcript back from its end to the last real user message and decodes at most `verdict_audit_final_turn_max_bytes` (64 MiB) of it. Earlier history is only hashed into `source_sha256` for this summary; the reader's 15 s alarm bounds the rest ([#262](https://github.com/boxlite-ai/agent-tooling/issues/262)). The runner builds this bounded summary from its frozen copy for audit-history serialization, separately from the auditor's full file.
+- Bookkeeping snapshot selection: after the existing preview reductions, binary search retains
   the largest earliest-tool prefix fitting the cap, including the final LF. Claims
   remain whole or use the existing truncated fallback. Fixed-preview sizes increase:
   each new record exceeds any shrinkage in omission counters. The unchanged builder
@@ -838,7 +852,7 @@ one line cites the first.
 | regex | none-allow | No model reachable and no fallback pattern matched. | 2252 |
 | regex | match-block | No model reachable and a fallback pattern matched. | 2256 |
 
-Dossier shape, from `.claude/agents/verdict-auditor.md`: `branch`, `head`, `tree_hash`,
+Dossier shape, from [boxlite-verdict-audit](.agents/skills/boxlite-verdict-audit/SKILL.md): `branch`, `head`, `tree_hash`,
 `generation`, a `verdict` of `PASS`, `FAIL` or `IN_PROGRESS`, and `findings`. The
 commit and push dossier in `.claude/agents/commit-push-auditor.md` carries `PASS` or
 `FAIL` and is `FAIL` exactly when `findings` is non-empty. Both kinds may carry

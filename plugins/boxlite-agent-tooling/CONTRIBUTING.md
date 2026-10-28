@@ -66,6 +66,16 @@ install with the real CLI in an empty isolated Codex home. Verify fresh
 `skills/list` and `hooks/list` results against shipped assets; repeat after
 reinstall without editing the installed cache.
 
+### Full-transcript verdict audits
+
+Version 0.1.36 gives verdict auditors the complete native transcript through a private
+frozen file. [boxlite-verdict-audit](.agents/skills/boxlite-verdict-audit/SKILL.md) owns the
+entire procedure; the agent definition is a thin launch adapter, and command-line
+audits load the skill explicitly. Triage and history keep bounded summaries; hosts without a
+usable native source retain explicit fallback snapshots. Regression coverage lives in
+`full-transcript.test.sh`; run it with `make test:plugin TEST_FILTER=full-transcript`.
+Reload the plugin or start a new task after adoption.
+
 ### PR-size choice rollout
 
 Version 0.1.29 packages the **Bypass limit** / **Split PR** flow. Verify both adopted
