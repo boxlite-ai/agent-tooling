@@ -68,6 +68,13 @@ reinstall without editing the installed cache.
 
 ### Transcript discovery for verdict audits
 
+Version 0.1.37 adds optional user network configuration, bounded execution diagnostics,
+and retention of unchanged verdict work across prompts. New turns still need fresh
+approval. Headless commit reviews reconstruct the staged candidate in private scratch;
+the repository remains read-only. See [audit configuration and runners](.agents/hooks/audit/README.md).
+After adoption, reload the host plugin; native Claude and platform coverage must be
+verified separately from shell fixtures.
+
 Version 0.1.36 makes auditors discover the full parent transcript from session identity,
 host, repository, and request time. [boxlite-verdict-audit](.agents/skills/boxlite-verdict-audit/SKILL.md)
 owns discovery and the entire audit procedure; the agent definition remains a thin adapter.

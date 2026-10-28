@@ -747,10 +747,10 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'codex-cli fake\n'
   exit 0
 fi
-cd_arg=""; output=""; prompt=""
+output=""; prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cd) cd_arg="$2"; shift 2 ;;
+    --cd) shift 2 ;;
     --output-last-message|-o) output="$2"; shift 2 ;;
     -) prompt="$(cat)"; shift ;;
     --ask-for-approval|--disable|--sandbox|--output-schema) shift 2 ;;
@@ -758,15 +758,16 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-printf '%s\n' "$prompt" > "$cd_arg/push-prompt.txt"
+repo_root="$(printf '%s\n' "$prompt" | sed -n '/^{"target_command":/p' | jq -er .repo_root)"
+printf '%s\n' "$prompt" > "$repo_root/push-prompt.txt"
 evidence_path_json="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence path JSON: //p' | head -1)"
 evidence_path="$(printf '%s' "$evidence_path_json" | jq -er 'select(type == "string")')"
 evidence_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence SHA-256: //p' | head -1)"
 [[ -r "$evidence_path" ]]
 [[ "$(shasum -a 256 < "$evidence_path" | awk '{print $1}')" == "$evidence_hash" ]]
-cp "$evidence_path" "$cd_arg/push-evidence.txt"
-branch="$(git -C "$cd_arg" branch --show-current)"
-head="$(git -C "$cd_arg" rev-parse HEAD)"
+cp "$evidence_path" "$repo_root/push-evidence.txt"
+branch="$(git -C "$repo_root" branch --show-current)"
+head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
@@ -774,7 +775,7 @@ jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$comman
   > "$output"
 if [[ -n "${CODEX_FAKE_DELAY:-}" ]]; then
   history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
-  [[ -z "$history" ]] || bash "$cd_arg/.agents/state/history-result-fixture.sh" "$history" "$output"
+  [[ -z "$history" ]] || bash "$repo_root/.agents/state/history-result-fixture.sh" "$history" "$output"
   perl -e 'select(undef,undef,undef,$ARGV[0])' "$CODEX_FAKE_DELAY"
 fi
 PUSH_FAKE_CODEX
@@ -837,10 +838,10 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'codex-cli fake\n'
   exit 0
 fi
-cd_arg=""; output=""; prompt=""
+output=""; prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cd) cd_arg="$2"; shift 2 ;;
+    --cd) shift 2 ;;
     --output-last-message|-o) output="$2"; shift 2 ;;
     -) prompt="$(cat)"; shift ;;
     --ask-for-approval|--disable|--sandbox|--output-schema) shift 2 ;;
@@ -848,15 +849,16 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-printf '%s\n' "$prompt" > "$cd_arg/new-ref-prompt.txt"
+repo_root="$(printf '%s\n' "$prompt" | sed -n '/^{"target_command":/p' | jq -er .repo_root)"
+printf '%s\n' "$prompt" > "$repo_root/new-ref-prompt.txt"
 evidence_path_json="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence path JSON: //p' | head -1)"
 evidence_path="$(printf '%s' "$evidence_path_json" | jq -er 'select(type == "string")')"
 evidence_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence SHA-256: //p' | head -1)"
 [[ -r "$evidence_path" ]]
 [[ "$(shasum -a 256 < "$evidence_path" | awk '{print $1}')" == "$evidence_hash" ]]
-cp "$evidence_path" "$cd_arg/new-ref-evidence.txt"
-branch="$(git -C "$cd_arg" branch --show-current)"
-head="$(git -C "$cd_arg" rev-parse HEAD)"
+cp "$evidence_path" "$repo_root/new-ref-evidence.txt"
+branch="$(git -C "$repo_root" branch --show-current)"
+head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
@@ -898,10 +900,10 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'codex-cli fake\n'
   exit 0
 fi
-cd_arg=""; output=""; prompt=""
+output=""; prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cd) cd_arg="$2"; shift 2 ;;
+    --cd) shift 2 ;;
     --output-last-message|-o) output="$2"; shift 2 ;;
     -) prompt="$(cat)"; shift ;;
     --ask-for-approval|--disable|--sandbox|--output-schema) shift 2 ;;
@@ -909,15 +911,16 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-printf '%s\n' "$prompt" > "$cd_arg/closest-base-prompt.txt"
+repo_root="$(printf '%s\n' "$prompt" | sed -n '/^{"target_command":/p' | jq -er .repo_root)"
+printf '%s\n' "$prompt" > "$repo_root/closest-base-prompt.txt"
 evidence_path_json="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence path JSON: //p' | head -1)"
 evidence_path="$(printf '%s' "$evidence_path_json" | jq -er 'select(type == "string")')"
 evidence_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence SHA-256: //p' | head -1)"
 [[ -r "$evidence_path" ]]
 [[ "$(shasum -a 256 < "$evidence_path" | awk '{print $1}')" == "$evidence_hash" ]]
-cp "$evidence_path" "$cd_arg/closest-base-evidence.txt"
-branch="$(git -C "$cd_arg" branch --show-current)"
-head="$(git -C "$cd_arg" rev-parse HEAD)"
+cp "$evidence_path" "$repo_root/closest-base-evidence.txt"
+branch="$(git -C "$repo_root" branch --show-current)"
+head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
@@ -974,10 +977,10 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'codex-cli fake\n'
   exit 0
 fi
-cd_arg=""; output=""; prompt=""
+output=""; prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cd) cd_arg="$2"; shift 2 ;;
+    --cd) shift 2 ;;
     --output-last-message|-o) output="$2"; shift 2 ;;
     -) prompt="$(cat)"; shift ;;
     --ask-for-approval|--disable|--sandbox|--output-schema) shift 2 ;;
@@ -985,15 +988,16 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-printf '%s\n' "$prompt" > "$cd_arg/moved-on-prompt.txt"
+repo_root="$(printf '%s\n' "$prompt" | sed -n '/^{"target_command":/p' | jq -er .repo_root)"
+printf '%s\n' "$prompt" > "$repo_root/moved-on-prompt.txt"
 evidence_path_json="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence path JSON: //p' | head -1)"
 evidence_path="$(printf '%s' "$evidence_path_json" | jq -er 'select(type == "string")')"
 evidence_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence SHA-256: //p' | head -1)"
 [[ -r "$evidence_path" ]]
 [[ "$(shasum -a 256 < "$evidence_path" | awk '{print $1}')" == "$evidence_hash" ]]
-cp "$evidence_path" "$cd_arg/moved-on-evidence.txt"
-branch="$(git -C "$cd_arg" branch --show-current)"
-head="$(git -C "$cd_arg" rev-parse HEAD)"
+cp "$evidence_path" "$repo_root/moved-on-evidence.txt"
+branch="$(git -C "$repo_root" branch --show-current)"
+head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
@@ -1029,10 +1033,10 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'codex-cli fake\n'
   exit 0
 fi
-cd_arg=""; output=""; prompt=""
+output=""; prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cd) cd_arg="$2"; shift 2 ;;
+    --cd) shift 2 ;;
     --output-last-message|-o) output="$2"; shift 2 ;;
     -) prompt="$(cat)"; shift ;;
     --ask-for-approval|--disable|--sandbox|--output-schema) shift 2 ;;
@@ -1040,15 +1044,16 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-printf '%s\n' "$prompt" > "$cd_arg/rewind-prompt.txt"
+repo_root="$(printf '%s\n' "$prompt" | sed -n '/^{"target_command":/p' | jq -er .repo_root)"
+printf '%s\n' "$prompt" > "$repo_root/rewind-prompt.txt"
 evidence_path_json="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence path JSON: //p' | head -1)"
 evidence_path="$(printf '%s' "$evidence_path_json" | jq -er 'select(type == "string")')"
 evidence_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence SHA-256: //p' | head -1)"
 [[ -r "$evidence_path" ]]
 [[ "$(shasum -a 256 < "$evidence_path" | awk '{print $1}')" == "$evidence_hash" ]]
-cp "$evidence_path" "$cd_arg/rewind-evidence.txt"
-branch="$(git -C "$cd_arg" branch --show-current)"
-head="$(git -C "$cd_arg" rev-parse HEAD)"
+cp "$evidence_path" "$repo_root/rewind-evidence.txt"
+branch="$(git -C "$repo_root" branch --show-current)"
+head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
@@ -1075,10 +1080,10 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'codex-cli fake\n'
   exit 0
 fi
-cd_arg=""; output=""; prompt=""
+output=""; prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cd) cd_arg="$2"; shift 2 ;;
+    --cd) shift 2 ;;
     --output-last-message|-o) output="$2"; shift 2 ;;
     -) prompt="$(cat)"; shift ;;
     --ask-for-approval|--disable|--sandbox|--output-schema) shift 2 ;;
@@ -1086,15 +1091,16 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-printf '%s\n' "$prompt" > "$cd_arg/delete-prompt.txt"
+repo_root="$(printf '%s\n' "$prompt" | sed -n '/^{"target_command":/p' | jq -er .repo_root)"
+printf '%s\n' "$prompt" > "$repo_root/delete-prompt.txt"
 evidence_path_json="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence path JSON: //p' | head -1)"
 evidence_path="$(printf '%s' "$evidence_path_json" | jq -er 'select(type == "string")')"
 evidence_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence SHA-256: //p' | head -1)"
 [[ -r "$evidence_path" ]]
 [[ "$(shasum -a 256 < "$evidence_path" | awk '{print $1}')" == "$evidence_hash" ]]
-cp "$evidence_path" "$cd_arg/delete-evidence.txt"
-branch="$(git -C "$cd_arg" branch --show-current)"
-head="$(git -C "$cd_arg" rev-parse HEAD)"
+cp "$evidence_path" "$repo_root/delete-evidence.txt"
+branch="$(git -C "$repo_root" branch --show-current)"
+head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
@@ -1197,10 +1203,10 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'codex-cli fake\n'
   exit 0
 fi
-cd_arg=""; output=""; prompt=""
+output=""; prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cd) cd_arg="$2"; shift 2 ;;
+    --cd) shift 2 ;;
     --output-last-message|-o) output="$2"; shift 2 ;;
     -) prompt="$(cat)"; shift ;;
     --ask-for-approval|--disable|--sandbox|--output-schema) shift 2 ;;
@@ -1208,10 +1214,11 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-branch="$(git -C "$cd_arg" branch --show-current)"
-head="$(git -C "$cd_arg" rev-parse HEAD)"
+repo_root="$(printf '%s\n' "$prompt" | sed -n '/^{"target_command":/p' | jq -er .repo_root)"
+branch="$(git -C "$repo_root" branch --show-current)"
+head="$(git -C "$repo_root" rev-parse HEAD)"
 command="$(printf '%s' "$prompt" | sed -n '/^{"target_command":/p' | jq -r '.target_command')"
-diff_hash="$(git -C "$cd_arg" diff --cached --no-ext-diff | shasum -a 256 | awk '{print $1}')"
+diff_hash="$(git -C "$repo_root" diff --cached --no-ext-diff | shasum -a 256 | awk '{print $1}')"
 command_hash="$(printf '%s' "$command" | shasum -a 256 | awk '{print $1}')"
 commit_subject="$(printf '%s' "$command" | sed -n "s/.* -m '\([^']*\)'.*/\1/p" | head -1)"
 commit_subject_hash="$(printf '%s' "$commit_subject" | shasum -a 256 | awk '{print $1}')"

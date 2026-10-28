@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # shellcheck source-path=SCRIPTDIR
-# UserPromptSubmit hook: revoke a verdict audit owned by this same session.
+# UserPromptSubmit hook: rotate authority and retain only unchanged audit work.
 #
 # The Stop hook launches run-verdict-audit.sh synchronously. This hook never signals a PID
-# selected from workspace state: revoking the session's request makes the runner cancel
-# its own process group and discard any dossier produced for the abandoned turn.
+# selected from workspace state. A valid request with unchanged Git bindings may finish
+# as prior evidence; otherwise revocation makes the runner cancel its own process group.
 #
 # Current Codex dispatches UserPromptSubmit at its external UserInput edge and records a
 # Stop continuation internally without re-dispatching it. Claude documents this event as
@@ -62,6 +62,8 @@ if [[ ! -r "$audit_state_lib" ]]; then
 fi
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$audit_state_lib"
+# shellcheck source=../lib/audit-request.sh
+source "$tooling_root/.agents/lib/audit-request.sh" || exit 2
 wake_lib="$tooling_root/.agents/lib/hook-wake.sh"
 if [[ ! -r "$wake_lib" ]]; then
   printf 'cancel-verdict-audit.sh: missing %s — cannot recognise internal wakes.\n' \
@@ -162,6 +164,13 @@ fi
 # Persist the steer before touching any mutex. A Stop invocation snapshots this token on
 # entry and refuses every later authority mutation when it changes, so cancellation stays
 # effective even if the decision-holder crashes or this hook must return after contention.
+retain_audit=false
+first_prompt_line="$(printf '%s' "$payload" | jq -r '(.prompt // "") | gsub("\r";"") |
+  split("\n") | map(select(test("[^[:space:]]"))) | .[0] // ""')"
+if [[ ! "$first_prompt_line" =~ ^force-pass-auditors:[[:space:]]+([^[:space:]].*)$ ]] \
+   && audit_request_context_read "$project_dir" "$session_scope" >/dev/null 2>&1; then
+  retain_audit=true
+fi
 prompt_epoch="$$-$(date +%s)-${RANDOM:-0}"
 prompt_epoch_written=true
 if ! printf '%s\n' "$prompt_epoch" \
@@ -189,8 +198,11 @@ fi
 # Revoke visible authority before any fallible mutex operation. An unsafe gitignored
 # mutex path must not leave a superseded request/PASS consumable; the serialized cleanup
 # below closes the hidden-quarantine and late-publication races when the mutex is usable.
+if [[ "$retain_audit" != true ]]; then
 rm -f "$audit_request_file" "$previous_verdict_file" "$last_uuid_file" \
   "$payload_transcript_file" "$prior_audit_input_file" "$verdict_file"
+request_context_file="$state_dir/verdict-request-context.json.$session_scope"
+rm -f "$request_context_file" 2>/dev/null || rmdir "$request_context_file" 2>/dev/null || true
 
 # The short decision mutex orders UserPromptSubmit against a Stop gate that has hidden a
 # dossier under a quarantine pathname. Once held, revoke first so the live runner wakes;
@@ -199,7 +211,7 @@ rm -f "$audit_request_file" "$previous_verdict_file" "$last_uuid_file" \
 # in one Perl process so the decision lock remains held through both cleanup passes.
 perl -MFcntl=:DEFAULT,:flock -e '
   my ($decision_path, $publish_path, $request, $previous, $last_uuid,
-      $payload_transcript, $prior_input, $cancel_prefix, $verdict) = @ARGV;
+      $payload_transcript, $prior_input, $cancel_prefix, $verdict, $request_context) = @ARGV;
 
   sub unlink_prefixed {
     my ($prefix) = @_;
@@ -217,7 +229,7 @@ perl -MFcntl=:DEFAULT,:flock -e '
   }
 
   sub unlink_state {
-    unlink($request, $previous, $last_uuid, $payload_transcript, $prior_input, $verdict);
+    unlink($request, $previous, $last_uuid, $payload_transcript, $prior_input, $verdict, $request_context);
     unlink_prefixed($prior_input . ".input-");
     unlink_prefixed($cancel_prefix . ".");
     unlink_prefixed($verdict . ".audit-");
@@ -268,11 +280,12 @@ perl -MFcntl=:DEFAULT,:flock -e '
 ' "$audit_decision_mutex_file" "$audit_publish_mutex_file" \
   "$audit_request_file" "$previous_verdict_file" "$last_uuid_file" \
   "$payload_transcript_file" "$prior_audit_input_file" \
-  "$audit_cancellation_prefix" "$verdict_file" \
+  "$audit_cancellation_prefix" "$verdict_file" "$request_context_file" \
   >/dev/null 2>&1 || {
     printf 'cancel-verdict-audit.sh: could not serialize audit cancellation.\n' >&2
     exit 1
   }
+fi
 if [[ "$prompt_epoch_written" != true ]]; then
   printf 'cancel-verdict-audit.sh: could not record the session prompt epoch.\n' >&2
   # UserPromptSubmit exit 2 is the cross-host fail-closed outcome. If cancellation

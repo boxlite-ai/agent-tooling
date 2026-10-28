@@ -94,6 +94,8 @@ if [[ ! -r "$audit_state_lib" ]]; then
 fi
 # shellcheck source=../../lib/verdict-audit-state.sh
 source "$audit_state_lib"
+# shellcheck source=../../lib/audit-request.sh
+source "$tooling_root/.agents/lib/audit-request.sh" || exit 2
 # shellcheck source=../../lib/audit-network.sh
 source "$tooling_root/.agents/lib/audit-network.sh" || exit 2
 audit_network_load || exit 2
@@ -897,6 +899,10 @@ fi
 if [[ "$session_scope" != "-" ]]; then
   audit_prompt_epoch="$(verdict_audit_read_single_record \
     "$prompt_epoch_file" 2>/dev/null)" || audit_prompt_epoch=""
+  if request_context="$(audit_request_context_read "$project_dir" "$session_scope" 2>/dev/null)"; then
+    audit_prompt_epoch="$(jq -r .origin_epoch <<< "$request_context")"
+    [[ "$audit_prompt_epoch" != - ]] || audit_prompt_epoch=""
+  fi
   if [[ -n "$audit_prompt_epoch" ]]; then
     [[ -r "$auditor_control" ]] || {
       printf 'run-verdict-audit.sh: auditor lifecycle control is unavailable.\n' >&2
@@ -927,17 +933,7 @@ strip_frontmatter() {  # $1 = spec file
 # launch, so the auditor can keep the whole workspace read-only without guessing the
 # dossier binding.
 compute_audit_tree_hash() {
-  local index_file tree_hash="" command_status=0
-  index_file="$(mktemp)" || return 1
-  GIT_INDEX_FILE="$index_file" git -C "$project_dir" read-tree HEAD >/dev/null 2>&1 \
-    && GIT_INDEX_FILE="$index_file" git -C "$project_dir" add -A >/dev/null 2>&1 \
-    && tree_hash="$(GIT_INDEX_FILE="$index_file" \
-         git -C "$project_dir" write-tree 2>/dev/null)" \
-    || command_status=$?
-  rm -f "$index_file"
-  (( command_status == 0 )) && [[ "$tree_hash" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] \
-    || return 1
-  printf '%s\n' "$tree_hash"
+  audit_request_tree "$project_dir"
 }
 
 # The prompt is a document, not a string literal: .agents/prompts/audit/verdict-runner.md.

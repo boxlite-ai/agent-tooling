@@ -84,7 +84,7 @@ setup() {
   # dossier is keyed to and self-invalidates a just-passed audit. Ignoring the
   # directory (not one file) keeps this true for every marker the gates write —
   # last-verdict.prev.json, verdict-last-uuid, verdict-decisions.log.
-  printf '.agents/state/\n' > "$d/.gitignore"
+  printf '.agents/state/\nCLASSIFIER_RAN\n' > "$d/.gitignore"
   git -C "$d" add -A
   git -C "$d" commit -qm base
   printf '%s' "$d"
@@ -303,9 +303,17 @@ session_state_path() {  # repo basename session
   printf '%s/.agents/state/%s.%s' "$1" "$2" "$(session_scope_of "$1" "$3")"
 }
 write_session_request() {  # repo session generation final-id
-  local path; path="$(session_state_path "$1" verdict-request "$2")"
+  local path epoch; path="$(session_state_path "$1" verdict-request "$2")"
   mkdir -p "$(dirname "$path")"
   printf '%s %s %s\n' "$3" "$(( $(date +%s) + 600 ))" "$4" > "$path"
+  epoch="$(cat "$(session_state_path "$1" verdict-prompt-epoch "$2")" 2>/dev/null || true)"
+  if [[ -n "$epoch" ]]; then
+    jq -nc --arg request "$(cat "$path")" --arg epoch "$epoch" \
+      --arg branch "$(git -C "$1" branch --show-current)" --arg head "$(git -C "$1" rev-parse HEAD)" \
+      --arg tree "$(tree_hash_of "$1")" \
+      '{request:$request,origin_epoch:$epoch,branch:$branch,head:$head,tree_hash:$tree}' \
+      > "$(session_state_path "$1" verdict-request-context.json "$2")"
+  fi
 }
 run_session_hook() {  # repo session classifier-answer
   jq -nc --arg p "$1/transcript.jsonl" --arg s "$2" \
@@ -613,8 +621,8 @@ else
 fi
 rm -rf "$R"
 
-# A real user steer revokes the generation while Stop is synchronously waiting. The
-# old Stop must return silently after the runner cancels, never block the new prompt.
+# A user steer after a tree change revokes the generation while Stop is waiting.
+# The old Stop must return silently after cancellation, never block the new prompt.
 R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
 payload="$(jq -nc --arg p "$R/transcript.jsonl" \
   '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
@@ -630,6 +638,7 @@ for (( poll_index=0; poll_index<300; poll_index++ )); do
   [[ -e "$R/.agents/state/SYNC_AUDIT_WAITING" ]] && break
   sleep 0.01
 done
+printf 'changed while the audit was running\n' > "$R/changed-production"
 prompt_hook "$R" session-a turn-b >/dev/null 2>&1
 for (( poll_index=0; poll_index<500; poll_index++ )); do
   kill -0 "$steered_stop_job" 2>/dev/null || break
@@ -2555,7 +2564,7 @@ fi; rm -rf "$R"
 # SOUNDNESS — why EVERY non-empty line must match, not just the first. A turn that did
 # real work and then hit an error still owes proof... The stub says NO, so a tier A that
 # wrongly swallowed these would allow, and so would a hook with no tiers at all.
-R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
+R="$(setup)"; write_transcript "$R" "Verified the socket path resolves under the jailer."
 append_assistant "$R" "API Error: Overloaded"
 out="$(run_hook "$R" NO)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
@@ -2567,7 +2576,7 @@ fi; rm -rf "$R"
 # ...and so does the reverse order, which is exactly what a first-line-only anchor
 # leaks: a transient error, then a retry that states the verdict in the same turn.
 R="$(setup)"; write_transcript "$R" "API Error: Overloaded"
-append_assistant "$R" "Root cause is the stale socket path; 12/12 tests pass."
+append_assistant "$R" "Verified the socket path resolves under the jailer."
 out="$(run_hook "$R" NO)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
   pass=$((pass+1)); printf '  PASS  %s\n' "harness error THEN real verdict → block (not swallowed)"
@@ -2584,14 +2593,14 @@ else
 fi; rm -rf "$R"
 
 echo
-echo "## Tier B: assertion-only claims block without consulting the model"
+echo "## Count wording uses classification; completion assertions keep the fast path"
 # Stub answers NO throughout, so a hook without tier B reaches the model and allows.
 R="$(setup)"; write_transcript "$R" "Reran the suite: 173/173 tests pass on the hook harness."
 out="$(run_hook "$R" NO)"
-if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1 && [[ ! -e "$R/CLASSIFIER_RAN" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "'173/173 tests pass' → block, classifier never invoked"
+if printf '%s' "$out" | jq -e '(.decision // "") != "block"' >/dev/null 2>&1 && [[ -e "$R/CLASSIFIER_RAN" ]]; then
+  pass=$((pass+1)); printf '  PASS  %s\n' "slash counts reach the same classifier as prose counts"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s classifier_ran=%s)\n' "tier B skips the model" \
+  fail=$((fail+1)); printf '  FAIL  %s  (out=%s classifier_ran=%s)\n' "count wording uses classification" \
     "$out" "$([[ -e "$R/CLASSIFIER_RAN" ]] && echo yes || echo no)"
 fi; rm -rf "$R"
 
@@ -2619,10 +2628,10 @@ fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "26/26 tests pass."
 decide "$R" >/dev/null
-if grep -q ' assertion match-block$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "tier B decision logged (rung + outcome)"
+if grep -q ' regex match-block$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
+  pass=$((pass+1)); printf '  PASS  %s\n' "offline count fallback logged (rung + outcome)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (log=%s)\n' "tier B logged" "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  fail=$((fail+1)); printf '  FAIL  %s  (log=%s)\n' "count fallback logged" "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 echo

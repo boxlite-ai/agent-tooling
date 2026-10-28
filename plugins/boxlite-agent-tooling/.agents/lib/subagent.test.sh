@@ -26,6 +26,7 @@
 # Exits non-zero on any failure.
 set -uo pipefail
 
+unset BOXLITE_HOOK_HOST PLUGIN_ROOT CLAUDE_PLUGIN_ROOT
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$LIB_DIR/../.." && pwd)"
 # shellcheck source=/dev/null

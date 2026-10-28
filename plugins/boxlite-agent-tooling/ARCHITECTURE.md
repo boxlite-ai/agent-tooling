@@ -21,7 +21,7 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 
 | A person or host does this | Event | Script | What they see |
 | --- | --- | --- | --- |
-| Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. An audit still running for the abandoned turn is revoked. |
+| Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. Old authority is revoked; unchanged audit work may finish as prior evidence. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-research-auditor` PASS for its exact content, unless every target resolves outside every repository; shell commands are outside this gate. |
@@ -387,7 +387,29 @@ Producers for callers with no agent runtime.
 | Who needs a verdict | Producer | What it does |
 | --- | --- | --- |
 | The Stop gate, synchronously | `.agents/hooks/audit/run-verdict-audit.sh` | Loads `boxlite-verdict-audit` into a model CLI with audit and native timer tools, which writes the turn's dossier. |
-| A Git gate, CI or a plain shell | `.agents/hooks/audit/run-commit-push-audit.sh` | Runs `codex exec` read-only with hooks disabled and writes the same `last-audit.json` the `commit-push-auditor` subagent writes. |
+| A Git gate, CI or a plain shell | `.agents/hooks/audit/run-commit-push-audit.sh` | Runs `codex exec` with private writable scratch, read-only repository/evidence, and hooks/user configuration disabled; writes the same `last-audit.json` as the native auditor. |
+
+Headless commit reviews bind scratch test reconstruction to the captured Git index
+tree; an unstaged fix cannot validate a broken staged candidate. Push reconstruction
+uses the verified ref-update context's new commit trees. The reviewer verifies each
+reconstructed tree before using its tests. The parent rechecks commit tree, diff, and
+subject before publishing. Scratch owns `TMPDIR`; general temporary directories and
+additional write roots are excluded. Network access permits bound-design retrieval.
+The private `bin/mktemp` adapter adds a scratch template only for default invocations;
+explicit templates/options pass through. Reviewer commands prepend that bin directory
+after shell initialization, covering Darwin's default-temp and login-shell behavior.
+The design reader accepts `show [repo-root]`, so Bash redirections run in writable
+scratch while the original target's branch and design binding remain authoritative.
+Both commit-review routes use `commit-push-tests.md`: host receipts, complete native
+execution records, or safe reruns must bind commands/results to the tested candidate.
+Optional parent identity/host/time hints guide independent transcript discovery;
+no transcript path or prior summary supplies proof. Sandbox-denied checks require
+another verified evidence route or an unchecked finding.
+Native retrieval covers ordinary and custom tool calls, including content-item arrays
+and nested orchestration results. Wrapper completion cannot certify a running command;
+reviewers follow emitted continuation IDs to its terminal result. Initial session cwd
+may precede a verified worktree transition. Command/subject and design checks precede
+long reruns; denied sandbox capabilities send the reviewer to authentic execution records.
 
 An agent with a built-in spawns the auditor itself, `Task` on Claude Code and
 `collaboration.spawn_agent` on Codex, from the specs in `.claude/agents/`.
@@ -424,6 +446,8 @@ never comes from repository files or evaluated shell/PAC text. See
 `.agents/lib/audit-diagnostics.sh` retains bounded, masked stderr and execution
 metadata. Verdict completion preserves the child exit status before considering
 its dossier; a child that writes PASS and then exits nonzero cannot approve work.
+Both count formats (`60/60 tests passed`, `60 passed, 0 failed`) use the classifier.
+Counts and citations locate proof; the independent auditor verifies it.
 
 ### Shared finish reminders
 
@@ -628,6 +652,7 @@ than one session can share a checkout.
 - `audit-diagnostics.jsonl`: bounded execution records for headless audit attempts; never approval.
 - `verdict-last-uuid`: the id of the message the gate last judged.
 - `verdict-prompt-epoch`: the current prompt epoch.
+- `verdict-request-context.json`: origin prompt epoch and Git binding for retained execution, managed by `.agents/lib/audit-request.sh`.
 - `verdict-stop-message.jsonl`: Codex's Stop message preserved in transcript shape when no transcript exists.
 - `last-audit.json`: the commit or push dossier. `last-audit-handoff.json` carries the gate's request to the auditor.
 - `commit-audit-receipt.json`: the receipt commit-msg publishes and pre-push spends.
@@ -639,6 +664,16 @@ than one session can share a checkout.
 - `api-resume`: the recent resumes and the unspent wake hashes of the API-failure resume.
 
 ### Verdict retry handoff
+
+A request context binds the original prompt epoch, exact claim checksum, branch,
+HEAD, and full working tree. New human prompts always rotate the prompt epoch and
+revoke override grants. They preserve a running verdict request only while its Git
+binding and bounded context remain valid; changed or unsafe state uses cancellation.
+History can finish that original attempt while its request remains current.
+Only its original turn may consume the result. An unchanged completed dossier may
+be handed to a later auditor as prior evidence, with freshness preserved, never as
+approval of the later turn. For example, “what's happening?” leaves unchanged work
+running; a later deployment claim gets a new audit generation.
 
 A session retry captures the prior same-generation FAIL's normalized JSON and inode
 under the runner's leases before launching the auditor. To publish a replacement,
@@ -815,7 +850,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A stale or mismatched turn dossier is discarded, never blocked on. `.agents/hooks/audit/preflight-verdict-check.sh:28`
 - A readable snapshot with no assistant text ends unjudged under `blind-allow`; a failed or truncated snapshot requires an audit. `.agents/hooks/audit/preflight-verdict-check.sh:53`
 - A message is never judged twice. `.agents/hooks/audit/preflight-verdict-check.sh:62`
-- A parked FAIL serves only the next audit of the same round. `.agents/hooks/audit/preflight-verdict-check.sh:1778`
+- A parked dossier supplies prior evidence to a fresh audit; it cannot approve a new turn. `.agents/hooks/audit/preflight-verdict-check.sh`
 - A reply that leads with a valid TL;DR is never asked to shorten; the Stop gate's only writing check is that TL;DR. `.agents/hooks/stop-gate.sh:4`
 - No editor or patch edit lands in a repository before a research PASS for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
@@ -829,7 +864,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A closed escalation survives one auditor lifetime (3660 seconds) after it closes, so it can still authenticate a late `SubagentStop`; the next prompt in its session retires it after that, which keeps the prompt hook inside its 3-second lock. `.agents/hooks/auditor-control.sh:318`
 - A commit or push is denied with a reload instruction when the session's loaded plugin version differs from the version the git hooks run: the loaded auditors cannot read the newer gate's audit tasks. `.agents/hooks/preflight-commit-push.sh:819`
 - A finished auditor's completion is internal only while its credit lasts. Claude names the auditors under this plugin's namespace and submits each completion twice, as an `agent-message` hand-back and a `task-notification`, so `SubagentStop` credits two deliveries for 300 seconds. A hand-back that arrives while the auditor is still running is accepted once, and the stop then credits one; a replay, an uncredited sender, or a column-zero frame line inside the report is a real prompt. `.agents/hooks/auditor-control.sh:48`, `.agents/hooks/cancel-verdict-audit.sh:108`
-- A test run counts as observed only through a receipt the host's result hook wrote for one plain `make test...` command. The auditor binds it to the staged tree, or diffs a red run's tree against it. `.agents/hooks/record-test-run.sh:14`
+- Test evidence must bind the command, completion, and source state through host receipts, complete native records, or safe reruns; current-tree inference cannot certify an earlier run. `.agents/prompts/audit/commit-push-tests.md`
 - A FAIL verdict gets a fresh audit once a test runs after it; otherwise the gate repeats its findings. `.agents/hooks/preflight-commit-push.sh:375`
 - Codex's hook-event set is closed; an unknown key loads no hooks at all. `host-parity.test.sh:24`
 - Every wired command declares its host and prefers its host's plugin root, with the alternate root as fallback. `host-parity.test.sh:30`
@@ -860,7 +895,7 @@ one line cites the first.
 | audit | inflight-allow | A live runner holds the lock for this session; its verdict gates the next turn end. | 2158 |
 | race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2183 |
 | harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2215 |
-| assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2224 |
+| assertion | match-block | Whole-line "done" or line-initial confirmation; audited with no classifier call. | 2224 |
 | runner | ERROR-block | The runner did not complete; safe execution metadata and a diagnostic path accompany the block. | 1790 |
 | triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2231 |
 | triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2240 |

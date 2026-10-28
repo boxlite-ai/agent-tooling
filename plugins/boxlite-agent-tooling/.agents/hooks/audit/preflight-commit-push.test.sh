@@ -578,30 +578,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-printf '%s\n' "$prompt" > "$cd_arg/prompt.txt"
 command_json_line="$(printf '%s\n' "$prompt" | sed -n '/^{"target_command":/p')"
+repo_root="$(printf '%s' "$command_json_line" | jq -r '.repo_root')"
+printf '%s\n' "$prompt" > "$repo_root/prompt.txt"
 evidence_path_json="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence path JSON: //p' | head -1)"
 evidence_path="$(printf '%s' "$evidence_path_json" | jq -r .)"
 evidence_expected_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Evidence SHA-256: //p' | head -1)"
 evidence_actual_hash="$(shasum -a 256 "$evidence_path" | awk '{print $1}')"
-cp "$evidence_path" "$cd_arg/evidence-snapshot.txt"
+cp "$evidence_path" "$repo_root/evidence-snapshot.txt"
 command_length="$(printf '%s' "$command_json_line" | jq -r '.target_command | length')"
 {
   printf 'approval=%s\n' "$approval"
   printf 'exec_seen=%s\n' "$exec_seen"
   printf 'disable_hooks=%s\n' "$disable_hooks"
   printf 'sandbox=%s\n' "$sandbox"
+  printf 'scratch_separate=%s\n' "$([[ "$cd_arg" != "$repo_root" && "${TMPDIR:-}" == "$cd_arg/tmp" ]] && printf yes || printf no)"
   printf 'schema=%s\n' "$schema"
   printf 'command_length=%s\n' "$command_length"
   printf 'evidence_readable=%s\n' "$([[ -r "$evidence_path" ]] && printf yes || printf no)"
   printf 'evidence_hash_matches=%s\n' \
     "$([[ "$evidence_expected_hash" == "$evidence_actual_hash" ]] && printf yes || printf no)"
-} > "$cd_arg/fake-codex.args"
+} > "$repo_root/fake-codex.args"
 
-branch="$(git -C "$cd_arg" branch --show-current)"
-head="$(git -C "$cd_arg" rev-parse HEAD)"
+branch="$(git -C "$repo_root" branch --show-current)"
+head="$(git -C "$repo_root" rev-parse HEAD)"
 command="$(printf '%s' "$command_json_line" | jq -r '.target_command')"
-diff_hash="$(git -C "$cd_arg" diff --cached --no-ext-diff | shasum -a 256 | awk '{print $1}')"
+diff_hash="$(git -C "$repo_root" diff --cached --no-ext-diff | shasum -a 256 | awk '{print $1}')"
 command_hash="$(printf '%s' "$command" | shasum -a 256 | awk '{print $1}')"
 commit_subject="$(printf '%s' "$command" | sed -n "s/.* -m '\([^']*\)'.*/\1/p" | head -1)"
 commit_subject_hash="$(printf '%s' "$commit_subject" | shasum -a 256 | awk '{print $1}')"
@@ -624,7 +626,8 @@ check_agentic=yes
 grep -q '^approval=never$' "$AGENTIC_REPO/fake-codex.args" || check_agentic=no
 grep -q '^exec_seen=yes$' "$AGENTIC_REPO/fake-codex.args" || check_agentic=no
 grep -q '^disable_hooks=yes$' "$AGENTIC_REPO/fake-codex.args" || check_agentic=no
-grep -q '^sandbox=read-only$' "$AGENTIC_REPO/fake-codex.args" || check_agentic=no
+grep -q '^sandbox=workspace-write$' "$AGENTIC_REPO/fake-codex.args" || check_agentic=no
+grep -q '^scratch_separate=yes$' "$AGENTIC_REPO/fake-codex.args" || check_agentic=no
 grep -q 'commit-push-audit.schema.json$' "$AGENTIC_REPO/fake-codex.args" || check_agentic=no
 expected_agentic_command="git commit -m 'test(hooks): codex audit'"
 grep -q "^command_length=${#expected_agentic_command}$" "$AGENTIC_REPO/fake-codex.args" || check_agentic=no
@@ -1185,9 +1188,10 @@ git -C "$BOTH_REPO" add -A
 # Both plugin roots are cleared so this is genuinely the unknown host. Running the suite
 # from inside a hook would otherwise leave a real root exported, and the menu assertions
 # below would quietly exercise that host's single route instead.
-reason_for_repo() {  # repo, command, optional CODEX_SANDBOX value
+reason_for_repo() {  # repo, command, optional CODEX_SANDBOX value, optional parent session
   local repo="$1" target_command="$2" env_desc="${3:-}"
-  printf '%s' "$target_command" | jq -Rs '{tool_input:{command:.}}' \
+  printf '%s' "$target_command" | jq -Rs --arg session "${4:-}" \
+    '{tool_input:{command:.},session_id:$session}' \
     | ( cd "$repo" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT \
         CLAUDE_PROJECT_DIR="$repo" \
         ${env_desc:+CODEX_SANDBOX="$env_desc"} \
@@ -1290,6 +1294,16 @@ if [[ "$(printf '%s' "$task_record" | jq -r '.target_command // ""' 2>/dev/null)
   pass=$((pass + 1)); printf '  PASS  blocked commit task is self-contained without parent history\n'
 else
   fail=$((fail + 1)); printf '  FAIL  blocked commit task is self-contained without parent history\n'
+fi
+
+parent_hint=$'native-"quoted"\ncontext'
+parent_reason="$(BOXLITE_HOOK_HOST=unknown reason_for_repo "$BOTH_REPO" "git commit -m 'test: x'" '' "$parent_hint")"
+parent_record="$(task_record_from_text "$(task_text_from_reason "$parent_reason")")"
+if jq -e --arg id "$parent_hint" '.parent_session_id == $id and .parent_host == "unknown" and
+  (.audit_started_at | test("^[0-9]+$")) and (has("transcript_path") | not)' <<< "$parent_record" >/dev/null; then
+  pass=$((pass + 1)); printf '  PASS  native review preserves parent discovery context as data\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  native review preserves parent discovery context as data\n'
 fi
 
 criteria_file="$BOTH_REPO/.agents/prompts/audit/commit-push-criteria.md"

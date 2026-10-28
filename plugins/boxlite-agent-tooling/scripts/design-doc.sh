@@ -22,5 +22,6 @@ case "${1:-}:$#" in
   check:1) design_doc_binding check "$PWD" ;;
   research:1) design_doc_research_record "$PWD" ;;
   show:1) design_doc_show "$PWD" ;;
-  *) printf 'usage: design-doc.sh register <URL> | check | research < verdict.json | show\n' >&2; exit 2 ;;
+  show:2) design_doc_show "$2" ;;
+  *) printf 'usage: design-doc.sh register <URL> | check | research < verdict.json | show [repo-root]\n' >&2; exit 2 ;;
 esac

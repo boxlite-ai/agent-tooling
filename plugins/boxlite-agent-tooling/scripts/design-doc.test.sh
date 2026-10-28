@@ -65,6 +65,11 @@ expect 'matching branch verifies again' 0 check
 [[ "$(wc -l < "$DOC_CALLS")" -ge 2 ]] || fail=$((fail+1))
 expect 'show prints the bound GitHub design' 0 show
 [[ "$(cat "$scratch/out")" == *'Verify designs before edits.'* ]] || fail=$((fail+1))
+cd "$scratch" || exit 1
+expect 'show targets the bound repository from a writable cwd' 0 show "$scratch/repo"
+[[ "$(cat "$scratch/out")" == *'Verify designs before edits.'* ]] || fail=$((fail+1))
+expect 'an explicit unbound target cannot reuse another repository binding' 1 show "$scratch"
+cd "$scratch/repo" || exit 1
 rm -f "$state"
 expect 'legacy bind registers an unbound worktree' 0 bind "$url"
 expect 'legacy binding verifies again' 0 check
@@ -98,6 +103,7 @@ expect 'recording leaves the binding intact' 0 check
 git checkout -qb different
 expect 'another branch cannot reuse binding' 1 check
 expect 'another branch cannot show the binding' 1 show
+expect 'explicit target still checks its branch binding' 1 show "$scratch/repo"
 git checkout -q feature
 export DOC_ERROR=1
 expect 'network failures never use previous success' 1 check

@@ -5,8 +5,10 @@
 audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON payload]
   local context="$1" operation="$2" id="${3:-}" payload="${4:-}"
   local root key scope_key input_key directory path request state history_path snapshot binding current_id
-  local session epoch actual_epoch library
+  local session epoch actual_epoch library retained retained_epoch retained_request retained_generation
   library="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 2
+  # shellcheck source=audit-request.sh
+  source "$library/audit-request.sh" || return 2
   local LC_ALL=C
   [[ -n "$payload" ]] || payload='{}'
   (( ${#context} <= 8192 && ${#payload} <= 1048576 )) || return 2
@@ -23,7 +25,20 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
     if [[ -e "$directory/verdict-prompt-epoch.$session" || -L "$directory/verdict-prompt-epoch.$session" ]]; then
       actual_epoch="$(verdict_audit_read_single_record "$directory/verdict-prompt-epoch.$session")" || return 2
     fi
-    [[ "$epoch" == "$actual_epoch" ]] || { printf 'audit-reflection: prompt epoch changed\n' >&2; return 2; }
+    if [[ "$epoch" != "$actual_epoch" ]]; then
+      retained=""
+      if [[ "$(jq -r .gate <<< "$context")" == verdict ]]; then
+        retained="$(audit_request_context_read "$root" "$session" 2>/dev/null)" || retained=""
+      fi
+      retained_epoch="$(jq -r '.origin_epoch // empty' <<< "$retained")"
+      retained_request="$(jq -r '.request // empty' <<< "$retained")"
+      retained_generation="${retained_request%% *}"
+      [[ "$retained_epoch" == - ]] && retained_epoch=0
+      if [[ "$epoch" != "$retained_epoch" ]] || ! jq -e --arg generation "$retained_generation" \
+          '(.binding.generation // .generation) == $generation' <<< "$payload" >/dev/null; then
+        printf 'audit-reflection: prompt epoch changed\n' >&2; return 2
+      fi
+    fi
   fi
   scope_key="$(printf '%s\n%s' "$root" "$session" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')"
   path="$directory/audit-history-$scope_key-$key.json"
@@ -118,7 +133,7 @@ _audit_reflection_remove() {
 
 _audit_reflection_prune() { # directory, session key, context key, epoch, active input
   local directory="$1" scope="$2" key="$3" epoch="$4" active="$5"
-  local file snapshot identity retired="" record old_key
+  local file snapshot identity retired="" record old_key retained context_session context_epoch
   # Only the current immutable input is needed: it embeds all prior cycle evidence.
   for file in "$directory/audit-input-$scope-$key-"*.json; do
     [[ "$file" != "$active" && -e "$file" ]] || continue
@@ -130,6 +145,10 @@ _audit_reflection_prune() { # directory, session key, context key, epoch, active
     identity="$(verdict_audit_path_identity "$file")" || return 2
     snapshot="$(verdict_audit_read_regular_state "$file" "$(audit_reflection_history_limit)" json)" || return 2
     if [[ "$(jq -r .context.epoch <<<"${snapshot#*$'\n'}")" == "$epoch" ]]; then continue; fi
+    context_session="$(jq -r .context.session <<< "${snapshot#*$'\n'}")"
+    context_epoch="$(jq -r .context.epoch <<< "${snapshot#*$'\n'}")"
+    retained="$(audit_request_context_read "${directory%/.agents/state}" "$context_session" 2>/dev/null)" || retained=""
+    if [[ -n "$retained" && "$(jq -r .origin_epoch <<< "$retained")" == "$context_epoch" ]]; then continue; fi
     record="$(jq -nc --arg path "$file" --arg identity "$identity" \
       --argjson time "${snapshot%%$'\n'*}" '{path:$path,identity:$identity,time:$time}')" || return 2
     retired+="$record"$'\n'

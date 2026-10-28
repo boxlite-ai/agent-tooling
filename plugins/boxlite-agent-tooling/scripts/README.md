@@ -43,6 +43,10 @@ Design, audit-history, and confirmation commands are separate entry points. Thei
 wrappers validate arguments and dependencies, then call libraries under
 [`../.agents/lib/`](../.agents/lib/); the libraries own provider reads and state transitions.
 
+`design-doc.sh show [repo-root]` reads the target's bound design without changing the
+working directory. Reviewers can run it from writable scratch when the repository is
+read-only; omitting the argument keeps the current-checkout behavior.
+
 ## Installation and guidance
 
 | Script / arguments | Responsibility and effects |

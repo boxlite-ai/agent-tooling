@@ -91,13 +91,17 @@ install_stub() {  # $1 = repo
 set -eu
 [[ "${1:-}" == "--version" ]] && { printf 'codex-cli fake\n'; exit 0; }
 sandbox=""; disable_hooks=no; ephemeral=no; schema=""; out=""; approval=""
+workspace=""; isolated=no; skip_git=no; config=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ask-for-approval) approval="$2"; shift 2 ;;
     exec) shift ;;
     --disable) [[ "$2" == "hooks" ]] && disable_hooks=yes; shift 2 ;;
     --sandbox) sandbox="$2"; shift 2 ;;
-    --cd) shift 2 ;;
+    --cd) workspace="$2"; shift 2 ;;
+    --ignore-user-config) isolated=yes; shift ;;
+    --skip-git-repo-check) skip_git=yes; shift ;;
+    -c) config+="$2"$'\n'; shift 2 ;;
     --ephemeral) ephemeral=yes; shift ;;
     --output-schema) schema="$2"; shift 2 ;;
     --output-last-message|-o) out="$2"; shift 2 ;;
@@ -114,6 +118,20 @@ evidence_actual_hash=""
 evidence_bytes=0
 evidence_mode=""
 evidence_dir_mode=""
+temporary_file="$(PATH="$workspace/bin:$PATH" mktemp)"
+temporary_directory="$(PATH="$workspace/bin:$PATH" mktemp -d)"
+explicit_file="$(PATH="$workspace/bin:$PATH" mktemp "$workspace/explicit.XXXXXXXXXX")"
+temporary_defaults=no
+if [[ "$temporary_file" == "$workspace/tmp/"* && -f "$temporary_file" \
+      && "$temporary_directory" == "$workspace/tmp/"* && -d "$temporary_directory" ]]; then
+  temporary_defaults=yes
+fi
+temporary_explicit=no
+[[ "$explicit_file" != "$workspace/explicit."* || ! -f "$explicit_file" ]] || temporary_explicit=yes
+rm -f "$temporary_file" "$explicit_file"
+rmdir "$temporary_directory"
+temporary_invalid=no
+PATH="$workspace/bin:$PATH" mktemp --audit-invalid-option >/dev/null 2>&1 || temporary_invalid=yes
 if [[ -n "$evidence_path" && -r "$evidence_path" ]]; then
   evidence_readable=yes
   evidence_actual_hash="$(shasum -a 256 < "$evidence_path" | awk '{print $1}')"
@@ -145,6 +163,14 @@ fi
   printf 'ephemeral=%s\n' "$ephemeral"
   printf 'approval=%s\n' "$approval"
   printf 'schema=%s\n' "$([[ -r "$schema" ]] && echo readable || echo MISSING)"
+  printf 'isolated=%s\nskip_git=%s\n%s' "$isolated" "$skip_git" "$config"
+  if [[ -d "$workspace" && "$workspace" != "$FAKE_DIR" && "${TMPDIR:-}" == "$workspace/tmp" \
+        && "$evidence_path" != "$workspace/"* && "$out" != "$workspace/"* ]]; then
+    printf 'scratch_separate=yes\n'
+  fi
+  printf 'workspace=%s\n' "$workspace"
+  printf 'temporary_defaults=%s\ntemporary_explicit=%s\ntemporary_invalid=%s\n' \
+    "$temporary_defaults" "$temporary_explicit" "$temporary_invalid"
 } > "$FAKE_DIR/flags.txt"
 if [[ -n "${CODEX_FAKE_STDERR_KIB:-}" ]]; then
   # The CLI narrates its work on stderr, so this stream grows with the size of the
@@ -903,12 +929,50 @@ echo
 echo "## The auditor is invoked inside a sandbox it cannot escape"
 # These flags are the whole reason a separate process is worth its cost.
 flags="$(cat "$R/flags.txt" 2>/dev/null || true)"
-for want in "sandbox=read-only" "disable_hooks=yes" "ephemeral=yes" "approval=never" "schema=readable"; do
+for want in "sandbox=workspace-write" "disable_hooks=yes" "ephemeral=yes" "approval=never" \
+  "schema=readable" "isolated=yes" "skip_git=yes" "scratch_separate=yes" \
+  "sandbox_workspace_write.writable_roots=[]" \
+  "sandbox_workspace_write.exclude_tmpdir_env_var=true" \
+  "sandbox_workspace_write.exclude_slash_tmp=true" \
+  "sandbox_workspace_write.network_access=true" "temporary_defaults=yes" \
+  "temporary_explicit=yes" "temporary_invalid=yes"; do
   case "$flags" in
     *"$want"*) ok "invoked with $want" ;;
     *)         bad "invoked with $want  (got: $(printf '%s' "$flags" | tr '\n' ' '))" ;;
   esac
 done
+auditor_workspace="$(sed -n 's/^workspace=//p' "$R/flags.txt")"
+if [[ -n "$auditor_workspace" && ! -e "$auditor_workspace" ]]; then
+  ok "private reviewer workspace is removed after completion"
+else
+  bad "private reviewer workspace is removed after completion"
+fi
+
+R_PARENT="$(setup)"; install_stub "$R_PARENT"
+parent_hint=$'parent-"quoted"\ncontext'
+CODEX_THREAD_ID="$parent_hint" BOXLITE_HOOK_HOST=codex \
+  audit "$R_PARENT" "$(bound_output "$R_PARENT" PASS '[]')" >/dev/null
+if sed -n '/^{"target_command":/p' "$R_PARENT/prompt.txt" | jq -e --arg id "$parent_hint" '
+  .parent_session_id == $id and .parent_host == "codex" and
+  (.audit_started_at | test("^[0-9]+$")) and (has("transcript_path") | not)' >/dev/null; then
+  ok "headless review preserves parent discovery context as data"
+else
+  bad "headless review preserves parent discovery context as data"
+fi
+
+R_UNSTAGED="$(setup)"; install_stub "$R_UNSTAGED"
+printf 'staged-broken\n' > "$R_UNSTAGED/f"
+git -C "$R_UNSTAGED" add f
+candidate_tree="$(git -C "$R_UNSTAGED" write-tree)"
+printf 'unstaged-fixed\n' > "$R_UNSTAGED/f"
+audit "$R_UNSTAGED" "$(bound_output "$R_UNSTAGED" PASS '[]')" >/dev/null
+task_tree="$(sed -n '/^{"target_command":/p' "$R_UNSTAGED/prompt.txt" | jq -r '.index_tree // empty')"
+if [[ "$task_tree" == "$candidate_tree" && "$(git -C "$R_UNSTAGED" show "$task_tree:f")" == staged-broken \
+      && "$(cat "$R_UNSTAGED/f")" == unstaged-fixed ]]; then
+  ok "review task binds scratch tests to staged bytes despite an unstaged fix"
+else
+  bad "review task binds scratch tests to staged bytes despite an unstaged fix"
+fi
 
 echo
 echo "## The target command reaches the auditor as data, not as instructions"

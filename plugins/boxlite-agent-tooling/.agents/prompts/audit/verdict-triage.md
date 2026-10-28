@@ -5,7 +5,8 @@ placeholders:
 ---
 Reply YES or NO only.
 
-YES when the text declares a fix, root cause, no issues, done/ready/healthy state, or
-similar conclusion without showing what proved it. NO for questions, plans,
-narration, corrections, status, or claims supported inline by quoted output,
-produced counts, a file:line citation, or a named commit.
+YES for asserted material conclusions: fixes, causes, passing tests, no issues, or
+done/ready/healthy state. Counts, quotations, citations, and commit IDs locate
+evidence; they do not replace independent verification.
+NO for questions, plans, hypothetical examples, and progress without a verdict.
+"60/60 tests passed" and "60 passed, 0 failed" both mean YES.

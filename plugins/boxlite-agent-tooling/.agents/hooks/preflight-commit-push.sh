@@ -549,6 +549,9 @@ if [[ -n "${GITHOOK_DELEGATED:-}" && "$kind" == "commit" ]]; then
     target_command_note=$'\n\n'"$target_command_note"
   fi
 fi
+parent_session_id="$(printf '%s' "$payload" | jq -r '
+  if (.session_id | type) == "string" then .session_id else empty end' 2>/dev/null)" || parent_session_id=""
+parent_session_id="${parent_session_id:-${CODEX_THREAD_ID:-}}"
 task_input_json="$(jq -nc \
   --arg operation_kind "$kind" \
   --arg repo_root "$repo_root" \
@@ -556,9 +559,14 @@ task_input_json="$(jq -nc \
   --arg expected_head "$head" \
   --arg dossier_path "$audit_file" \
   --arg target_command "$audit_target_command" \
+  --arg parent_session_id "$parent_session_id" \
+  --arg parent_host "$(hook_host_kind)" \
+  --arg audit_started_at "$(date +%s)" \
   '{operation_kind:$operation_kind, repo_root:$repo_root,
     expected_branch:$expected_branch, expected_head:$expected_head,
-    dossier_path:$dossier_path, target_command:$target_command}')"
+    dossier_path:$dossier_path, target_command:$target_command,
+    parent_session_id:$parent_session_id, parent_host:$parent_host,
+    audit_started_at:$audit_started_at}')"
 reflection_context=""
 if [[ -n "$hook_session_scope" && -n "$hook_prompt_epoch" ]]; then
   # shellcheck source=../lib/audit-reflection.sh
@@ -928,6 +936,8 @@ if [[ -n "${CODEX_SANDBOX:-}" && -n "${GITHOOK_DELEGATED:-}" && "$kind" == "push
   if [[ -r "$headless_auditor" ]]; then
     AUDITOR_SESSION_SCOPE="$hook_session_scope" \
       AUDITOR_PROMPT_EPOCH="$hook_prompt_epoch" \
+      AUDITOR_PARENT_SESSION_ID="$parent_session_id" \
+      AUDITOR_PARENT_HOST="$(hook_host_kind)" \
       bash "$headless_auditor" "$kind" "$command" >/dev/null 2>&1 || true
   fi
 fi

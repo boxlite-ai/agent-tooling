@@ -90,8 +90,25 @@ the inert [Codex lookup helper](../../lib/codex-cli.sh), including `CODEX_BIN` a
 desktop discovery. For example, installing Claude alongside Codex no longer changes
 which provider handles Codex Stop checks.
 
-`run-commit-push-audit.sh` runs `codex exec` read-only with hooks disabled. It rejects an
+`run-commit-push-audit.sh` gives `codex exec` a private writable scratch directory;
+the repository and audit inputs remain read-only. General temporary-directory grants
+are disabled, and `TMPDIR` stays inside scratch. Hooks and user configuration are
+disabled; network access supports the authenticated design reader. Commit tests must
+reconstruct the captured index tree, even when working files differ; push tests use
+the validated context's new commit trees. The runner rechecks the index tree before
+publication and removes scratch on exit. It rejects an
 answer that is malformed or bound to another branch, HEAD, diff, command, or subject.
+Default `mktemp` calls use a private adapter with an explicit scratch template, because
+Darwin can ignore `TMPDIR`. Explicit templates/options retain host behavior. The reviewer
+prepends the private bin directory inside each shell command; login-shell PATH ordering
+cannot silently select the system default. The adapter is removed with scratch.
+Run `design-doc.sh show <repo-root>` from scratch: macOS Bash can use the current
+directory for here-strings when system temp paths are unavailable. The explicit target
+still checks the original worktree and branch binding.
+Reviewers may verify tests from host receipts, complete native execution records, or
+safe reruns. Each route must establish the tested candidate tree and command completion;
+restricted process inspection is not a test failure. Parent identity hints support
+independent transcript discovery; missing execution proof still blocks approval.
 The commit/push gate prints this command for hosts it cannot identify:
 
 ```sh
@@ -154,7 +171,8 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.tes
 | Suite | Covers |
 | --- | --- |
 | [full-transcript.test.sh](full-transcript.test.sh) | Parent-context handoff without a transcript path, known/unknown hosts, complete evidence access through stubs, bounded history, and cleanup. |
-| [audit-runtime.test.sh](audit-runtime.test.sh) | Child failures, bounded diagnostics, and user proxy configuration through public script boundaries. |
+| [audit-runtime.test.sh](audit-runtime.test.sh) | Child failures, bounded diagnostics, user proxy configuration, and equivalent count wording through public script boundaries. |
+| [audit-retention.test.sh](audit-retention.test.sh) | Status prompts retain unchanged work; changed bindings cancel; old results cannot approve new turns. |
 | [preflight-verdict-check.test.sh](preflight-verdict-check.test.sh) | Verdict gate: triage, dossier bindings, consumption, and re-entry. |
 | [run-verdict-audit.test.sh](run-verdict-audit.test.sh) | Verdict runner: auditor selection, exit codes, freshness, and cancellation. |
 | [stop-host-routing.test.sh](stop-host-routing.test.sh) | Both Stop stages: host selection, overrides, unavailable providers, and bounded Codex discovery. |
@@ -162,7 +180,7 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.tes
 | [run-commit-push-audit.test.sh](run-commit-push-audit.test.sh) | Commit/push runner: sandbox flags; malformed or unbound answers land on FAIL. |
 | [preflight-commit-push.test.sh](preflight-commit-push.test.sh) | [../preflight-commit-push.sh](../preflight-commit-push.sh): command matching and dossier checks. |
 | [commit-push-attempt.test.sh](commit-push-attempt.test.sh) | Hook-prepared commit/push attempts and the `SubagentStop` check that closes them. |
-| [cancel-verdict-audit.test.sh](cancel-verdict-audit.test.sh) | [../cancel-verdict-audit.sh](../cancel-verdict-audit.sh): a new prompt cancels the session's audit. |
+| [cancel-verdict-audit.test.sh](cancel-verdict-audit.test.sh) | [../cancel-verdict-audit.sh](../cancel-verdict-audit.sh): new-prompt revocation, unsafe requests, and internal notifications. |
 | [auditor-override.test.sh](auditor-override.test.sh) | [../auditor-control.sh](../auditor-control.sh): auditor escalation and prompt-scoped overrides. |
 | [record-test-run.test.sh](record-test-run.test.sh) | [../record-test-run.sh](../record-test-run.sh): which commands leave test-run receipts. |
 

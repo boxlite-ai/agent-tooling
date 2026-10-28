@@ -290,7 +290,7 @@ plugin_name="$(jq -r .name "$CLAUDE")"
 routing="$(
   # shellcheck source=/dev/null
   source "$PLUGIN/.agents/lib/subagent.sh"
-  subagent_instruction --agent verdict-auditor --root "$PLUGIN" --task audit
+  BOXLITE_HOOK_HOST=unknown subagent_instruction --agent verdict-auditor --root "$PLUGIN" --task audit
 )"
 case "$routing" in
   *"Task(subagent_type=\"$plugin_name:verdict-auditor\""*)

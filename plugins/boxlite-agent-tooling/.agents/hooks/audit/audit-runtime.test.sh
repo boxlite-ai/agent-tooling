@@ -10,6 +10,7 @@ export CODEX_BIN="$scratch/no-model" BOXLITE_HOOK_HOST=unknown
 export TEST_HISTORY_RESULT_HELPER="$plugin_root/scripts/fixtures/audit-history-result.sh"
 export AUDIT_TEST_PROGRAM="$scratch/auditor.sh"
 export VERDICT_AUDITOR_CMD='bash "$AUDIT_TEST_PROGRAM"'
+export VERDICT_CLASSIFIER_CMD='while IFS= read -r line; do :; done; printf "called\n" >> "$CLAUDE_PROJECT_DIR/.agents/state/classifier"; printf "NO\n"'
 pass=0 fail=0 cases=0
 check() {
   if [[ "$2" == "$3" ]]; then
@@ -111,6 +112,17 @@ for invalid in malformed unknown-key bad-url writable symlink fifo oversized; do
   check "unsafe network configuration ($invalid) fails before model launch" \
     "status=$runner_status child=$([[ -e "$repo/.agents/state/started" ]] && echo started || echo absent)" \
     'status=2 child=absent'
+done
+
+for claim in '60/60 tests passed.' 'The test run passed: 60 passed, 0 failed, exit 0.'; do
+  setup
+  jq -nc --arg message "$claim" '{hook_event_name:"Stop",last_assistant_message:$message}' \
+    | (cd "$repo" && bash "$plugin_root/.agents/hooks/stop-gate.sh") \
+    > "$repo/.agents/state/stop-output" 2> "$repo/.agents/state/stop-error"
+  check "count wording uses the shared classifier: $claim" \
+    "$(cat "$repo/.agents/state/classifier" 2>/dev/null)" called
+  check 'Stop decisions include elapsed time' \
+    "$(awk '/elapsed_seconds=[0-9]+/ {found=1} END {print found+0}' "$repo/.agents/state/verdict-decisions.log")" 1
 done
 
 cat > "$scratch/codex" <<'CODEX'
