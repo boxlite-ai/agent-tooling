@@ -4471,7 +4471,7 @@ decided_rung() {  # repo classifier-answer -> rung and outcome of the last logge
     '{transcript_path:$p, hook_event_name:"Stop", session_id:"decision-log"}' \
     | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" VERDICT_GATE_HARD_BLOCK=1 \
         VERDICT_CLASSIFIER_CMD="$(cls_stub "$1" "$2")" bash "$HOOK" ) >/dev/null 2>&1
-  tail -n 1 "$log" 2>/dev/null | cut -d' ' -f3-
+  tail -n 1 "$log" 2>/dev/null | awk '{print $(NF-1), $NF}'
 }
 R="$(setup)"; write_transcript "$R" "Nothing here is a verdict; just chatting."
 rung="$(decided_rung "$R" NO)"

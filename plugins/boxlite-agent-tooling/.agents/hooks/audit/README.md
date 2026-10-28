@@ -111,6 +111,23 @@ It prints `codex audit commit: PASS` or `FAIL`; findings go to stderr.
 
 ## Configuration
 
+Headless classification and both runners read the optional user file
+`${XDG_CONFIG_HOME:-$HOME/.config}/boxlite-agent-tooling/network.json`. For example:
+
+```json
+{"HTTPS_PROXY":"http://proxy.example.com:8080","NO_PROXY":"localhost,127.0.0.1"}
+```
+
+The file must be user-owned, regular, at most 8 KiB, and not group/world writable.
+Only standard proxy keys are accepted. Inherited routing settings, including empty
+values, take precedence. Configure the user file when a GUI or background host does
+not inherit shell exports. Repository files and PAC programs are never evaluated.
+
+Each runner records route, child/runner exit status, elapsed seconds, outcome, and
+a credential-masked stderr tail in the session's `audit-diagnostics.jsonl`.
+Each tail is at most 4 KiB; the shared log rotates at its existing 1 MiB bound.
+Stop errors name this local file. Diagnostics never grant dossier authority.
+
 | Variable | Read by | Default | Effect |
 | --- | --- | --- | --- |
 | `BOXLITE_HOOK_HOST` | Shared host detector | Legacy root inference | Set by each manifest: `claude`, `codex`, or `unknown`; invalid nonempty exported values yield unknown. Routing metadata only. |
@@ -137,6 +154,7 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.tes
 | Suite | Covers |
 | --- | --- |
 | [full-transcript.test.sh](full-transcript.test.sh) | Parent-context handoff without a transcript path, known/unknown hosts, complete evidence access through stubs, bounded history, and cleanup. |
+| [audit-runtime.test.sh](audit-runtime.test.sh) | Child failures, bounded diagnostics, and user proxy configuration through public script boundaries. |
 | [preflight-verdict-check.test.sh](preflight-verdict-check.test.sh) | Verdict gate: triage, dossier bindings, consumption, and re-entry. |
 | [run-verdict-audit.test.sh](run-verdict-audit.test.sh) | Verdict runner: auditor selection, exit codes, freshness, and cancellation. |
 | [stop-host-routing.test.sh](stop-host-routing.test.sh) | Both Stop stages: host selection, overrides, unavailable providers, and bounded Codex discovery. |

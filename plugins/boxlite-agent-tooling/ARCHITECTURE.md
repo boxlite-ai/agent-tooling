@@ -417,6 +417,14 @@ recovery tasks also load from `.agents/prompts/`. The hooks retain protocol erro
 classifier dispatch, verdict validation, and output limits; prompt edits do not
 change those controls.
 
+The classifier and both headless runners load trusted user proxy data through
+`.agents/lib/audit-network.sh`; inherited environment choices win. Configuration
+never comes from repository files or evaluated shell/PAC text. See
+[network setup](.agents/hooks/audit/README.md#configuration).
+`.agents/lib/audit-diagnostics.sh` retains bounded, masked stderr and execution
+metadata. Verdict completion preserves the child exit status before considering
+its dossier; a child that writes PASS and then exits nonzero cannot approve work.
+
 ### Shared finish reminders
 
 `subagent_timed_prompt` in `.agents/lib/subagent.sh` renders
@@ -616,7 +624,8 @@ than one session can share a checkout.
 
 - `last-verdict.json`: the turn dossier the Stop gate consumes.
 - `last-verdict.prev.json`: a FAIL parked when the fix moved the tree, so the next audit re-checks its findings.
-- `verdict-decisions.log`: one line per Stop-gate decision, rung and outcome.
+- `verdict-decisions.log`: one line per Stop-gate decision, elapsed seconds, rung and outcome.
+- `audit-diagnostics.jsonl`: bounded execution records for headless audit attempts; never approval.
 - `verdict-last-uuid`: the id of the message the gate last judged.
 - `verdict-prompt-epoch`: the current prompt epoch.
 - `verdict-stop-message.jsonl`: Codex's Stop message preserved in transcript shape when no transcript exists.
@@ -852,6 +861,7 @@ one line cites the first.
 | race | stale-allow | The newest message id is the one already judged; a message is never judged twice. | 2183 |
 | harness | noise-allow | Every non-empty assistant line is harness text such as an API error; no model call. | 2215 |
 | assertion | match-block | An assertion-only form such as "173/173 tests pass"; audited with no classifier call. | 2224 |
+| runner | ERROR-block | The runner did not complete; safe execution metadata and a diagnostic path accompany the block. | 1790 |
 | triage | oversized-block | The turn text exceeds the classifier byte cap; sent straight to the file-backed auditor. | 2231 |
 | triage | NO-allow | The fast model found nothing taken on trust; allowed and announced to the human. | 2240 |
 | triage | YES-block | The model found a conclusion the reader must take on trust; the audit runs inside this Stop. | 2244 |

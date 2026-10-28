@@ -21,6 +21,9 @@ audit_file="$project_dir/.agents/state/last-audit.json"
 # trap a no-op on paths that never create a dir; the `:-` only guards that init
 # being dropped later.
 audit_tmp_dir=""
+audit_started_at="$(date +%s)"
+audit_execution_outcome=ERROR
+audit_execution_route=local
 evidence_max_bytes=262144
 agent_output_max_bytes=65536
 # The auditor's RESULT and the auditor's STDERR are bounded separately because they
@@ -74,6 +77,8 @@ if [[ ! -r "$verdict_state_lib" ]]; then
 fi
 # shellcheck source=../../lib/verdict-audit-state.sh
 source "$verdict_state_lib" || exit 2
+# shellcheck source=../../lib/audit-diagnostics.sh
+source "$tooling_root/.agents/lib/audit-diagnostics.sh" || exit 2
 
 audit_timeout_is_numeric=true
 [[ "$audit_timeout_seconds" =~ ^[1-9][0-9]*$ \
@@ -111,7 +116,18 @@ cleanup_runner() {
       original_status=2
     fi
   fi
-  [[ -z "${audit_tmp_dir:-}" ]] || rm -rf "$audit_tmp_dir"
+  if [[ -n "${audit_tmp_dir:-}" ]]; then
+    local outcome=ERROR
+    if (( original_status == 130 || original_status == 143 )); then outcome=CANCELED
+    elif [[ "$audit_execution_outcome" == PASS || "$audit_execution_outcome" == FAIL ]]; then
+      outcome="$audit_execution_outcome"
+    fi
+    audit_diagnostic_record "$project_dir" "${AUDITOR_SESSION_SCOPE:--}" "$kind" \
+      "${auditor_generation:-legacy}" "${history_id:-$$}" "$audit_execution_route" "$audit_started_at" \
+      "${codex_group_exit_status:-null}" "$original_status" "$outcome" \
+      "$audit_tmp_dir/codex-stderr.log" || true
+    rm -rf "$audit_tmp_dir"
+  fi
   [[ -z "${push_context_tmp_dir:-}" ]] || rm -rf "$push_context_tmp_dir"
   exit "$original_status"
 }
@@ -513,6 +529,7 @@ run_local_audit() {
   fi
 
   write_audit "$verdict" "$(findings_json)"
+  audit_execution_outcome="$verdict"
   printf 'local audit %s: %s\n' "$kind" "$verdict"
   if [[ "$verdict" == "FAIL" ]]; then
     printf '%s\n' "${findings[@]}" >&2
@@ -903,6 +920,7 @@ normalize_agentic_output() {
     | verdict_audit_write_atomic_identity "$audit_file")" \
     || write_fail "Internal: could not publish Codex audit state safely"
   published_audit_identity="$identity"
+  audit_execution_outcome="$audit_verdict"
   printf 'codex audit %s: %s\n' "$kind" "$audit_verdict"
   if [[ "$audit_verdict" == "FAIL" ]]; then
     printf '%s' "$normalized_output" | jq -r '.findings[]' >&2
@@ -1130,6 +1148,9 @@ run_codex_group() {  # codex-bin prompt raw-output stderr-log
 }
 
 run_agentic_audit() {
+  # shellcheck source=../../lib/audit-network.sh
+  source "$tooling_root/.agents/lib/audit-network.sh" || exit 2
+  audit_network_load || exit 2
   # Do cheap local checks before sending sanitized context to an agentic auditor.
   # This keeps obvious secret-like material and marker files local to the machine
   # without writing a consumable PASS artifact.
@@ -1137,6 +1158,7 @@ run_agentic_audit() {
   run_local_checks "$audit_raw_source_file"
   if (( ${#findings[@]} > 0 )); then
     write_audit "FAIL" "$(findings_json)"
+    audit_execution_outcome=FAIL
     printf 'local precheck %s: FAIL\n' "$kind"
     printf '%s\n' "${findings[@]}" >&2
     exit 1
@@ -1228,6 +1250,7 @@ run_agentic_audit() {
   start_auditor_control
 
   local codex_group_rc=0
+  audit_execution_route=codex
   run_codex_group "$codex_bin" "$prompt_text" "$raw_file" "$log_file" \
     || codex_group_rc=$?
   case "$codex_group_reason" in
@@ -1245,7 +1268,7 @@ run_agentic_audit() {
       ;;
   esac
   if (( codex_group_rc != 0 )); then
-    write_fail "Internal: codex exec audit failed to complete"
+    write_fail "Internal: codex exec audit failed with exit ${codex_group_rc} after $(( $(date +%s) - audit_started_at )) seconds; inspect audit-diagnostics in .agents/state"
   fi
 
   if [[ "$(hash_file "$evidence_file" 2>/dev/null || true)" != "$evidence_hash" ]]; then

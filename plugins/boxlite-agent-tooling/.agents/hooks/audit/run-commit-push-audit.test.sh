@@ -1523,7 +1523,7 @@ out="$( ( cd "$R7" && CLAUDE_PROJECT_DIR="$R7" FAKE_DIR="$R7" CODEX_BIN="$R7/bin
           CODEX_FAKE_RC=1 CODEX_FAKE_OUTPUT='' \
           bash "$R7/.agents/hooks/audit/run-commit-push-audit.sh" commit "$CMD" ) >/dev/null 2>&1
         cat "$R7/.agents/state/last-audit.json" 2>/dev/null || true )"
-expect_fail "auditor exiting nonzero → FAIL" "$out" "failed to complete"
+expect_fail "auditor exiting nonzero → FAIL with its exit status" "$out" "failed with exit 1"
 
 echo
 echo "## Native auditor evidence is bounded like the headless route"

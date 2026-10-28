@@ -121,6 +121,8 @@
 #
 # Tests: bash .agents/hooks/audit/preflight-verdict-check.test.sh
 set -uo pipefail
+verdict_gate_started_at="${VERDICT_STOP_STARTED_AT:-}"
+[[ "$verdict_gate_started_at" =~ ^[0-9]{1,10}$ ]] || verdict_gate_started_at="$(date +%s)"
 
 for required_command in jq perl; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
@@ -275,7 +277,7 @@ prompt_epoch_is_current() {
 log_decision() {  # rung outcome
   local line
   mkdir -p "$(dirname "$decision_log")" 2>/dev/null || return 0
-  line="$(date -u +%Y-%m-%dT%H:%M:%SZ) ${FINAL_ID:--} $1 $2"
+  line="$(date -u +%Y-%m-%dT%H:%M:%SZ) elapsed_seconds=$(( $(date +%s) - verdict_gate_started_at )) ${FINAL_ID:--} $1 $2"
   verdict_audit_append_log_line "$decision_log" "$line" 2>/dev/null || true
 }
 
@@ -1205,6 +1207,9 @@ should_audit() {  # stdin-less; uses $1 as the stripped message; echoes YES/NO/U
     echo UNKNOWN
     return 0
   fi
+  # shellcheck source=../../lib/audit-network.sh
+  source "$tooling_root/.agents/lib/audit-network.sh" || { echo UNKNOWN; return; }
+  audit_network_load || { echo UNKNOWN; return; }
   if [[ -z "${VERDICT_CLASSIFIER_CMD:-}" ]]; then
     audit_host="$(hook_host_kind)" || { echo UNKNOWN; return 0; }
   fi
@@ -1733,7 +1738,7 @@ block_audit_infrastructure_failure() {  # reason
 audit_before_stop() {  # trigger-reason
   local trigger_reason="$1"
   local runner="$tooling_root/.agents/hooks/audit/run-verdict-audit.sh"
-  local runner_status=0 runner_failure=""
+  local runner_status=0 runner_failure="" runner_error=""
   # The runner records this bounded summary in history; the auditor finds evidence.
   require_audit_reflection
   if ! ensure_verdict_request; then
@@ -1747,11 +1752,12 @@ Verdict audit could not start because its generation-bound request was not recor
 
 Verdict audit runner is unavailable at ${runner}."
   fi
-  CLAUDE_PROJECT_DIR="$project_dir" bash "$runner" "${transcript_path:--}" \
-    "$session_id" "$audit_generation" "$session_scope" >/dev/null 2>&1 \
+  runner_error="$(CLAUDE_PROJECT_DIR="$project_dir" bash "$runner" "${transcript_path:--}" \
+    "$session_id" "$audit_generation" "$session_scope" 2>&1 >/dev/null)" \
     || runner_status=$?
   prompt_epoch_is_current || allow
   if (( runner_status != 0 )); then
+    log_decision runner ERROR-block
     case "$runner_status" in
       1) runner_failure="the independent auditor did not produce a valid dossier" ;;
       2) runner_failure="the auditor could not launch or its history needs recovery" ;;
@@ -1761,7 +1767,8 @@ Verdict audit runner is unavailable at ${runner}."
     require_audit_reflection
     block_audit_infrastructure_failure "${trigger_reason}
 
-Verdict audit could not complete: ${runner_failure}. Retry after restoring the auditor."
+Verdict audit could not complete: ${runner_failure}.
+${runner_error:0:2048}"
   fi
 
   # Re-enter the hardened dossier path instead of duplicating its generation, binding,
@@ -1771,6 +1778,7 @@ Verdict audit could not complete: ${runner_failure}. Retry after restoring the a
     | ( cd "$repo_root" \
         && CLAUDE_PROJECT_DIR="$project_dir" \
           VERDICT_STOP_REENTRY_INCOMPLETE="$transcript_snapshot_truncated" \
+          VERDICT_STOP_STARTED_AT="$verdict_gate_started_at" \
           VERDICT_STOP_REENTRY_EPOCH="$entry_prompt_epoch" bash "${BASH_SOURCE[0]}" )
   exit $?
 }
