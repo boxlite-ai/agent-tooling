@@ -172,6 +172,7 @@ setup() {
   # and refuses to gate without them rather than waving the commit through. A fake
   # repo running a COPY of the hook therefore needs both staged beside it.
   cp "$REPO_ROOT/.agents/lib/subagent.sh" \
+     "$REPO_ROOT/.agents/lib/git-agent-origin.sh" \
      "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
@@ -188,6 +189,7 @@ setup() {
   cp -R "$REPO_ROOT/.githooks" "$REPO_ROOT/scripts" "$REPO_ROOT/guidance" "$plugin/"
   mkdir -p "$plugin/.agents/lib"
   cp "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
+     "$REPO_ROOT/.agents/lib/git-agent-origin.sh" \
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
      "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
@@ -296,7 +298,7 @@ activate_override_handoff() {  # repo session kind command
     > "$repo/.agents/state/auditor-control/grant.$scope.json"
   printf '%s' "$(jq -nc --arg command "$command" --arg session "$session" \
     '{session_id:$session,tool_input:{command:$command}}')" \
-    | (cd "$repo" && CLAUDE_PROJECT_DIR="$repo" \
+    | (cd "$repo" && AGENT_GATED=1 CLAUDE_PROJECT_DIR="$repo" \
         bash "$repo/.agents/hooks/preflight-commit-push.sh") >/dev/null
 }
 
@@ -789,7 +791,7 @@ printf '%s\n' "$push_lifecycle_epoch" \
 push_command="git push origin $branch_ref:$branch_ref"
 printf '%s' "$(jq -nc --arg command "$push_command" --arg session "$push_lifecycle_session" \
   '{session_id:$session,tool_input:{command:$command}}')" \
-  | (cd "$R" && CLAUDE_PROJECT_DIR="$R" \
+  | (cd "$R" && AGENT_GATED=1 CLAUDE_PROJECT_DIR="$R" \
       bash "$R/.agents/hooks/preflight-commit-push.sh") >/dev/null
 ( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CODEX_SANDBOX=seatbelt \
     CODEX_BIN="$R/bin/codex" CODEX_FAKE_DELAY=0.2 AUDITOR_PROMPT_AFTER_SECONDS=0 \
@@ -1183,11 +1185,11 @@ rm -rf "$R" "$B"
 
 echo
 echo "## delegation guard: exactly one consumer of the audit artifact"
-# With hooksPath installed, the PreToolUse layer must step aside (exit 0,
-# no deny) even when a commit would otherwise be rejected...
+# With hooksPath installed, legacy-marked PreToolUse delegates. Markerless
+# manifest handoff is exercised by tests/git-agent-origin.test.sh.
 R="$(setup)"
 out="$(printf '{"tool_input":{"command":"git commit -m x"}}' \
-      | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$R/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null)"
+      | ( cd "$R" && AGENT_GATED=1 CLAUDE_PROJECT_DIR="$R" bash "$R/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null)"
 check_eq "PreToolUse defers when .githooks installed"  "${out:-EMPTY}" "EMPTY"
 rm -rf "$R"
 
@@ -1329,7 +1331,7 @@ delegated_gate() {  # repo -> deny json (stdout) for the placeholder payload
 }
 pretooluse_gate() {  # repo command -> runs the PreToolUse layer (defers, writes handoff)
   printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$2" | jq -Rs .)" \
-    | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" bash "$1/.agents/hooks/preflight-commit-push.sh" ) >/dev/null 2>&1
+    | ( cd "$1" && AGENT_GATED=1 CLAUDE_PROJECT_DIR="$1" bash "$1/.agents/hooks/preflight-commit-push.sh" ) >/dev/null 2>&1
 }
 REAL_CMD="git commit -m 'test(hooks): bind the real command'"
 
@@ -1388,7 +1390,7 @@ rm -rf "$R"
 # The push handoff never carries a command: pre-push rebuilds its own exact one.
 R="$(setup)"
 printf '{"tool_input":{"command":"git push origin HEAD"}}' \
-  | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$R/.agents/hooks/preflight-commit-push.sh" ) >/dev/null 2>&1
+  | ( cd "$R" && AGENT_GATED=1 CLAUDE_PROJECT_DIR="$R" bash "$R/.agents/hooks/preflight-commit-push.sh" ) >/dev/null 2>&1
 check_eq "push handoff records no command text" \
   "$(jq -r '.command' "$R/.agents/state/last-audit-handoff.json")" "null"
 rm -rf "$R"

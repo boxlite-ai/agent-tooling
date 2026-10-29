@@ -350,7 +350,8 @@ if [[ -n "${GITHOOK_DELEGATED:-}" ]]; then
 else
   # Hook commands run in a short-lived launcher child. The launcher disappears before
   # git starts, while its parent is the task runner shared by both command trees.
-  handoff_owner_pid="$(ps -p "$PPID" -o ppid= 2>/dev/null)"
+  handoff_owner_pid="$(ps -p "$PPID" -o ppid= 2>/dev/null)" \
+    || { printf 'preflight-commit-push: cannot determine agent origin.\n' >&2; exit 2; }
   handoff_owner_pid="${handoff_owner_pid//[[:space:]]/}"
   [[ "$handoff_owner_pid" =~ ^[1-9][0-9]*$ ]] || handoff_owner_pid="$PPID"
   handoff_owner_start_token="$(verdict_audit_process_start_token "$handoff_owner_pid" 2>/dev/null)" \
@@ -869,8 +870,8 @@ ${advisories}"
 
 # Delegate to the git-level gate when installed: with core.hooksPath pointing at
 # .githooks, the same contract is enforced by .githooks/pre-commit|pre-push for
-# EVERY process (any agent, any harness — and humans stay exempt there), so this
-# PreToolUse layer steps aside to keep the audit artifact single-consumer.
+# marked agent processes, so this PreToolUse layer steps aside only after preserving
+# markerless agent origin. The audit artifact still has a single consumer.
 # GITHOOK_DELEGATED marks the call coming FROM that git-level gate — the one
 # caller that must not be deferred, or the two layers would defer to each other
 # and everything would silently pass.
@@ -892,6 +893,27 @@ if [[ -z "${GITHOOK_DELEGATED:-}" ]]; then
       if [[ -n "$loaded_version" && -n "$adopted_version" \
             && "$loaded_version" != "$adopted_version" ]]; then
         deny "This session loaded agent-tooling $loaded_version, but this repository's git hooks run $adopted_version. Run /reload-plugins in Claude Code, or start a new session, then retry."
+      fi
+      if [[ -z "${CLAUDECODE:-}" && -z "${CODEX_SANDBOX:-}" && -z "${AGENT_GATED:-}" ]]; then
+        # The manifest retains its shell with `; exit $?`. Without that launcher,
+        # a final-command exec would make the grandparent a possible human shell.
+        if [[ "$#" != 2 || "${1:-}" != --launcher-pid || "${2:-}" != "$PPID" ]]; then
+          deny 'Agent origin requires the current retained-launcher hook wiring. Reload the plugin or update custom PreToolUse wiring to pass --launcher-pid "$$" and end with ; exit $?.'
+        fi
+        handoff_owner_pid="$(ps -p "$PPID" -o ppid= 2>/dev/null)" \
+          || deny 'Cannot determine agent origin; Git delegation remains blocked.'
+        handoff_owner_pid="${handoff_owner_pid//[[:space:]]/}"
+        [[ "$handoff_owner_pid" =~ ^[1-9][0-9]*$ && "$handoff_owner_pid" != 1 ]] \
+          || deny 'Cannot determine agent origin; Git delegation remains blocked.'
+        handoff_owner_start_token="$(verdict_audit_process_start_token "$handoff_owner_pid")" \
+          || deny 'Cannot bind agent origin to a live process; Git delegation remains blocked.'
+        origin_lib="$tooling_root/.agents/lib/git-agent-origin.sh"
+        [[ -r "$origin_lib" && -r "$hooks_path/../.agents/lib/git-agent-origin.sh" ]] \
+          || deny 'Installed Git hooks cannot preserve agent origin. Update the repository tooling and reload the plugin before retrying.'
+        # shellcheck source=../lib/git-agent-origin.sh
+        source "$origin_lib"
+        git_agent_origin_record "$repo_root" "$handoff_owner_pid" "$handoff_owner_start_token" \
+          || deny 'Cannot record agent origin; Git delegation remains blocked.'
       fi
       # No validation here: the git-level gate runs this same script with
       # GITHOOK_DELEGATED set, and that pass is the single consumer of the artifact.

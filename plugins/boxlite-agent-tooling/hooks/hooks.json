@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/preflight-commit-push.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/preflight-commit-push.sh\" --launcher-pid \"$$\"; exit $?",
             "statusMessage": "Checking commit and push audit"
           },
           {

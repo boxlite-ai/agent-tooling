@@ -7,12 +7,16 @@
 # Tests: bash .githooks/githooks.test.sh
 set -uo pipefail
 
-# Named harness markers only — see pre-commit for why no prefix wildcards.
-is_agent=0
-[[ -n "${CLAUDECODE:-}" || -n "${CODEX_SANDBOX:-}" || -n "${AGENT_GATED:-}" ]] && is_agent=1
-
 repo_root="$(git rev-parse --show-toplevel)"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../.agents/lib/verdict-audit-state.sh
+source "$tooling_root/.agents/lib/verdict-audit-state.sh" || exit 1
+# shellcheck source=../.agents/lib/git-agent-origin.sh
+source "$tooling_root/.agents/lib/git-agent-origin.sh" || exit 1
+is_agent="$(git_agent_origin_classify "$repo_root")" || {
+  printf 'agent-tooling: cannot determine agent origin; push remains gated.\n' >&2
+  exit 1
+}
 verdict_state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
 receipt_state_lib="$tooling_root/.agents/lib/commit-audit-receipt.sh"
 watch_binding_command_hash=""

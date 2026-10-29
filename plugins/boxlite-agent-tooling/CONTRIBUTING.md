@@ -89,6 +89,14 @@ independent skill evaluations are needed to check model behavior. Run the suite 
 `make test:plugin TEST_FILTER=full-transcript`.
 Reload the plugin or start a new task after adoption.
 
+### Markerless Git audit rollout
+
+Version 0.1.38 ships retained-launcher manifests and worktree-local agent-origin
+records. Update repository tooling and the host plugin, then reload the session.
+The version change triggers host reconciliation and makes older preflight hooks
+request a reload before delegating to the new Git hooks. Custom markerless wiring
+must retain its launcher and pass its PID; see [Git gates](ARCHITECTURE.md#git-gates).
+
 ### PR-size choice rollout
 
 Version 0.1.29 packages the **Bypass limit** / **Split PR** flow. Verify both adopted

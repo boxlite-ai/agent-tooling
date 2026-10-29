@@ -6,10 +6,9 @@
 # by `make setup` (sets core.hooksPath). The PreToolUse gate detects the
 # installation and delegates, so the audit artifact keeps exactly one consumer.
 #
-# Humans are not gated: enforcement binds only when a harness marker is present
-# in the environment — CLAUDECODE (Claude Code shells), CODEX_SANDBOX (Codex
-# exec shells), or explicit AGENT_GATED=1 (any other agent: one env line in its
-# wiring). Named markers, not prefix wildcards: plugin artifacts like
+# Humans are not gated: enforcement uses a harness marker or a live ancestor
+# recorded by PreToolUse. Environment markers are CLAUDECODE, CODEX_SANDBOX,
+# or explicit AGENT_GATED=1. Named markers, not prefix wildcards: artifacts like
 # CODEX_COMPANION_* must not gate a session that is not Codex-driven. An agent
 # could unset its marker — same honest-mistakes threat model as the rest of the
 # gate stack. git's native --no-verify bypass also applies (existing repo
@@ -21,11 +20,16 @@
 # Tests: bash .githooks/githooks.test.sh
 set -uo pipefail
 
-is_agent=0
-[[ -n "${CLAUDECODE:-}" || -n "${CODEX_SANDBOX:-}" || -n "${AGENT_GATED:-}" ]] && is_agent=1
-
 repo_root="$(git rev-parse --show-toplevel)"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../.agents/lib/verdict-audit-state.sh
+source "$tooling_root/.agents/lib/verdict-audit-state.sh" || exit 1
+# shellcheck source=../.agents/lib/git-agent-origin.sh
+source "$tooling_root/.agents/lib/git-agent-origin.sh" || exit 1
+is_agent="$(git_agent_origin_classify "$repo_root")" || {
+  printf 'agent-tooling: cannot determine agent origin; commit remains gated.\n' >&2
+  exit 1
+}
 
 verify_installation="$tooling_root/scripts/verify-installation.sh"
 [[ -x "$verify_installation" ]] || {

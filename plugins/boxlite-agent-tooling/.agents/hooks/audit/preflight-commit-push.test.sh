@@ -426,7 +426,7 @@ git -C "$DELEG_REPO" config core.hooksPath .githooks
 deleg_decision() {  # -> passthrough | allow | deny | parse_error
   local out
   out=$(printf 'git commit -m x' | jq -Rs '{tool_input:{command:.}}' \
-        | ( cd "$DELEG_REPO" && CLAUDE_PROJECT_DIR="$DELEG_REPO" \
+        | ( cd "$DELEG_REPO" && AGENT_GATED=1 CLAUDE_PROJECT_DIR="$DELEG_REPO" \
             bash "$DELEG_REPO/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null)
   if [[ -z "$out" ]]; then printf 'passthrough'; return; fi
   printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null \
@@ -441,7 +441,8 @@ else
   fail=$((fail + 1)); printf '  FAIL  hooksPath set but delegate missing still gates here  (got=%s)\n' "$got"
 fi
 
-# Configured and present: the git-level gate owns it, this layer steps aside.
+# Legacy-marked delegation: the git-level gate owns it. Markerless manifest
+# handoff and old-hook rejection are covered by tests/git-agent-origin.test.sh.
 printf '#!/usr/bin/env bash\nexit 0\n' > "$DELEG_REPO/.githooks/pre-commit"
 chmod +x "$DELEG_REPO/.githooks/pre-commit"
 got="$(deleg_decision)"

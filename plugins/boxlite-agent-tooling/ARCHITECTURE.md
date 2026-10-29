@@ -4,7 +4,7 @@
 - Fail-closed gates around the moments a coding agent acts on a repository: the end of a turn, a commit, a push, a pull request.
 - A gate never produces the verdict it checks. An independent auditor writes a dossier under `.agents/state/`, bound to what it judged, and the gate reads it back.
 - A turn dossier whose binding no longer matches is discarded, never blocked on; a commit or push dossier that no longer matches denies until a fresh audit.
-- Humans are not gated: the Git gates bind only when a harness variable such as `CLAUDECODE` is in the environment.
+- Humans are not gated: Git gates recognize harness variables or a live ancestor recorded by PreToolUse.
 - This file is a map, not an atlas: entry points, boundaries, invariants, vocabulary. How a script works is in its own header comment.
 - `architecture.test.sh` fails when the map names a script, state file, decision or term the code no longer has.
 
@@ -361,8 +361,23 @@ they never substitute acknowledgment recovery text for writing instructions.
 
 ### Git gates
 
-They run for any process and bind only when `CLAUDECODE`, `CODEX_SANDBOX`
-or `AGENT_GATED=1` is in the environment.
+They run for any process. Auditing activates for nonempty `CLAUDECODE`,
+`CODEX_SANDBOX`, or `AGENT_GATED`, or a live ancestor recorded by PreToolUse.
+`.agents/lib/git-agent-origin.sh` shares classification across all three audit hooks.
+
+For markerless shells, the manifests retain the launcher with `; exit $?` and pass
+`--launcher-pid "$$"`. PreToolUse verifies that PID against its actual parent, then
+records the launcher's parent and process-start token. Missing launcher metadata,
+failed process lookup, older installed hooks, or failed writes block delegation.
+Reload the plugin after updating; custom wiring must preserve the same launcher.
+
+Records live under `agent-tooling-agent-shells/<PID>` in the worktree Git directory.
+They activate audits without granting a PASS. Git checks at most 64 ancestors;
+malformed or unreadable consulted records fail closed. Separate owners cannot
+overwrite each other; stale start tokens cannot identify reused PIDs. Records
+survive audit consumption and require no cleanup to stop matching after owner exit.
+For example, a Codex shell without `CODEX_SANDBOX` still reaches the Git audit;
+an unrelated human terminal in that worktree remains exempt.
 
 | A person or agent does this | Gate | What happens |
 | --- | --- | --- |
@@ -855,7 +870,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - No editor or patch edit lands in a repository before a research PASS for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
-- Humans are not gated; named harness variables gate, never prefix wildcards. `.githooks/pre-commit:9`
+- Humans are not gated; named harness variables or recorded live ancestors activate audits. `.agents/lib/git-agent-origin.sh`
 - A receipt names a commit by parent and tree, never by a diff hash. `.agents/lib/commit-audit-receipt.sh:10`
 - An override is recorded as `OVERRIDDEN BY USER`, never PASS, and expires within an hour. `.agents/hooks/auditor-control.sh:707`, `.agents/lib/auditor-override-state.sh:55`
 - A StopFailure hook's result is ignored. A turn resumes only through an `asyncRewake` exit 2, at most three times per session in ten minutes, each resume recorded before it is announced. `.agents/hooks/resume-after-api-failure.sh:125`

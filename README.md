@@ -38,7 +38,7 @@ The **host plugin** supplies skills, auditors, and lifecycle hooks. The **reposi
 
 An auditor produces evidence bound to the work it reviewed. Gates read that evidence. For example, changing the staged diff after an audit invalidates its commit approval and requires another audit.
 
-These are local workflow checks, not a sandbox or a GitHub security boundary. Git audit gates activate in agent-marked environments; browser writes and other unsupported routes fall outside CLI checks. See [enforcement boundaries](plugins/boxlite-agent-tooling/ARCHITECTURE.md#boundaries).
+These are local workflow checks, not a sandbox or a GitHub security boundary. Git audit gates recognize harness environment markers and agent processes recorded by PreToolUse; browser writes and other unsupported routes fall outside CLI checks. See [enforcement boundaries](plugins/boxlite-agent-tooling/ARCHITECTURE.md#boundaries).
 
 ## Get started
 

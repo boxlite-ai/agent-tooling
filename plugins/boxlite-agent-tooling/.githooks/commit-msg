@@ -3,8 +3,16 @@
 # actual commit message. See .githooks/pre-commit for the broader gate design.
 set -uo pipefail
 
-is_agent=0
-[[ -n "${CLAUDECODE:-}" || -n "${CODEX_SANDBOX:-}" || -n "${AGENT_GATED:-}" ]] && is_agent=1
+repo_root="$(git rev-parse --show-toplevel)"
+tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../.agents/lib/verdict-audit-state.sh
+source "$tooling_root/.agents/lib/verdict-audit-state.sh" || exit 1
+# shellcheck source=../.agents/lib/git-agent-origin.sh
+source "$tooling_root/.agents/lib/git-agent-origin.sh" || exit 1
+is_agent="$(git_agent_origin_classify "$repo_root")" || {
+  printf 'agent-tooling: cannot determine agent origin; commit remains gated.\n' >&2
+  exit 1
+}
 
 chained="$(git rev-parse --git-common-dir)/hooks/commit-msg"
 if [[ -x "$chained" && "$(realpath "$chained" 2>/dev/null)" != "$(realpath "$0" 2>/dev/null)" ]]; then
@@ -12,8 +20,6 @@ if [[ -x "$chained" && "$(realpath "$chained" 2>/dev/null)" != "$(realpath "$0" 
 fi
 
 if [[ "$is_agent" == 1 ]]; then
-  repo_root="$(git rev-parse --show-toplevel)"
-  tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   # Same reason as resolve_gate in pre-commit/pre-push: where core.hooksPath is
   # configured absolute rather than the relative value `make setup` sets, this one
   # hook can run for worktrees on either side of the marker move. Take whichever
