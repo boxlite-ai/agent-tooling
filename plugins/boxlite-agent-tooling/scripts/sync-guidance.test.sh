@@ -118,6 +118,22 @@ require_semantic_rule "guidance constrains test-only compatibility adapters" \
   'test-only compatibility adapter.*must not implement the fix.*alter the defect check.*become the failure signal'
 require_semantic_rule "guidance pins production-boundary tests" \
   'data must come from production code under test'
+require_semantic_rule "guidance classifies proof per behavioral claim" \
+  'Classify each behavioral claim.*base contract'
+require_semantic_rule "new wrappers do not exempt fixes to existing behavior" \
+  'fixes to existing behavior.*new APIs/wrappers'
+require_semantic_rule "unchanged correct dependencies keep a new entry point in new-contract proof" \
+  'new entry points.*unchanged, correct dependencies.*new.contract proof'
+require_semantic_rule "new contracts need evidence of no equivalent prior contract" \
+  'wholly new contracts.*base/source.*no equivalent prior contract'
+require_semantic_rule "new contracts test the implemented path and explain applicability" \
+  'positive, negative, and boundary tests.*implementation.*not applicable.*reason'
+require_semantic_rule "new security APIs exercise real allowed and denied boundaries" \
+  'new security APIs.*allowed/denied.*real security boundar'
+require_semantic_rule "missing APIs and setup failures do not reproduce defects" \
+  'Missing APIs.*compilation errors.*setup errors.*never reproduce a defect'
+require_semantic_rule "mixed changes apply both proof standards per claim" \
+  'Mixed changes.*both.*per claim'
 
 echo
 echo "## A repository with no instructions files gets the canonical layout"

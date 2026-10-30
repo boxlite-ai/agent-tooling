@@ -16,10 +16,11 @@ SHA-256, then read it on demand. Never print that evidence, changed paths, envir
 variables, or secrets. Verify command/subject and design bindings first; then use
 shared test-evidence policy.
 
-Only scratch is writable; repository/evidence stay read-only. Read repository instructions;
-run the design reader from scratch with explicit `repo_root`. Reconstruct commits from
+Only scratch is writable; repository/evidence stay read-only.
+Run the design reader from scratch with explicit `repo_root`. Reconstruct commits from
 `index_tree` or pushes from validated new commit trees; verify reconstructed trees.
-Never copy working files. Bind tests to those objects and the fully reverted baseline.
+Never copy working files. Bind tests to those objects and, when defect proof applies,
+the fully reverted baseline.
 Start shell commands with `export PATH="$TMPDIR/../bin:$PATH"`; check mktemp resolves there.
 
 Work alone. Use at most one specialist only if security, concurrency, migration, or

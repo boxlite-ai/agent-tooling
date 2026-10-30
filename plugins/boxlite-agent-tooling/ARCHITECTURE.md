@@ -420,6 +420,19 @@ execution records, or safe reruns must bind commands/results to the tested candi
 Optional parent identity/host/time hints guide independent transcript discovery;
 no transcript path or prior summary supplies proof. Sandbox-denied checks require
 another verified evidence route or an unchecked finding.
+
+Verification chooses proof per behavioral claim using base/source evidence. The
+[workflow](guidance/workflow.md#test) owns full-revert defect proof for fixes to existing
+behavior, including through a new API or wrapper. Wholly new contracts require no prior
+equivalent and positive, negative, and boundary tests against the implementation;
+new security boundaries need allowed/denied checks. Mixed changes apply both standards.
+New entry points over unchanged, correct dependencies use new-contract tests; reusing
+an existing backend or authorization helper alone does not require defect proof.
+Missing APIs and compilation/setup failures do not establish the defect. The verdict
+skill and commit-review instructions use this distinction without changing gate
+decisions or dossier schemas. Contract suites verify shipped text and distribution;
+native-host model behavior needs separate evaluation.
+
 Native retrieval covers ordinary and custom tool calls, including content-item arrays
 and nested orchestration results. Wrapper completion cannot certify a running command;
 reviewers follow emitted continuation IDs to its terminal result. Initial session cwd

@@ -67,10 +67,17 @@ Prose, plausibility, and inference are not proof.
 | Safe removal | Reference searches; live checks when claimed |
 | Operational result or count | Command and output; rerun only safely and reproducibly |
 
-- Core runtime/security changes or deep verification: follow repository two-side rules
-  in an isolated detached worktree with tracked/relevant untracked changes. Observe
-  failure without the fix, success with it; remove the worktree.
-- Otherwise: structural/transcript proof suffices.
+- For fixes to existing behavior, including through new APIs/wrappers, follow repository
+  full-revert rules in an isolated detached worktree with tracked/relevant untracked
+  changes. Observe defect assertions fail with every production change removed, then
+  pass with the complete fix; remove the worktree.
+- New entry points over unchanged, correct dependencies use new-contract proof.
+- For wholly new contracts, verify base/source evidence of no equivalent prior contract;
+  require positive, negative, and boundary tests against the implementation, including
+  allowed/denied checks at real security boundaries. Mark full-revert defect proof
+  not applicable with a reason. Mixed changes apply both standards per claim.
+- Missing APIs, compilation errors, and setup errors never reproduce a defect.
+- Other claims: structural/transcript proof suffices.
 
 ### 5. Decide
 

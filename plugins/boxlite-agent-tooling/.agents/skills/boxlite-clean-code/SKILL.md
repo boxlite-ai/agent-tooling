@@ -75,14 +75,14 @@ Avoid tiny-class proliferation. Measure before optimizing.
 
 ## Verify and report
 
-Add/update tests for changed branching, parsing, retries, security, and boundaries.
-For bugs, write a focused reproducer; observe the defect before fixing.
-Revert every production change and observe failure, then restore the complete fix
-and observe a pass; follow the repository's compatibility-adapter procedure.
+Test changed branches, parsing, retries, security, and boundaries through project behavior;
+avoid test-built values, substitutes, and framework-only checks. Never weaken assertions;
+fix code or establish an intentional contract change.
 
-Test project behavior, not test-built values, substitutes, or a library/framework alone.
-Never weaken assertions to pass; fix code or establish an intentional contract change.
+For fixes to existing behavior (new APIs/wrappers included), reproduce before fixing;
+follow repository full-revert and compatibility-adapter rules. For wholly new contracts,
+prove no prior equivalent; test implementation and security boundaries;
+explain why defect proof is not applicable. Mixed changes apply both per claim.
 
-Run the smallest relevant check first; broaden for risk/required validation.
-Claim only checks run. Report intentional changes, clarity, results, blockers,
-residual risk, and uncertainty.
+Run focused then risk/required checks. Report checks run, intentional changes, clarity,
+blockers, risks, uncertainty.

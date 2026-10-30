@@ -52,7 +52,8 @@ Never cite time.
    no runtime or concurrency work.
 
    Apply the shared test-evidence policy from the task. Bind executions to the exact
-   candidate and fully reverted baseline; sandbox limitations do not prove test failures.
+   candidate and, when defect proof applies, the fully reverted baseline; sandbox
+   limitations do not prove test failures.
 
 5. Judge commit subjects against CONTRIBUTING.md: the exact command's, or for push only
    `commit-subject ` lines in the verified context. Block invalid `type(scope): summary`,

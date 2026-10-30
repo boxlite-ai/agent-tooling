@@ -97,6 +97,15 @@ The version change triggers host reconciliation and makes older preflight hooks
 request a reload before delegating to the new Git hooks. Custom markerless wiring
 must retain its launcher and pass its PID; see [Git gates](ARCHITECTURE.md#git-gates).
 
+### Verification applicability rollout
+
+Version 0.1.39 scopes full-revert defect proof to fixes of existing behavior, including
+fixes reached through new APIs or wrappers. Wholly new contracts require evidence of
+no prior equivalent and implementation tests, with allowed/denied security checks.
+Mixed changes keep both standards. Update consumer tooling, refresh the host plugin,
+then reload or start a new task; see [audit producers](ARCHITECTURE.md#audit-producers).
+New wrappers over unchanged, correct dependencies use new-contract tests.
+
 ### PR-size choice rollout
 
 Version 0.1.29 packages the **Bypass limit** / **Split PR** flow. Verify both adopted

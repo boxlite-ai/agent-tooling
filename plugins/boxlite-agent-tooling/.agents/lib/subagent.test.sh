@@ -486,6 +486,51 @@ else
   bad "delivered compatibility policy exists in the plugin"
 fi
 
+echo
+echo "## Delivered verification policy distinguishes fixes from new contracts"
+test_policy="$PLUGIN_ROOT/.agents/prompts/audit/commit-push-tests.md"
+check "native Git audit receives the test policy path" "$test_policy" "$commit_task_rendered"
+check "headless Git audit receives the test policy path" "$test_policy" "$commit_runner_rendered"
+for relative in \
+  .agents/prompts/audit/commit-push-tests.md \
+  .agents/skills/boxlite-verdict-audit/SKILL.md; do
+  policy_text="$(subagent_strip_frontmatter "$PLUGIN_ROOT/$relative" | tr '\n' ' ')"
+  for rule in \
+    'fixes to existing behavior.*new APIs/wrappers' \
+    'new entry points.*unchanged, correct dependencies.*new.contract proof' \
+    'wholly new contracts.*no equivalent prior contract' \
+    'positive, negative, and boundary tests.*implementation' \
+    'allowed/denied.*real security boundar' \
+    'not applicable.*reason' \
+    'Mixed changes.*both.*per claim' \
+    'Missing APIs.*compilation errors.*setup errors.*never reproduce a defect'; do
+    if printf '%s\n' "$policy_text" | grep -Eiq "$rule"; then
+      ok "$relative: $rule"
+    else
+      bad "$relative: $rule"
+    fi
+  done
+done
+clean_code="$(subagent_strip_frontmatter "$PLUGIN_ROOT/.agents/skills/boxlite-clean-code/SKILL.md" | tr '\n' ' ')"
+for rule in \
+  'fixes to existing behavior.*new APIs/wrappers.*reproduce before fixing' \
+  'repository full-revert and compatibility-adapter rules' \
+  'wholly new contracts.*prove no prior equivalent.*test implementation and security boundaries' \
+  'defect proof is not applicable.*Mixed changes apply both per claim'; do
+  if printf '%s\n' "$clean_code" | grep -Eiq "$rule"; then
+    ok "clean-code scope: $rule"
+  else
+    bad "clean-code scope: $rule"
+  fi
+done
+check_no "verdict policy does not demand two-side proof by risk alone" \
+  'Core runtime/security changes or deep verification:' \
+  "$(subagent_strip_frontmatter "$PLUGIN_ROOT/.agents/skills/boxlite-verdict-audit/SKILL.md")"
+check "headless audit binds reverted baselines only when applicable" \
+  'when defect proof applies' "$commit_runner_rendered"
+check "native audit binds reverted baselines only when applicable" \
+  'when defect proof applies' "$(subagent_strip_frontmatter "$PLUGIN_ROOT/.claude/agents/commit-push-auditor.md")"
+
 model_documents="$(cat \
   "$PLUGIN_ROOT"/.agents/prompts/*/*.md \
   "$PLUGIN_ROOT/.claude/agents/commit-push-auditor.md" \
