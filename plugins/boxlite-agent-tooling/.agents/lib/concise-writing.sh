@@ -33,7 +33,11 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
       if ($line =~ /^ {0,3}(\#{1,6})[ \t]+(.*)$/) {
         my ($depth, $heading) = (length($1), $2);
         last if $level && $depth <= $level;
-        $heading =~ s/[ \t]+\#*[ \t]*$//;
+        # Strip the closing sequence from the reversed text: anchored at its start, the
+        # match runs once instead of from every blank in a long run.
+        $heading = reverse $heading;
+        $heading =~ s/\A[ \t]*\#*[ \t]+//;
+        $heading = reverse $heading;
         if (!$level && $heading =~ /^TL;DR$/i) {
           exit 4 if $ARGV[0] eq "first" && $seen;
           $level = $depth; next;

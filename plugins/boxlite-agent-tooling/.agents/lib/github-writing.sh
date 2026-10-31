@@ -9,18 +9,16 @@
 
 github_writing_check_privacy() { # literal published text; no transcript access
   local status=0
-  if (( ${#1} > 8000 )); then
-    printf 'GitHub private context check cannot inspect oversized text.'
-    return 1
-  fi
   # Scan the raw text, including quotes, fences and comments: GitHub stores all of
   # them. These indicators catch accidental context copies, not arbitrary secrets
   # or paraphrases. Never include a match or the input in the diagnostic.
   printf '%s' "$1" | perl -CSD -0777 -e '
     use utf8;
     my $text = <STDIN> // "";
+    # Possessive whitespace runs cannot trade characters, so "<" before a long run
+    # stays linear; a match must consume every space before "/" or the tag anyway.
     my $private = qr{
-      (?:<|&lt;)\s*/?\s*(?:oai-mem-citation|hook_prompt|environment_context|user_instructions)\b
+      (?:<|&lt;)\s*+/?\s*+(?:oai-mem-citation|hook_prompt|environment_context|user_instructions)\b
       | \b(?:as\s+you\s+(?:told|asked|said)|(?:the\s+)?user\s+(?:asked|told)\s+me)\b
       | \b(?:per|from|in|according\s+to|as\s+discussed\s+in)\s+
         (?:(?:our|your|the|a)\s+)?(?:private|internal|confidential)\s+
@@ -47,11 +45,7 @@ github_writing_check_body() { # body [comment]
     printf 'GitHub text is empty.'
     return 1
   fi
-  # Bound work before invoking the Markdown counter, including unbroken tokens.
-  if (( ${#body} > 8000 )); then
-    printf 'GitHub text is too long.'
-    return 1
-  fi
+  # No length limit: GitHub enforces its own, and these checks stay linear (#310).
   github_writing_check_privacy "$body" || return 1
   # Complete artifacts need room for evidence, so no total word cap applies. A leading
   # TL;DR already gives readers the short version, so its details may also be dense.

@@ -137,7 +137,9 @@ limits: paragraphs at most 80 words and list items at most 40. Text that starts 
 valid TL;DR skips them, since readers already have the short version; complete
 documents have no total-word cap.
 Fences and tables are excluded from block limits; Chinese/Japanese characters
-count individually. Empty text and inputs over 8000 shell characters fail closed.
+count individually. Empty text fails closed. The hook sets no length limit: GitHub
+enforces its own, and the checks after the shell scan stay linear
+([#310](https://github.com/boxlite-ai/agent-tooling/issues/310)).
 The shared word counter recognizes table delimiters in linear time: each optional
 outer pipe is grouped with its following whitespace, so an absent pipe cannot make
 two runs compete for the same spaces. It retains Unicode whitespace, alignment
@@ -157,7 +159,7 @@ and a summary before POST or PATCH.
 `github_writing_check_privacy` in `.agents/lib/github-writing.sh` also inspects literal
 CLI titles and REST title fields. It rejects conversation/memory markup, explicit
 private-message attribution, personal home paths, and local agent context paths.
-It scans raw text even inside comments or fences, bounds input to 8000 characters,
+It scans raw text of any length, even inside comments or fences,
 fails closed on scanner errors, and never echoes rejected content. Denials occur
 before consuming PR acknowledgments. There is no automatic disclosure exception.
 This is a heuristic against accidental copies, not a provenance verifier or secret

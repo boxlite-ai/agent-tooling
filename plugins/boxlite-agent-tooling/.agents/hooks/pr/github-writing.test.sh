@@ -131,13 +131,50 @@ check 'short REST issue body keeps the summary' "gh api repos/o/r/issues -f titl
 check 'REST owner named comments keeps the summary' "gh api repos/comments/r/issues -f title=Bug -f body='Short.'" deny 'TL;DR'
 check 'short comment keeps the privacy check' "gh issue comment 7 --body 'See /Users/me/notes.'" deny 'private context'
 check 'short comment keeps the item limit' "gh issue comment 7 --body '- $(printf 'word %.0s' {1..50})'" deny 'list item over 40 words'
-check 'oversized structured document' "gh issue comment 7 --body '$structured
+# GitHub enforces its own body limit, so the hook adds none (#310).
+long_document="$structured
 
 ## Example
 
 ~~~
 $(printf 'x%.0s' {1..8001})
-~~~'" deny 'too long'
+~~~"
+check 'structured document over 8,000 characters' "gh issue comment 7 --body '$long_document'" allow
+check 'privacy check past 8,000 characters' "gh issue comment 7 --body '$long_document
+
+See /Users/me/notes.'" deny 'private context'
+# The checks after the shell scan stay fast at the largest body GitHub accepts, 125,000
+# characters of release notes, including whitespace runs in the privacy scan and in a
+# heading. Time them directly; the shell scan's cost grows with the whole command.
+timed_writing_check() { # name, check function, text, expected status
+  local timed status elapsed
+  timed="$(
+    source "$PLUGIN/.agents/lib/reply-summary.sh"
+    source "$PLUGIN/.agents/lib/concise-writing.sh"
+    source "$PLUGIN/.agents/lib/github-writing.sh"
+    start="$(perl -MTime::HiRes=time -e 'print time')"
+    "$2" "$3" >/dev/null
+    status=$?
+    perl -MTime::HiRes=time -e 'printf "%s %.3f", $ARGV[0], time - $ARGV[1]' -- "$status" "$start"
+  )"
+  read -r status elapsed <<< "$timed"
+  if (( ${#3} == 125000 )) && [[ "$status" == "$4" ]] \
+     && perl -e 'exit($ARGV[0] < 2 ? 0 : 1)' -- "$elapsed"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s: %s characters, status %s (want %s) in %s s (limit 2 s)\n' \
+      "$1" "${#3}" "$status" "$4" "$elapsed"
+  fi
+}
+max_prefix="$structured"$'\n\n~~~\n'
+timed_writing_check '125,000-character document' github_writing_check_body \
+  "$max_prefix$(perl -e 'print "x" x shift' $((125000 - ${#max_prefix} - 4)))"$'\n~~~' 0
+timed_writing_check 'privacy scan of "<" before a whitespace run' github_writing_check_privacy \
+  "<$(perl -e 'print " " x 124999')" 0
+heading_tail=$'\n\nShort.'
+timed_writing_check 'heading holding a whitespace run' github_writing_check_body \
+  "## a$(perl -e 'print " " x shift' $((125000 - 5 - ${#heading_tail})))b$heading_tail" 1
 check 'release notes' "gh release create v1 --notes '$dense'" deny
 check 'short release notes' "gh release create v1 --notes '## TL;DR
 
@@ -239,6 +276,7 @@ for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
 done
 for text in '<oai-mem-citation>PRIVATE_CANARY</oai-mem-citation>' \
   '<hook_prompt>PRIVATE_CANARY</hook_prompt>' '<environment_context>PRIVATE_CANARY</environment_context>' \
+  '<  / environment_context>PRIVATE_CANARY' '&lt; user_instructions&gt; PRIVATE_CANARY' \
   'As you told me, PRIVATE_CANARY.' 'The user asked me to add PRIVATE_CANARY.' \
   'From the internal chat: PRIVATE_CANARY.' '根据私聊记录，PRIVATE_CANARY。' \
   '/Users/PRIVATE_CANARY/work/file.txt' '/home/PRIVATE_CANARY/file.txt' \

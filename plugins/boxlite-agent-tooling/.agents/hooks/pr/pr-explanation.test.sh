@@ -62,5 +62,22 @@ while IFS= read -r fixture; do
     fi
   done
 done < "$plugin/.agents/hooks/pr/fixtures/pr-explanation-render.jsonl"
+# Rendered whitespace runs stay linear: each trim matches from the start of its text.
+# shellcheck source=../../lib/pr-description.sh
+source "$plugin/.agents/lib/pr-description.sh"
+spaces="$(perl -e 'print " " x 200000')"
+for case in "0 <h2>How it works</h2><p>a${spaces}b</p>" "1 <h2>How${spaces}x</h2><p>Retry once.</p>"; do
+  want="${case%% *}" html="${case#* }" status=0
+  start="$(perl -MTime::HiRes=time -e 'print time')"
+  _pr_description_check_explanation "$html" >/dev/null || status=$?
+  elapsed="$(perl -MTime::HiRes=time -e 'printf "%.3f", time - $ARGV[0]' -- "$start")"
+  if [[ "$status" == "$want" ]] && perl -e 'exit($ARGV[0] < 2 ? 0 : 1)' -- "$elapsed"; then
+    pass=$((pass+1))
+  else
+    printf 'FAIL explanation whitespace run: status %s (want %s) in %s s (limit 2 s)\n' \
+      "$status" "$want" "$elapsed"
+    fail=$((fail+1))
+  fi
+done
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" == 0 ]]

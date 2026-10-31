@@ -127,8 +127,8 @@ reply_summary_is_dense() {  # text
 # 0 when short, 1 when longer, 2 when the text could not be counted.
 reply_summary_is_short() {  # text
   local text="${1-}" counts total
-  # Text over the 8000-character GitHub writing cap is never short, which bounds the
-  # counter's work before the TL;DR check applies its own limit.
+  # Text over 8000 characters is never short, which bounds the counter's work before
+  # the TL;DR check applies its own limit.
   (( ${#text} <= 8000 )) || return 1
   counts="$(reply_summary_word_counts "$text")" || return 2
   read -r total _ <<< "$counts"
