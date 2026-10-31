@@ -666,7 +666,7 @@ OVER_WORDS_BODY="$LIMIT_WORDS_BODY x"
 OVER_CHARS_BODY="${LIMIT_CHARS_BODY}字"
 EMOJI_BODY="$(awk 'BEGIN {for (i=0; i<2000; i++) printf "😀"}')"
 HUGE_BODY="$(awk 'BEGIN {for (i=0; i<8001; i++) printf "x"}')"
-for body_fixture in GRAPH GRAPH_CRLF FIX_GRAPH GRAPH_WITH_TRAILING_SECTION BULLET_BODY EXAMPLE_BODY SEQUENCE_BODY TABLE_BODY LIMIT_WORDS_BODY OVER_WORDS_BODY LIMIT_CHARS_BODY OVER_CHARS_BODY EMOJI_BODY; do
+for body_fixture in GRAPH GRAPH_CRLF FIX_GRAPH GRAPH_WITH_TRAILING_SECTION BULLET_BODY EXAMPLE_BODY SEQUENCE_BODY TABLE_BODY LIMIT_WORDS_BODY OVER_WORDS_BODY LIMIT_CHARS_BODY OVER_CHARS_BODY EMOJI_BODY HUGE_BODY; do
   printf -v "$body_fixture" '%s%s' "${!body_fixture}" "$DOC_LINK"
 done
 # Read the example rather than duplicating its text in the test.
@@ -702,7 +702,7 @@ run_body "long structured body edit → allow" "gh pr edit 42 $FEAT --body '$OVE
 run_body "80 Chinese characters at the paragraph boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
 run_body "81 Chinese characters → deny" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "deny"
 run_body "2000 four-byte characters plus summary → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
-run_body "oversized argument → deny" "gh pr create $FEAT --body '$HUGE_BODY'" "deny"
+run_body "body over 8,000 characters plus summary → allow" "gh pr create $FEAT --body '$HUGE_BODY'" "passthrough"
 run_body "long body edit → deny" "gh pr edit 42 $FEAT --body '$LONG_BODY'" "deny"
 write_marker "reviewed: shorten description" create
 run "size rejection → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"

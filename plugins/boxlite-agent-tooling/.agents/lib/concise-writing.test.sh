@@ -123,6 +123,22 @@ timed break_alternating      allow "Foo"$'\n'"*$(long ' *' 100000)x"
 timed underline_spaces_tail  allow "Foo"$'\n'"$(long '=' 100000)$(long ' ' 100000)x"
 timed underline_dash_spaces  deny  "Foo"$'\n'"-$(long ' ' 200000)"
 
+echo "Heading closing sequences"
+heading() {  # name allow|deny whole-markdown
+  local start elapsed actual=allow
+  start="$(perl -MTime::HiRes=time -e 'printf "%.3f", time')"
+  concise_writing_check_summary "$3" first 39 >/dev/null || actual=deny
+  elapsed="$(perl -MTime::HiRes=time -e 'printf "%.3f", time - $ARGV[0]' -- "$start")"
+  if [[ "$actual" == "$2" ]]; then ok "$1"; else bad "$1 (got $actual, want $2)"; fi
+  if perl -e 'exit($ARGV[0] < 2 ? 0 : 1)' -- "$elapsed"; then ok "$1 within 2 s"; else bad "$1 took $elapsed s"; fi
+}
+heading closing_tab_hash      allow $'## TL;DR\t#\t\n\nShort.'
+heading closing_needs_space   deny  $'## TL;DR#\n\nShort.'
+heading hash_inside_text      deny  $'## TL;DR # x\n\nShort.'
+heading run_before_text       deny  "## a$(long ' ' 200000)b"$'\n\nShort.'
+heading tab_run_before_text   deny  "## a$(long $'\t' 200000)b"$'\n\nShort.'
+heading run_before_closing    allow "## TL;DR$(long ' ' 200000)#"$'\n\nShort.'
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

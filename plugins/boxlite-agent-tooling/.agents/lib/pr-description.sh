@@ -6,10 +6,18 @@ _pr_description_check_explanation() { # bounded GitHub-rendered HTML
   if ! printf '%s' "$1" | perl -CSD -0777 -e '
     use strict;
     use warnings;
+    sub trim {
+      # Trim each end from the start of its text, so long blank runs stay linear.
+      my ($text) = @_;
+      $text =~ s/\A\s+//;
+      $text = reverse $text;
+      $text =~ s/\A\s+//;
+      return scalar reverse $text;
+    }
     sub has_explanation {
       my ($content) = @_;
       $content =~ s/&(?:\#\d+|\#x[0-9a-f]+|[a-z]+);//ig;
-      $content =~ s/^\s+|\s+$//g;
+      $content = trim($content);
       return $content =~ /[\p{L}\p{N}]/ &&
         $content !~ /\A(?:(?:TODO|TBD|N\/?A|Not\s+applicable)[.!]?(?:\s+|\z))+\z/i;
     }
@@ -37,7 +45,7 @@ _pr_description_check_explanation() { # bounded GitHub-rendered HTML
             }
             ($heading_level, $heading) = ($level, "");
           } else {
-            $heading =~ s/^\s+|\s+$//g;
+            $heading = trim($heading);
             $active = 1 if $heading_level == 2 && $heading =~ /^How it works$/i;
             $heading_level = 0;
           }
