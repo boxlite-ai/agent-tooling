@@ -63,6 +63,8 @@ instructions load before the wake budget is recorded.
 
 Research and design policy lives in `boxlite-design-doc`; registration
 and publishing steps live in [CONTRIBUTING.md](CONTRIBUTING.md#pull-request-descriptions).
+The repository's [design issue template](../../.github/ISSUE_TEMPLATE/design.md) mirrors
+the skill's outline, including a separate `Problem` section before `Scope`.
 
 `scripts/design-doc.sh` accepts `register <URL>` and binds it with `.agents/lib/design-doc.sh`
 after a provider read; `bind` remains a compatibility alias. The preferred verb avoids
