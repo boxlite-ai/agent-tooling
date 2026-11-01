@@ -145,7 +145,7 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 | --- | --- |
 | Research and write a design before coding | Use `boxlite-design-doc`. |
 | Implement, refactor, or review maintainability | [boxlite-clean-code](plugins/boxlite-agent-tooling/.agents/skills/boxlite-clean-code/SKILL.md) |
-| Shorten a reply, document, or PR description | [boxlite-writing](plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md) |
+| Write or shorten a reply, document, or PR description as structured output | [boxlite-writing](plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md) |
 | Explain a subsystem with a concrete example | “Use `boxlite-examples` to explain how this subsystem works.” |
 | Draw a diagram grounded in source | [boxlite-visualize](plugins/boxlite-agent-tooling/.agents/skills/boxlite-visualize/SKILL.md) |
 | Highlight essential phrases while preserving meaning | [boxlite-reading-highlights](plugins/boxlite-agent-tooling/.agents/skills/boxlite-reading-highlights/SKILL.md) |
