@@ -26,6 +26,14 @@ Keep file paths in link targets, tests, and diagnostics that locate a problem.
 Run `bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .` before
 submitting Markdown changes; the Writing ownership workflow runs the same gate.
 
+Writing limits live in `boxlite-writing/rules.json`; its `scripts/sync-rules.sh`
+renders their table in the skill. After changing a limit, regenerate that table
+and run `make test:writing`. CI checks both policy ownership and table drift.
+For example, changing the short-reply exemption does not change paragraph density.
+The skill's sourceable checker needs Bash, Perl, and jq; copy the whole skill
+directory when sharing it. Existing library paths remain compatibility adapters.
+The consolidation preserves hook decisions; #317's structure checks remain deferred.
+
 ## Auditor test isolation
 
 The verdict runner suite builds a utility-only PATH and uses an explicit default

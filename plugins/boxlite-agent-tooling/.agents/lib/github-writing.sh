@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # GitHub text policy over literal argv supplied by the hook's shell scanner.
-# Requires reply-summary.sh, concise-writing.sh, perl and jq. No file reads or writes.
+# Requires reply-summary.sh, concise-writing.sh, perl and jq. Policy reads skill data;
+# this adapter never reads body files, writes files, or calls GitHub.
 # Public checks print a bounded diagnostic on rejection and return 1; success is
 # silent. The caller appends the shared writing reminder and renders the host response.
 # CLI flag reference: cli/cli pkg/cmd/pr/comment/comment.go:107-114.
 # https://github.com/cli/cli/blob/trunk/pkg/cmd/pr/comment/comment.go#L107-L114
-# shellcheck disable=SC2154 # Policy constants are owned by sourced reply-summary.sh.
 
 github_writing_check_privacy() { # literal published text; no transcript access
   local status=0
@@ -40,28 +40,11 @@ github_writing_check_privacy() { # literal published text; no transcript access
 }
 
 github_writing_check_body() { # body [comment]
-  local body="$1" kind="${2-}" density=0
-  if [[ "$body" != *[![:space:]]* ]]; then
-    printf 'GitHub text is empty.'
-    return 1
+  # Preserve empty-text precedence; privacy remains the publishing adapter's job.
+  if [[ "$1" == *[![:space:]]* ]]; then
+    github_writing_check_privacy "$1" || return 1
   fi
-  # No length limit: GitHub enforces its own, and these checks stay linear (#310).
-  github_writing_check_privacy "$body" || return 1
-  # Complete artifacts need room for evidence, so no total word cap applies. A leading
-  # TL;DR already gives readers the short version, so its details may also be dense.
-  concise_writing_check_summary "$body" first 39 no-hint >/dev/null && return 0
-  reply_summary_is_dense "$body" || density=$?
-  # shellcheck disable=SC2016 # Render literal Markdown headings, never shell expansion.
-  case "$density" in
-    # The PR gate appends the shared skill reminder to every writing denial. A comment
-    # within one paragraph's budget reads whole; documents keep their summary.
-    1) [[ "$kind" == comment ]] && reply_summary_is_short "$body" && return 0
-       concise_writing_check_summary "$body" anywhere 39 no-hint; return $? ;;
-    0) printf 'GitHub text has a paragraph over %s words or a list item over %s words: shorten them, or start with `## TL;DR` and one short sentence.' \
-         "$reply_summary_paragraph_max_words" "$reply_summary_item_max_words" ;;
-    *) printf 'GitHub text could not be counted.' ;;
-  esac
-  return 1
+  boxlite_writing_check_body "$@"
 }
 
 _github_writing_opaque() {

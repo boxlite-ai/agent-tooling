@@ -483,6 +483,8 @@ fixture_plugin="$TEST_DIR/prompt-plugin"
 mkdir -p "$fixture_plugin/scripts" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts/pr"
 cp "$SCRIPT" "$fixture_plugin/scripts/"
 cp "$PLUGIN_ROOT/.agents/lib/"{pr-author-review,subagent,hook-host,reply-summary,concise-writing,github-writing}.sh "$fixture_plugin/.agents/lib/"
+mkdir -p "$fixture_plugin/.agents/skills"
+cp -R "$PLUGIN_ROOT/.agents/skills/boxlite-writing" "$fixture_plugin/.agents/skills/"
 SCRIPT="$fixture_plugin/scripts/pr-author-review.sh"
 cat > "$fixture_plugin/.agents/prompts/pr/pr-author-review.md" <<'PROMPT'
 ---

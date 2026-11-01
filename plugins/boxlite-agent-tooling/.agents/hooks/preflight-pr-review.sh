@@ -59,11 +59,11 @@ load_writing_policy() {
     }
   done
   # shellcheck source=../lib/reply-summary.sh
-  source "$tooling_root/.agents/lib/reply-summary.sh"
+  source "$tooling_root/.agents/lib/reply-summary.sh" || exit 2
   # shellcheck source=../lib/github-writing.sh
   source "$tooling_root/.agents/lib/github-writing.sh"
   # shellcheck source=../lib/concise-writing.sh
-  source "$tooling_root/.agents/lib/concise-writing.sh"
+  source "$tooling_root/.agents/lib/concise-writing.sh" || exit 2
   writing_loaded=1
 }
 

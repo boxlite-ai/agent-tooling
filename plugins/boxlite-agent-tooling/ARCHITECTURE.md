@@ -70,7 +70,7 @@ Claude Code's reported worktree command refusal ([#207](https://github.com/boxli
 both verbs share validation and state.
 
 The gate rechecks existence, nonempty content, and a leading TL;DR
-under 40 words. Details after that TL;DR may be dense; no total-word cap applies.
+within the policy's summary cap. Details may be dense; no total-word cap applies.
 Bindings live in the worktree Git directory as `agent-tooling-design-doc.json` and
 match its canonical root and branch (or detached HEAD). State reads and replacement
 reuse `.agents/lib/verdict-audit-state.sh`; no success cache survives a failed read.
@@ -156,9 +156,9 @@ The structural checker does not judge example relevance or accuracy.
 
 The PR-review hook checks PR bodies (including drafts), issue/discussion bodies, comments,
 reviews, close/reopen comments, release notes, and REST body/description fields.
-`.agents/lib/github-writing.sh` reuses `.agents/lib/reply-summary.sh`'s block
-limits: paragraphs at most 80 words and list items at most 40. Text that starts with a
-valid TL;DR skips them, since readers already have the short version; complete
+`.agents/lib/github-writing.sh` delegates text policy to the skill's checker.
+Text that starts with a
+valid TL;DR bypasses density limits, since readers already have the short version; complete
 documents have no total-word cap.
 Fences and tables are excluded from block limits; Chinese/Japanese characters
 count individually. Empty text fails closed. The hook sets no length limit: GitHub
@@ -172,9 +172,9 @@ still count toward the total. `.agents/lib/reply-summary.test.sh` checks these
 semantics and rejects delimiter-shaped failures taking two seconds or more
 ([#259](https://github.com/boxlite-ai/agent-tooling/issues/259)).
 Denials reuse the `boxlite-writing` skill; clarity remains a reviewer judgment.
-Every inspected body also needs a TL;DR section of at most 39 words, including design
+Every inspected body also needs a TL;DR section within the policy cap, including design
 documents and published PR bodies checked on ready/metadata edits. A comment, close or
-reopen text, or review body of 80 words or fewer is exempt once its blocks fit the
+reopen text, or review body within the short-reply budget is exempt once its blocks fit the
 density limits ([#265](https://github.com/boxlite-ai/agent-tooling/issues/265)).
 Only a peer or higher heading ends that section; nested headings do not reset it.
 The author-review publisher checks its rendered bot comment for privacy indicators
@@ -204,11 +204,27 @@ later bot additions are outside it. Writing denials never consume an acknowledgm
 `scripts/sync-guidance.sh` splices `guidance/workflow.md`, which names the
 `boxlite-writing` skill without embedding its body. The hash and dirty-revision
 stamp depend only on workflow text; skill edits do not change generated instructions.
-Agents load the skill through host discovery. Hooks and synchronization do not read
-its body, so a missing local skill file does not prevent emitting the reference.
+Agents load the skill through host discovery. Hooks do not parse its prose, so a
+missing SKILL.md does not prevent emitting the reference.
+
+`boxlite-writing` packages the text checks in
+[scripts/check.sh](.agents/skills/boxlite-writing/scripts/check.sh) and numeric policy in
+[rules.json](.agents/skills/boxlite-writing/rules.json). The checker validates the data
+inside calls; invalid policy fails closed. The short-reply exemption and paragraph
+limit are independent settings. Guidance-only values are displayed but not enforced.
+[scripts/sync-rules.sh](.agents/skills/boxlite-writing/scripts/sync-rules.sh) renders the
+skill's limits table; `make test:writing` checks that it matches the data.
+
+`.agents/lib/reply-summary.sh` retains bounded transcript recovery and exposes the
+skill's measurement functions. `.agents/lib/concise-writing.sh` retains host reminder
+loading and exposes the summary function. The latter accepts `policy` as its cap;
+numeric arguments and the uncapped default remain compatible. Callers retain their
+existing choices. Stop owns continuations and verdict handoff; GitHub owns privacy
+and publication. Missing checker assets abort loading; sourcing reads no policy,
+consumes no stdin, and emits no output on success.
 
 The repository's [Writing ownership workflow](../../.github/workflows/writing-ownership.yml)
-runs `scripts/check-writing-ownership.sh`, the reference-delivery tests, and
+runs `make test:writing`, the reference-delivery tests, the skill's policy tests, and
 `.agents/lib/concise-writing.test.sh` for the TL;DR summary rules on Linux.
 `.agents/lib/reply-summary.test.sh` covers word counts and delimiter performance there.
 The gate uses
@@ -838,9 +854,9 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
   [Selection checks and benchmark](tests/snapshot_selection/README.md) cover this
   size assumption, exact boundaries, and comparison with the previous scan.
 - Stop gate to verdict check: after the TL;DR check and timed confirmations, `.agents/hooks/stop-gate.sh` `exec`s `.agents/hooks/audit/preflight-verdict-check.sh` with the payload unchanged, so the check runs as the hook process: its output, stderr, exit status, and signal handling are the hook's ([#255](https://github.com/boxlite-ai/agent-tooling/issues/255)). Missing dependencies fail closed.
-- Mandatory summary: `.agents/lib/concise-writing.sh` checks for an ATX TL;DR heading outside fences, quotes, and comments, whose first block is a paragraph opening with a word, emphasis, a link, or inline code. A list item, thematic break, link or footnote definition, setext heading, or table cannot stand in for that paragraph ([#257](https://github.com/boxlite-ai/agent-tooling/issues/257)). Human-facing replies over 80 words, by the same counter, must start there ([#265](https://github.com/boxlite-ai/agent-tooling/issues/265)); the entire section has at most 39 words using the shared Unicode-aware counter. Each denial is one line: the failed condition, then a literal fix; length failures report the count and limit and ask for a same-level heading after one short sentence. Missing, misplaced, malformed, and overlong TL;DR denials end with `apply boxlite-writing` unless the caller passes `no-hint`. Only the GitHub writing check does, because the PR gate appends its own reminder. Stop checks the TL;DR only when `stop_hook_active` is false: one correction can continue a turn, then the check is skipped, including after unrelated Stop continuations. GitHub and design-document checks remain mandatory. Missing Stop text falls back to a bounded transcript snapshot; unreadable or truncated snapshots fail closed even on continuations. Explicitly empty reply text remains empty without replaying earlier text; verdict auditing still runs. Internal instructions and tool payloads need no summary. Sentence simplicity and output structure remain writing instructions: no hook checks prose blocks, form choice, or list and table limits ([#315](https://github.com/boxlite-ai/agent-tooling/issues/315)).
+- Mandatory summary: `.agents/lib/concise-writing.sh` checks for an ATX TL;DR heading outside fences, quotes, and comments, whose first block is a paragraph opening with a word, emphasis, a link, or inline code. A list item, thematic break, link or footnote definition, setext heading, or table cannot stand in for that paragraph ([#257](https://github.com/boxlite-ai/agent-tooling/issues/257)). Replies outside the short-reply exemption, by the same counter, must start there ([#265](https://github.com/boxlite-ai/agent-tooling/issues/265)); the entire section uses the configured summary cap and shared Unicode-aware counter. Each denial is one line: the failed condition, then a literal fix; length failures report the count and limit and ask for a same-level heading after one short sentence. Missing, misplaced, malformed, and overlong TL;DR denials end with `apply boxlite-writing` unless the caller passes `no-hint`. Only the GitHub writing check does, because the PR gate appends its own reminder. Stop checks the TL;DR only when `stop_hook_active` is false: one correction can continue a turn, then the check is skipped, including after unrelated Stop continuations. GitHub and design-document checks remain mandatory. Missing Stop text falls back to a bounded transcript snapshot; unreadable or truncated snapshots fail closed even on continuations. Explicitly empty reply text remains empty without replaying earlier text; verdict auditing still runs. Internal instructions and tool payloads need no summary. Sentence simplicity and output structure remain writing instructions: no hook checks prose blocks, form choice, or list and table limits ([#315](https://github.com/boxlite-ai/agent-tooling/issues/315)).
 - Enforcement scope: Stop checks the final reply after generation; it cannot retract streamed commentary. GitHub checks cover recognized CLI calls, not browser or connector writes. Design checks cover fetched GitHub, Linear, and Notion content; native Notion headings retain their structure. Shared guidance applies to every human-facing output across these surfaces.
-- Shared writing skill: `boxlite-writing` owns writing rules. Workflow, Stop TL;DR denials, GitHub reminders, PR guidance, and the optional prompt hook reference it by name. `concise_writing_reminder` supplies the shortening request the PR gate appends to GitHub writing denials, without reading skill files. Paragraphs over 80 words or list items over 40 trigger it only in GitHub text that does not start with a valid TL;DR; Stop never asks to shorten a reply.
+- Shared writing skill: `boxlite-writing` owns writing rules, numeric policy, and text checks. Workflow, Stop TL;DR denials, GitHub reminders, PR guidance, and the optional prompt hook reference it by name. `concise_writing_reminder` supplies the shortening request the PR gate appends to GitHub writing denials, without reading SKILL.md. Density limits trigger it only in GitHub text that does not start with a valid TL;DR; Stop never asks to shorten a reply.
 - Consumer to tooling: consumers float on `tooling.ref`, run only the adopted revision recorded in `.git/agent-tooling/current`, and reach the network only from bootstrap and refresh. `templates/install.sh:11`, hold at `:15`. One refresh runs at a time, held by `.git/agent-tooling/.refresh.lock` (`scripts/refresh-installation.sh`), and a refresh that finds it held skips. Breaking that lock would race its holder, so one left behind by a killed run is reported rather than cleared: `scripts/verify-installation.sh:22`, which every commit and push runs, names it once it is an hour old. Without that, the automatic refresh is dead and only a log nobody reads would say so.
 - Lifecycle environment: `sync-installation.sh` and `refresh-installation.sh` capture the consumer root, clear Git's repository-local variables plus `GIT_NAMESPACE` through `.agents/lib/git-environment.sh`, then enter that root before verification or adoption. This protects older committed installers too: a linked-worktree checkout cannot redirect cache initialization into the consumer through inherited `GIT_DIR`. Discovery or cleanup failure prevents installer execution; sync remains nonblocking. Chained hooks retain their parent environment; global Git and transport configuration remain available.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop hook: confirmations and final-response checks run in sequence, so they
 # never race as separate Stop hooks would:
-#   1. On the initial Stop, a nonempty last reply over 80 words must start with a
+#   1. On the initial Stop, a nonempty reply outside the short-reply budget needs a
 #      short TL;DR; shorter replies read whole, and explicit empty replies stay empty.
 #      A reply that leads with one already gives its short version, so the gate never
 #      asks for another.
@@ -38,9 +38,9 @@ done
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$tooling_root/.agents/lib/verdict-audit-state.sh"
 # shellcheck source=../lib/reply-summary.sh
-source "$tooling_root/.agents/lib/reply-summary.sh"
+source "$tooling_root/.agents/lib/reply-summary.sh" || exit 2
 # shellcheck source=../lib/concise-writing.sh
-source "$tooling_root/.agents/lib/concise-writing.sh"
+source "$tooling_root/.agents/lib/concise-writing.sh" || exit 2
 
 # ── Input: the payload fields this gate reads; anything malformed is the verdict
 #    check's to report ─────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ if [[ "$reply_is_supplied" != true && -n "$transcript_path" ]]; then
 fi
 if [[ "$stop_hook_active" != true && -n "$last_assistant_message" ]] \
    && ! reply_summary_is_short "$last_assistant_message" \
-   && ! summary_error="$(concise_writing_check_summary "$last_assistant_message" first 39)"; then
+   && ! summary_error="$(concise_writing_check_summary "$last_assistant_message" first policy)"; then
   jq -nc --arg reason "$summary_error" '{decision:"block",reason:$reason}'
   exit 0
 fi

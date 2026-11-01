@@ -86,7 +86,7 @@ design_doc_verify() { # URL -> SHA-256 of the verified content, only after a liv
   }
   [[ "$body" == *[![:space:]]* ]] || { _design_doc_error 'document is empty'; return 1; }
   (( ${#body} <= 32000 )) || { _design_doc_error 'document exceeds the bounded content check'; return 1; }
-  concise_writing_check_summary "$body" first 39 >&2 || return 1
+  concise_writing_check_summary "$body" first policy >&2 || return 1
   printf '%s' "$body" | perl -MDigest::SHA=sha256_hex -0777 -e 'print sha256_hex(scalar(<STDIN>) // "")'
 }
 

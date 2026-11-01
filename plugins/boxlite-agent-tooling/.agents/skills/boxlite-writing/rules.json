@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "enforced": {
+    "summary_max_words": 39,
+    "short_reply_max_words": 80,
+    "paragraph_max_words": 80,
+    "item_max_words": 40
+  },
+  "guidance": {
+    "sentence_max_words": 25,
+    "prose_max_sentences": 1,
+    "reasoning_max_sentences": 3,
+    "list_min_items": 2,
+    "list_max_items": 7,
+    "list_item_max_sentences": 1,
+    "table_min_columns": 2,
+    "table_max_columns": 5
+  }
+}

@@ -161,7 +161,14 @@ facade_failure() { # label, expected diagnostic, Markdown, optional fault, skill
     # shellcheck disable=SC2329 # Inject counter and parser failures into the sourced validator.
     if [[ "$fault" == empty ]]; then reply_summary_word_counts() { return 0; }
     elif [[ "$fault" == failed ]]; then reply_summary_word_counts() { return 1; }
-    elif [[ "$fault" == no_parser ]]; then PATH="$scratch/bin"; exec 2>/dev/null; fi
+    elif [[ "$fault" == no_parser ]]; then
+      # Keep policy-loading dependencies so this case reaches the missing Perl parser.
+      mkdir "$scratch/parser-bin"
+      ln -s "$(command -v jq)" "$scratch/parser-bin/jq"
+      ln -s "$(command -v dirname)" "$scratch/parser-bin/dirname"
+      # shellcheck disable=SC2123 # Intentionally hide Perl while retaining policy dependencies.
+      PATH="$scratch/parser-bin"; exec 2>/dev/null
+    fi
     concise_writing_check_summary "$body" first 39
   )" || status=$?
   [[ "$output" != *'; apply boxlite-writing' ]] || hint=yes
