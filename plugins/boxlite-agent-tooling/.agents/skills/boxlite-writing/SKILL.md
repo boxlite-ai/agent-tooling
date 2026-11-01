@@ -5,16 +5,14 @@ description: Write or shorten human-facing replies, docs, PRs, issues, and comme
 
 ## Rules
 
-- Structure all human-facing output: headings, lists, tables, diagrams, code blocks.
-- A prose block holds one sentence; connected reasoning may take up to three.
-- Write minimally everywhere, prompts included; keep evidence, risks, failures, uncertainty.
-- Lead with the result; prefer a visual when one carries it.
-- Add a brief real example when it helps understanding.
+- Structure all human-facing output; a prose block holds one sentence, or three for connected reasoning.
+- Write minimally, prompts included; keep evidence, risks, failures, uncertainty.
+- Lead with the result; prefer a visual when one fits; add a brief real example when it helps.
 
 ## TL;DR
 
 - Start with `## TL;DR`: one plain sentence under 40 words, then a same-level heading.
-- Only replies and comments of at most 80 words skip it; they lead with the point.
+- Only replies and comments of at most 80 words skip it.
 
 ## Form
 
@@ -32,6 +30,5 @@ description: Write or shorten human-facing replies, docs, PRs, issues, and comme
 ## Limits
 
 - Sentences: at most 25 words; reasoning keeps its because or so.
-- Lists: 2–7 flat items, one sentence each.
-- Tables: 2–5 columns, one line per cell.
-- Order items by importance; give risks and uncertainty their own items.
+- Lists: 2–7 flat items, one sentence each; tables: 2–5 columns, one-line cells.
+- Order by importance; risks and uncertainty get their own items.
