@@ -34,7 +34,7 @@ jobs:
       - name: Verify gate rejection cases
         run: bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.test.sh
       - name: Check repository writing ownership
-        run: make test:writing
+        run: bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .
       - name: Verify skill references and hook behavior
         run: |
           bash plugins/boxlite-agent-tooling/scripts/sync-guidance.test.sh

@@ -9,6 +9,7 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | Required guidance | Canonical source |
 | --- | --- |
 | Research and design docs | [boxlite-design-doc](.agents/skills/boxlite-design-doc/SKILL.md) |
+| GitHub design issue starter | [Design issue template](../../.github/ISSUE_TEMPLATE/design.md) |
 | PR size, splitting, stacks, documentation, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
 | Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
@@ -26,9 +27,9 @@ Keep file paths in link targets, tests, and diagnostics that locate a problem.
 Run `bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .` before
 submitting Markdown changes; the Writing ownership workflow runs the same gate.
 
-Writing limits live in `boxlite-writing/rules.json`; its `scripts/sync-rules.sh`
-renders their table in the skill. After changing a limit, regenerate that table
-and run `make test:writing`. CI checks both policy ownership and table drift.
+Runtime writing limits live in `boxlite-writing/rules.json`. After changing a
+limit, run the skill's `scripts/check.test.sh` and `make test:writing`.
+SKILL.md stays independently authored; no script generates or rewrites it.
 For example, changing the short-reply exemption does not change paragraph density.
 The skill's sourceable checker needs Bash, Perl, and jq; copy the whole skill
 directory when sharing it. Existing library paths remain compatibility adapters.
@@ -224,6 +225,10 @@ Example: a 612-line PR presents **Bypass limit** and **Split PR**. Selecting byp
 records that choice for its exact diff; no explanation is required.
 
 ### Pull request descriptions
+
+For GitHub designs, start from the [design issue template](../../.github/ISSUE_TEMPLATE/design.md).
+It keeps `Problem` between `TL;DR` and `Scope`, following [#309](https://github.com/boxlite-ai/agent-tooling/issues/309).
+When changing the skill's outline, update the template's sections too.
 
 Apply `boxlite-design-doc`, then register it before coding:
 

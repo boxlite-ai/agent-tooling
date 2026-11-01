@@ -40,6 +40,7 @@ payload="$(cat)"
 command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // ""')"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 writing_error=""
+writing_error_reminds=1
 writing_loaded=0
 writing_inspected_count=0
 
@@ -73,19 +74,60 @@ deny_writing() { # bounded checker diagnostic plus shared prompt text
   exit 0
 }
 
+# Bourne-Again, its POSIX mode, the Z shell and Debian Almquist build the same argv
+# around these output redirections (#308): an optional 1 or 2, then >, >> or >| with a
+# fused or separate plain target, or 1>&2-style duplication and closing. Input
+# redirections can feed gh text (`-F query=@-`), and other forms split the shells, so
+# both keep the command non-literal.
+agreed_redirection_width=0
+match_agreed_redirection() { # argv index; sets agreed_redirection_width to 1 or 2
+  local index="$1" word="${shell_words[$1]}" target
+  agreed_redirection_width=0
+  (( shell_word_quotes[index] == 0 && shell_word_escapes[index] == 0 \
+     && shell_word_dynamics[index] == 0 && shell_word_unquoted_globs[index] == 0 )) || return 1
+  case "$word" in
+    [12]'>&'[0-9]|[12]'>&-') agreed_redirection_width=1; return 0 ;;
+    [12]'>'*) word="${word:1}" ;;
+  esac
+  case "$word" in
+    '>>'*|'>|'*) target="${word:2}" ;;
+    '>'*) target="${word:1}" ;;
+    *) return 1 ;;
+  esac
+  # A fused operator is another redirection or a Z shell form such as >! or >>|.
+  case "$target" in
+    *[\<\>\&\|]*|'!'*) return 1 ;;
+    ?*) agreed_redirection_width=1; return 0 ;;
+  esac
+  index=$((index + 1))
+  (( index < ${#shell_words[@]} && shell_word_redirections[index] == 0 \
+     && shell_word_dynamics[index] == 0 && shell_word_unquoted_globs[index] == 0 )) || return 1
+  agreed_redirection_width=2
+}
+
 inspect_github_writing() { # first gh argument index, literal context (default 1)
-  local start="$1" cursor="$1" literal="${2:-1}" reason
+  local cursor="$1" literal="${2:-1}" reason status=0
+  local -a writing_argv=()
   load_writing_policy
   writing_inspected_count=$((writing_inspected_count + 1))
   while (( cursor < ${#shell_words[@]} )); do
+    # Agreed redirections never reach gh's argv; any other keeps the command opaque.
+    if (( shell_word_redirections[cursor] )) && match_agreed_redirection "$cursor"; then
+      cursor=$((cursor + agreed_redirection_width))
+      continue
+    fi
     if (( shell_word_dynamics[$cursor] || shell_word_unquoted_globs[$cursor] \
        || shell_word_redirections[$cursor] )); then
       literal=0
     fi
+    writing_argv+=("${shell_words[$cursor]}")
     cursor=$((cursor + 1))
   done
-  if ! reason="$(github_writing_check "$literal" "${shell_words[@]:$start}")"; then
-    [[ -n "$writing_error" ]] || writing_error="$reason"
+  reason="$(github_writing_check "$literal" ${writing_argv[@]+"${writing_argv[@]}"})" || status=$?
+  if (( status )) && [[ -z "$writing_error" ]]; then
+    writing_error="$reason"
+    # Status 2 is an option gh itself rejects, not a writing problem.
+    writing_error_reminds=$(( status == 1 ))
   fi
 }
 
@@ -161,6 +203,18 @@ skip_shell_redirections() { # argv index
     esac
   done
   redirection_skip_index="$scan_word_index"
+}
+
+is_pr_help_request() { # first argv index after create, edit or ready
+  local index="$1" count="${#shell_words[@]}"
+  (( count - index == 1 )) \
+    || { (( count - index == 2 )) && [[ "${shell_words[$index]}" != -* ]]; } || return 1
+  while (( index < count )); do
+    (( shell_word_dynamics[index] == 0 && shell_word_unquoted_globs[index] == 0 \
+       && shell_word_redirections[index] == 0 )) || return 1
+    index=$((index + 1))
+  done
+  [[ "${shell_words[$((count - 1))]}" == --help || "${shell_words[$((count - 1))]}" == -h ]]
 }
 
 # Resolve only an already-literal word or an exact $name/${name} reference to
@@ -240,6 +294,7 @@ inspect_simple_command() {
   local -a shell_words=("${shell_words[@]}") shell_word_quotes=("${shell_word_quotes[@]}")
   local -a shell_word_dynamics=("${shell_word_dynamics[@]}") shell_word_unquoted_dynamics=("${shell_word_unquoted_dynamics[@]}")
   local -a shell_word_unquoted_globs=("${shell_word_unquoted_globs[@]}") shell_word_redirections=("${shell_word_redirections[@]}")
+  local -a shell_word_escapes=("${shell_word_escapes[@]}")
   parsed_simple_count=$((parsed_simple_count + 1))
 
   # This is deliberately a narrow recognizer, not a Bash interpreter. A single
@@ -649,6 +704,13 @@ inspect_simple_command() {
     inspect_github_writing "$github_group_index"
     return 0
   fi
+  # gh prints help and runs nothing for help alone (#308), so `[selector] --help|-h`
+  # is no transition and is claimed like other pr commands; any other argument keeps
+  # the full grammar below.
+  if is_pr_help_request "$((subcmd_index + 1))"; then
+    inspect_github_writing "$github_group_index"
+    return 0
+  fi
 
   protected_size_args=("$subcmd" ${target_prefix[@]+"${target_prefix[@]}"} "${shell_words[@]:$((subcmd_index + 1))}")
   # Target options may occur anywhere, but a metadata/body operand is never an option.
@@ -680,11 +742,13 @@ inspect_simple_command() {
   done
   for index in ${target_remove[@]+"${target_remove[@]}"}; do
     unset 'shell_words[index]' 'shell_word_quotes[index]' 'shell_word_dynamics[index]' \
-      'shell_word_unquoted_dynamics[index]' 'shell_word_unquoted_globs[index]' 'shell_word_redirections[index]'
+      'shell_word_unquoted_dynamics[index]' 'shell_word_unquoted_globs[index]' 'shell_word_redirections[index]' \
+      'shell_word_escapes[index]'
   done
   shell_words=("${shell_words[@]}"); shell_word_quotes=("${shell_word_quotes[@]}")
   shell_word_dynamics=("${shell_word_dynamics[@]}"); shell_word_unquoted_dynamics=("${shell_word_unquoted_dynamics[@]}")
   shell_word_unquoted_globs=("${shell_word_unquoted_globs[@]}"); shell_word_redirections=("${shell_word_redirections[@]}")
+  shell_word_escapes=("${shell_word_escapes[@]}")
   word_count="${#shell_words[@]}"; content_record_end="$word_count"
   # Writing and review must see the same draft prefix after target normalization.
   inspect_github_writing "$github_group_index"
@@ -1101,6 +1165,7 @@ finish_shell_word() {
   shell_word_unquoted_dynamics[${#shell_word_unquoted_dynamics[@]}]="$shell_word_unquoted_dynamic"
   shell_word_unquoted_globs[${#shell_word_unquoted_globs[@]}]="$shell_word_unquoted_glob"
   shell_word_redirections[${#shell_word_redirections[@]}]="$shell_word_redirection"
+  shell_word_escapes[${#shell_word_escapes[@]}]="$completed_escaped"
   shell_word=""
   shell_word_started=0
   shell_word_quoted=0
@@ -1257,6 +1322,7 @@ finish_simple_command() {
   shell_word_unquoted_dynamics=()
   shell_word_unquoted_globs=()
   shell_word_redirections=()
+  shell_word_escapes=()
 }
 
 # `$()` source is executable even when its surrounding word is double quoted.
@@ -1411,7 +1477,7 @@ scan_command_fragment() {
   local -a shell_words=() shell_word_quotes=() shell_word_dynamics=()
   local -a shell_word_unquoted_dynamics=()
   local -a shell_word_unquoted_globs=()
-  local -a shell_word_redirections=()
+  local -a shell_word_redirections=() shell_word_escapes=()
   local shell_word="" shell_word_started=0 shell_word_quoted=0 shell_word_dynamic=0
   local shell_word_escaped=0 shell_word_unquoted_dynamic=0 shell_word_unquoted_glob=0
   local shell_word_redirection=0
@@ -1606,8 +1672,10 @@ scan_command_fragment() {
 
 scan_command_fragment "$command"
 
-# Writing denials never request or consume a human review acknowledgment.
+# Writing denials never request or consume a human review acknowledgment. An option
+# gh would reject gets its diagnostic alone, without the writing reminder.
 if [[ -n "$writing_error" ]]; then
+  (( writing_error_reminds )) || deny_writing "$writing_error"
   writing_guidance="$(concise_writing_reminder)" || exit 2
   deny_writing "$writing_error
 

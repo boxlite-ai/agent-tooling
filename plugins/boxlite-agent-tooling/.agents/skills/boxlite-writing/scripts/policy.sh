@@ -8,15 +8,9 @@ boxlite_writing_rules() { # [limits] -> validated JSON, or four enforced limits
     def keys_are($wanted): type == "object" and (keys == ($wanted | sort));
     def limits: all(.[]; type == "number" and . == floor and . > 0 and . <= 100000);
     select(length == 1) | .[0] |
-    select(keys_are(["version", "enforced", "guidance"]) and .version == 1) |
+    select(keys_are(["version", "enforced"]) and .version == 1) |
     select(.enforced | keys_are(["summary_max_words", "short_reply_max_words",
       "paragraph_max_words", "item_max_words"]) and limits) |
-    select(.guidance | keys_are(["sentence_max_words", "prose_max_sentences",
-      "reasoning_max_sentences", "list_min_items", "list_max_items",
-      "list_item_max_sentences", "table_min_columns", "table_max_columns"]) and limits) |
-    select(.guidance.list_min_items <= .guidance.list_max_items and
-      .guidance.table_min_columns <= .guidance.table_max_columns and
-      .guidance.prose_max_sentences <= .guidance.reasoning_max_sentences) |
     if $mode == "limits" then .enforced |
       [.summary_max_words, .short_reply_max_words, .paragraph_max_words, .item_max_words] | @tsv
     elif $mode == "" then . else empty end

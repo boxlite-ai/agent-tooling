@@ -32,7 +32,6 @@ test\:guidance:
 
 test\:writing:
 	bash $(P)/scripts/check-writing-ownership.sh .
-	bash $(P)/.agents/skills/boxlite-writing/scripts/sync-rules.sh --check
 
 test\:guidance-check:
 	bash $(P)/scripts/sync-guidance.sh --check .
