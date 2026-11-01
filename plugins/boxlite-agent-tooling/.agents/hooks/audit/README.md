@@ -152,6 +152,7 @@ Stop errors name this local file. Diagnostics never grant dossier authority.
 | `VERDICT_AUDITOR_MODEL` | `run-verdict-audit.sh` | `claude-sonnet-5` | Model for the `claude -p` route. |
 | `VERDICT_AUDITOR_TIMEOUT` | `run-verdict-audit.sh` | `900` seconds | Hard limit for one audit. |
 | `COMMIT_PUSH_AUDITOR_TIMEOUT` | `run-commit-push-audit.sh` | `900` seconds | Hard limit for one audit. |
+| `DESIGN_AUDITOR_TIMEOUT` | `preflight-design-doc.sh` | `900` seconds | Design audit deadline; past it, the auditor is told to record its verdict now. |
 | `CODEX_BIN` | Both runners and Stop classifier | `codex` on `PATH`, then the macOS app bundle | Codex binary; does not override host selection. |
 | `CODEX_COMMIT_PUSH_AUDIT_MODE` | `run-commit-push-audit.sh` | `agentic` | `local` runs offline checks, for tests and diagnostics only. |
 | `AUDITOR_SESSION_SCOPE`, `AUDITOR_PROMPT_EPOCH` | `run-commit-push-audit.sh` | unset | Bind the audit to one session's history and prompt; the gate's command sets both. |

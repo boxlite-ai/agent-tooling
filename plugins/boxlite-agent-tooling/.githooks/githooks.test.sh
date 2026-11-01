@@ -176,6 +176,7 @@ setup() {
      "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
+     "$REPO_ROOT/.agents/lib/subagent-identity.sh" \
      "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
      "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
@@ -192,6 +193,7 @@ setup() {
      "$REPO_ROOT/.agents/lib/git-agent-origin.sh" \
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
+     "$REPO_ROOT/.agents/lib/subagent-identity.sh" \
      "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
      "$REPO_ROOT/.agents/lib/hook-host.sh" "$plugin/.agents/lib/"

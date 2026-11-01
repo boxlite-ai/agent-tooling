@@ -231,10 +231,10 @@ done
 [ "$found" -gt 0 ] && ok "agent specs exist ($found specs)" \
                    || bad "agent specs exist"
 known_auditors="$("$PLUGIN/.agents/hooks/auditor-control.sh" --known-auditors 2>/dev/null | sort)"
-# The one exception: design-research-auditor blocks only edits, never a turn's end or
+# The one exception: design-auditor blocks only edits, never a turn's end or
 # a commit, so the user can always redirect it without an override (design #253).
 shipped_auditors="$(find "$PLUGIN/.claude/agents" -maxdepth 1 -name '*-auditor.md' \
-  ! -name design-research-auditor.md -exec basename {} .md \; | sort)"
+  ! -name design-auditor.md -exec basename {} .md \; | sort)"
 [ "$known_auditors" = "$shipped_auditors" ] \
   && ok "every shipped auditor has override control mapping" \
   || bad "every shipped auditor has override control mapping (known: ${known_auditors:-none})"

@@ -17,8 +17,14 @@ export PATH="$scratch/bin:$PATH"
 state="$scratch/state with spaces/request.json"
 spec='{"binding":{"head":"first"},"prefix":"reviewed:","fallback":"keep-draft","minimum_words":1}'
 run() { bash "$cli" "$@"; }
+# Hooks call the library directly; the CLI exposes only the agent operations.
+hook_run() {
+  bash -c 'source "$1/.agents/lib/verdict-audit-state.sh" && source "$1/.agents/lib/timed-user-prompt.sh" \
+    && shift && timed_user_prompt "$@"' hook "$plugin" "$@"
+}
 expect() { jq -e "$2" <<<"$1" >/dev/null || { printf 'FAIL: %s\n' "$2" >&2; exit 1; }; }
 reject() { if run "$@" >"$scratch/out" 2>"$scratch/err"; then printf 'FAIL: accepted %s\n' "$1" >&2; exit 1; fi; }
+reject_hook() { if hook_run "$@" >"$scratch/out" 2>"$scratch/err"; then printf 'FAIL: hook accepted %s %s\n' "$1" "${4:-}" >&2; exit 1; fi; }
 
 request="$(run request "$state" "$spec")"
 id="$(jq -r .id <<<"$request")"
@@ -108,7 +114,8 @@ request="$(run request "$state" "$size_spec")"
 id="$(jq -r .id <<<"$request")"
 instruction='Please request the size exception again.'
 reject renew "$state" "$id" "$instruction"
-run present "$state" "$id" native-question >/dev/null
+reject present "$state" "$id" native-question
+hook_run present "$state" "$id" native-question >/dev/null
 printf '2700\n' > "$CONFIRMATION_TEST_CLOCK"
 expired="$(run fallback "$state" "$id")"
 expect "$(run request "$state" "$size_spec")" ".id == \"$id\" and .status == \"expired\" and .deadline == 2700"
@@ -129,7 +136,7 @@ expect "$(cat "$archive")" ".request.id == \"$id\" and .request.status == \"expi
   and .user_request == \"$instruction\" and .successor_id == \"$next_id\" and .renewed_at == 2700"
 [[ "$(jq -c .request "$archive")" == "$expired" ]]
 reject respond "$state" "$id" "$reason"
-reject native-reply "$state" "$id" '{"tool_use_id":"native-question","answer":"stale"}'
+reject_hook native-reply "$state" "$id" '{"tool_use_id":"native-question","answer":"stale"}'
 reject renew "$state" "$id" "$instruction"
 expect "$(run request "$state" "$size_spec")" ".id == \"$next_id\" and .deadline == 3000"
 expect "$(run respond "$state" "$next_id" "$reason")" '.status == "accepted"'
@@ -222,4 +229,43 @@ id="$(jq -r .id "$state")"
 reject respond "$state" "$id" "$reason"
 expect "$(run request "$state" "$size_spec")" ".id == \"$id\" and .deadline == 4180 and .status == \"expired\""
 expect "$(run renew "$state" "$id" "$instruction")" '.created_at == 4180 and .deadline == 4480 and .status == "pending"'
-printf 'timed-user-prompt: all lifecycle, deadline, legacy-state, unsafe-state, and concurrency checks passed\n'
+
+# Design decisions (design #309): only the human records one, through the managed
+# question's hook or a typed prompt line; relayed CLI text never counts.
+printf '5000\n' > "$CONFIRMATION_TEST_CLOCK"
+research_state="$scratch/state with spaces/research.json"
+research_spec='{"binding":{"head":"fifth"},"prefix":"design-decision:","fallback":"keep-blocked","minimum_words":1}'
+reject request "$research_state" "$(jq -c '.fallback = "keep-draft"' <<<"$research_spec")"
+reject request "$research_state" "$(jq -c '.prefix = "reviewed:"' <<<"$research_spec")"
+id="$(run request "$research_state" "$research_spec" | jq -r .id)"
+expect "$(run question "$research_state" "$id")" \
+  '[.questions[0].options[].label] == ["Redesign","Reflect again","Overrule"]'
+reject respond "$research_state" "$id" 'Overrule'
+reject respond "$research_state" "$id" 'design-decision: Overrule the gaps are acceptable'
+reject prompt-reply "$research_state" "$id" 'design-decision: Overrule the gaps are acceptable'
+reject_hook prompt-reply "$research_state" "$id" 'Overrule'
+reject_hook prompt-reply "$research_state" "$id" 'design-decision: Overrule'
+reject_hook prompt-reply "$research_state" "$id" 'design-decision: Approve it'
+expect "$(run status "$research_state" "$id")" '.status == "pending"'
+expect "$(hook_run prompt-reply "$research_state" "$id" 'design-decision: Overrule the gaps are acceptable')" \
+  '.status == "accepted" and .response == "design-decision: Overrule the gaps are acceptable"'
+expect "$(run consume "$research_state" "$id")" '.status == "consumed"'
+id="$(run request "$research_state" "$research_spec" | jq -r .id)"
+hook_run present "$research_state" "$id" research-question >/dev/null
+reject_hook native-reply "$research_state" "$id" '{"tool_use_id":"research-question","answer":"Approve"}'
+expect "$(hook_run native-reply "$research_state" "$id" '{"tool_use_id":"research-question","answer":"Reflect again"}')" \
+  '.status == "accepted" and .response == "Reflect again"'
+expect "$(run consume "$research_state" "$id")" '.status == "consumed"'
+# The deadline ends the agent wait, not the human's say: a late typed line still counts.
+id="$(run request "$research_state" "$research_spec" | jq -r .id)"
+printf '5301\n' > "$CONFIRMATION_TEST_CLOCK"
+expect "$(run request "$research_state" "$research_spec")" ".id == \"$id\" and .status == \"expired\""
+expect "$(run fallback "$research_state" "$id")" '.fallback_delivered and .spec.fallback == "keep-blocked"'
+reject renew "$research_state" "$id" 'ask me again'
+expect "$(hook_run prompt-reply "$research_state" "$id" 'design-decision: Redesign start from the findings')" \
+  '.status == "accepted" and (.fallback_delivered | not)'
+reject_hook prompt-reply "$research_state" "$id" 'design-decision: Overrule twice is not allowed'
+size_state="$scratch/state with spaces/research-size.json"
+id="$(run request "$size_state" "$size_spec" | jq -r .id)"
+reject_hook prompt-reply "$size_state" "$id" 'design-decision: Overrule not for size requests'
+printf 'timed-user-prompt: all lifecycle, deadline, legacy-state, unsafe-state, design-decision, and concurrency checks passed\n'

@@ -30,6 +30,14 @@
             "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/audit-deadline.sh\""
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -66,6 +74,15 @@
             "type": "command",
             "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^(Read|Bash|WebFetch|WebSearch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/audit-deadline.sh\""
           }
         ]
       }

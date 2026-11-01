@@ -24,7 +24,8 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. Old authority is revoked; unchanged audit work may finish as prior evidence. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
-| Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-research-auditor` PASS for its exact content, unless every target resolves outside every repository; shell commands are outside this gate. |
+| Calls a tool or stops as the design auditor | `PreToolUse`, `SubagentStop` | `.agents/hooks/audit-deadline.sh` | Past its deadline, "record your verdict now"; one verdict-less stop is blocked. |
+| Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-auditor` PASS for its exact content, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. Above 400 added code lines, asks the user to bypass the guideline or split. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely size choice or typed review answer. Idle expiry never authorizes; size choices cannot satisfy review acknowledgment. |
@@ -77,25 +78,48 @@ Notion child blocks fail closed; list items and code keep their block structure,
 literal text inside a block cannot forge a TL;DR.
 Workflow and tracking issues invoke `boxlite-design-doc` by name.
 
-Research is verified before code, not at commit or PR time
+Designs are audited before code, not at commit or PR time
 ([design #253](https://github.com/boxlite-ai/agent-tooling/issues/253)):
 
-- The pre-edit gate also requires `agent-tooling-design-research.json` beside the
-  binding: a PASS bound to the root, branch, URL, and SHA-256 of the live content.
-  Any edit to the design needs a new review.
-- Missing or stale: the denial names the `design-research-auditor` route with
-  `.agents/prompts/audit/design-research-task.md` and its criteria. A FAIL for
+- The pre-edit gate also requires `agent-tooling-design-audit.json` beside the
+  binding: a PASS, or the human's overrule, bound to the root, branch, URL, and SHA-256
+  of the live content. Any edit to the design needs a new review. Verdicts in a
+  pre-0.1.41 `agent-tooling-design-research.json` stay readable until the next one is written.
+- Missing or stale: the denial names the `design-auditor` route with
+  `.agents/prompts/audit/design-task.md` and its criteria. A FAIL for
   unchanged content: the denial lists its findings.
 - The auditor reads the design through `design-doc.sh show` and records through
-  `design-doc.sh research`, which accepts one `{content_sha256, verdict, findings}`
-  object for the live content only: PASS without findings, FAIL with one-line findings.
-- It has no override card: it blocks only edits, never a turn's end or a commit, so
-  the user can always redirect it. `host-parity.test.sh` names it as the one exception.
+  `design-doc.sh verdict` (alias `research`), which accepts one `{content_sha256, verdict, findings,
+  advisories}` object for the live content only. Critical and high gaps are findings and
+  FAIL; low and nit gaps are advisories and never do. Every round runs in full.
+- The loop ([design #309](https://github.com/boxlite-ai/agent-tooling/issues/309),
+  `.agents/lib/design-audit.jq`) counts FAILs per root and branch until a PASS, an
+  overrule, or a redesign, so rebinding keeps the count. After an edit, the task input
+  carries the last FAIL's findings for the same URL as `prior_findings`.
+- A second FAIL that repeats a finding or does not reduce them, the third FAIL, or a FAIL
+  after Reflect again stops the loop as INCOMPLETE. A converging second FAIL first needs a
+  reflection in `audit-reflection-contract.jq`'s schema through `design-doc.sh reflect`.
+- At a stop, a `design-decision:` timed confirmation asks the human:
+  - Redesign: the failed content cannot be audited again, and the count resets.
+  - Reflect again: one more audit after a reflection.
+  - Overrule: recorded as `OVERRIDDEN`, never PASS. The findings ride along as
+    `overruled:` prior findings that are not re-raised.
+- Only the managed question's hook or a typed first prompt line
+  `design-decision: <choice> <reason>` records a choice. Unanswered after five
+  minutes, edits stay blocked.
+- The auditor works to `DESIGN_AUDITOR_TIMEOUT` (default 900 s, as for other audits). The
+  gate writes the deadline once per design content into `agent-tooling-design-audit-task.json`
+  and the task. Past it, `.agents/hooks/audit-deadline.sh` answers the auditor's tool calls,
+  except recording the verdict, with "record your verdict now", and blocks one verdict-less
+  stop. Claude Code names the auditor in `agent_type`; Codex names it in the subagent
+  transcript's spawn metadata, read by `.agents/lib/subagent-identity.sh`.
+- It has no `force-pass-auditors` card: it blocks only edits, never a turn's end or a
+  commit. `host-parity.test.sh` names it as the one exception.
 
 Commit-push auditors read the bound design through `design-doc.sh show`, which rechecks
 the binding and prints the same authenticated provider read, so Linear and Notion
 designs need no browser login. `.agents/prompts/audit/commit-push-criteria.md` checks
-the diff against the design; neither it nor the PR question re-audits research.
+the diff against the design; neither it nor the PR question re-runs the design audit.
 Page length and design quality remain review criteria.
 Every PR requires substantive project docs; reviewers assess their quality.
 The design-doc gate does not inspect documentation diffs.
@@ -270,8 +294,9 @@ existing PR URLs and matching bases. This is workflow guidance, not a new hook b
 `.agents/lib/timed-user-prompt.sh` provides the reusable five-minute confirmation
 lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-supplied
 context and a random ID; retries preserve the deadline, late replies are rejected,
-and acceptance can be consumed once. Callers select `split` or `keep-draft` as the
-timeout fallback for `pr-size-exception:` or `reviewed:` respectively. The library
+and acceptance can be consumed once. Callers select `split`, `keep-draft`, or
+`keep-blocked` as the timeout fallback for `pr-size-exception:`, `reviewed:`, or
+`design-decision:` respectively. The library
 serializes state transitions; its prompt renderer describes an agent-opened,
 non-blocking question. It never waits or opens a host dialog inside the state lock.
 
@@ -289,6 +314,14 @@ question ID. The agent first remeasures through the guarded PR operation and sho
 the current diff and split. Ordinary `request` calls cannot renew expired or declined attempts;
 review requests cannot be renewed. Like `respond`, the CLI trusts the agent to relay
 verbatim human text; it does not authenticate human identity.
+
+Design decisions accept the labels `Redesign`, `Reflect again`, and `Overrule`, or a
+typed `design-decision: <label> <reason>` line. `respond` rejects them. Only the
+managed question's hook (`native-reply`) or the prompt hook (`prompt-reply`, through
+`.agents/hooks/design-decision-prompt.sh`) records one. A typed line still counts after
+the deadline, which ends only the agent's wait. They cannot be renewed. The CLI exposes
+only `request`, `status`, `question`, `respond`, `renew`, `consume`, and `fallback`, so
+it cannot record a native or prompt reply.
 
 Renewal exclusively writes an archive containing the expired or declined record, human instruction,
 successor ID, and renewal time before atomically replacing the active state, all under
@@ -882,7 +915,8 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A message is never judged twice. `.agents/hooks/audit/preflight-verdict-check.sh:62`
 - A parked dossier supplies prior evidence to a fresh audit; it cannot approve a new turn. `.agents/hooks/audit/preflight-verdict-check.sh`
 - A reply that leads with a valid TL;DR is never asked to shorten; the Stop gate's only writing check is that TL;DR. `.agents/hooks/stop-gate.sh:4`
-- No editor or patch edit lands in a repository before a research PASS for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
+- No editor or patch edit lands in a repository before a design-audit PASS, or the human's overrule, for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
+- A design decision is recorded only by the managed question's hook or the human's typed first prompt line; agent-relayed text never counts. `.agents/hooks/design-decision-prompt.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
 - Humans are not gated; named harness variables or recorded live ancestors activate audits. `.agents/lib/git-agent-origin.sh`

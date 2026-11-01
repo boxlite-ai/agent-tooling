@@ -42,6 +42,7 @@ matcher alone does not distinguish `git commit` from an unrelated command.
 | --- | --- |
 | `UserPromptSubmit` | [cancel-verdict-audit.sh](../.agents/hooks/cancel-verdict-audit.sh) |
 | `SubagentStart`, `SubagentStop` | [auditor-control.sh](../.agents/hooks/auditor-control.sh) |
+| `SubagentStop`; `PreToolUse` / `Read`, `Bash`, `WebFetch`, `WebSearch` | [audit-deadline.sh](../.agents/hooks/audit-deadline.sh): the design auditor’s deadline |
 | `PreToolUse` / editor or patch tools | [preflight-design-doc.sh](../.agents/hooks/preflight-design-doc.sh) |
 | `PreToolUse` / `Bash` | [preflight-commit-push.sh](../.agents/hooks/preflight-commit-push.sh), [preflight-pr-review.sh](../.agents/hooks/preflight-pr-review.sh) |
 | `PreToolUse`, `PostToolUse` / `AskUserQuestion` (Claude) | [claude-timed-question.sh](../.agents/hooks/claude-timed-question.sh) |

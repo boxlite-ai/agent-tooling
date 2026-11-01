@@ -30,6 +30,14 @@
             "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/audit-deadline.sh\""
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -56,6 +64,15 @@
             "type": "command",
             "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/preflight-pr-review.sh\"",
             "statusMessage": "Checking PR review acknowledgement"
+          }
+        ]
+      },
+      {
+        "matcher": "^(Read|Bash|WebFetch|WebSearch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/audit-deadline.sh\""
           }
         ]
       }

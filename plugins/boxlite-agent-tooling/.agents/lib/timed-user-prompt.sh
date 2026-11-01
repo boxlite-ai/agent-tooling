@@ -56,12 +56,17 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
     def spec:
       type == "object" and (keys == ["binding","fallback","minimum_words","prefix"])
       and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 8192))
-      and (.fallback | IN("split","keep-draft"))
-      and (.prefix | IN("reviewed:","pr-size-exception:"))
+      and (.fallback | IN("split","keep-draft","keep-blocked"))
+      and (.prefix | IN("reviewed:","pr-size-exception:","design-decision:"))
       and ((.prefix == "reviewed:") == (.fallback == "keep-draft"))
+      and ((.prefix == "design-decision:") == (.fallback == "keep-blocked"))
       and (.minimum_words | type == "number" and . >= 1 and . <= 100 and floor == .);
+    # A design decision is a native label, or a typed line naming one with a reason.
+    def decision_line: test("^design-decision: (Redesign|Reflect again|Overrule)\\s+\\S");
     def response_ok($s):
       line and (if $s.prefix == "pr-size-exception:" and . == "Bypass limit" then true
+        elif $s.prefix == "design-decision:"
+        then IN("Redesign","Reflect again","Overrule") or decision_line
         else startswith($s.prefix + " ")
           and ([.[($s.prefix|length):] | scan("\\S+")] | length) >= $s.minimum_words end);
     def valid:
@@ -108,6 +113,14 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
         or (.question_tool_id != "" and .question_tool_id != $reply)
       then error("question expired or was already presented")
       else .question_tool_id = $reply end
+    elif $op == "respond" and .spec.prefix == "design-decision:" then
+      error("design decisions come only from the human: the managed question or a typed design-decision line")
+    elif $op == "prompt-reply" then
+      # The human typed it, so it still counts after the deadline ended the agent wait.
+      if .spec.prefix != "design-decision:" or ($reply | line and decision_line | not)
+      then error("only a typed design-decision line from the human prompt counts")
+      elif (.status | IN("pending","expired") | not) then error("confirmation no longer accepts replies")
+      else .status = "accepted" | .response = $reply | .fallback_delivered = false end
     elif $op == "respond" or $op == "native-reply" then
       if .status != "pending" then error("confirmation no longer accepts replies")
       else . end |
@@ -156,7 +169,10 @@ _timed_user_prompt_question() {
   # The locked transition runs in a fresh shell; load its renderer locally.
   # shellcheck source=subagent.sh
   source "$root/.agents/lib/subagent.sh" || return 2
-  [[ "$(jq -r .spec.fallback <<<"$1")" != split ]] || template=questions/timed-question-size
+  case "$(jq -r .spec.fallback <<<"$1")" in
+    split) template=questions/timed-question-size ;;
+    keep-blocked) template=questions/timed-question-design ;;
+  esac
   # Insert JSON string contents, never raw data, into the structured question.
   prefix="$(jq -er '.spec.prefix | tojson | .[1:-1]' <<<"$1")" || return 2
   id="$(jq -er '.id | tojson | .[1:-1]' <<<"$1")" || return 2

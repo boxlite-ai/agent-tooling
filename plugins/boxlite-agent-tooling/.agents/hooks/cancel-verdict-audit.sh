@@ -135,6 +135,11 @@ if [[ "$prompt_text" == 'api compatibility: skip' ]]; then
     printf 'api-compatibility: confirmation not recorded: %s\n' "${compatibility_record#api-compatibility: }"
   fi
 fi
+# Only the human's own first prompt line records a design decision; wakes exit above.
+if [[ "$prompt_text" =~ ^[[:space:]]*design-decision: ]]; then
+  printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$project_dir" \
+    bash "$tooling_root/.agents/hooks/design-decision-prompt.sh"
+fi
 
 state_dir="$project_dir/.agents/state"
 if ! mkdir -p "$state_dir" 2>/dev/null; then
