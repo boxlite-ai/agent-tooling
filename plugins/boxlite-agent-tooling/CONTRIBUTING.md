@@ -9,6 +9,7 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | Required guidance | Canonical source |
 | --- | --- |
 | Research and design docs | [boxlite-design-doc](.agents/skills/boxlite-design-doc/SKILL.md) |
+| GitHub design issue starter | [Design issue template](../../.github/ISSUE_TEMPLATE/design.md) |
 | PR size, splitting, stacks, documentation, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
 | Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
@@ -216,6 +217,10 @@ Example: a 612-line PR presents **Bypass limit** and **Split PR**. Selecting byp
 records that choice for its exact diff; no explanation is required.
 
 ### Pull request descriptions
+
+For GitHub designs, start from the [design issue template](../../.github/ISSUE_TEMPLATE/design.md).
+It keeps `Problem` between `TL;DR` and `Scope`, following [#309](https://github.com/boxlite-ai/agent-tooling/issues/309).
+When changing the skill's outline, update the template's sections too.
 
 Apply `boxlite-design-doc`, then register it before coding:
 

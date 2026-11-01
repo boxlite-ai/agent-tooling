@@ -34,6 +34,7 @@ Challenge assumptions and each layer's need for knowledge.
 Write findings:
 
 - **TL;DR:** problem → outcome.
+- **Problem:** current behavior or unmet need, concrete evidence, and impact.
 - **Scope:** constraints, non-goals, acceptance.
 - **Related work and lessons:** research above; alternatives include reuse/simplify/no change; recommendation.
 - **How it works:** approach/mechanism → outcome; trade-offs.
