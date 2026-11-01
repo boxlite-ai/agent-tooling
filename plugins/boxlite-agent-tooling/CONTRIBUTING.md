@@ -9,6 +9,8 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | Required guidance | Canonical source |
 | --- | --- |
 | Research and design docs | [boxlite-design-doc](.agents/skills/boxlite-design-doc/SKILL.md) |
+| Design audit steps and entry format | [Design criteria](.agents/prompts/audit/design-criteria.md) |
+| Design auditor input and verdict object | [design-auditor](.claude/agents/design-auditor.md) |
 | GitHub design issue starter | [Design issue template](../../.github/ISSUE_TEMPLATE/design.md) |
 | PR size, splitting, stacks, documentation, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
