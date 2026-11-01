@@ -97,6 +97,17 @@ The version change triggers host reconciliation and makes older preflight hooks
 request a reload before delegating to the new Git hooks. Custom markerless wiring
 must retain its launcher and pass its PID; see [Git gates](ARCHITECTURE.md#git-gates).
 
+### Design audit rollout
+
+Version 0.1.41 renames `design-research-auditor` to `design-auditor` and its prompts to
+`design-criteria.md` and `design-task.md`. Each audit round runs in full within
+`DESIGN_AUDITOR_TIMEOUT` (900 s); only critical and high gaps FAIL. Findings carry across
+edits, and repeated FAILs stop for a `design-decision:` choice
+([#309](https://github.com/boxlite-ai/agent-tooling/issues/309)). Verdicts in
+`agent-tooling-design-research.json` stay readable, and `design-doc.sh research` remains an
+alias of `verdict`. Update consumer tooling, refresh the host plugin, then reload or start
+a new task.
+
 ### Verification applicability rollout
 
 Version 0.1.39 scopes full-revert defect proof to fixes of existing behavior, including
@@ -124,7 +135,7 @@ reload or start a new session to replace already-loaded prompts.
 
 Version 0.1.31 moves the research check before code:
 
-- The first code edit on each in-progress branch needs a `design-research-auditor`
+- The first code edit on each in-progress branch needs a `design-auditor`
   PASS for the bound design.
 - Code written or committed under any 0.1.30 build may lack a research check: before
   the next commit or push on such a branch, attempt one editor edit so that review
@@ -215,9 +226,14 @@ bash <plugin-root>/scripts/design-doc.sh register <URL>
 `bind` remains a compatibility alias; `register` avoids the reported Claude Code
 worktree refusal ([#207](https://github.com/boxlite-ai/agent-tooling/issues/207)).
 
-The first code edit then needs a research PASS for the design's exact content. The
-pre-edit gate names the `design-research-auditor` route; the auditor records its
-verdict with `design-doc.sh research`. Editing the design needs a new review.
+The first code edit then needs a design-audit PASS for the design's exact content. The
+pre-edit gate names the `design-auditor` route; the auditor records its
+verdict with `design-doc.sh verdict` within `DESIGN_AUDITOR_TIMEOUT` (900 s). Editing
+the design needs a new review.
+Only critical and high gaps FAIL. After repeated FAILs, the gate asks for a reflection
+(`design-doc.sh reflect`) or stops for your choice. To answer in text, make your
+prompt's first line `design-decision: <Redesign|Reflect again|Overrule> <reason>`
+([design #309](https://github.com/boxlite-ai/agent-tooling/issues/309)).
 
 GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
 `LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.

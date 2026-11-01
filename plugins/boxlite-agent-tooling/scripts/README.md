@@ -78,7 +78,7 @@ host installation are separate transactions.
 
 | Script / arguments | Responsibility and effects |
 | --- | --- |
-| [design-doc.sh](design-doc.sh) `register <URL>` (alias `bind`), `check`, `research`, or `show` | Fetch and validate a design; bind it to the current worktree/branch, recheck the existing binding, record the research auditor's stdin verdict for the live content, or recheck it and print its content. |
+| [design-doc.sh](design-doc.sh) `register <URL>` (alias `bind`), `check`, `verdict` (alias `research`), `reflect`, or `show` | Fetch and validate a design; bind it to the current worktree/branch, recheck the existing binding, record the research auditor's stdin verdict for the live content, store the stdin reflection a later audit waits for, or recheck it and print its content. |
 | [api-compatibility.sh](api-compatibility.sh) `inspect\|inspect-push\|check\|push [repo-root] [base-ref]` | Check `*openapi*.yaml` changes, require user confirmation to skip breaking/default enforcement, and export per-file request-audit evidence; see [commands](api-compatibility.md). |
 | [pr-author-review.sh](pr-author-review.sh) `<github-event.json>` | CI publisher: update the author-review check and prompt, and return an unacknowledged PR to draft. Exit 0: acknowledged/irrelevant; 1: awaiting acknowledgment; 2: API/validation error. |
 | [audit-reflection.sh](audit-reflection.sh) `prepare\|record\|status\|submit STATE` | Read bounded request JSON from stdin; validate and persist audit-cycle transitions, returning cycle JSON on stdout. |
@@ -99,7 +99,7 @@ See [state contracts](../ARCHITECTURE.md#state-files) and the
 
 | Script / arguments | Responsibility and effects |
 | --- | --- |
-| [timed-user-prompt.sh](timed-user-prompt.sh) `request\|status\|respond\|renew\|consume\|fallback STATE SPEC_OR_ID [HUMAN_TEXT]` | Persist confirmation deadlines, exact human responses, consumption, and expiry; renewal requires the user's explicit instruction. |
+| [timed-user-prompt.sh](timed-user-prompt.sh) `request\|status\|question\|respond\|renew\|consume\|fallback STATE SPEC_OR_ID [HUMAN_TEXT]` | Persist confirmation deadlines, exact human responses, consumption, and expiry; renewal requires the user's explicit instruction. |
 | [claude-with-timed-prompts.sh](claude-with-timed-prompts.sh) `[claude args...]` | Launch Claude with this plugin; configure native question timeout for supported local sessions and disable Remote Control there. |
 | [continue-timed-prompts.sh](continue-timed-prompts.sh) | Called by the Stop gate with hook JSON on stdin; emit a continuation for pending confirmations or their timeout fallback. |
 | [resume-on-network-error.sh](resume-on-network-error.sh) `[--max-restarts N] [--max-wait SECONDS] [--probe-url URL] [--] <prompt> [claude args...]` | Supervise `claude -p`, retry eligible API failures within budgets, and print final result JSON. |

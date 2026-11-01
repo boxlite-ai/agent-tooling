@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture managed replies: size choices or typed review acknowledgments.
+# Capture managed replies: size choices, design decisions, or typed review acknowledgments.
 # shellcheck source-path=SCRIPTDIR
 set -euo pipefail
 fail() { printf 'claude-timed-question: %s\n' "$1" >&2; exit 2; }
@@ -7,7 +7,8 @@ for dependency in jq git perl date; do command -v "$dependency" >/dev/null || fa
 payload="$(cat)"
 [[ "$(jq -r '.tool_name // ""' <<<"$payload")" == AskUserQuestion ]] || exit 0
 kind="$(jq -r '[.tool_input.questions[]?.question | select(type=="string") |
-  if startswith("pr-size-exception:") then "pr-size" elif startswith("reviewed:") then "pr-review" else empty end][0] // ""' <<<"$payload")"
+  if startswith("pr-size-exception:") then "pr-size" elif startswith("reviewed:") then "pr-review"
+  elif startswith("design-decision:") then "design-decision" else empty end][0] // ""' <<<"$payload")"
 [[ -n "$kind" ]] || exit 0
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 # shellcheck source=../lib/verdict-audit-state.sh

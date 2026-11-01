@@ -42,4 +42,17 @@ mv "$scratch/expired" "$state"
 out="$(stop)"
 jq -e '.decision=="block" and (.reason|contains("No review acknowledgment was granted"))' <<<"$out" >/dev/null
 [[ -z "$(stop)" ]]
-printf 'timed continuations: pending, scope, size timeout, and review timeout passed\n'
+# A design decision keeps the agent working until its deadline, then keeps edits blocked.
+spec="$(jq '.prefix="design-decision:"|.fallback="keep-blocked"' <<<"$spec")"
+state="$scratch/repo/.agents/state/design-decision-request.json"
+bash "$plugin/scripts/timed-user-prompt.sh" request "$state" "$spec" >/dev/null
+out="$(stop)"
+jq -e '.decision=="block" and (.reason|contains("pending design-decision") and contains("Deadline:"))' <<<"$out" >/dev/null \
+  || { printf 'FAIL: a pending design decision must keep the agent working: %s\n' "$out" >&2; exit 1; }
+jq '.created_at -= 301 | .deadline -= 301' "$state" > "$scratch/expired"
+mv "$scratch/expired" "$state"
+out="$(stop)"
+jq -e '.decision=="block" and (.reason|contains("edits stay blocked") and contains("Silence never overrules"))' <<<"$out" >/dev/null \
+  || { printf 'FAIL: a design-decision timeout must keep edits blocked: %s\n' "$out" >&2; exit 1; }
+[[ -z "$(stop)" ]]
+printf 'timed continuations: pending, scope, size, review, and design-decision timeouts passed\n'

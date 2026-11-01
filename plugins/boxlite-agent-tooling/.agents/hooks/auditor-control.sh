@@ -33,6 +33,8 @@ source "$interactive_prompt_lib"
 source "$host_lib"
 # shellcheck source=../lib/subagent.sh
 source "$tooling_root/.agents/lib/subagent.sh" || exit 2
+# shellcheck source=../lib/subagent-identity.sh
+source "$tooling_root/.agents/lib/subagent-identity.sh" || exit 2
 
 # Module context is populated once repository identity has been validated below.
 auditor_control_state_dir=
@@ -66,40 +68,8 @@ auditor_control_canonical_auditor_from_path() {  # Codex orchestration agent pat
   esac
 }
 
-auditor_control_read_first_transcript_record() {  # transcript path
-  perl -MFcntl=:DEFAULT -e '
-    my ($path, $max) = @ARGV;
-    $SIG{ALRM} = sub { exit 1 };
-    alarm 1;
-    exit 1 if lstat($path) && -l _;
-    my $flags = O_RDONLY | O_NONBLOCK;
-    $flags |= Fcntl::O_NOFOLLOW() if defined &Fcntl::O_NOFOLLOW;
-    sysopen(my $fh, $path, $flags) or exit 1;
-    my @opened = stat($fh);
-    my @named = lstat($path);
-    exit 1 unless @opened && @named && -f $fh
-      && $opened[0] == $named[0] && $opened[1] == $named[1];
-    my $record = "";
-    while (index($record, "\n") < 0 && length($record) <= $max) {
-      my $chunk = "";
-      my $count = sysread($fh, $chunk, 4096);
-      exit 1 unless defined $count;
-      last if $count == 0;
-      $record .= $chunk;
-    }
-    my $newline = index($record, "\n");
-    $record = substr($record, 0, $newline) if $newline >= 0;
-    my @named_after = lstat($path);
-    exit 1 unless @named_after
-      && $opened[0] == $named_after[0] && $opened[1] == $named_after[1];
-    alarm 0;
-    exit 1 if $record eq "" || length($record) > $max || $record =~ /[\0\r]/;
-    print $record;
-  ' "$1" 65536
-}
-
 auditor_control_auditor_from_payload() {  # hook payload, event
-  local payload="$1" event="$2" agent_type transcript_path session_meta agent_path
+  local payload="$1" event="$2" agent_type transcript_path agent_path
   agent_type="$(printf '%s' "$payload" | jq -r '.agent_type // ""')"
   if auditor_control_canonical_auditor "$agent_type"; then
     return 0
@@ -123,19 +93,7 @@ auditor_control_auditor_from_payload() {  # hook payload, event
     *) return 1 ;;
   esac
   [[ -n "$transcript_path" ]] || return 1
-  session_meta="$(auditor_control_read_first_transcript_record "$transcript_path" 2>/dev/null)" || return 2
-  agent_path="$(printf '%s' "$session_meta" | jq -er \
-    --arg session "$(printf '%s' "$payload" | jq -r '.session_id')" \
-    --arg agent "$(printf '%s' "$payload" | jq -r '.agent_id // ""')" '
-      if .type == "session_meta"
-         and .payload.id == $agent
-         and .payload.session_id == $session
-         and .payload.thread_source == "subagent"
-         and .payload.source.subagent.thread_spawn.parent_thread_id == $session
-         and (.payload.source.subagent.thread_spawn.agent_path | type) == "string"
-      then .payload.source.subagent.thread_spawn.agent_path
-      else empty end
-    ' 2>/dev/null)" || return 2
+  agent_path="$(subagent_identity_codex_path "$payload" "$transcript_path")" || return 2
   auditor_control_canonical_auditor_from_path "$agent_path"
 }
 

@@ -12,12 +12,16 @@ source "$plugin/.agents/lib/subagent.sh"
 source "$plugin/.agents/lib/timed-user-prompt.sh"
 payload="$(cat)"
 repo="$(git -C "${CLAUDE_PROJECT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
-[[ -e "$repo/.agents/state/pr-size-request.json" || -L "$repo/.agents/state/pr-size-request.json" \
-  || -e "$repo/.agents/state/pr-review-request.json" || -L "$repo/.agents/state/pr-review-request.json" ]] || exit 0
+names=(pr-size-request pr-review-request design-decision-request)
+present=false
+for name in "${names[@]}"; do
+  [[ ! -e "$repo/.agents/state/$name.json" && ! -L "$repo/.agents/state/$name.json" ]] || present=true
+done
+[[ "$present" == true ]] || exit 0
 session="$(jq -er '.session_id // "" | select(type=="string")' <<<"$payload")" || exit 2
 head="$(git -C "$repo" rev-parse HEAD)" || exit 2
 branch="$(git -C "$repo" branch --show-current)" || exit 2
-for name in pr-size-request pr-review-request; do
+for name in "${names[@]}"; do
   path="$repo/.agents/state/$name.json"
   [[ -e "$path" || -L "$path" ]] || continue
   snapshot="$(verdict_audit_read_regular_state "$path" 16384 json)" || exit 2
@@ -40,11 +44,11 @@ for name in pr-size-request pr-review-request; do
       timed_user_prompt fallback "$path" "$id" >/dev/null || exit 2 ;;
     expired)
       [[ "$(jq -r .fallback_delivered <<<"$request")" == false ]] || continue
-      if [[ "$(jq -r .spec.fallback <<<"$request")" == split ]]; then
-        reason="$(subagent_prompt questions/timed-continue-expired-size "$plugin")" || exit 2
-      else
-        reason="$(subagent_prompt questions/timed-continue-expired-review "$plugin")" || exit 2
-      fi
+      case "$(jq -r .spec.fallback <<<"$request")" in
+        split) reason="$(subagent_prompt questions/timed-continue-expired-size "$plugin")" || exit 2 ;;
+        keep-blocked) reason="$(subagent_prompt questions/timed-continue-expired-design "$plugin")" || exit 2 ;;
+        *) reason="$(subagent_prompt questions/timed-continue-expired-review "$plugin")" || exit 2 ;;
+      esac
       timed_user_prompt fallback "$path" "$id" >/dev/null || exit 2 ;;
     *) continue ;;
   esac

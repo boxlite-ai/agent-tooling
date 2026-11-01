@@ -163,14 +163,14 @@ done
 record_research() { # PASS|FAIL, findings JSON
   jq -nc --arg sha "$(printf '%s' "$design" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" \
     --arg verdict "$1" --argjson findings "$2" '{content_sha256:$sha,verdict:$verdict,findings:$findings}' |
-    (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" research) >/dev/null ||
+    (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" verdict) >/dev/null ||
     { printf 'FAIL recording a research %s\n' "$1"; fail=$((fail+1)); }
 }
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' deny
 done
-expect_denial 'Claude Code is routed to the research auditor' claude 'boxlite-agent-tooling:design-research-auditor'
-expect_denial 'Codex is routed to the research auditor spec' codex '.claude/agents/design-research-auditor.md'
+expect_denial 'Claude Code is routed to the design auditor' claude 'boxlite-agent-tooling:design-auditor'
+expect_denial 'Codex is routed to the design auditor spec' codex '.claude/agents/design-auditor.md'
 record_research FAIL '["research: no source supports the retry limit; cite one"]'
 check Write 'edit source' deny
 expect_denial 'a failed review lists its findings' codex 'no source supports the retry limit'
@@ -180,8 +180,64 @@ for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
 done
 publish "$design"$'\n\nA later decision.'
 check Write 'edit source' deny
-expect_denial 'an edited design needs a new review' codex 'design-research-auditor'
+expect_denial 'an edited design needs a new review' codex 'design-auditor'
 publish "$design"
+check Write 'edit source' allow
+# The research loop through the hook (design #309).
+cat > "$scratch/bin/date" <<'SH'
+#!/usr/bin/env bash
+if [[ -n "${DESIGN_TEST_CLOCK:-}" ]]; then cat "$DESIGN_TEST_CLOCK"; else exec /bin/date "$@"; fi
+SH
+chmod +x "$scratch/bin/date"
+record_on() { # design text, findings JSON -> FAIL (PASS when empty) for that text
+  jq -nc --arg sha "$(printf '%s' "$1" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" \
+    --argjson findings "$2" '{content_sha256:$sha, verdict:(if $findings == [] then "PASS" else "FAIL" end),
+      findings:$findings}' | (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" verdict) >/dev/null ||
+    { printf 'FAIL recording research for a revision\n'; fail=$((fail+1)); }
+}
+revision() { printf '%s\n\nRevision %s.' "$design" "$1"; }
+said() { # description, output, expected text
+  if [[ "$2" == *"$3"* ]]; then printf 'PASS %s\n' "$1"; pass=$((pass+1))
+  else printf 'FAIL %s: %s\n' "$1" "$2"; fail=$((fail+1)); fi
+}
+typed() { # prompt text, session -> what the prompt hook's research helper reports
+  jq -nc --arg prompt "$1" --arg session "${2:-}" '{prompt:$prompt} + if $session == "" then {} else {session_id:$session} end' |
+    (cd "$scratch/repo" && CLAUDE_PROJECT_DIR="$scratch/repo" bash "$plugin/.agents/hooks/design-decision-prompt.sh")
+}
+two='["high: research: A","high: research: B"]'
+publish "$(revision 1)"; record_on "$(revision 1)" "$two"
+publish "$(revision 2)"
+expect_denial 'an edited design sends prior findings to the auditor' codex 'prior_findings'
+record_on "$(revision 2)" '["high: research: C"]'
+expect_denial 'a converging FAIL 2 asks for a reflection' codex "scripts/design-doc.sh\" reflect"
+rm -f "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
+record_on "$(revision 2)" "$two"
+publish "$(revision 3)"; record_on "$(revision 3)" '["high: research: A"]'
+expect_denial 'a repeated finding at FAIL 2 stops the loop' codex 'INCOMPLETE: the design-audit loop stopped after FAIL 2'
+expect_denial 'the stop names the typed decision line' codex 'design-decision: <Redesign|Reflect again|Overrule> <reason>'
+said 'a bare choice records nothing' "$(typed 'design-decision: Overrule')" 'nothing recorded'
+said 'another session cannot decide' "$(typed 'design-decision: Overrule fine' other-session)" 'another session'
+check Write 'edit source' deny
+said 'a typed first line records the choice' "$(typed $'design-decision: Overrule the gaps are acceptable\nthanks')" 'recorded'
+for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
+  check "$tool" 'edit source' allow
+done
+said 'the overrule is never PASS' "$(jq -r .verdict "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit.json")" OVERRIDDEN
+publish "$(revision 4)"; record_on "$(revision 4)" "$two"
+publish "$(revision 5)"; record_on "$(revision 5)" "$two"
+# Earlier requests used the real clock, so the test clock starts after it.
+export DESIGN_TEST_CLOCK="$scratch/clock"
+started=$(( $(/bin/date -u +%s) + 10 ))
+printf '%s\n' "$started" > "$DESIGN_TEST_CLOCK"
+expect_denial 'no drop in findings stops the loop' codex 'INCOMPLETE'
+printf '%s\n' "$(( started + 301 ))" > "$DESIGN_TEST_CLOCK"
+expect_denial 'an unanswered stop keeps edits blocked' codex 'edits stay blocked'
+check Write 'edit source' deny
+said 'a late typed line still counts' "$(typed 'design-decision: Redesign start from the findings')" 'recorded'
+expect_denial 'Redesign asks for a fresh draft' codex 'The human chose Redesign'
+unset DESIGN_TEST_CLOCK
+said 'the prompt hook routes typed decisions' "$(cat "$plugin/.agents/hooks/cancel-verdict-audit.sh")" 'design-decision-prompt.sh'
+publish "$design"; record_on "$design" '[]'
 check Write 'edit source' allow
 export DOC_ERROR=1
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do

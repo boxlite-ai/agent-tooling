@@ -83,7 +83,7 @@ verdict() { # SHA-256, PASS|FAIL, findings JSON -> the auditor's record
 }
 record() { # description, exit status, record
   local description="$1" expected="$2" status=0
-  bash "$cli" research <<<"$3" > "$scratch/out" 2> "$scratch/err" || status=$?
+  bash "$cli" verdict <<<"$3" > "$scratch/out" 2> "$scratch/err" || status=$?
   if [[ "$status" == "$expected" ]]; then
     printf 'PASS %s\n' "$description"; pass=$((pass+1))
   else
@@ -100,6 +100,123 @@ record 'malformed input is rejected' 1 'not json'
 record 'a FAIL with findings is recorded' 0 "$(verdict "$reviewed" FAIL '["research: gap; check"]')"
 record 'a PASS for the reviewed content is recorded' 0 "$(verdict "$reviewed" PASS '[]')"
 expect 'recording leaves the binding intact' 0 check
+
+# The research loop (design #309): severity, carried findings, the FAIL cap, and the
+# human's choice. Each revision is new design content.
+research_state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
+revise() { # label -> SHA-256 of the published revision
+  github_doc $'## TL;DR\n\nVerify designs before edits.\n\nRevision '"$1"'.'
+  content_hash "$(jq -r .body "$DOC_FIXTURE")"
+}
+gate() { # operation [argument] -> design_doc_binding through the library, as the hook calls it
+  bash -c 'for lib in verdict-audit-state reply-summary concise-writing design-doc; do
+      source "$1/.agents/lib/$lib.sh" || exit 2; done
+    design_doc_binding "$2" "$PWD" "${3:-}"' gate "$plugin" "$@"
+}
+review() { # SHA-256, findings JSON, advisories JSON -> the auditor's record
+  jq -nc --arg sha "$1" --argjson findings "$2" --argjson advisories "${3:-[]}" \
+    '{content_sha256:$sha, verdict:(if $findings == [] then "PASS" else "FAIL" end),
+      findings:$findings, advisories:$advisories}'
+}
+high() { jq -nc --arg gap "$1" '["high: research: " + $gap]'; }
+outcome() { # description, wanted status, status
+  if [[ "$3" == "$2" ]]; then printf 'PASS %s\n' "$1"; pass=$((pass+1))
+  else printf 'FAIL %s (exit %s, wanted %s)\n' "$1" "$3" "$2"; cat "$scratch/err"; fail=$((fail+1)); fi
+}
+request_has() { # description, jq condition on the edit gate's request
+  local request status=0
+  request="$(gate edit 2>"$scratch/err")" || status=$?
+  jq -e "$2" <<<"$request" >/dev/null 2>&1 || status="unmatched $status: $request"
+  outcome "$1" 3 "$status"
+}
+decide() { local status=0; gate decide "$3" >/dev/null 2>"$scratch/err" || status=$?; outcome "$1" "$2" "$status"; }
+reflect() { local status=0; bash "$cli" reflect <<<"$3" >/dev/null 2>"$scratch/err" || status=$?; outcome "$1" "$2" "$status"; }
+reflection() { # gate request -> a reflection bound to its history and FAIL ids
+  jq -c '{history_hash, failure_ids, diagnosis:"the first fix edited wording only",
+    previous_fixes_failed_because:"no source was re-read", changed_approach:"re-derive claims from sources",
+    checks:[{command:"rg -n claim design.md", expected:"one source", observed:"one source",
+      evidence:"design.md:3"}], auditor_gaps:[]}' <<<"$1"
+}
+two='["high: research: Fidelity: quote lacks subject","critical: research: Search: no log"]'
+a="$(revise a)"
+record 'advisories alone record PASS' 0 "$(review "$a" '[]' '["low: research: Search: wording"]')"
+status=0; gate edit >/dev/null 2>"$scratch/err" || status=$?
+outcome 'a PASS with advisories allows edits' 0 "$status"
+record 'a high advisory is rejected' 1 "$(review "$a" '[]' '["high: research: Search: missed item"]')"
+record 'FAIL 1 records its findings' 0 "$(review "$a" "$two")"
+b="$(revise b)"
+request_has 'findings survive an edit' ".prior_findings == $two and .findings == [] and .fails == 1"
+record 'FAIL 2 with fewer, new findings records' 0 "$(review "$b" "$(high 'Alternatives: reuse unexamined')")"
+request_has 'a converging FAIL 2 waits for a reflection' '.reflection_due and (.blocked | not) and .fails == 2'
+record 'audit 3 is refused before the reflection' 1 "$(review "$b" '[]')"
+request="$(gate edit 2>/dev/null)" || true
+reflect 'a reflection missing the FAIL ids is refused' 1 "$(reflection "$request" | jq -c '.failure_ids = ["1:x","2:y"]')"
+reflect 'a reflection bound to this history is stored' 0 "$(reflection "$request")"
+request_has 'the reflected loop asks for audit 3' '(.reflection_due | not) and (.blocked | not)'
+c="$(revise c)"
+record 'FAIL 3 records' 0 "$(review "$c" "$(high 'Transfer: unsupported')")"
+request_has 'FAIL 3 stops for the human' '.blocked and .stop == "cap" and .fails == 3'
+record 'a stopped loop refuses another verdict' 1 "$(review "$c" '[]')"
+decide 'a choice the gate does not know is refused' 1 'Approve'
+decide 'Reflect again reopens one audit' 0 'Reflect again'
+request_has 'Reflect again waits for a reflection' '.reflection_due and (.blocked | not)'
+request="$(gate edit 2>/dev/null)" || true
+reflect 'the second reflection binds all three FAILs' 0 "$(reflection "$request")"
+record 'the extra audit fails' 0 "$(review "$c" "$(high 'Transfer: unsupported')")"
+request_has 'a FAIL after Reflect again stops again' '.blocked and .stop == "cap" and .fails == 4'
+decide 'Overrule ends the loop' 0 Overrule
+status=0; gate edit >/dev/null 2>"$scratch/err" || status=$?
+outcome 'an overrule allows edits for this content' 0 "$status"
+status=0; [[ "$(jq -r .verdict "$research_state")" == OVERRIDDEN ]] || status=1
+outcome 'an overrule is recorded as OVERRIDDEN, never PASS' 0 "$status"
+decide 'no decision is pending after an overrule' 1 Overrule
+d="$(revise d)"
+request_has 'overruled findings ride along, marked' \
+  '.prior_findings == ["overruled: high: research: Transfer: unsupported"] and .fails == 0'
+record 'FAIL 1 of a new cycle' 0 "$(review "$d" "$two")"
+e="$(revise e)"
+record 'a repeated finding at FAIL 2 records' 0 "$(review "$e" '["high: research: Fidelity: quote lacks subject"]')"
+request_has 'a repeated finding stops at FAIL 2' '.blocked and .stop == "early" and .fails == 2'
+decide 'Redesign resets the count' 0 Redesign
+request_has 'Redesign asks for a fresh draft' '.redesign and .fails == 0 and (.blocked | not)'
+record 'the failed draft cannot be audited after Redesign' 1 "$(review "$e" '[]')"
+f="$(revise f)"
+request_has 'a fresh draft starts a new count' '(.redesign | not) and .fails == 0'
+record 'FAIL 1 again' 0 "$(review "$f" "$(high 'Search: thin log')")"
+g="$(revise g)"
+record 'FAIL 2 with as many new findings records' 0 "$(review "$g" "$(high 'Local fit: unchecked')")"
+request_has 'no drop in findings stops at FAIL 2' '.blocked and .stop == "early"'
+decide 'Overrule again' 0 Overrule
+h="$(revise h)"
+record 'FAIL 1 before rebinding' 0 "$(review "$h" "$two")"
+other=https://github.com/example/project/issues/2
+jq -nc --arg url "$other" --arg body "$(jq -r .body "$DOC_FIXTURE")" '{html_url:$url,body:$body}' > "$DOC_FIXTURE"
+expect 'another design URL can be registered' 0 register "$other"
+request_has 'another URL gets no prior findings but keeps the count' '.prior_findings == [] and .fails == 1'
+record 'FAIL 2 after rebinding records' 0 "$(review "$h" "$two")"
+request_has 'rebinding cannot reset the count' '.blocked and .fails == 2'
+github_doc $'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
+expect 'the original design is registered again' 0 register "$url"
+jq -nc --arg root "$(pwd -P)" --arg url "$url" --arg sha "$h" '{root:$root, branch:"feature",
+  url:$url, content_sha256:$sha, verdict:"FAIL", findings:["research: legacy finding"]}' > "$research_state"
+request_has 'a legacy FAIL counts once and carries its findings' \
+  '.prior_findings == ["research: legacy finding"] and .fails == 1'
+jq '. + {advisories:[], failures:[], stop:"sideways", extra:false, reflection:null, overruled:[]}' \
+  "$research_state" > "$scratch/malformed" && mv "$scratch/malformed" "$research_state"
+request="$(gate edit 2>/dev/null)" && status=0 || status=$?
+[[ -z "$request" ]] || status="request printed"
+outcome 'a malformed loop state fails closed' 3 "$status"
+record 'a malformed loop state takes no verdict' 1 "$(verdict "$reviewed" PASS '[]')"
+rm -f "$research_state"
+# Verdicts recorded before the rename stay readable until the next one is written.
+legacy="$(git rev-parse --absolute-git-dir)/agent-tooling-design-research.json"
+jq -nc --arg root "$(pwd -P)" --arg url "$url" --arg sha "$reviewed" '{root:$root, branch:"feature",
+  url:$url, content_sha256:$sha, verdict:"PASS", findings:[]}' > "$legacy"
+status=0; gate edit >/dev/null 2>"$scratch/err" || status=$?
+outcome 'a PASS in the old state file still allows edits' 0 "$status"
+rm -f "$legacy"
+status=0; bash "$cli" research <<<"$(verdict "$reviewed" PASS '[]')" >/dev/null 2>"$scratch/err" || status=$?
+outcome 'research remains an alias of verdict' 0 "$status"
 git checkout -qb different
 expect 'another branch cannot reuse binding' 1 check
 expect 'another branch cannot show the binding' 1 show

@@ -71,6 +71,7 @@ setup() {  # [object format] -> repo path
     "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
     "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
     "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
+    "$REPO_ROOT/.agents/lib/subagent-identity.sh" \
     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
     "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
   cp -R "$REPO_ROOT/.agents/prompts/." "$d/.agents/prompts/"

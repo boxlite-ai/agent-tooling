@@ -153,4 +153,21 @@ chmod +x "$scratch/bin/claude"
 out="$(PATH="$scratch/bin:$PATH" bash "$plugin/scripts/claude-with-timed-prompts.sh" --resume 'session with spaces')"
 [[ "$out" == $'300000\n--settings\n{"remoteControlAtStartup":false,"disableRemoteControl":true}\n--resume\nsession with spaces\n--plugin-dir\n'"$plugin" ]]
 reject env PATH="$scratch/bin:$PATH" CLAUDE_TEST_VERSION=2.1.197 bash "$plugin/scripts/claude-with-timed-prompts.sh"
-printf 'Claude timed prompts: host route, native reply, timeout, replay, review marker, and launcher passed\n'
+# Design decisions: only the managed question, answered by the human, records a choice.
+state="$repo/.agents/state/design-decision-request.json"
+spec="$(jq -nc --arg root "$repo" --arg head "$(git rev-parse HEAD)" \
+  '{binding:{root:$root,head:$head,branch:"feature",session:"native",url:"u",fails:3,stop:"cap"},prefix:"design-decision:",fallback:"keep-blocked",minimum_words:1}')"
+id="$(bash "$cli" request "$state" "$spec" | jq -r .id)"
+question="$(bash "$cli" question "$state" "$id")"
+key="$(jq -r '.questions[0].question' <<<"$question")"
+tool_id=design-1
+saved_question="$question"
+question="$(jq '.questions[0].options[2].label = "Approve"' <<<"$question")"
+reject call_hook PreToolUse
+question="$saved_question"
+call_hook PreToolUse
+reject call_hook PostToolUse "$(reply 'Approve it')"
+jq -e '.status=="pending"' "$state" >/dev/null
+call_hook PostToolUse "$(reply Overrule)"
+jq -e '.status=="accepted" and .response=="Overrule"' "$state" >/dev/null
+printf 'Claude timed prompts: host route, native reply, timeout, replay, review marker, design decision, and launcher passed\n'

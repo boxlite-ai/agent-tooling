@@ -1027,6 +1027,26 @@ check_eq "a new prompt removes every generation-owned native prior snapshot" \
   "${remaining_prior_inputs:-none}" none
 rm -rf "$R"
 
+echo "## A typed design-decision first line is recorded only for its own session"
+R="$(setup)"
+dd_state="$R/.agents/state/design-decision-request.json"
+dd_spec="$(jq -nc --arg root "$(cd "$R" && pwd -P)" --arg branch "$(git -C "$R" branch --show-current)" \
+  --arg head "$(git -C "$R" rev-parse HEAD)" '{binding:{root:$root,branch:$branch,head:$head,
+  session:"dd-session",url:"u",fails:3,stop:"cap"},prefix:"design-decision:",fallback:"keep-blocked",minimum_words:1}')"
+bash "$REPO_ROOT/scripts/timed-user-prompt.sh" request "$dd_state" "$dd_spec" >/dev/null
+decide_prompt() {  # session prompt -> what the prompt hook printed
+  jq -nc --arg s "$1" --arg p "$2" '{hook_event_name:"UserPromptSubmit",session_id:$s,turn_id:"dd",prompt:$p}' \
+    | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$HOOK" 2>/dev/null )
+}
+decide_prompt dd-session $'please consider\ndesign-decision: Overrule not the first line' >/dev/null
+check_eq "a decision below the first prompt line records nothing" "$(jq -r .status "$dd_state")" pending
+decide_prompt other-session 'design-decision: Overrule from another session' >/dev/null
+check_eq "another session cannot record the decision" "$(jq -r .status "$dd_state")" pending
+dd_out="$(decide_prompt dd-session 'design-decision: Overrule the open gaps are acceptable')"
+check_eq "the human's typed first line records the decision" \
+  "$(jq -r .status "$dd_state"):$([[ "$dd_out" == *recorded* ]] && echo reported || echo silent)" accepted:reported
+rm -rf "$R"
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

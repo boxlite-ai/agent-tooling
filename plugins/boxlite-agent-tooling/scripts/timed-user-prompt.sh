@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # shellcheck source-path=SCRIPTDIR
 # Shared confirmation CLI; respond/renew require the human response/instruction verbatim.
+# Native and prompt replies belong to their hooks, so the CLI cannot record them.
 set -euo pipefail
-[[ $# -ge 3 && $# -le 4 ]] || {
-  printf 'usage: timed-user-prompt.sh request|status|respond|renew|consume|fallback STATE SPEC_OR_ID [HUMAN_TEXT]\n' >&2
+[[ $# -ge 3 && $# -le 4 && "$1" =~ ^(request|status|question|respond|renew|consume|fallback)$ ]] || {
+  printf 'usage: timed-user-prompt.sh request|status|question|respond|renew|consume|fallback STATE SPEC_OR_ID [HUMAN_TEXT]\n' >&2
   exit 2
 }
 for dependency in jq perl date; do
