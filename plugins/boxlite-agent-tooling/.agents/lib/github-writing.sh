@@ -3,8 +3,8 @@
 # Requires reply-summary.sh, concise-writing.sh, perl and jq. No file reads or writes.
 # Public checks print a bounded diagnostic on rejection and return 1; success is
 # silent. The caller appends the shared writing reminder and renders the host response.
-# CLI flag reference: cli/cli pkg/cmd/pr/comment/comment.go:107-114.
-# https://github.com/cli/cli/blob/trunk/pkg/cmd/pr/comment/comment.go#L107-L114
+# github_writing_check returns 2 instead when gh itself would reject the options, which
+# is no writing problem, so that diagnostic goes out without the reminder.
 # shellcheck disable=SC2154 # Policy constants are owned by sourced reply-summary.sh.
 
 github_writing_check_privacy() { # literal published text; no transcript access
@@ -84,44 +84,153 @@ _github_writing_graphql_nonwriting() { # literal query
   '
 }
 
-_github_writing_api() { # literal-argv(0|1), api argv
-  local literal="$1" token value key method="" endpoint="" query="" input=0 has_fields=0 kind=""
-  local bodies=() titles=() body_count=0 title_count=0
-  shift
+# gh 2.92.0 options per covered command, as `gh help <command>` lists them: `long` is a
+# boolean, `long=` takes a value, and `s/` adds its shorthand. Every command inherits
+# the boolean --help; none defines -h, which pflag then reads as a help request.
+# When gh adds options, regenerate these lines from `gh help` (#308).
+_github_writing_spec() { # group:operation -> spec
+  case "$1" in
+    api:*) printf '%s' 'F/field= H/header= X/method= cache= f/raw-field= help hostname= i/include input= p/preview= paginate q/jq= silent slurp t/template= verbose' ;;
+    issue:create) printf '%s' 'F/body-file= R/repo= T/template= a/assignee= b/body= e/editor help l/label= m/milestone= p/project= recover= t/title= w/web' ;;
+    issue:comment|pr:comment) printf '%s' 'F/body-file= R/repo= b/body= create-if-none delete-last e/editor edit-last help w/web yes' ;;
+    issue:edit) printf '%s' 'F/body-file= R/repo= add-assignee= add-label= add-project= b/body= help m/milestone= remove-assignee= remove-label= remove-milestone remove-project= t/title=' ;;
+    issue:close) printf '%s' 'R/repo= c/comment= duplicate-of= help r/reason=' ;;
+    issue:reopen|pr:reopen) printf '%s' 'R/repo= c/comment= help' ;;
+    pr:create) printf '%s' 'B/base= F/body-file= H/head= R/repo= T/template= a/assignee= b/body= d/draft dry-run e/editor f/fill fill-first fill-verbose help l/label= m/milestone= no-maintainer-edit p/project= r/reviewer= recover= t/title= w/web' ;;
+    pr:review) printf '%s' 'F/body-file= R/repo= a/approve b/body= c/comment help r/request-changes' ;;
+    pr:close) printf '%s' 'R/repo= c/comment= d/delete-branch help' ;;
+    release:create) printf '%s' 'F/notes-file= R/repo= d/draft discussion-category= fail-on-no-commits generate-notes help latest n/notes= notes-from-tag notes-start-tag= p/prerelease t/title= target= verify-tag' ;;
+    release:edit) printf '%s' 'F/notes-file= R/repo= discussion-category= draft help latest n/notes= prerelease t/title= tag= target= verify-tag' ;;
+    # gh 2.92.0 has no discussion command; keep the options this check accepted before.
+    discussion:*) printf '%s' 'B/base= F/body-file= H/head= R/repo= T/template= a/assignee= add-assignee= add-label= add-project= add-reviewer= approve b/body= c/comment= category= create-if-none d/draft delete-branch delete-last discussion-category= discussion-id= dry-run e/editor edit-last f/fill fail-on-no-commits fill-first fill-verbose generate-notes help hostname= l/label= latest m/milestone= n/notes= no-maintainer-edit notes-file= notes-from-tag notes-start-tag= p/prerelease project= r/reviewer= reason= recover= remove-assignee= remove-label= remove-milestone remove-project= remove-reviewer= request-changes t/title= target= verify-tag w/web yes' ;;
+  esac
+}
+
+_github_writing_bool() { # value -> true or false, as Go's strconv.ParseBool reads it
+  case "$1" in
+    1|t|T|true|TRUE|True) printf true ;;
+    0|f|F|false|FALSE|False) printf false ;;
+    *) return 1 ;;
+  esac
+}
+
+_github_writing_option_error() { # command label, option shown (may be empty), problem (empty: unknown)
+  local subject="$1 option"
+  [[ -z "$2" ]] || subject+=" \`$2\`"
+  if [[ -n "$3" ]]; then printf '%s %s' "$subject" "$3"; else printf 'Unrecognized %s' "$subject"; fi
+  # shellcheck disable=SC2016 # Literal Markdown code span, never shell expansion.
+  printf '; nothing was authorized. Check `gh help %s`.' "${1#gh }"
+}
+
+# Read argv as pflag v1.0.10 does (flag.go:980-1160): --name, --name=value, -x value,
+# -xvalue, -x=value and grouped shorthands such as -iq; `--` ends options; other words
+# are operands. Options go to _github_writing_options as name=value, in order, and
+# operands to _github_writing_operands. Returns 2 when gh would print help instead
+# of running: a reached -h, or a final --help that is true.
+_github_writing_parse() { # command label, spec, argv...
+  local label="$1" spec=" $2 " token name value has_value shorts letter entry help=false
+  shift 2
+  _github_writing_options=()
+  _github_writing_operands=()
   while (( $# )); do
     token="$1"; shift
     case "$token" in
-      --method|-X|--input|--field|-F|--raw-field|-f|--hostname|--header|-H|--jq|-q|--template|-t|--cache)
-        (( $# )) || { _github_writing_opaque; return 1; }
-        value="$1"; shift ;;
-      --*=*) value="${token#*=}"; token="${token%%=*}" ;;
-      -[XfF]?*) value="${token:2}"; value="${value#=}"; token="${token:0:2}" ;;
-      --paginate|--slurp|--silent|--include|-i|--verbose) continue ;;
-      -*) _github_writing_opaque; return 1 ;;
-      *) endpoint="$token"; continue ;;
+      --) _github_writing_operands+=("$@"); break ;;
+      --*)
+        name="${token#--}"; value=""; has_value=0
+        if [[ "$name" == *=* ]]; then value="${name#*=}"; name="${name%%=*}"; has_value=1; fi
+        # Name only spellings gh could define, so the diagnostic never echoes data.
+        if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,39}$ ]]; then
+          _github_writing_option_error "$label" '' ''; return 1
+        elif [[ "$spec" == *" $name "* || "$spec" == *"/$name "* ]]; then
+          (( has_value )) || value=true
+          value="$(_github_writing_bool "$value")" || {
+            _github_writing_option_error "$label" "--$name" 'takes true or false'; return 1; }
+        elif [[ "$spec" == *" $name= "* || "$spec" == *"/$name= "* ]]; then
+          if (( !has_value )); then
+            (( $# )) || { _github_writing_option_error "$label" "--$name" 'needs a value'; return 1; }
+            value="$1"; shift
+          fi
+        else
+          _github_writing_option_error "$label" "--$name" ''; return 1
+        fi
+        [[ "$name" != help ]] || help="$value"
+        _github_writing_options+=("$name=$value") ;;
+      -?*)
+        shorts="${token#-}"
+        while [[ -n "$shorts" ]]; do
+          # pflag skips the rest of a cluster that starts like a Go test flag (-test.v).
+          [[ "$shorts" != test.* ]] || break
+          letter="${shorts:0:1}"; shorts="${shorts:1}"
+          if [[ "$letter" != [A-Za-z0-9] ]]; then
+            _github_writing_option_error "$label" '' ''; return 1
+          elif [[ "$spec" != *" $letter/"* ]]; then
+            [[ "$letter" != h ]] || return 2
+            _github_writing_option_error "$label" "-$letter" ''; return 1
+          fi
+          entry="${spec#* "$letter"/}"; entry="${entry%% *}"; name="${entry%=}"
+          if [[ "$shorts" == =?* ]]; then
+            value="${shorts#=}"; shorts=""
+          elif [[ "$entry" != *= ]]; then
+            value=true
+          elif [[ -n "$shorts" ]]; then
+            value="$shorts"; shorts=""
+          elif (( $# )); then
+            value="$1"; shift
+          else
+            _github_writing_option_error "$label" "-$letter" 'needs a value'; return 1
+          fi
+          if [[ "$entry" != *= ]]; then
+            value="$(_github_writing_bool "$value")" || {
+              _github_writing_option_error "$label" "-$letter" 'takes true or false'; return 1; }
+          fi
+          [[ "$name" != help ]] || help="$value"
+          _github_writing_options+=("$name=$value")
+        done ;;
+      *) _github_writing_operands+=("$token") ;;
     esac
-    case "$token" in
-      --method|-X) method="$value" ;;
-      --input) input=1 ;;
-      --field|-F|--raw-field|-f)
+  done
+  [[ "$help" != true ]] || return 2
+}
+
+_github_writing_api() { # literal-argv(0|1), api argv
+  local literal="$1" option name value key method="" endpoint="" query="" input=0 has_fields=0 kind=""
+  local bodies=() titles=() body_count=0 title_count=0
+  shift
+  _github_writing_parse 'gh api' "$(_github_writing_spec api:)" "$@"
+  case $? in
+    1) return 2 ;;
+    # gh prints help and sends nothing, but a dynamic word could consume the flag.
+    2) (( !literal )) || return 0
+       _github_writing_opaque; return 1 ;;
+  esac
+  for option in ${_github_writing_options[@]+"${_github_writing_options[@]}"}; do
+    name="${option%%=*}"; value="${option#*=}"
+    case "$name" in
+      method) method="$value" ;;
+      input) input=1 ;;
+      field|raw-field)
         has_fields=1
         key="${value%%=*}"; value="${value#*=}"
         case "$key" in
           query) query="$value" ;;
           title|*'[title]')
-            if [[ ( "$token" == --field || "$token" == -F ) && "$value" == @* ]]; then
+            if [[ "$name" == field && "$value" == @* ]]; then
               input=1
             else
               titles[title_count]="$value"; title_count=$((title_count + 1))
             fi ;;
           body|bodyText|description|notes|*'[body]'|*'[bodyText]'|*'[description]')
-            if [[ ( "$token" == --field || "$token" == -F ) && "$value" == @* ]]; then
+            if [[ "$name" == field && "$value" == @* ]]; then
               input=1
             else
               bodies[body_count]="$value"; body_count=$((body_count + 1))
             fi ;;
         esac ;;
     esac
+  done
+  for value in ${_github_writing_operands[@]+"${_github_writing_operands[@]}"}; do
+    endpoint="$value"
   done
   case "$method" in GET|HEAD|OPTIONS|DELETE) return 0 ;; esac
   # Without fields/input gh defaults to GET, even with a dynamic endpoint.
@@ -156,7 +265,7 @@ _github_writing_api() { # literal-argv(0|1), api argv
 }
 
 github_writing_check() { # literal-argv(0|1), gh arguments after global options
-  local literal="$1" group="${2-}" operation="${3-}" token value kind=""
+  local literal="$1" group="${2-}" operation="${3-}" option name value kind=""
   local required=0 has_body=0 has_option=0 deleting=0
   shift
   # gh persistent flags can occur between its noun and verb as well as before it.
@@ -192,48 +301,29 @@ github_writing_check() { # literal-argv(0|1), gh arguments after global options
   esac
   (( literal )) || { _github_writing_opaque; return 1; }
   shift 2
-  while (( $# )); do
-    token="$1"; shift
-    case "$token" in
-      --title|-t)
-        (( $# )) || { _github_writing_opaque; return 1; }
-        github_writing_check_privacy "$1" || return 1
-        shift; has_option=1; continue ;;
-      --title=*|-t?*)
-        value="${token#--title=}"; [[ "$token" == --title=* ]] || value="${token:2}"
-        github_writing_check_privacy "${value#=}" || return 1
-        has_option=1; continue ;;
-      --body|-b|--notes|-n|--comment|-c)
-        # --comment/-c on pr review is a boolean, on close/reopen it is text.
-        if [[ "$group:$operation" == pr:review && ( "$token" == --comment || "$token" == -c ) ]]; then
-          required=1; has_option=1; continue
+  _github_writing_parse "gh $group $operation" "$(_github_writing_spec "$group:$operation")" "$@"
+  case $? in
+    1) return 2 ;;
+    2) return 0 ;; # gh prints help and runs nothing.
+  esac
+  for option in ${_github_writing_options[@]+"${_github_writing_options[@]}"}; do
+    name="${option%%=*}"; value="${option#*=}"
+    has_option=1
+    case "$name" in
+      title) github_writing_check_privacy "$value" || return 1 ;;
+      body|notes|comment)
+        # --comment is a boolean on pr review and text on close/reopen.
+        if [[ "$group:$operation" == pr:review && "$name" == comment ]]; then
+          [[ "$value" != true ]] || required=1
+          continue
         fi
-        (( $# )) || { _github_writing_opaque; return 1; }
-        value="$1"; shift ;;
-      --body=*|--notes=*|--comment=*) value="${token#*=}" ;;
-      -[bnc]?*) value="${token:2}"; value="${value#=}" ;;
-      --body-file|--body-file=*|-F*|--notes-file|--notes-file=*|--editor|-e|--web|-w|--fill*|-f|--template|--template=*|-T*|--recover*|--generate-notes|--notes-from-tag)
-        _github_writing_opaque; return 1 ;;
-      --delete-last) deleting=1; has_option=1; continue ;;
-      --help|-h) return 0 ;;
-      --draft|--draft=*|-d|-d=*|--prerelease|-p|--latest|--latest=*|--verify-tag|--fail-on-no-commits|--edit-last|--create-if-none|--yes|--approve|--request-changes|--delete-branch|--dry-run|--no-maintainer-edit|--remove-milestone|--discussion-id=*)
-        has_option=1; continue ;;
-      -a|-r)
-        if [[ "$group:$operation" != pr:review ]]; then
-          (( $# )) || { _github_writing_opaque; return 1; }
-          shift
-        fi
-        has_option=1; continue ;;
-      --repo|-R|--hostname|--label|-l|--assignee|--milestone|-m|--project|--reviewer|--base|-B|--head|-H|--target|--notes-start-tag|--discussion-category|--category|--reason|--add-label|--remove-label|--add-assignee|--remove-assignee|--add-project|--remove-project)
-        (( $# )) || { _github_writing_opaque; return 1; }
-        shift; has_option=1; continue ;;
-      --repo=*|--hostname=*|--label=*|--assignee=*|--milestone=*|--project=*|--reviewer=*|--base=*|--head=*|--target=*|--notes-start-tag=*|--discussion-category=*|--category=*|--reason=*|--add-*=*|--remove-*=*|-R?*|-l?*|-m?*|-B?*|-H?*)
-        has_option=1; continue ;;
-      -*) _github_writing_opaque; return 1 ;;
-      *) continue ;;
+        github_writing_check_body "$value" "$kind" || return 1
+        has_body=1 ;;
+      body-file|notes-file|template|recover) _github_writing_opaque; return 1 ;;
+      editor|web|fill|fill-first|fill-verbose|generate-notes|notes-from-tag)
+        [[ "$value" != true ]] || { _github_writing_opaque; return 1; } ;;
+      delete-last) [[ "$value" != true ]] || deleting=1 ;;
     esac
-    github_writing_check_body "$value" "$kind" || return 1
-    has_body=1; has_option=1
   done
   if (( (required && !has_body && !deleting) || !has_option )); then
     _github_writing_opaque; return 1
