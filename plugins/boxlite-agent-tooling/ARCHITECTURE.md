@@ -198,6 +198,24 @@ rejected because their final published text is outside this check. Read-only com
 and body-preserving operations, including close/reopen without comments, pass through.
 Visible writes behind unsupported launchers fail closed. GraphQL detection skips
 comments and quoted strings and recognizes all ignored token separators.
+
+Options are read as gh's pflag v1.0.10 reads them, from per-command gh 2.92.0 specs in
+`_github_writing_spec`, so every spelling gh accepts gets one decision
+([#308](https://github.com/boxlite-ai/agent-tooling/issues/308)):
+
+- An unknown option, a missing value or a non-boolean value gets a diagnostic naming the
+  option and `gh help`, without the writing reminder, since gh would run nothing.
+- A reached `-h`, or a final `--help` that is true, passes in literal argv: gh prints help.
+  The PR gate likewise passes `gh pr create|edit|ready [selector] --help|-h`.
+- Output redirections that Bourne-Again, its POSIX mode, the Z shell and Debian Almquist
+  read alike leave argv: an optional 1 or 2, then `>`, `>>` or `>|` with a plain target,
+  or `2>&1`-style duplication and closing. The scanner records escapes per word, so
+  `\2>&1` stays an argument. Input redirections can feed gh text, and other forms differ
+  between shells, so both keep the command non-literal.
+- When gh adds options, regenerate the specs from `gh help`; until then they get the
+  diagnostic. Argv forms still misread are tracked in
+  [#314](https://github.com/boxlite-ai/agent-tooling/issues/314).
+
 This is a hook on recognized `gh`
 commands, not a GitHub server policy: other clients, script files, browser edits and
 later bot additions are outside it. Writing denials never consume an acknowledgment.

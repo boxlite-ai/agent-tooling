@@ -187,6 +187,15 @@ echo "## Matcher: should gate"
 run "gh pr create direct"               "gh pr create -t foo"               "deny"
 run "gh pr edit direct"                 "gh pr edit 42 --body foo"          "deny"
 run "gh pr ready direct"                "gh pr ready 42"                    "deny"
+# gh prints help and runs nothing for help alone (#308), so it is no gated transition.
+run "help for create"                   "gh pr create --help"               "passthrough"
+run "help for edit"                     "gh pr edit --help"                 "passthrough"
+run "help for ready"                    "gh pr ready --help"                "passthrough"
+run "short help after a selector"       "gh pr ready 42 -h"                 "passthrough"
+run "help does not exempt other arguments" \
+  "gh pr create --help --title oops --body prose"                           "deny"
+run "false help stays gated"            "gh pr ready 42 --help=false"       "deny"
+run "help behind a launcher stays gated" "nohup gh pr ready --help"         "deny"
 run "repo override between noun and create" \
   "gh pr --repo other-owner/other-repo create --title oops --body prose"     "deny"
 run "repo override between noun and edit" \

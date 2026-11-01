@@ -257,6 +257,48 @@ check 'PR repo flag between noun and verb' "gh pr -R o/r comment 7 --body '$dens
 check 'compound command catches later write' "true && gh issue comment 7 --body '$dense'" deny
 check 'nested shell catches write' "bash -c \"gh issue comment 7 --body '$dense'\"" deny
 
+# gh parses options with pflag (#308): each spelling gh 2.92.0 accepts gets the same
+# decision, and an option gh rejects gets a parse diagnostic instead of writing advice.
+for command in 'gh api --help' 'gh api -p corsair repos/o/r' 'gh issue close 7 --duplicate-of 5' \
+  'gh release edit v1 --tag v2' 'gh release edit v1 --prerelease=false' \
+  'gh pr comment 7 --delete-last --yes=true' "gh issue create --title Bug --body '## TL;DR
+
+Fixed.' -a@me" 'gh api -HAccept:x repos/o/r' 'gh api -iq .name repos/o/r' 'gh api -- repos/o/r' \
+  "gh issue comment 7 --body '$dense' --help" "gh issue comment 7 -h --body '$dense'" \
+  'gh issue comment 7 --body-file notes.md --help=T' \
+  'gh issue close 7 2>/dev/null' 'gh pr comment 7 --body "Done." 2>&1' 'gh issue close 7 > out' \
+  'gh issue close 7 >>log 2>&1' 'gh issue close 7 >|out 1>&2 2>&-'; do
+  check "gh accepts: ${command//$dense/<dense>}" "$command" allow
+done
+for rejection in 'gh api repos/o/r --output x|Unrecognized gh api option `--output`; nothing was authorized. Check `gh help api`.' \
+  'gh api repos/o/r --output=x|Unrecognized gh api option `--output`' \
+  'gh api -Z repos/o/r|Unrecognized gh api option `-Z`' \
+  'gh api repos/o/r -H|gh api option `-H` needs a value' \
+  'gh issue comment 7 --help=maybe|gh issue comment option `--help` takes true or false'; do
+  check "gh rejects: ${rejection%%|*}" "${rejection%%|*}" deny "${rejection#*|}"
+  if [[ "$last_check_output" != *boxlite-writing* ]]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1)); printf 'FAIL option error carries the writing reminder: %s\n' "${rejection%%|*}"
+  fi
+done
+for command in 'gh issue comment 7 --body-file notes.md --help=false' \
+  "gh pr comment 7 --help --help=false --body '$dense'" \
+  'gh pr comment 7 >! --body --body-file=x' \
+  "gh api repos/o/r/issues/1/comments --jq 12>&1 -fbody='$dense'" \
+  "gh api repos/o/r/issues/1/comments --jq \"2\">&1 -fbody='$dense'" \
+  "gh api repos/o/r/issues/1/comments --jq \\2>&1 -fbody='$dense'" \
+  "gh api repos/o/r/issues/1/comments -f>out body='$dense'" \
+  "gh pr comment 7 --body '$dense' 2>&1" \
+  "gh api repos/o/r/issues/1/comments -if body='$dense'" \
+  "gh api repos/o/r/issues/1/comments -H --help -f body='$dense'" \
+  'gh issue comment 7 -- --body x' \
+  "gh issue > out comment 7 --body '$dense'" \
+  "gh release 2>&1 create v1 --notes '$dense'" \
+  'gh api graphql -F query=@- < mutation.graphql' 'gh api graphql -F query=@- 0>&3'; do
+  check "still denied: ${command//$dense/<dense>}" "$command" deny
+done
+
 private_text='Per our private conversation, PRIVATE_CANARY must stay unpublished.'
 private_body="## TL;DR
 
