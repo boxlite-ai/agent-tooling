@@ -7,7 +7,7 @@ description: Write or shorten human-facing replies, docs, PRs, issues, and comme
 
 - Structure all human-facing output; a prose block holds one sentence, or three for connected reasoning.
 - Write minimally, prompts included; keep evidence, risks, failures, uncertainty.
-- Lead with the result; prefer a visual when one fits; add a brief real example when it helps.
+- Lead with the result; prefer a visual when one fits; add a brief real example when possible.
 
 ## TL;DR
 
