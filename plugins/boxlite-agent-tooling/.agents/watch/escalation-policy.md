@@ -20,7 +20,7 @@ Report every comment/review, including bots.
 
 ## Escalate instead of acting
 
-Ask first:
+Ask once before acting on these, and do not wait for a reply: leave the item unchanged, keep watching, and report it. Silence never approves.
 
 1. No code signal: runner OOM, network/cache failures, timeouts, or never-started jobs.
    Report the run; no edits/reruns.

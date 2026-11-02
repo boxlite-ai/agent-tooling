@@ -32,7 +32,7 @@ Example: deleting an endpoint in a commit, then restoring and staging the origin
 
 ## Approval
 
-Follow [human confirmation](../guidance/api-compatibility.md#human-confirmation): show breaking/default changes, recommend GitHub issue discussion, and ask whether to skip. Only the exact user prompt `api compatibility: skip` records that choice. No discussion link is required; do not create an issue without permission.
+Follow [human confirmation](../guidance/api-compatibility.md#human-confirmation): show breaking/default changes, recommend GitHub issue discussion, and ask once whether to skip without waiting; silence keeps the gate. Only the exact user prompt `api compatibility: skip` records that choice. No discussion link is required; do not create an issue without permission.
 
 Approvals live in the worktree Git directory and bind the sorted set of changed paths and their before/after content. Another changed contract invalidates confirmation. Do not invoke `record` to manufacture a user event. A skip leaves SDK request-test audit and checker failures enforced.
 

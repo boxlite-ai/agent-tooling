@@ -2453,6 +2453,14 @@ if [[ "$policy" == *"2 auto-fix attempts"* && "$policy" == *"Never weaken"* \
 else
   fail=$((fail + 1)); printf '  FAIL  compact policy preserves escalation boundaries\n'
 fi
+# An escalation asks once and never stalls the watch; silence leaves the item alone (#334).
+if [[ "$policy" == *"Ask once before acting on these, and do not wait for a reply"* \
+   && "$policy" == *"leave the item unchanged, keep watching, and report it"* \
+   && "$policy" == *"Silence never approves"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  escalation asks never wait and default to no change\n'
+else
+  fail=$((fail + 1)); printf '  FAIL  escalation asks never wait and default to no change\n'
+fi
 
 echo
 printf 'post-remote-write-watch: %d passed, %d failed\n' "$pass" "$fail"

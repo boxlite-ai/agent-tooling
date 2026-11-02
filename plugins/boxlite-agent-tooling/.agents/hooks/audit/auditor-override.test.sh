@@ -46,10 +46,24 @@ portable_hook() {
   )
 }
 
+# A launcher session (scripts/claude-with-timed-prompts.sh): native questions close after
+# a bounded idle timeout, so the hook may hand Claude the interactive card.
 claude_hook() {
   local repo="$1" payload="$2"
   printf '%s' "$payload" | (
     cd "$repo" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$repo" \
+      CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 \
+      BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1 CLAUDE_AFK_TIMEOUT_MS=300000 bash "$CONTROL"
+  )
+}
+
+# Any other Claude session, such as one under Remote Control, where a question stays
+# open until answered: a card there would block the turn (#334).
+claude_remote_hook() {
+  local repo="$1" payload="$2"
+  printf '%s' "$payload" | (
+    cd "$repo" && env -u PLUGIN_ROOT -u BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS \
+      -u CLAUDE_AFK_TIMEOUT_MS CLAUDE_PROJECT_DIR="$repo" \
       CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
   )
 }
@@ -113,6 +127,9 @@ check_eq "Claude exits 2 so asyncRewake injects the reminder into the parent" \
 check_eq "the wake gives Claude a two-choice interactive auditor card" \
   "force=$(grep -c 'Force pass.*taking too long' "$R/claude.err" || true) keep=$(grep -c 'Keep waiting' "$R/claude.err" || true) select=$(grep -c 'auditor-control.sh.*select' "$R/claude.err" || true)" \
   "force=1 keep=2 select=2"
+check_eq "a card closed without a choice keeps waiting and is never reopened" \
+  "rule=$(grep -c 'If the card closes without a choice, keep waiting: run nothing and do not re-open it' "$R/claude.err" || true)" \
+  "rule=1"
 
 card_override_command="$(sed -n 's/^  "Force pass": //p' "$R/claude.err")"
 card_override_out="$(cd "$R" && bash -c "$card_override_command")"
@@ -195,6 +212,22 @@ check_eq "Codex receives the portable status, never the Claude interactive card"
 codex_route_stop="$(jq -nc --arg s "$session" --arg id codex-route \
   '{hook_event_name:"SubagentStop",session_id:$s,agent_id:$id,agent_type:"verdict-auditor",last_assistant_message:"PASS"}')"
 codex_hook "$R" "$codex_route_stop" >/dev/null 2>&1
+
+# Without the launcher marker, Claude must get the typed status on the same exit-2 wake,
+# carrying the nonce its escalation record expects, and never the blocking card.
+remote_start="$(jq -nc --arg s "$session" --arg id remote-audit \
+  '{hook_event_name:"SubagentStart",session_id:$s,agent_id:$id,agent_type:"verdict-auditor"}')"
+remote_rc=0
+claude_remote_hook "$R" "$remote_start" > "$R/remote.out" 2> "$R/remote.err" || remote_rc=$?
+remote_escalation="$R/.agents/state/auditor-control/escalation.$scope.verdict-auditor.remote-audit.json"
+remote_nonce="$(sed -n 's/.*\[auditor-wake:\([0-9a-f]\{64\}\)\].*/\1/p' "$R/remote.err")"
+remote_nonce_hash="$(printf '%s' "$remote_nonce" | shasum -a 256 | awk '{print $1}')"
+check_eq "Claude without the launcher marker wakes with the typed status, never the card" \
+  "rc=$remote_rc state=$(jq -r '.state' "$remote_escalation" 2>/dev/null) card=$(grep -c 'Invoke AskUserQuestion' "$R/remote.err" || true) status=$(grep -c 'non-blocking assistant status' "$R/remote.err" || true) nonce=$([[ -n "$remote_nonce" && "$remote_nonce_hash" == "$(jq -r '.wake_nonce_hash' "$remote_escalation" 2>/dev/null)" ]] && echo bound || echo unbound)" \
+  "rc=2 state=open card=0 status=1 nonce=bound"
+remote_stop="$(jq -nc --arg s "$session" --arg id remote-audit \
+  '{hook_event_name:"SubagentStop",session_id:$s,agent_id:$id,agent_type:"verdict-auditor",last_assistant_message:"PASS"}')"
+portable_hook "$R" "$remote_stop" >/dev/null
 
 portable_hook "$R" "$portable_start" >/dev/null
 escalation_count="$(jq -r 'select(.event == "escalated" and .generation == "portable-audit") | .generation' "$event_file" | wc -l | tr -d ' ')"
