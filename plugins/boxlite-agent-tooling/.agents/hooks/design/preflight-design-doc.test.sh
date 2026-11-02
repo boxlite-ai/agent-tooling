@@ -171,6 +171,9 @@ for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
 done
 expect_denial 'Claude Code is routed to the design auditor' claude 'boxlite-agent-tooling:design-auditor'
 expect_denial 'Codex is routed to the design auditor spec' codex '.claude/agents/design-auditor.md'
+# The task states the deadline audit-deadline.sh enforces: the one the gate recorded (#328).
+task_deadline="$(jq -r .deadline "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit-task.json")"
+expect_denial 'the design task states the deadline the hook enforces' claude "Deadline: Unix $task_deadline ("
 record_research FAIL '["research: no source supports the retry limit; cite one"]'
 check Write 'edit source' deny
 expect_denial 'a failed review lists its findings' codex 'no source supports the retry limit'

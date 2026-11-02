@@ -116,7 +116,8 @@ Designs are audited before code, not at commit or PR time
   minutes, edits stay blocked.
 - The auditor works to `DESIGN_AUDITOR_TIMEOUT` (default 900 s, as for other audits). The
   gate writes the deadline once per design content into `agent-tooling-design-audit-task.json`;
-  the task prompt states no clock (#240). Past it, the [timed-subagent](#timed-subagents) rule
+  the task prompt states that deadline, which this hook enforces (#240 faulted a clock nothing
+  enforced). Past it, the [timed-subagent](#timed-subagents) rule
   answers its tool calls, except `design-doc.sh verdict`, and one verdict-less stop is blocked.
 - It has no `force-pass-auditors` card: it blocks only edits, never a turn's end or a
   commit. `host-parity.test.sh` names it as the one exception.
@@ -542,37 +543,39 @@ past its deadline, an auditor may only record its verdict, and one verdict-less 
 
 | Piece | Home | Used by |
 | --- | --- | --- |
-| `subagent_timed_timeout` | `.agents/lib/subagent.sh` | Design and commit/push gates |
-| `subagent_timed_message`, `subagent_timed_stop` | `.agents/lib/subagent.sh` | `audit-deadline.sh`, `commit-push-stop.sh` |
+| `subagent_timed_timeout` | `.agents/lib/subagent.sh` | Design and commit/push gates, both headless runners |
+| `subagent_timed_message`, `subagent_timed_stop` | `.agents/lib/subagent.sh` | `audit-deadline.sh`, `commit-push-stop.sh`, the verdict runner |
+| `subagent_timed_drive` | `.agents/lib/subagent.sh` | `run-verdict-audit.sh`, Claude route |
 | `subagent_identity_auditor` | `.agents/lib/subagent-identity.sh` | `audit-deadline.sh`, `auditor-control.sh` |
 
 | Auditor | Deadline from | Allowed past it |
 | --- | --- | --- |
 | Design | `agent-tooling-design-audit-task.json` | `design-doc.sh verdict` |
 | Commit/push | The attempt link | A write naming its `dossier_path` |
+| Headless verdict, Claude | `VERDICT_AUDITOR_TIMEOUT` | One record turn; stopped 240 s after the deadline |
 
 - The hook sees every tool a timed auditor's spec lists; `.agents/hooks/design/audit-deadline.test.sh`
   fails when the matcher misses one. Codex-hosted web search bypasses hooks.
-- Headless verdict audits still use the reminder below until #328's runner step lands.
-
-### Shared finish reminders
-
-`subagent_timed_prompt` in `.agents/lib/subagent.sh` renders
-`.agents/prompts/subagent/timed-subagent.md` with an absolute deadline: 85 percent of the
-timeout, capped at 510 seconds after rendering. Only the two headless audit runners use
-it; native dispatch carries no reminder (see [commit/push attempts](#commitpush-attempts)).
-Verdict and commit/push audits both default to 900 seconds, so each requests a report
-by 510 seconds and keeps 390 seconds to write it; a 120-second audit requests one by
-102. A 600-second verdict default left 90 seconds, too few for a retry's history and
-reflection reviews: every reflection retry hit the hard timeout
-([#234](https://github.com/boxlite-ai/agent-tooling/issues/234)).
-
-The runner's model starts one native Monitor, stops new checks on its notice, and cancels
-an unused timer with TaskStop. Each auditor owns its result schema. Existing hard timeouts
-and publication checks remain in the runners; the reminder is cooperative. Hosts without
-Monitor skip it, including the current isolated Codex CLI route. No scheduler or polling
-fallback is installed. See [design #174](https://github.com/boxlite-ai/agent-tooling/issues/174)
-and [Monitor limits](https://code.claude.com/docs/en/tools-reference#monitor-tool).
+- `--safe-mode` keeps hooks away from the headless verdict auditor, so the runner drives
+  `claude -p` over stream-json with `--replay-user-messages`. `subagent_timed_drive` is one
+  Perl process (`IPC::Open2`, `IO::Select`, `JSON::PP`, `alarm`) that reads each event's
+  `type` and the record message's echo:
+  1. Sends the audit prompt as the first user message.
+  2. Closes stdin at the first `result`; the CLI runs any queued turn, then exits.
+  3. At the deadline, sends `.agents/prompts/subagent/timed-subagent.md` as “Deadline passed:
+     record your verdict now.” Claude Code delivers it, and echoes it, when the running call
+     or thought ends.
+  4. With no echo 30 s later, sends `interrupt`; the call or thought ends and the queued
+     message runs next. It is never resent (a resend runs a duplicate turn), and a delivered
+     message is never interrupted. Only delivery racing the interrupt can end the record
+     turn; the stop then exits 1, as before #328.
+  5. 240 s after the deadline (at most 3540 s), its alarm fires and the runner stops the
+     process group; a live record turn took about 120 s. The lease and the completion
+     monitor cover that stop.
+- Design #328 links the Claude Code 2.1.316 probes behind steps 2–4. Native Win32 Perl
+  selects only on sockets, so there the task runs without a record turn.
+- The headless Codex runners and `VERDICT_AUDITOR_CMD` stop at the deadline; Codex takes no
+  input after it starts.
 
 ### Commit/push attempts
 
@@ -597,9 +600,6 @@ a timeout that never fired ([#240](https://github.com/boxlite-ai/agent-tooling/i
 
 The procedure is embedded literally into each task. Agent specs reference the supplied
 procedure instead of duplicating it; prompt tests verify delivery, not live model compliance.
-The reminder is cooperative: a shorter runner timeout also reduces the reporting
-margin. A live smoke test must distinguish early completion with TaskStop from
-notice-triggered reporting before the hard cutoff; neither proves the other.
 
 Both commit/push paths render `.agents/prompts/audit/commit-push-criteria.md` into their
 task through `subagent_prompt`; missing, empty, or unresolved criteria block dispatch.

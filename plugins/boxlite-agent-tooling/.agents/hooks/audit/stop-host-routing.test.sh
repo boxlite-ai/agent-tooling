@@ -34,13 +34,26 @@ if [[ "${1:-}" == --version ]]; then
 fi
 printf '%s\n' "${0##*/}" >> "$ROUTE_CAPTURE/calls"
 printf '%s\n' "$@" > "$ROUTE_CAPTURE/args"
-cat > "$ROUTE_CAPTURE/prompt"
+stream_json=false
+for arg in "$@"; do [[ "$arg" != stream-json ]] || stream_json=true; done
+if [[ "$stream_json" == true ]]; then
+  # The verdict driver sends the prompt as the first stream-json user message and keeps
+  # stdin open until a `result` event (design #328).
+  IFS= read -r frame || exit 3
+  jq -r '.message.content' <<<"$frame" > "$ROUTE_CAPTURE/prompt"
+else
+  cat > "$ROUTE_CAPTURE/prompt"
+fi
 [[ "${ROUTE_FAIL:-false}" != true ]] || exit 7
 if [[ "$ROUTE_ROLE" == classifier ]]; then
   printf '%s\n' "${ROUTE_REPLY:-NO}"
 else
   printf '{"branch":"main","head":"h","tree_hash":"t","generation":"%s","verdict":"PASS","proof":[],"findings":[]}' \
     "$VERDICT_AUDITOR_GENERATION" > "$VERDICT_AUDITOR_OUTPUT_FILE"
+fi
+if [[ "$stream_json" == true ]]; then
+  printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
+  cat >/dev/null
 fi
 MODEL
 chmod +x "$scratch/model"

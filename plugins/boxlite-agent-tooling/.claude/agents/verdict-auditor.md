@@ -1,7 +1,7 @@
 ---
 name: verdict-auditor
 description: Independently audit final-turn claims and write a session-bound proof dossier.
-tools: Read, Bash, Write, Monitor, TaskStop
+tools: Read, Bash, Write, TaskStop
 model: sonnet
 effort: xhigh
 ---
