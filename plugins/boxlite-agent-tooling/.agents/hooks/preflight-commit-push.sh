@@ -593,11 +593,8 @@ if ! audit_criteria="$(subagent_prompt audit/commit-push-criteria "$tooling_root
   exit 2
 fi
 
-audit_timeout="${COMMIT_PUSH_AUDITOR_TIMEOUT:-900}"
-if [[ ! "$audit_timeout" =~ ^[1-9][0-9]{0,3}$ ]]; then
-  printf 'preflight-commit-push: COMMIT_PUSH_AUDITOR_TIMEOUT must be 1 to 9999 seconds\n' >&2
-  exit 2
-fi
+audit_timeout="$(subagent_timed_timeout COMMIT_PUSH_AUDITOR_TIMEOUT \
+  "${COMMIT_PUSH_AUDITOR_TIMEOUT:-900}" 9999)" || exit 2
 
 # The hook owns the history attempt so an auditor that stops early cannot leave it
 # open or unbound. It is prepared only where an auditor is requested; a passing

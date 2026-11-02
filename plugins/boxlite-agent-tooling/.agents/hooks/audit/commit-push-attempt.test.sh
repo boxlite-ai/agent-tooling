@@ -140,6 +140,18 @@ stop true >/dev/null
 check_eq "a resumed stop without a dossier records ERROR" "$(attempts | sed 's/.*://')" "ERROR"
 check_eq "a closed attempt removes its link" "$([[ -e "$LINK" ]] && echo present || echo gone)" "gone"
 
+echo "SubagentStop blocks a dossier-less stop past the deadline once (design #328)"
+use_session attempt-late
+stage_change
+preflight >/dev/null
+jq -c '.deadline = 0' "$LINK" > "$LINK.tmp" && mv "$LINK.tmp" "$LINK"
+late="$(stop false)"
+check_eq "a first late stop without a dossier blocks" "$(jq -r .decision <<<"$late")" "block"
+check_eq "the late block says record now" \
+  "$(jq -r '.reason | startswith("Deadline passed: record your verdict now.")' <<<"$late")" "true"
+stop true >/dev/null
+check_eq "a resumed late stop without a dossier records ERROR" "$(attempts | sed 's/.*://')" "ERROR"
+
 echo "SubagentStop records a bound dossier"
 use_session attempt-pass
 stage_change

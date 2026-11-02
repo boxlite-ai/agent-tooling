@@ -170,6 +170,46 @@ subagent_timed_prompt() {  # tooling root, positive timeout seconds (at most 4 d
   subagent_prompt subagent/timed-subagent "$root" "finish_at=$(( now + finish_after ))"
 }
 
+# Timed subagents (design #328): every auditor works to one deadline. Past it, the auditor
+# may only record its verdict, and one verdict-less stop is blocked. Hooks and runners
+# call these helpers; each auditor supplies its deadline and its record step.
+
+# Prints a timeout that is a decimal integer from 1 through the maximum; otherwise names
+# the variable and fails. The length bound comes first: Bash 3.2 wraps integers wider
+# than 64 bits, which could turn a huge value into a small accepted one.
+subagent_timed_timeout() {  # variable name, value, maximum seconds
+  if [[ "$2" =~ ^[1-9][0-9]*$ && ${#2} -le ${#3} ]] && (( $2 <= $3 )); then
+    printf '%s\n' "$2"
+    return 0
+  fi
+  printf '%s must be an integer from 1 to %s seconds\n' "$1" "$3" >&2
+  return 1
+}
+
+# The deadline message a timed subagent receives, before or after its deadline.
+subagent_timed_message() {  # passed|stop, record step
+  case "$1" in
+    passed) printf 'Deadline passed: record your verdict now. %s\n' "$2" ;;
+    stop) printf 'Record your verdict before stopping. %s\n' "$2" ;;
+    *) return 2 ;;
+  esac
+}
+
+# Prints why a stop must be blocked, or nothing to allow it. A resumed stop always
+# passes, so each stop is blocked at most once. `unchecked` (a verdict with unrun
+# checks) is sent back for more checks only while time remains.
+subagent_timed_stop() {  # deadline, recorded|missing|unchecked, resumed, record step
+  [[ "$3" != true && "$2" != recorded ]] || return 0
+  if (( $(date +%s) < $1 )); then
+    case "$2" in
+      missing) subagent_timed_message stop "$4" ;;
+      unchecked) printf 'Time remains: run each unchecked check, then record again. %s\n' "$4" ;;
+    esac
+  elif [[ "$2" == missing ]]; then
+    subagent_timed_message passed "$4"
+  fi
+}
+
 # Print the block a gate puts in its deny reason.
 #
 #   subagent_instruction --agent commit-push-auditor --root "$tooling_root" \

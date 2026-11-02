@@ -24,7 +24,7 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. Old authority is revoked; unchanged audit work may finish as prior evidence. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
-| Calls a tool or stops as the design auditor | `PreToolUse`, `SubagentStop` | `.agents/hooks/audit-deadline.sh` | Past its deadline, "record your verdict now"; one verdict-less stop is blocked. |
+| Calls a tool or stops as a timed auditor (design, commit/push) | `PreToolUse`, `SubagentStop` | `.agents/hooks/audit-deadline.sh` | Past its deadline, every call but the record step gets "record your verdict now"; one verdict-less design stop is blocked (commit/push stops: `auditor-control.sh`). See [timed subagents](#timed-subagents). |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-auditor` PASS for its exact content, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. Above 400 added code lines, asks the user to bypass the guideline or split. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
@@ -110,11 +110,9 @@ Designs are audited before code, not at commit or PR time
   `design-decision: <choice> <reason>` records a choice. Unanswered after five
   minutes, edits stay blocked.
 - The auditor works to `DESIGN_AUDITOR_TIMEOUT` (default 900 s, as for other audits). The
-  gate writes the deadline once per design content into `agent-tooling-design-audit-task.json`
-  and the task. Past it, `.agents/hooks/audit-deadline.sh` answers the auditor's tool calls,
-  except recording the verdict, with "record your verdict now", and blocks one verdict-less
-  stop. Claude Code names the auditor in `agent_type`; Codex names it in the subagent
-  transcript's spawn metadata, read by `.agents/lib/subagent-identity.sh`.
+  gate writes the deadline once per design content into `agent-tooling-design-audit-task.json`;
+  the task prompt states no clock (#240). Past it, the [timed-subagent](#timed-subagents) rule
+  answers its tool calls, except `design-doc.sh verdict`, and one verdict-less stop is blocked.
 - It has no `force-pass-auditors` card: it blocks only edits, never a turn's end or a
   commit. `host-parity.test.sh` names it as the one exception.
 
@@ -532,6 +530,26 @@ its dossier; a child that writes PASS and then exits nonzero cannot approve work
 Both count formats (`60/60 tests passed`, `60 passed, 0 failed`) use the classifier.
 Counts and citations locate proof; the independent auditor verifies it.
 
+### Timed subagents
+
+One deadline contract serves every auditor ([design #328](https://github.com/boxlite-ai/agent-tooling/issues/328)):
+past its deadline, an auditor may only record its verdict, and one verdict-less stop is blocked.
+
+| Piece | Home | Used by |
+| --- | --- | --- |
+| `subagent_timed_timeout` | `.agents/lib/subagent.sh` | Design and commit/push gates |
+| `subagent_timed_message`, `subagent_timed_stop` | `.agents/lib/subagent.sh` | `audit-deadline.sh`, `commit-push-stop.sh` |
+| `subagent_identity_auditor` | `.agents/lib/subagent-identity.sh` | `audit-deadline.sh`, `auditor-control.sh` |
+
+| Auditor | Deadline from | Allowed past it |
+| --- | --- | --- |
+| Design | `agent-tooling-design-audit-task.json` | `design-doc.sh verdict` |
+| Commit/push | The attempt link | A write naming its `dossier_path` |
+
+- The hook sees every tool a timed auditor's spec lists; `.agents/hooks/design/audit-deadline.test.sh`
+  fails when the matcher misses one. Codex-hosted web search bypasses hooks.
+- Headless verdict audits still use the reminder below until #328's runner step lands.
+
 ### Shared finish reminders
 
 `subagent_timed_prompt` in `.agents/lib/subagent.sh` renders
@@ -563,9 +581,11 @@ a timeout that never fired ([#240](https://github.com/boxlite-ai/agent-tooling/i
   `auditor-control/audit-task.<scope>.commit-push-auditor.json` with the context, dossier
   path, and a deadline of `COMMIT_PUSH_AUDITOR_TIMEOUT` seconds.
 - **Close.** On `SubagentStop` in Claude Code or Codex, `.agents/lib/commit-push-stop.sh` records a
-  dossier bound to the attempt. Before the deadline it blocks once when the dossier is
-  missing or has an `unchecked:` finding; otherwise it records `ERROR`. A check failure
-  allows the stop, since the Git gate still holds.
+  dossier bound to the attempt. It blocks once when the dossier is missing, before or after
+  the deadline, or has an `unchecked:` finding while time remains; otherwise it records the
+  dossier or `ERROR`. A check failure allows the stop, since the Git gate still holds.
+- **Deadline.** Past it, the [timed-subagent](#timed-subagents) rule answers every tool call
+  except a write naming the attempt's `dossier_path` (#328).
 - **Hosts.** Claude Code 2.1.296 and Codex CLI 0.162.1 both resumed a blocked subagent and
   then set `stop_hook_active`. The headless runner cancels the preflight's open attempt,
   then prepares and records its own.

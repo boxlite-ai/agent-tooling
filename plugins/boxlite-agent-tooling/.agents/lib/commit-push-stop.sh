@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 # SubagentStop check for the commit/push attempt the preflight prepared.
-# Requires verdict-audit-state.sh, auditor-override-state.sh, audit-reflection.sh,
-# audit-reflection-gate.sh, and jq. Source this file; it performs no work on load.
+# Requires subagent.sh, verdict-audit-state.sh, auditor-override-state.sh,
+# audit-reflection.sh, audit-reflection-gate.sh, and jq. Source this file; it performs no
+# work on load.
+
+# The commit/push auditor's record step, for its deadline messages (design #328).
+commit_push_stop_record() {  # attempt id, dossier path
+  printf 'Write the dossier for attempt %s to %s; PASS or FAIL, with each check you have not run as an unchecked: finding.' "$1" "$2"
+}
 
 # Print a block reason to keep the auditor running, or nothing to let it stop.
 # A stop always leaves the attempt closed: recorded from a bound dossier, or ERROR.
 commit_push_stop_check() {  # repo session-scope stop-hook-active
   local repo="$1" scope="$2" resumed="$3" link task context id dossier deadline
-  local history snapshot document=""
+  local history snapshot document="" state=missing reason
   link="$(auditor_override_control_dir "$repo")/audit-task.$scope.commit-push-auditor.json"
   [[ -e "$link" || -L "$link" ]] || return 0
   task="$(verdict_audit_read_single_record "$link")" || return 2
@@ -26,16 +32,18 @@ commit_push_stop_check() {  # repo session-scope stop-hook-active
     document="$(jq -ce --arg id "$id" 'select(.history_review.attempt_id == $id)' \
       <<<"${snapshot#*$'\n'}" 2>/dev/null)" || document=""
   fi
-  # One block per stop: Claude Code sets stop_hook_active once a hook has resumed it.
-  if [[ "$resumed" != true ]] && (( $(date +%s) < deadline )); then
-    if [[ -z "$document" ]]; then
-      printf 'Write the dossier for attempt %s to %s before stopping; PASS or FAIL.\n' "$id" "$dossier"
-      return 0
-    fi
+  if [[ -n "$document" ]]; then
+    state=recorded
     if jq -e 'any(.findings[]?; startswith("unchecked:"))' <<<"$document" >/dev/null; then
-      printf 'Time remains: run each unchecked check, then rewrite the dossier at %s.\n' "$dossier"
-      return 0
+      state=unchecked
     fi
+  fi
+  # One block per stop: Claude Code sets stop_hook_active once a hook has resumed it.
+  reason="$(subagent_timed_stop "$deadline" "$state" "$resumed" \
+    "$(commit_push_stop_record "$id" "$dossier")")"
+  if [[ -n "$reason" ]]; then
+    printf '%s\n' "$reason"
+    return 0
   fi
   if [[ -n "$document" ]] \
       && audit_reflection_gate "$context" record "$id" "$document" >/dev/null 2>&1; then

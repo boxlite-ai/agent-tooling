@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Design-audit deadline (design #309): host payloads cross the real hook and library.
+# Timed-subagent deadline (designs #309, #328): host payloads cross the real hook and libraries.
 set -uo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 hook="$plugin/.agents/hooks/audit-deadline.sh"
@@ -89,9 +89,56 @@ ok 'Codex: a transcript bound to another session is not trusted' \
   "$(call "$(codex_payload PreToolUse /root/design_auditor other-session)")" '0:'
 has 'Codex: a verdict-less stop is blocked' "$(call "$(codex_payload SubagentStop /root/design_auditor codex-session)")" \
   '"decision":"block"' 'Deadline passed'
+# The commit/push auditor works to the deadline in its attempt link (design #328).
+session=commit-session
+scope="git-$(printf '%s' "$session" | git -C "$scratch/repo" hash-object --stdin)"
+link="$scratch/repo/.agents/state/auditor-control/audit-task.$scope.commit-push-auditor.json"
+dossier="$scratch/repo/.agents/state/last-audit.json"
+mkdir -p "${link%/*}"
+attempt() { # seconds until the deadline
+  jq -nc --argjson deadline "$(( $(date +%s) + $1 ))" --arg dossier "$dossier" \
+    '{context:{}, attempt_id:"attempt-1", dossier_path:$dossier, deadline:$deadline}' > "$link"
+}
+commit_tool() { # tool, input JSON -> PreToolUse payload from the commit/push auditor
+  jq -nc --arg tool "$1" --argjson input "$2" --arg cwd "$scratch/repo" --arg session "$session" \
+    '{hook_event_name:"PreToolUse", session_id:$session, tool_name:$tool, tool_input:$input,
+      cwd:$cwd, agent_type:"boxlite-agent-tooling:commit-push-auditor"}'
+}
+ok 'commit/push: no link, the auditor works freely' \
+  "$(call "$(commit_tool Read '{"file_path":"/etc/hosts"}')")" '0:'
+attempt 600
+ok 'commit/push: before the deadline a read passes' \
+  "$(call "$(commit_tool Read '{"file_path":"/etc/hosts"}')")" '0:'
+attempt -1
+result="$(call "$(commit_tool Read '{"file_path":"/etc/hosts"}')")"
+ok 'commit/push: past the deadline a read is answered' "${result%%:*}" 2
+has 'commit/push: the answer names the attempt and dossier' "$result" \
+  'Deadline passed: record your verdict now' 'attempt-1' "$dossier"
+ok 'commit/push: past the deadline a dossier write passes' "$(call "$(commit_tool Write \
+  "$(jq -nc --arg path "$dossier" '{file_path:$path, content:"{}"}')")")" '0:'
+ok 'commit/push: past the deadline a shell write of the dossier passes' "$(call "$(commit_tool Bash \
+  "$(jq -nc --arg command "jq -n {} > $dossier" '{command:$command}')")")" '0:'
+ok 'commit/push: past the deadline other shell calls are answered' \
+  "$(call "$(commit_tool Bash '{"command":"rg -n claim ."}')" | cut -c1-2)" '2:'
+ok 'commit/push: its stops are left to auditor-control' "$(call "$(jq -nc --arg cwd "$scratch/repo" \
+  --arg session "$session" '{hook_event_name:"SubagentStop", session_id:$session, cwd:$cwd,
+  agent_type:"boxlite-agent-tooling:commit-push-auditor", stop_hook_active:false}')")" '0:'
+codex_commit() { # agent path -> PreToolUse Read payload from a Codex subagent
+  local transcript="$scratch/codex-commit-$RANDOM.jsonl"
+  jq -nc --arg parent "$session" --arg path "$1" \
+    '{type:"session_meta",payload:{id:"codex-commit-1",session_id:$parent,thread_source:"subagent",
+      source:{subagent:{thread_spawn:{parent_thread_id:$parent,depth:1,agent_path:$path}}}}}' > "$transcript"
+  jq -nc --arg transcript "$transcript" --arg cwd "$scratch/repo" --arg session "$session" \
+    '{hook_event_name:"PreToolUse", session_id:$session, agent_id:"codex-commit-1", agent_type:"default",
+      tool_name:"Read", tool_input:{}, cwd:$cwd, transcript_path:$transcript}'
+}
+ok 'Codex: the commit/push auditor is answered past the deadline' \
+  "$(call "$(codex_commit /root/commit_push_auditor)" | cut -c1-2)" '2:'
+ok 'Codex: a verdict auditor without a deadline task works freely' \
+  "$(call "$(codex_commit /root/verdict_auditor)")" '0:'
 # The gate's side: one deadline per design content, from DESIGN_AUDITOR_TIMEOUT.
 lib() { # environment assignments..., -- , design_doc_audit_task arguments
-  env "$@" bash -c 'for lib in verdict-audit-state reply-summary concise-writing design-doc; do
+  env "$@" bash -c 'for lib in verdict-audit-state reply-summary concise-writing subagent design-doc; do
       source "'"$plugin"'/.agents/lib/$lib.sh" || exit 2; done
     design_doc_audit_task "'"$scratch/repo"'" url digest'
 }
@@ -107,6 +154,18 @@ for manifest in hooks.json codex-hooks.json; do
   ok "$manifest wires the deadline to tool calls and stops" "$(jq '[(.hooks.PreToolUse[]
     | select(.matcher as $m | "Read" | test($m))), .hooks.SubagentStop[] | .hooks[].command
     | select(contains("audit-deadline.sh"))] | length' "$plugin/hooks/$manifest")" 2
+done
+# Every tool a timed auditor's spec lists must reach the deadline hook (design #328).
+for spec in design-auditor commit-push-auditor; do
+  tools="$(sed -n 's/^tools: //p' "$plugin/.claude/agents/$spec.md" | tr -d ' ')"
+  for manifest in hooks.json codex-hooks.json generic-hooks.json; do
+    missed="$(jq -r --arg tools "$tools" '
+      [.hooks.PreToolUse[] | select(any(.hooks[]; .command | contains("audit-deadline.sh")))
+       | .matcher] as $matchers
+      | [$tools | split(",")[] | select(. as $tool | any($matchers[]; . as $re | $tool | test($re)) | not)]
+      | join(",")' "$plugin/hooks/$manifest")"
+    ok "$spec tools reach the deadline hook in $manifest" "${missed:-none}" none
+  done
 done
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" == 0 ]]

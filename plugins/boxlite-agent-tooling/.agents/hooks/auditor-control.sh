@@ -43,58 +43,9 @@ auditor_control_known_auditors() {
   printf '%s\n' commit-push-auditor verdict-auditor
 }
 
-auditor_control_canonical_auditor() {  # host agent type/name
-  # Claude reports plugin agents under this plugin's namespace; other plugins' agents
-  # of the same name are not auditors.
-  case "$1" in
-    commit-push-auditor|commit_push_auditor|boxlite-agent-tooling:commit-push-auditor)
-      printf 'commit-push-auditor' ;;
-    verdict-auditor|verdict_auditor|boxlite-agent-tooling:verdict-auditor)
-      printf 'verdict-auditor' ;;
-    *) return 1 ;;
-  esac
-}
-
-auditor_control_canonical_auditor_from_path() {  # Codex orchestration agent path
-  local agent_name="${1##*/}"
-  case "$agent_name" in
-    commit-push-auditor|commit-push-auditor_*|commit_push_auditor|commit_push_auditor_*)
-      printf 'commit-push-auditor'
-      ;;
-    verdict-auditor|verdict-auditor_*|verdict_auditor|verdict_auditor_*)
-      printf 'verdict-auditor'
-      ;;
-    *) return 1 ;;
-  esac
-}
-
-auditor_control_auditor_from_payload() {  # hook payload, event
-  local payload="$1" event="$2" agent_type transcript_path agent_path
-  agent_type="$(printf '%s' "$payload" | jq -r '.agent_type // ""')"
-  if auditor_control_canonical_auditor "$agent_type"; then
-    return 0
-  fi
-  # Codex reports registered subagents as `default`, so only that host shape needs
-  # transcript metadata fallback. Claude supplies the concrete agent type; attempting
-  # to parse every other agent's Claude transcript as Codex session metadata turns
-  # unrelated SubagentStop events into noisy fail-closed hook errors.
-  [[ "$agent_type" == default ]] || return 1
-  case "$event" in
-    SubagentStart)
-      transcript_path="$(printf '%s' "$payload" | jq -r \
-        'if (.transcript_path|type)=="string" then .transcript_path else "" end')"
-      ;;
-    SubagentStop)
-      transcript_path="$(printf '%s' "$payload" | jq -r '
-        if (.agent_transcript_path|type)=="string" then .agent_transcript_path
-        elif (.transcript_path|type)=="string" then .transcript_path
-        else "" end')"
-      ;;
-    *) return 1 ;;
-  esac
-  [[ -n "$transcript_path" ]] || return 1
-  agent_path="$(subagent_identity_codex_path "$payload" "$transcript_path")" || return 2
-  auditor_control_canonical_auditor_from_path "$agent_path"
+# The design auditor is named too (subagent-identity.sh) but has no escalation card.
+auditor_control_is_auditor() {  # name: one of auditor_control_known_auditors
+  [[ $'\n'"$(auditor_control_known_auditors)"$'\n' == *$'\n'"$1"$'\n'* ]]
 }
 
 auditor_control_project_repo() {
@@ -161,8 +112,8 @@ auditor_control_escalation_record_is_bound() {  # JSON scope auditor generation 
          and .opened_at <= 999999999999999999
          and .opened_at == (.opened_at | floor))
   ' >/dev/null 2>&1 \
-    && [[ "$(auditor_control_canonical_auditor "$3" 2>/dev/null)" == "$3" \
-       && "$(auditor_control_safe_generation "$4")" == "$4" \
+    && auditor_control_is_auditor "$3" \
+    && [[ "$(auditor_control_safe_generation "$4")" == "$4" \
        && "$5" == "$auditor_control_state_dir/escalation.$2.$3.$4.json" ]]
 }
 
@@ -194,8 +145,8 @@ auditor_control_completion_record_is_bound() {  # JSON scope auditor generation 
          and (.remaining // 1) >= 1 and (.remaining // 1) <= 1024
          and (.remaining // 1) == ((.remaining // 1) | floor))
   ' >/dev/null 2>&1 \
-    && [[ "$(auditor_control_canonical_auditor "$3" 2>/dev/null)" == "$3" \
-       && "$5" == "$auditor_control_state_dir/completion.$2.$3.$4.json" ]]
+    && auditor_control_is_auditor "$3" \
+    && [[ "$5" == "$auditor_control_state_dir/completion.$2.$3.$4.json" ]]
 }
 
 auditor_control_write_pending_stop_receipt() {  # scope auditor generation
@@ -259,9 +210,9 @@ auditor_control_preserve_active_completion_receipts() {
     record_scope="$(printf '%s' "$active_json" | jq -r '.session_scope // ""')"
     state="$(printf '%s' "$active_json" | jq -r '.state // ""')"
     if [[ "$record_scope" != "$scope" || "$state" != running \
-          || "$(auditor_control_canonical_auditor "$auditor" 2>/dev/null)" != "$auditor" \
           || -z "$generation" || "$(auditor_control_safe_generation "$generation")" != "$generation" \
-          || "$active_file" != "$auditor_control_state_dir/active.$scope.$auditor.json" ]]; then
+          || "$active_file" != "$auditor_control_state_dir/active.$scope.$auditor.json" ]] \
+       || ! auditor_control_is_auditor "$auditor"; then
       auditor_control_state_retire_cache_entry "$active_file" || return 1
       continue
     fi
@@ -407,7 +358,7 @@ auditor_control_state_initialize "$repo" "$0" || exit 1
 case "${1:-}" in
   external-start)
     auditor="$2"; generation="$3"; scope="$4"; epoch="$5"
-    auditor_control_canonical_auditor "$auditor" >/dev/null 2>&1 || exit 1
+    auditor_control_is_auditor "$auditor" || exit 1
     auditor_control_state_dispatch start "$scope" "$auditor" "$generation" "$epoch" \
       || exit $?
     threshold="${AUDITOR_PROMPT_AFTER_SECONDS:-30}"
@@ -790,7 +741,7 @@ if [[ "${1:-}" == select ]]; then
   [[ "$choice" == keep_waiting || "$choice" == override_all ]] \
     || { printf 'auditor-control.sh: invalid interactive prompt choice.\n' >&2; exit 1; }
   auditor="$(printf '%s' "$payload" | jq -r '.auditor // ""')"
-  auditor_control_canonical_auditor "$auditor" >/dev/null 2>&1 \
+  auditor_control_is_auditor "$auditor" \
     || { printf 'auditor-control.sh: invalid interactive prompt auditor.\n' >&2; exit 1; }
   generation="$(printf '%s' "$payload" | jq -r '.generation // ""')"
   [[ -n "$generation" && "$(auditor_control_safe_generation "$generation")" == "$generation" ]] \
@@ -826,7 +777,8 @@ fi
 
 agent_id="$(printf '%s' "$payload" | jq -r '.agent_id // ""')"
 [[ -n "$agent_id" ]] || exit 0
-auditor="$(auditor_control_auditor_from_payload "$payload" "$event")"; auditor_status=$?
+auditor="$(subagent_identity_auditor "$payload")"; auditor_status=$?
+(( auditor_status != 0 )) || auditor_control_is_auditor "$auditor" || auditor_status=1
 if (( auditor_status != 0 )); then
   if (( auditor_status == 1 )); then
     [[ "$event" == SubagentStop ]] && printf '{}\n'
