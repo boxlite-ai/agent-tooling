@@ -463,6 +463,13 @@ commit_task_rendered="$(subagent_prompt audit/commit-push-task "$PLUGIN_ROOT" \
   'task_input_json={"marker":"DYNAMIC_COMMIT_TASK"}')"
 static_precedes_dynamic "commit task keeps reusable policy before run data" \
   "$commit_task_rendered" 'findings: []' DYNAMIC_COMMIT_TASK
+# The design task's deadline and record are run data too, so the shared rules come first.
+design_criteria="$(subagent_prompt audit/design-criteria "$PLUGIN_ROOT" "plugin_root=$PLUGIN_ROOT")"
+design_task_rendered="$(subagent_prompt audit/design-task "$PLUGIN_ROOT" \
+  "audit_criteria=$design_criteria" deadline=DYNAMIC_DESIGN_DEADLINE \
+  'task_input_json={"marker":"DYNAMIC_DESIGN_TASK"}')"
+static_precedes_dynamic "design task keeps reusable policy before run data" \
+  "$design_task_rendered" 'design-doc.sh" verdict' DYNAMIC_DESIGN_DEADLINE
 # verdict-runner is the only verdict prompt. The Stop gate runs its auditor
 # synchronously rather than emitting a spawn instruction, so the task-prompt twin it
 # used to pair with is gone; the byte-identical-body check that compared the two went

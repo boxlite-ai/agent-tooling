@@ -94,6 +94,11 @@ Designs are audited before code, not at commit or PR time
   `design-doc.sh verdict` (alias `research`), which accepts one `{content_sha256, verdict, findings,
   advisories}` object for the live content only. Critical and high gaps are findings and
   FAIL; low and nit gaps are advisories and never do. Every round runs in full.
+- Each audit rule has one owner ([design #323](https://github.com/boxlite-ai/agent-tooling/issues/323)):
+  the spec holds input checks and the verdict object, the criteria hold the steps and entry
+  format, and the task holds the deadline. The task renders the criteria before the deadline
+  and record, so the shared rules stay a reusable prompt prefix, and it marks the record
+  untrusted right after it.
 - The loop ([design #309](https://github.com/boxlite-ai/agent-tooling/issues/309),
   `.agents/lib/design-audit.jq`) counts FAILs per root and branch until a PASS, an
   overrule, or a redesign, so rebinding keeps the count. After an edit, the task input
@@ -1110,7 +1115,9 @@ they are not loaded by ordinary skill use. Existing skill discovery exposes the
 whole directory; Codex UI metadata uses the same skill name. No runtime or hook is
 added. Original source is preserved unless modification was requested.
 
-`boxlite-design-doc` owns research requirements, the design outline, and design review.
+`boxlite-design-doc` owns research requirements and the design outline; the design audit
+rules live in `design-criteria.md` and the `design-auditor` spec, and the audit loop lives in code.
+Its five numbered steps run in work order: Frame, Search protocol and Analyze under Research, the auditor's standard; Write and Gate under Design.
 For complex sources, its Research section uses `boxlite-distill` in knowledge mode while retaining decision-relevant evidence and the design outline.
 Hosts discover it through their skill paths; consumers name the skill without
 copying its rules. The full Test section and reproduce-before-fix remain in workflow guidance.
