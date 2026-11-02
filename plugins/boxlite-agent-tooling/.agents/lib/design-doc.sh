@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Design-doc verification, worktree binding, and the audit verdict recorded for the
 # bound content. Requires jq, perl, git, curl, verdict-audit-state.sh, reply-summary.sh
-# and concise-writing.sh. Source only.
+# and concise-writing.sh; design_doc_audit_task also needs subagent.sh. Source only.
 # _design_doc_jq takes single-quoted jq programs, as jq itself does.
 # shellcheck disable=SC2016
 
@@ -120,10 +120,9 @@ _design_doc_file_hash() { # path -> SHA-256 of its bytes, or nothing when it is 
 # the other audits). Repeated edit attempts reuse an unexpired deadline for the same content.
 # The task file also records the audit state's hash, so a stop can tell whether a verdict landed.
 design_doc_audit_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
-  local timeout="${DESIGN_AUDITOR_TIMEOUT:-900}" git_dir path now snapshot
-  [[ "$timeout" =~ ^[1-9][0-9]{0,3}$ ]] || {
-    _design_doc_error 'DESIGN_AUDITOR_TIMEOUT must be 1 to 9999 seconds'; return 1;
-  }
+  local timeout git_dir path now snapshot
+  timeout="$(subagent_timed_timeout DESIGN_AUDITOR_TIMEOUT "${DESIGN_AUDITOR_TIMEOUT:-900}" 9999)" \
+    || return 1
   git_dir="$(git -C "$1" rev-parse --absolute-git-dir)" || return 1
   path="$git_dir/agent-tooling-design-audit-task.json"
   now="$(date +%s)" || return 1

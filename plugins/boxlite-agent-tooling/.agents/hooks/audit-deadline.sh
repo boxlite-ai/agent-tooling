@@ -1,60 +1,71 @@
 #!/usr/bin/env bash
-# PreToolUse and SubagentStop: time the design auditor like the other audits (design #309).
-# Past its deadline, every tool call except recording the verdict is answered with
-# "record your verdict now", and one stop without a verdict is blocked. Other agents pass.
-# Claude Code names the auditor in agent_type; Codex reports `default` and names it in
-# the subagent transcript's spawn metadata (.agents/lib/subagent-identity.sh).
+# PreToolUse and SubagentStop: the timed-subagent deadline for native auditors (#309, #328).
+# Past its deadline, every tool call except the auditor's record step is answered "record
+# your verdict now". This hook blocks one verdict-less design-auditor stop; auditor-control.sh
+# closes commit/push stops with the same rule (subagent_timed_stop). Other agents pass.
 set -uo pipefail
 payload="$(head -c 1048577)"
-[[ "$payload" == *design-auditor* || "$payload" == *'"default"'* ]] || exit 0
-agent="$(jq -r '.agent_type // "" | strings' <<<"$payload" 2>/dev/null)" || exit 0
-case "$agent" in
-  design-auditor|boxlite-agent-tooling:design-auditor) ;;
-  default)
-    # shellcheck source=../lib/subagent-identity.sh
-    source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd -P)/subagent-identity.sh" || exit 0
-    transcript="$(jq -r 'if (.agent_transcript_path | type) == "string" then .agent_transcript_path
-      elif (.transcript_path | type) == "string" then .transcript_path else "" end' <<<"$payload")"
-    [[ -n "$transcript" ]] || exit 0
-    agent="$(subagent_identity_codex_path "$payload" "$transcript")" || exit 0
-    case "${agent##*/}" in
-      design-auditor|design-auditor_*|design_auditor|design_auditor_*) ;;
-      *) exit 0 ;;
-    esac ;;
+[[ "$payload" == *auditor* || "$payload" == *'"default"'* ]] || exit 0
+lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd -P)" || exit 0
+plugin_root="${lib%/.agents/lib}"
+for name in subagent subagent-identity verdict-audit-state auditor-override-state commit-push-stop; do
+  # shellcheck source=/dev/null
+  source "$lib/$name.sh" || exit 0
+done
+auditor="$(subagent_identity_auditor "$payload")" || exit 0
+event="$(jq -r '.hook_event_name // ""' <<<"$payload")"
+cwd="$(jq -r '.cwd // "" | strings' <<<"$payload")"
+case "$auditor" in
+  design-auditor)
+    git_dir="$(git -C "${cwd:-$PWD}" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
+    task_path="$git_dir/agent-tooling-design-audit-task.json"
+    [[ -f "$task_path" && ! -L "$task_path" ]] || exit 0
+    task="$(jq -ce 'select((.deadline | type) == "number" and (.state_hash | type) == "string")' \
+      "$task_path" 2>/dev/null)" || exit 0
+    allow_command='design-doc\.sh"?[[:space:]]+(verdict|research)([[:space:]]|$)'
+    allow_path=""
+    record="Pipe {content_sha256, verdict, findings, advisories} to bash \"$plugin_root/scripts/design-doc.sh\" verdict; checks you have not run are high: unchecked." ;;
+  commit-push-auditor)
+    [[ "$event" == PreToolUse ]] || exit 0
+    repo="$(git -C "${cwd:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
+    scope="$(verdict_audit_scope_from_hook_payload "$payload" "$repo" 2>/dev/null)" || exit 0
+    task="$(verdict_audit_read_single_record \
+      "$(auditor_override_control_dir "$repo")/audit-task.$scope.commit-push-auditor.json" 2>/dev/null \
+      | jq -ce 'select((.deadline | type) == "number" and (.dossier_path | type) == "string"
+                       and (.attempt_id | type) == "string")' 2>/dev/null)" || exit 0
+    allow_command=""
+    allow_path="$(jq -r .dossier_path <<<"$task")"
+    record="$(commit_push_stop_record "$(jq -r .attempt_id <<<"$task")" "$allow_path")" ;;
   *) exit 0 ;;
 esac
-cwd="$(jq -r '.cwd // "" | strings' <<<"$payload")"
-git_dir="$(git -C "${cwd:-$PWD}" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
-task_path="$git_dir/agent-tooling-design-audit-task.json"
-[[ -f "$task_path" && ! -L "$task_path" ]] || exit 0
-task="$(jq -ce 'select((.deadline | type) == "number" and (.state_hash | type) == "string")' \
-  "$task_path" 2>/dev/null)" || exit 0
 deadline="$(jq -r .deadline <<<"$task")"
-plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-record="Pipe {content_sha256, verdict, findings, advisories} to bash \"$plugin_root/scripts/design-doc.sh\" verdict; checks you have not run are high: unchecked."
-now="$(date +%s)"
-case "$(jq -r '.hook_event_name // ""' <<<"$payload")" in
+case "$event" in
   PreToolUse)
-    (( now >= deadline )) || exit 0
+    (( $(date +%s) >= deadline )) || exit 0
+    tool="$(jq -r '.tool_name // ""' <<<"$payload")"
     command="$(jq -r '.tool_input.command // "" | strings' <<<"$payload")"
-    pattern='design-doc\.sh"?[[:space:]]+(verdict|research)([[:space:]]|$)'
-    if [[ "$(jq -r '.tool_name // ""' <<<"$payload")" == Bash && "$command" =~ $pattern ]]; then
+    if [[ -n "$allow_command" && "$tool" == Bash && "$command" =~ $allow_command ]]; then
       exit 0
     fi
-    printf 'Deadline passed: record your verdict now. %s\n' "$record" >&2
+    if [[ -n "$allow_path" ]]; then
+      file="$(jq -r '.tool_input.file_path // "" | strings' <<<"$payload")"
+      [[ "$file" != "$allow_path" && "$command" != *"$allow_path"* ]] || exit 0
+    fi
+    subagent_timed_message passed "$record" >&2
     exit 2 ;;
   SubagentStop)
-    [[ "$(jq -r '.stop_hook_active == true' <<<"$payload")" != true ]] || exit 0
-    state="$git_dir/agent-tooling-design-audit.json"
+    resumed="$(jq -r '.stop_hook_active == true' <<<"$payload")"
+    [[ "$resumed" != true ]] || exit 0
+    state_path="$git_dir/agent-tooling-design-audit.json"
     current=""
-    [[ ! -f "$state" ]] || current="$(perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$state")"
+    [[ ! -f "$state_path" ]] \
+      || current="$(perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$state_path")"
     # A changed audit state means this auditor recorded its verdict.
     if [[ "$current" != "$(jq -r .state_hash <<<"$task")" ]]; then
       rm -f "$task_path"
       exit 0
     fi
-    reason="Record your verdict before stopping. $record"
-    (( now < deadline )) || reason="Deadline passed: record your verdict now. $record"
-    jq -nc --arg reason "$reason" '{decision:"block",reason:$reason}' ;;
+    reason="$(subagent_timed_stop "$deadline" missing "$resumed" "$record")"
+    [[ -z "$reason" ]] || jq -nc --arg reason "$reason" '{decision:"block",reason:$reason}' ;;
 esac
 exit 0

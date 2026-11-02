@@ -121,12 +121,12 @@ if ! task_input="$(jq -c '{repo_root, design_url, content_sha256}
    || ! findings="$(listed findings)"; then
   deny 'audit request unreadable'
 fi
-deadline="$(design_doc_audit_task "$(jq -r .repo_root <<<"$request")" \
-  "$(jq -r .design_url <<<"$request")" "$(jq -r .content_sha256 <<<"$request")")" \
+design_doc_audit_task "$(jq -r .repo_root <<<"$request")" \
+  "$(jq -r .design_url <<<"$request")" "$(jq -r .content_sha256 <<<"$request")" >/dev/null \
   || deny 'design audit deadline unavailable'
 if ! criteria="$(subagent_prompt audit/design-criteria "$plugin_root" "plugin_root=$plugin_root")" \
    || ! task="$(subagent_prompt audit/design-task "$plugin_root" \
-     "audit_criteria=$criteria" "task_input_json=$task_input" "deadline=$deadline")" \
+     "audit_criteria=$criteria" "task_input_json=$task_input")" \
    || ! instruction="$(subagent_instruction --agent design-auditor --root "$plugin_root" \
      --description 'Design audit' --task "$task")"; then
   deny 'design audit instruction unavailable'
