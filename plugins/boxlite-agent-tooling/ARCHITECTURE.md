@@ -1097,6 +1097,7 @@ added. Original source is preserved unless modification was requested.
 
 `boxlite-design-doc` owns research requirements and the design outline; the design audit
 rules live in `design-criteria.md` and the `design-auditor` spec, and the audit loop lives in code.
+Its five numbered steps run in work order: Frame, Search protocol and Analyze under Research, the auditor's standard; Write and Gate under Design.
 For complex sources, its Research section uses `boxlite-distill` in knowledge mode while retaining decision-relevant evidence and the design outline.
 Hosts discover it through their skill paths; consumers name the skill without
 copying its rules. The full Test section and reproduce-before-fix remain in workflow guidance.
