@@ -19,9 +19,10 @@
 #   2. Current host's CLI, identified by the shared hook_host_kind accessor.
 #      Unknown shell callers retain Claude-then-Codex executable discovery.
 #      A known host never falls through to the other provider.
-#      Claude — headless with the auditor spec as system prompt, tools
-#      whitelisted, hooks disabled (no nested gates), 15-minute cap.
-#      Codex — read-only, hooks disabled, ephemeral, same timeout. Codex writes
+#      Claude — headless stream-json with the auditor spec as system prompt, tools
+#      whitelisted, hooks disabled (no nested gates). At the 15-minute deadline,
+#      subagent_timed_drive asks for the dossier; it stops the CLI 240 s later.
+#      Codex — read-only, hooks disabled, ephemeral, stopped at the deadline. Codex writes
 #      only its final response through the host-owned --output-last-message channel;
 #      the parent runner validates and publishes those bytes.
 #   3. No matching CLI → exit 2 with instructions (the caller sees why).
@@ -105,18 +106,48 @@ source "$tooling_root/.agents/lib/audit-diagnostics.sh" || exit 2
 source "$tooling_root/.agents/lib/audit-reflection.sh"
 # shellcheck source=../../lib/audit-reflection-gate.sh
 source "$tooling_root/.agents/lib/audit-reflection-gate.sh"
+# The prompt is a document, not a string literal: .agents/prompts/audit/verdict-runner.md.
+# Loaded through the shared library so this runner and the Stop gate that offers the
+# in-agent route cannot drift apart on what "proven" means.
+#
+# The document is the only copy. A second one drifting out of date would not announce
+# itself — the audit would run and return a confident verdict against a superseded
+# standard of proof. A missing document is therefore exit 2, the code this script
+# already uses for "no runner available", rather than something to improvise around.
+# The prompts ship in this same pinned tree, so their absence means the gates that
+# reach this script are equally broken.
+subagent_lib="$tooling_root/.agents/lib/subagent.sh"
+if [[ ! -r "$subagent_lib" ]]; then
+  printf 'run-verdict-audit.sh: missing %s — cannot build the audit prompt.\n' "$subagent_lib" >&2
+  exit 2
+fi
+# shellcheck source=../../lib/subagent.sh
+source "$subagent_lib"
+# shellcheck source=../../lib/codex-cli.sh
+source "$tooling_root/.agents/lib/codex-cli.sh" || exit 2
 # shellcheck disable=SC2154 # Assigned by verdict-audit-state.sh above.
 max_audit_timeout_seconds="$(( verdict_audit_lock_max_seconds - verdict_audit_deadline_slack_seconds ))"
-audit_timeout_is_numeric=true
-[[ "$audit_timeout_seconds" =~ ^[1-9][0-9]*$ \
-   && ${#audit_timeout_seconds} -le 4 ]] || audit_timeout_is_numeric=false
-# Bound the string before arithmetic: macOS Bash 3.2 wraps integers wider than 64 bits,
-# which can turn an attacker-controlled huge value into a small accepted timeout.
-if [[ "$audit_timeout_is_numeric" != true ]] \
-   || (( audit_timeout_seconds > max_audit_timeout_seconds )); then
-  printf 'run-verdict-audit.sh: VERDICT_AUDITOR_TIMEOUT must be an integer from 1 to %s seconds.\n' \
-    "$max_audit_timeout_seconds" >&2
+audit_timeout_seconds="$(subagent_timed_timeout VERDICT_AUDITOR_TIMEOUT \
+  "$audit_timeout_seconds" "$max_audit_timeout_seconds")" || exit 2
+audit_host="$(hook_host_kind)" || {
+  printf 'run-verdict-audit.sh: shared host detector is unavailable.\n' >&2
   exit 2
+}
+# The runner is chosen before the lease, which must cover its stop. The Claude route gets
+# its record message at the deadline, an interrupt 30 s later if it is still undelivered,
+# and its stop 240 s after the deadline, capped at the maximum (design #328): a live
+# record turn took about 120 s. Other routes stop at the deadline.
+audit_runner=none
+audit_stop_seconds="$audit_timeout_seconds"
+if [[ -n "${VERDICT_AUDITOR_CMD:-}" ]]; then
+  audit_runner=override
+elif [[ "$audit_host" != codex ]] && command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
+  audit_runner=claude
+  audit_stop_seconds="$(( audit_timeout_seconds + 240 ))"
+  (( audit_stop_seconds <= max_audit_timeout_seconds )) \
+    || audit_stop_seconds="$max_audit_timeout_seconds"
+elif [[ "$audit_host" != claude ]] && codex_bin="$(codex_cli_find)" && [[ -r "$spec_file" ]]; then
+  audit_runner=codex
 fi
 if [[ -n "$provided_session_scope" ]]; then
   if [[ "$provided_session_scope" != "-" \
@@ -155,7 +186,7 @@ audit_output_file="$verdict_file"
 [[ "$session_scope" == "-" ]] \
   || audit_output_file="${verdict_file}.audit-${audit_token}"
 # shellcheck disable=SC2154 # Assigned by verdict-audit-state.sh above.
-audit_deadline="$(( $(date +%s) + audit_timeout_seconds + verdict_audit_deadline_slack_seconds ))"
+audit_deadline="$(( $(date +%s) + audit_stop_seconds + verdict_audit_deadline_slack_seconds ))"
 runner_start_token="$(verdict_audit_process_start_token "$$" 2>/dev/null)" || {
   printf 'run-verdict-audit.sh: could not identify the runner process start time.\n' >&2
   exit 2
@@ -936,29 +967,6 @@ compute_audit_tree_hash() {
   audit_request_tree "$project_dir"
 }
 
-# The prompt is a document, not a string literal: .agents/prompts/audit/verdict-runner.md.
-# Loaded through the shared library so this runner and the Stop gate that offers the
-# in-agent route cannot drift apart on what "proven" means.
-#
-# The document is the only copy. A second one drifting out of date would not announce
-# itself — the audit would run and return a confident verdict against a superseded
-# standard of proof. A missing document is therefore exit 2, the code this script
-# already uses for "no runner available", rather than something to improvise around.
-# The prompts ship in this same pinned tree, so their absence means the gates that
-# reach this script are equally broken.
-subagent_lib="$tooling_root/.agents/lib/subagent.sh"
-if [[ ! -r "$subagent_lib" ]]; then
-  printf 'run-verdict-audit.sh: missing %s — cannot build the audit prompt.\n' "$subagent_lib" >&2
-  exit 2
-fi
-# shellcheck source=../../lib/subagent.sh
-source "$subagent_lib"
-# shellcheck source=../../lib/codex-cli.sh
-source "$tooling_root/.agents/lib/codex-cli.sh" || exit 2
-audit_host="$(hook_host_kind)" || {
-  printf 'run-verdict-audit.sh: shared host detector is unavailable.\n' >&2
-  exit 2
-}
 expected_branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || printf '')"
 expected_head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || printf '')"
 if [[ "$session_scope" != "-" ]]; then
@@ -1002,8 +1010,10 @@ if [[ -n "$history_path" ]]; then
   audit_prompt+=$'\nHistory schema JSON: '"$(jq -nc --arg path "$tooling_root/.agents/hooks/audit/commit-push-audit.schema.json" '{path:$path}')"
   audit_prompt+=$'\n\n'"$reflection_prompt"
 fi
-timed_prompt="$(subagent_timed_prompt "$tooling_root" "$audit_timeout_seconds")" || exit 2
-audit_prompt="$timed_prompt"$'\n\n'"$audit_prompt"
+if [[ "$audit_runner" == claude ]]; then
+  record_message="$(subagent_prompt subagent/timed-subagent "$tooling_root")" || exit 2
+  record_message="$(subagent_timed_message passed "${record_message#$'\n'}")" || exit 2
+fi
 
 # Each launch clears its output path to establish freshness without second-resolution
 # mtime comparisons. Legacy runs use the shared path; session runs use a unique stage
@@ -1080,7 +1090,7 @@ start_audit_group_event_channel() {
   exec 5>&-
   rm -f "$event_fifo" 2>/dev/null || true
   rmdir "$channel_dir" 2>/dev/null || true
-  monitor_timeout="$(( audit_timeout_seconds + 5 ))"
+  monitor_timeout="$(( audit_stop_seconds + 5 ))"
   # A direct child owns the event read. A valid `done N` record means the model command
   # returned; EOF, malformed bytes, or timeout is a fail-closed completion failure.
   perl -e '
@@ -1224,7 +1234,7 @@ done
 # Headless prompts have no source-file location for relative skill references.
 spec_body="Audit skill location JSON: $(jq -nc --arg path "$audit_skill" '{path:$path}')"
 spec_body+=$'\n\n'"$(strip_frontmatter "$spec_file")"$'\n\n'"$(strip_frontmatter "$audit_skill")"
-if [[ -n "${VERDICT_AUDITOR_CMD:-}" ]]; then
+if [[ "$audit_runner" == override ]]; then
   audit_route=override
   # The stable procedure comes first so repeated headless audits can reuse that prefix;
   # only the bounded runner task and its JSON input vary by generation.
@@ -1241,27 +1251,28 @@ if [[ -n "${VERDICT_AUDITOR_CMD:-}" ]]; then
     echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
     exit 1
   fi
-elif [[ "$audit_host" != codex ]] && command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
+elif [[ "$audit_runner" == claude ]]; then
   audit_route=claude
   audit_started=true
   remove_owned_verdict
   rm -f "$audit_output_file"
   # Safe mode retains OAuth/keychain auth while dropping project/plugin/memory/hook
   # context. Replace the coding-agent prompt with the stripped auditor procedure and
-  # expose its audit and timer tools; --name suppresses a separate title request.
-  # perl alarm remains the portable outer timeout for the complete agent/tool loop.
+  # expose its audit tools; --name suppresses a separate title request. The driver's
+  # alarm is the portable outer timeout for the complete agent/tool loop.
   if ! run_in_audit_group \
       "$audit_prompt" \
-      perl -e 'alarm shift; exec @ARGV' "$audit_timeout_seconds" \
-        claude -p --safe-mode --system-prompt "$spec_body" \
-          --tools Read Bash Write Monitor TaskStop --effort xhigh --name verdict-auditor \
-          --no-session-persistence --model "$auditor_model"; then
+      subagent_timed_drive "$audit_timeout_seconds" 30 "$audit_stop_seconds" "$record_message" \
+        claude -p --safe-mode --input-format stream-json --output-format stream-json --verbose \
+          --replay-user-messages \
+          --system-prompt "$spec_body" --tools Read Bash Write TaskStop --effort xhigh \
+          --name verdict-auditor --no-session-persistence --model "$auditor_model"; then
     rm -f "$audit_output_file"
     remove_owned_verdict while-current
     echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
     exit 1
   fi
-elif [[ "$audit_host" != claude ]] && codex_bin="$(codex_cli_find)" && [[ -r "$spec_file" ]]; then
+elif [[ "$audit_runner" == codex ]]; then
   audit_route=codex
   audit_started=true
   remove_owned_verdict
