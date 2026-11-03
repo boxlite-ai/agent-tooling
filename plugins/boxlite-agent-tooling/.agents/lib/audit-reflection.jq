@@ -13,6 +13,8 @@ def input_ok:
   keys_are(["id","binding","snapshot"]) and (.id | identifier)
   and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 4096))
   and (.snapshot | type == "object" and length > 0 and (tojson | utf8bytelength <= 327680));
+# Advisories never decide a verdict, so a rewrite that changes only them is the same outcome.
+def outcome_decision: if (.evidence | type) == "object" then del(.evidence.advisories) else . end;
 def outcome_ok:
   (del(.history_review,.reflection_review) | keys_are(["verdict","evidence"]))
   and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS","CANCELED"))
@@ -60,9 +62,11 @@ elif $operation == "record" then
   then error("invalid audit outcome") else . end |
   ([.attempts[].id] | index($request.id)) as $index |
   if $index == null then error("unknown attempt")
-  elif .attempts[$index].outcome != null and .attempts[$index].outcome != $request.outcome
+  elif .attempts[$index].outcome != null
+    and (.attempts[$index].outcome | outcome_decision) != ($request.outcome | outcome_decision)
   then error("attempt outcome changed")
-  elif .attempts[$index].outcome == $request.outcome then .
+  # The same decision records again; the first outcome stays (#339).
+  elif .attempts[$index].outcome != null then .
   else
     audit_reflection_assess($request.outcome; .attempts[$index]) |
     if $request.outcome.history_review != null then
