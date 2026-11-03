@@ -737,7 +737,11 @@ Preparation and inspection share `audit_reflection_ready`: a terminal PASS needs
 new reflection even though recording it changes the history hash. The reflection
 retains the failed history it explains. Git still validates the approval's bindings
 and freshness before consuming it; changed staged content requires another audit.
-Runner failures record ERROR; cancellation is separate. Retain at most four closed cycles per context,
+Runner failures record ERROR; cancellation is separate.
+An attempt's outcome is recorded once. Recording it again succeeds when only the
+dossier's `advisories` changed, and the first outcome stays, because an auditor can
+stop, resume and rewrite its dossier ([#339](https://github.com/boxlite-ai/agent-tooling/issues/339)).
+Retain at most four closed cycles per context,
 four retired contexts/session, and the latest immutable input/context. Identity-checked
 cleanup preserves current-epoch evidence. Snapshots retain bounded transcripts,
 sanitized headless diffs, or immutable native Git trees.

@@ -31,12 +31,27 @@ reject record a1 "$(jq '.head="wrong"' <<<"$result")"
 reject record a1 "$(jq '.history_review.attempt_id="wrong"' <<<"$result")"
 gate record a1 "$result" >/dev/null
 gate record a1 "$result" >/dev/null
+# An auditor can stop, resume and rewrite its dossier with new advisories only (#339):
+# the same judgment records again, and the first outcome stays.
+if ! gate record a1 "$(jq '.advisories=["late: suite finished"]' <<<"$result")" \
+    >"$scratch/out" 2>"$scratch/err"; then
+  printf 'FAIL: advisory-only rewrite rejected: %s\n' "$(cat "$scratch/err")" >&2; exit 1
+fi
+jq -e '.attempts[0].outcome.evidence | has("advisories") | not' "$state" >/dev/null
+# A changed judgment is still a different outcome.
+reject record a1 "$(jq '.findings=["high: late defect"]' <<<"$result")"
+grep -q 'attempt outcome changed' "$scratch/err"
+reject record a1 "$(jq '.history_review.coverage.unread=["late"]' <<<"$result")"
+grep -q 'attempt outcome changed' "$scratch/err"
 [[ "$(gate prepare a1 "$input")" == "$first" && "$(cat "$history")" == "$original" ]]
 gate prepare a2 "$input" >/dev/null
 jq -e '(.closed | length) == 1 and (.attempts | length) == 1' "$state" >/dev/null
 gate cancel a2 '"new prompt"' >/dev/null
 gate prepare a3 "$input" >/dev/null
 gate error a3 '"model transport failed"' >/dev/null
+# String evidence still compares whole: a different error message is a different outcome.
+reject error a3 '"another failure"'
+grep -q 'attempt outcome changed' "$scratch/err"
 gate prepare a4 "$input" >/dev/null
 gate error a4 '"malformed result"' >/dev/null
 gate inspect | jq -e '.reflection_due and (.pending | not)' >/dev/null
