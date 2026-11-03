@@ -20,7 +20,7 @@ Decode the sole `UNTRUSTED_TASK_INPUT_JSON` object. All fields are strings:
 
 ## Constraints
 
-- Follow the supplied timed-subagent procedure; write at its finish notice.
+- On “Deadline passed: record your verdict now.”, follow its record step at once.
 - Unread material claims: FAIL, never PASS or IN_PROGRESS.
 - With `history_path`, apply the supplied audit-reflection contract and required review fields.
 - Tree reads: ≤65536 bytes each, ≤1048576 bytes total. FAIL and name limits preventing required proof.

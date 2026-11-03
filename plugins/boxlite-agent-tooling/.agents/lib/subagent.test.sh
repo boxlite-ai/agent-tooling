@@ -707,5 +707,81 @@ for probe in "You are the headless equivalent" "Apply the loaded boxlite-verdict
 done
 
 echo
+echo "## Timed subagents: one timeout check, one driver (design #328)"
+# The length bound comes before arithmetic: Bash 3.2 wraps integers wider than 64 bits,
+# so a huge value must fail on length, not compare as a small number.
+for case in "1:ok" "9999:ok" "0:bad" "10000:bad" "01:bad" "1e3:bad" ":bad" "-1:bad" \
+            "99999999999999999999999:bad"; do
+  value="${case%:*}" expected="${case##*:}"
+  if out="$(subagent_timed_timeout EXAMPLE_TIMEOUT "$value" 9999 2>"$TMP/timeout.err")"; then
+    [[ "$expected" == ok && "$out" == "$value" ]] && ok "timeout '$value' accepted" \
+      || bad "timeout '$value' accepted (expected $expected)"
+  else
+    [[ "$expected" == bad ]] && has 'EXAMPLE_TIMEOUT must be an integer from 1 to 9999 seconds' \
+      "$(cat "$TMP/timeout.err")" && ok "timeout '$value' rejected by name" \
+      || bad "timeout '$value' rejected (expected $expected)"
+  fi
+done
+
+# A stream-json CLI stand-in that follows the Claude Code 2.1.316 probes linked from
+# design #328: a message sent mid-call is delivered, and echoed with `isReplay`, when the
+# call or thought ends; an interrupt ends the turn with a `result` lacking its `result`
+# key, and a queued message runs next.
+cat > "$TMP/cli" <<'CLI'
+#!/usr/bin/env bash
+set -uo pipefail
+log() { printf '%s\n' "$1" >> "$CLI_LOG"; }
+deliver() {  # echo the queued message as delivered, then record
+  jq -cn --arg text "$queued" '{type: "user", isReplay: true, message: {role: "user", content: $text}}'
+  [[ "$CLI_MODE" != slow ]] || sleep 2
+  printf 'recorded\n' > "$CLI_DOSSIER"
+  printf '%s\n' '{"type":"system","subtype":"init"}' '{"type":"result","subtype":"success","result":"ok"}'
+}
+IFS= read -r first || exit 3
+log "task=$(jq -r '.message.content' <<<"$first")"
+if [[ "$CLI_MODE" == early ]]; then
+  printf 'recorded\n' > "$CLI_DOSSIER"
+  printf '%s\n' '{"type":"result","subtype":"success","result":"ok"}'
+fi
+queued=""
+while IFS= read -r line; do
+  case "$(jq -r '.type' <<<"$line"):$CLI_MODE" in
+    user:*)
+      queued="$(jq -r '.message.content' <<<"$line")"
+      log "message=$queued"
+      case "$CLI_MODE" in steer|slow) deliver ;; esac ;;
+    control_request:*)
+      log "interrupt=$(jq -r '.request.subtype' <<<"$line")"
+      printf '%s\n' '{"type":"control_response","response":{"subtype":"success"}}'
+      case "$CLI_MODE" in
+        queued) printf '%s\n' '{"type":"result","subtype":"error_during_execution"}' ;;
+        race) printf '%s\n' '{"type":"result","subtype":"success","result":"done"}' ;;
+        *) continue ;;
+      esac
+      [[ -z "$queued" ]] || deliver ;;
+  esac
+done
+log eof
+CLI
+chmod +x "$TMP/cli"
+# Deadline 1 s, grace 1 s, stop 5 s. Each case: mode, exit, dossier, exchange, name.
+for case in \
+  "early:0:recorded:task=Prüfe ünïcode.:a turn ending before the deadline gets no message" \
+  "steer:0:recorded:task=Prüfe ünïcode.;message=Deadline passed.:the message reaches a running turn" \
+  "slow:0:recorded:task=Prüfe ünïcode.;message=Deadline passed.:a delivered message is never interrupted" \
+  "queued:0:recorded:task=Prüfe ünïcode.;message=Deadline passed.;interrupt=interrupt:a held message runs after the interrupt, sent once" \
+  "race:0:recorded:task=Prüfe ünïcode.;message=Deadline passed.;interrupt=interrupt:a turn ending as the interrupt lands still records" \
+  "ignore:142:none:task=Prüfe ünïcode.;message=Deadline passed.;interrupt=interrupt:a CLI that never answers is stopped"; do
+  IFS=: read -r mode status dossier log name <<<"$case"
+  rm -f "$TMP/cli.log" "$TMP/cli.dossier"
+  printf 'Prüfe ünïcode.' | CLI_MODE="$mode" CLI_LOG="$TMP/cli.log" CLI_DOSSIER="$TMP/cli.dossier" \
+    subagent_timed_drive 1 1 5 'Deadline passed.' "$TMP/cli" 2>/dev/null
+  # The stand-in may log its EOF after the driver exits; only the exchange matters.
+  got="$?:$(cat "$TMP/cli.dossier" 2>/dev/null || printf none):$(grep -v -x eof "$TMP/cli.log" | paste -sd ';' -)"
+  [[ "$got" == "$status:$dossier:$log" ]] && ok "driver: $name" \
+    || bad "driver: $name (got $got, want $status:$dossier:$log)"
+done
+
+echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

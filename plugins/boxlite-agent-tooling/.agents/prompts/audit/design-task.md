@@ -1,7 +1,7 @@
 ---
 name: design-task
 used-by: .agents/hooks/preflight-design-doc.sh
-placeholders: task_input_json, audit_criteria
+placeholders: task_input_json, audit_criteria, deadline
 description: Inputs for an independent design audit.
 ---
 

@@ -2640,16 +2640,21 @@ REQUEST_CAP="$R/captured-headless-request.json"
 cat > "$BIN/claude" <<'FAKE'
 #!/usr/bin/env bash
 set -uo pipefail
-audit_prompt="$(cat)"
+# The driver sends the audit prompt as the first stream-json user message.
+IFS= read -r first_frame || exit 3
+audit_prompt="$(jq -r '.message.content' <<<"$first_frame")"
 safe_mode=false
 has_name=false
 has_no_persistence=false
 effort=""
 system_mode="default"
 system_prompt=""
+stream_flags=""
 tool_names=()
 while (( $# > 0 )); do
   case "$1" in
+    --input-format|--output-format) stream_flags+="$1=${2:-} "; shift 2 ;;
+    --verbose|--replay-user-messages) stream_flags+="$1 "; shift ;;
     --safe-mode) safe_mode=true; shift ;;
     --name) has_name=true; shift 2 ;;
     --no-session-persistence) has_no_persistence=true; shift ;;
@@ -2682,17 +2687,20 @@ fi
 calls=2
 [[ "$has_name" == true ]] && calls=1
 jq -nc --arg system "$system_prompt" --arg message "$audit_prompt" \
-  --arg effort "$effort" --arg system_mode "$system_mode" \
+  --arg effort "$effort" --arg system_mode "$system_mode" --arg stream "$stream_flags" \
   --argjson tools "$tools" --argjson calls "$calls" --argjson safe "$safe_mode" \
   --argjson persistence "$has_no_persistence" \
   '{system:$system,messages:[{role:"user",content:$message}],tools:$tools,
     calls:$calls,safe_mode:$safe,no_session_persistence:$persistence,
-    effort:$effort,system_mode:$system_mode}' > "$REQUEST_CAPTURE"
+    effort:$effort,system_mode:$system_mode,stream:$stream}' > "$REQUEST_CAPTURE"
 mkdir -p "$CLAUDE_PROJECT_DIR/.agents/state"
 [[ -z "${LOCK_CAPTURE:-}" ]] \
   || cp "$CLAUDE_PROJECT_DIR/.agents/state/verdict-audit.lock" "$LOCK_CAPTURE"
 printf '{"branch":"main","head":"h","tree_hash":"t","verdict":"PASS","proof":[],"findings":[]}' \
   > "$CLAUDE_PROJECT_DIR/.agents/state/last-verdict.json"
+# End the turn; the driver then closes stdin.
+printf '%s\n' '{"type":"result","subtype":"success","result":"PASS"}'
+cat >/dev/null
 FAKE
 chmod +x "$BIN/claude"
 ( cd "$R" && CLAUDE_PROJECT_DIR="$R" SPEC_CAPTURE="$CAP" REQUEST_CAPTURE="$REQUEST_CAP" PATH="$BIN:$PATH" \
@@ -2725,37 +2733,66 @@ headless_budget="$headless_budget safe=$(jq -r '.safe_mode' "$REQUEST_CAP") mode
 headless_budget="$headless_budget persist=$(jq -r '.no_session_persistence' "$REQUEST_CAP") effort=$(jq -r '.effort' "$REQUEST_CAP")"
 check_eq "headless Claude request replaces ambient context within a hard budget" \
   "$headless_budget" \
-  "bytes=bounded system=bounded tools=5:Read,Bash,Write,Monitor,TaskStop calls=1 safe=true mode=replace persist=true effort=xhigh"
-for deadline_case in 600:510 120:102 1200:510; do
-  timeout_seconds="${deadline_case%:*}"; expected_window="${deadline_case#*:}"
+  "bytes=bounded system=bounded tools=4:Read,Bash,Write,TaskStop calls=1 safe=true mode=replace persist=true effort=xhigh"
+check_eq "headless Claude request streams JSON both ways and echoes delivery (design #328)" \
+  "$(jq -r '.stream' "$REQUEST_CAP")" \
+  "--input-format=stream-json --output-format=stream-json --verbose --replay-user-messages "
+check_eq "headless Claude prompt carries no timer procedure" \
+  "$(jq -r '[.messages[0].content | scan("SUBAGENT_FINISH_NOW")] | length' "$REQUEST_CAP")" 0
+# The lease must outlast the Claude route's stop: 240 s past the deadline, capped where
+# the lease reaches the Stop gate's 3600 s ceiling.
+LOCK_CAP="$R/captured-lock.txt"
+for stop_case in 900:1140 3500:3540; do
+  timeout_seconds="${stop_case%:*}"; expected_stop="${stop_case#*:}"
   started_at="$(date +%s)"
   ( cd "$R" && CLAUDE_PROJECT_DIR="$R" SPEC_CAPTURE="$CAP" REQUEST_CAPTURE="$REQUEST_CAP" \
-      PATH="$BIN:$PATH" VERDICT_AUDITOR_TIMEOUT="$timeout_seconds" \
+      LOCK_CAPTURE="$LOCK_CAP" PATH="$BIN:$PATH" VERDICT_AUDITOR_TIMEOUT="$timeout_seconds" \
       env -u VERDICT_AUDITOR_CMD bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
   finished_at="$(date +%s)"
-  finish_at="$(jq -r 'try (.messages[0].content | capture("(?m)^finish_at=(?<time>[0-9]+)$").time) catch "0"' "$REQUEST_CAP")"
-  check_eq "shared reminder deadline for a ${timeout_seconds}s verdict audit" \
-    "$([[ "$finish_at" -ge $(( started_at + expected_window )) && \
-          "$finish_at" -le $(( finished_at + expected_window )) ]] && echo bounded || echo missing)" bounded
-  check_eq "verdict runner supplies one native Monitor procedure" \
-    "$(jq -r '[.messages[0].content | scan("SUBAGENT_FINISH_NOW")] | length' "$REQUEST_CAP")" 1
+  lock_deadline="$(awk '{print $2}' "$LOCK_CAP" 2>/dev/null || true)"
+  lease_state="lease:${lock_deadline:-missing}"
+  [[ "$lock_deadline" =~ ^[0-9]+$ ]] \
+    && (( lock_deadline >= started_at + expected_stop + verdict_audit_deadline_slack_seconds \
+          && lock_deadline <= finished_at + expected_stop + verdict_audit_deadline_slack_seconds )) \
+    && lease_state=covered
+  check_eq "lease covers the stop of a ${timeout_seconds}s Claude audit" "$lease_state" covered
 done
-# The hard alarm, not the notice, ends a slow audit. A reflection retry still has to
-# write its history and reflection reviews after the notice, so the default budget
-# must leave minutes for that report, not seconds.
-LOCK_CAP="$R/captured-lock.txt"
-( cd "$R" && CLAUDE_PROJECT_DIR="$R" SPEC_CAPTURE="$CAP" REQUEST_CAPTURE="$REQUEST_CAP" \
-    LOCK_CAPTURE="$LOCK_CAP" PATH="$BIN:$PATH" \
-    env -u VERDICT_AUDITOR_CMD -u VERDICT_AUDITOR_TIMEOUT \
-      bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
-lock_deadline="$(awk '{print $2}' "$LOCK_CAP" 2>/dev/null || true)"
-finish_at="$(jq -r 'try (.messages[0].content | capture("(?m)^finish_at=(?<time>[0-9]+)$").time) catch "0"' "$REQUEST_CAP")"
-report_window=missing
-[[ "$lock_deadline" =~ ^[0-9]+$ && "$finish_at" =~ ^[1-9][0-9]*$ ]] \
-  && report_window="$(( lock_deadline - verdict_audit_deadline_slack_seconds - finish_at ))"
-check_eq "default verdict budget leaves five minutes to report after the notice" \
-  "$([[ "$report_window" =~ ^[0-9]+$ && "$report_window" -ge 300 ]] \
-      && echo enough || echo "short:$report_window")" enough
+rm -rf "$R" "$BIN"
+
+echo
+echo "## A Claude auditor still working at its deadline records its verdict"
+# Design #328: the runner used to kill this auditor without a dossier, so Stop blocked.
+# Now the driver sends the record message at the deadline; this stand-in, like Claude
+# Code, sees it while its turn runs, then writes the dossier and ends the turn.
+R="$(setup)"
+BIN="$(mktemp -d)"
+cat > "$BIN/claude" <<'FAKE_BUSY'
+#!/usr/bin/env bash
+set -uo pipefail
+IFS= read -r task || exit 3
+while IFS= read -r frame; do
+  [[ "$(jq -r '.type // empty' <<<"$frame" 2>/dev/null)" == user ]] || continue
+  jq -r '.message.content' <<<"$frame" > "$CLAUDE_PROJECT_DIR/record-message"
+  mkdir -p "$CLAUDE_PROJECT_DIR/.agents/state"
+  printf '{"branch":"main","head":"h","tree_hash":"t","verdict":"PASS","proof":[],"findings":[]}' \
+    > "$CLAUDE_PROJECT_DIR/.agents/state/last-verdict.json"
+  printf '%s\n' '{"type":"result","subtype":"success","result":"PASS"}'
+  cat >/dev/null
+  exit 0
+done
+sleep 30
+FAKE_BUSY
+chmod +x "$BIN/claude"
+( cd "$R" && CLAUDE_PROJECT_DIR="$R" PATH="$BIN:$PATH" VERDICT_AUDITOR_TIMEOUT=2 \
+    env -u VERDICT_AUDITOR_CMD bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
+record_rc=$?
+record_dossier=absent
+[[ -s "$R/.agents/state/last-verdict.json" ]] && record_dossier=present
+record_lead=missing
+grep -q '^Deadline passed: record your verdict now\. Run no more checks' "$R/record-message" 2>/dev/null \
+  && record_lead=sent
+check_eq "an audit running at its deadline gets the record message and passes" \
+  "rc=$record_rc dossier=$record_dossier message=$record_lead" "rc=0 dossier=present message=sent"
 rm -rf "$R" "$BIN"
 
 echo

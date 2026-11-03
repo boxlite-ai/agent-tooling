@@ -150,8 +150,8 @@ Stop errors name this local file. Diagnostics never grant dossier authority.
 | `BOXLITE_HOOK_HOST` | Shared host detector | Legacy root inference | Set by each manifest: `claude`, `codex`, or `unknown`; invalid nonempty exported values yield unknown. Routing metadata only. |
 | `VERDICT_AUDITOR_CMD` | `run-verdict-audit.sh` | unset | Replaces the model CLI; reads the audit prompt on stdin and must write the requested dossier. |
 | `VERDICT_AUDITOR_MODEL` | `run-verdict-audit.sh` | `claude-sonnet-5` | Model for the `claude -p` route. |
-| `VERDICT_AUDITOR_TIMEOUT` | `run-verdict-audit.sh` | `900` seconds | Hard limit for one audit. |
-| `COMMIT_PUSH_AUDITOR_TIMEOUT` | `preflight-commit-push.sh`, `run-commit-push-audit.sh` | `900` seconds | Native auditor deadline: past it, only the dossier write is allowed. Hard limit for the headless runner. |
+| `VERDICT_AUDITOR_TIMEOUT` | `run-verdict-audit.sh` | `900` seconds | Deadline, 1–3540. Claude route: the auditor is told to record now, interrupted 30 s later if that message is still undelivered, and stopped 240 s after the deadline (at most 3540 s). Codex and `VERDICT_AUDITOR_CMD`: stopped at the deadline. |
+| `COMMIT_PUSH_AUDITOR_TIMEOUT` | `preflight-commit-push.sh`, `run-commit-push-audit.sh` | `900` seconds | Native auditor deadline (1–9999): past it, only the dossier write is allowed. The headless Codex runner (1–3540) stops the audit at the deadline and records FAIL. |
 | `DESIGN_AUDITOR_TIMEOUT` | `preflight-design-doc.sh` | `900` seconds | Design audit deadline; past it, the auditor is told to record its verdict now. |
 | `CODEX_BIN` | Both runners and Stop classifier | `codex` on `PATH`, then the macOS app bundle | Codex binary; does not override host selection. |
 | `CODEX_COMMIT_PUSH_AUDIT_MODE` | `run-commit-push-audit.sh` | `agentic` | `local` runs offline checks, for tests and diagnostics only. |

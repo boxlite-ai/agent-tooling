@@ -82,16 +82,15 @@ source "$verdict_state_lib" || exit 2
 # shellcheck source=../../lib/audit-diagnostics.sh
 source "$tooling_root/.agents/lib/audit-diagnostics.sh" || exit 2
 
-audit_timeout_is_numeric=true
-[[ "$audit_timeout_seconds" =~ ^[1-9][0-9]*$ \
-   && ${#audit_timeout_seconds} -le 18 ]] || audit_timeout_is_numeric=false
-# shellcheck disable=SC2154 # Assigned by verdict-audit-state.sh above.
-max_audit_timeout_seconds="$(( verdict_audit_lock_max_seconds - verdict_audit_deadline_slack_seconds ))"
-if [[ "$audit_timeout_is_numeric" != true ]] \
-   || (( audit_timeout_seconds > max_audit_timeout_seconds )); then
-  printf 'run-commit-push-audit: COMMIT_PUSH_AUDITOR_TIMEOUT must be a decimal integer from 1 through %s seconds.\n' \
-    "$max_audit_timeout_seconds" >&2
-  exit 2
+# Without subagent.sh, a check below fails the audit and names the file before the
+# timeout is first used.
+if [[ -r "$tooling_root/.agents/lib/subagent.sh" ]]; then
+  # shellcheck source=../../lib/subagent.sh
+  source "$tooling_root/.agents/lib/subagent.sh" || exit 2
+  # shellcheck disable=SC2154 # Assigned by verdict-audit-state.sh above.
+  max_audit_timeout_seconds="$(( verdict_audit_lock_max_seconds - verdict_audit_deadline_slack_seconds ))"
+  audit_timeout_seconds="$(subagent_timed_timeout COMMIT_PUSH_AUDITOR_TIMEOUT \
+    "$audit_timeout_seconds" "$max_audit_timeout_seconds")" || exit 2
 fi
 
 cleanup_runner() {
@@ -691,8 +690,6 @@ audit_snapshot_matches_expected() {  # exact raw source file
 build_audit_context() {  # exact raw source file
   local raw_source_file="$1"
   local instruction
-  # shellcheck source=../../lib/subagent.sh
-  source "$tooling_root/.agents/lib/subagent.sh" || return 1
   instruction="$(subagent_prompt audit/commit-push-context "$tooling_root")" || return 1
   printf '%s\n\n' "$instruction"
   case "$kind" in
@@ -814,7 +811,6 @@ build_prompt() {  # evidence file, evidence sha256
     printf 'Internal: cannot load nonempty commit-push-criteria prompt\n' >&2
     return 1
   fi
-  subagent_timed_prompt "$tooling_root" "$audit_timeout_seconds" || return 1
   if ! subagent_prompt audit/commit-push-runner "$tooling_root" \
          "audit_criteria=${audit_criteria}" \
          "command_json=${command_json}" \

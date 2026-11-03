@@ -424,21 +424,14 @@ expect_fail "not JSON at all → FAIL"            "$(audit "$R" 'this is not jso
 expect_fail "valid JSON, wrong shape → FAIL"    "$(audit "$R" '{"verdict":"PASS"}')"      "malformed"
 expect_fail "verdict outside the enum → FAIL"   "$(audit "$R" "$(bound_output "$R" MAYBE '[]')")" "malformed"
 
-for deadline_case in 900:510 120:102 1200:510; do
-  timeout_seconds="${deadline_case%:*}"; expected_window="${deadline_case#*:}"
-  started_at="$(date +%s)"
-  reminder_output="$(COMMIT_PUSH_AUDITOR_TIMEOUT="$timeout_seconds" audit "$R" "$(bound_output "$R" PASS '[]')")"
-  finished_at="$(date +%s)"
-  finish_at="$(sed -n 's/^finish_at=\([0-9][0-9]*\)$/\1/p' "$R/prompt.txt")"
-  if [[ "${finish_at:-0}" -ge $(( started_at + expected_window )) && \
-        "${finish_at:-0}" -le $(( finished_at + expected_window )) && \
-        "$(verdict_of "$reminder_output")" == PASS && \
-        "$(grep -c SUBAGENT_FINISH_NOW "$R/prompt.txt")" == 1 ]]; then
-    ok "shared reminder reaches the ${timeout_seconds}s commit audit"
-  else
-    bad "shared reminder reaches the ${timeout_seconds}s commit audit (deadline=${finish_at:-missing})"
-  fi
-done
+# Codex has no Monitor, so the headless commit audit carries no timer procedure (#328).
+timer_output="$(COMMIT_PUSH_AUDITOR_TIMEOUT=120 audit "$R" "$(bound_output "$R" PASS '[]')")"
+if [[ "$(verdict_of "$timer_output")" == PASS ]] \
+   && ! grep -q -e SUBAGENT_FINISH_NOW -e '^finish_at=' "$R/prompt.txt"; then
+  ok "the headless commit audit prompt carries no timer procedure"
+else
+  bad "the headless commit audit prompt carries no timer procedure"
+fi
 
 echo
 echo "## Headless timing follows the actual auditor process"

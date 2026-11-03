@@ -157,19 +157,6 @@ subagent_prompt() (  # $1 = prompt name, $2 = tooling root, then key=value pairs
   printf '%s\n' "$text"
 )
 
-# Render one cooperative finish reminder; callers retain hard-timeout ownership.
-subagent_timed_prompt() {  # tooling root, positive timeout seconds (at most 4 digits)
-  local root="${1:-}" seconds="${2:-}" now finish_after
-  if [[ -z "$root" || ! "$seconds" =~ ^[1-9][0-9]*$ || ${#seconds} -gt 4 ]]; then
-    printf 'subagent_timed_prompt: root and timeout seconds (1–9999) are required\n' >&2
-    return 2
-  fi
-  now="$(date +%s)" || return 2
-  finish_after=$(( seconds * 85 / 100 ))
-  (( finish_after <= 510 )) || finish_after=510
-  subagent_prompt subagent/timed-subagent "$root" "finish_at=$(( now + finish_after ))"
-}
-
 # Timed subagents (design #328): every auditor works to one deadline. Past it, the auditor
 # may only record its verdict, and one verdict-less stop is blocked. Hooks and runners
 # call these helpers; each auditor supplies its deadline and its record step.
@@ -208,6 +195,82 @@ subagent_timed_stop() {  # deadline, recorded|missing|unchecked, resumed, record
   elif [[ "$2" == missing ]]; then
     subagent_timed_message passed "$4"
   fi
+}
+
+# Runs a stream-json Claude CLI, started with --replay-user-messages, as a headless timed
+# subagent. stdin holds the task, sent as the first user message. The first `result`
+# closes stdin, so the CLI runs any queued turn and exits. At the deadline the record
+# message is sent; Claude Code delivers it when the running call or thought ends and
+# echoes it then. With no echo by deadline + grace, an interrupt ends that call or thought
+# and the queued message runs next, so it is never sent twice; a delivered message is
+# never interrupted. Events are matched by `type` and that echo only: an interrupted
+# `result` lacks its `result` key (anthropics/claude-code#94741). At the stop time the
+# alarm ends the driver (142); the caller then stops its process group. Otherwise it
+# exits with the CLI's status. Native Win32 Perl selects only on sockets (perlport), so
+# there the task runs without a record turn, as before #328.
+subagent_timed_drive() {  # deadline (s), grace (s), stop (s), record message, CLI command...
+  perl -MIO::Select -MIPC::Open2 -MJSON::PP -MEncode=decode -MTime::HiRes=time -e '
+    use strict;
+    use warnings;
+    my ($deadline, $grace, $stop, $message, @command) = @ARGV;
+    my $start = time;
+    alarm $stop;
+    $SIG{PIPE} = "IGNORE";
+    my $json = JSON::PP->new->utf8->canonical;
+    my $task = do { local $/; <STDIN> } // "";
+    my $record = decode("UTF-8", $message);
+    my $pid = open2(my $from_cli, my $to_cli, @command);
+    $to_cli->autoflush(1);
+    my $send = sub { print {$to_cli} $json->encode($_[0]), "\n" };
+    my $say = sub {
+      $send->({type => "user", message => {role => "user", content => $_[0]}});
+    };
+    my $finish = sub {
+      waitpid $pid, 0;
+      exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
+    };
+    $say->(decode("UTF-8", $task));
+    if ($^O eq "MSWin32") {
+      close $to_cli;
+      1 while sysread($from_cli, my $chunk, 65536);
+      $finish->();
+    }
+    my @steps = (
+      [$start + $deadline, sub { $say->($record) }],
+      [$start + $deadline + $grace, sub {
+        $send->({type => "control_request", request_id => "timed-subagent-deadline",
+                 request => {subtype => "interrupt"}});
+      }],
+    );
+    my ($open, $buffer, $select) = (1, "", IO::Select->new($from_cli));
+    while (1) {
+      my $wait = $open && @steps ? $steps[0][0] - time : undef;
+      $wait = 0 if defined $wait && $wait < 0;
+      if (!$select->can_read($wait)) {
+        (shift @steps)->[1]->() if $open && @steps;
+        next;
+      }
+      last unless sysread($from_cli, my $chunk, 65536);
+      next unless $open;
+      $buffer .= $chunk;
+      while ($buffer =~ s/\A([^\n]*)\n//) {
+        my $event = eval { $json->decode($1) };
+        next unless ref $event eq "HASH";
+        my $type = $event->{type} // "";
+        if ($type eq "user" && $event->{isReplay} && ref $event->{message} eq "HASH") {
+          my $content = $event->{message}{content};
+          @steps = () if defined $content && !ref $content && $content eq $record;
+          next;
+        }
+        next unless $type eq "result";
+        close $to_cli;
+        ($open, $buffer) = (0, "");
+        last;
+      }
+    }
+    close $to_cli if $open;
+    $finish->();
+  ' "$@"
 }
 
 # Print the block a gate puts in its deny reason.
