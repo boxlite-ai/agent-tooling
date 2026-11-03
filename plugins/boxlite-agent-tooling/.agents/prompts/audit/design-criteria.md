@@ -5,7 +5,7 @@ placeholders: plugin_root
 description: Design audit rules before any code edit.
 ---
 
-- Standard: read the Research section of `{{plugin_root}}/skills/boxlite-design-doc/SKILL.md`.
+- Standard: read `{{plugin_root}}/skills/boxlite-design-doc/SKILL.md`, Research and Design.
 - Design: read via `bash "{{plugin_root}}/scripts/design-doc.sh" show` in `repo_root`, not provider pages; headings and links prove nothing.
 - Each round: run every step; report all gaps at once.
 

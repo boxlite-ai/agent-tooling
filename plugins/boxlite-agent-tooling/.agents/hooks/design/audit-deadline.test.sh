@@ -89,6 +89,33 @@ ok 'Codex: a transcript bound to another session is not trusted' \
   "$(call "$(codex_payload PreToolUse /root/design_auditor other-session)")" '0:'
 has 'Codex: a verdict-less stop is blocked' "$(call "$(codex_payload SubagentStop /root/design_auditor codex-session)")" \
   '"decision":"block"' 'Deadline passed'
+# The design advisor works to its own deadline; its record step is advice (design #335).
+advice_task_file="$git_dir/agent-tooling-design-advice-task.json"
+advice_task() { # seconds until the deadline
+  jq -nc --argjson deadline "$(( $(date +%s) + $1 ))" \
+    '{url:"u", content_sha256:"c", deadline:$deadline, state_hash:""}' > "$advice_task_file"
+}
+advisor=boxlite-agent-tooling:design-advisor
+advisor_stop() {
+  jq -nc --arg cwd "$scratch/repo" '{hook_event_name:"SubagentStop",
+    agent_type:"boxlite-agent-tooling:design-advisor", stop_hook_active:false, cwd:$cwd}'
+}
+ok 'advisor: no task, it works freely' "$(call "$(tool "$advisor" Read '')")" '0:'
+advice_task -1
+result="$(call "$(tool "$advisor" Read '')")"
+ok 'advisor: past the deadline a read is answered' "${result%%:*}" 2
+has 'advisor: the answer names the advice step' "$result" 'Deadline passed' 'scripts/design-doc.sh" advice'
+ok 'advisor: past the deadline the advice command passes' \
+  "$(call "$(tool "$advisor" Bash "bash \"$plugin/scripts/design-doc.sh\" advice <<<'{}'")")" '0:'
+ok 'advisor: past the deadline a verdict command is answered' \
+  "$(call "$(tool "$advisor" Bash "bash design-doc.sh verdict <<<'{}'")" | cut -c1-2)" '2:'
+has 'advisor: an advice-less stop is blocked' "$(call "$(advisor_stop)")" '"decision":"block"' 'Deadline passed'
+printf '{"advice":[]}\n' > "$git_dir/agent-tooling-design-advice.json"
+ok 'advisor: a stop after its advice passes' "$(call "$(advisor_stop)")" '0:'
+rm -f "$git_dir/agent-tooling-design-advice.json"
+advice_task -1
+ok 'Codex: the design advisor is answered past the deadline' \
+  "$(call "$(codex_payload PreToolUse /root/design_advisor codex-session)" | cut -c1-2)" '2:'
 # The commit/push auditor works to the deadline in its attempt link (design #328).
 session=commit-session
 scope="git-$(printf '%s' "$session" | git -C "$scratch/repo" hash-object --stdin)"
@@ -155,8 +182,8 @@ for manifest in hooks.json codex-hooks.json; do
     | select(.matcher as $m | "Read" | test($m))), .hooks.SubagentStop[] | .hooks[].command
     | select(contains("audit-deadline.sh"))] | length' "$plugin/hooks/$manifest")" 2
 done
-# Every tool a timed auditor's spec lists must reach the deadline hook (design #328).
-for spec in design-auditor commit-push-auditor; do
+# Every tool a timed agent's spec lists must reach the deadline hook (designs #328, #335).
+for spec in design-auditor design-advisor commit-push-auditor; do
   tools="$(sed -n 's/^tools: //p' "$plugin/.claude/agents/$spec.md" | tr -d ' ')"
   for manifest in hooks.json codex-hooks.json generic-hooks.json; do
     missed="$(jq -r --arg tools "$tools" '

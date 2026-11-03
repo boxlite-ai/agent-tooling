@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PreToolUse: verify the current design, and an independent audit verdict for its
-# exact content, before explicit edits inside a repository.
+# PreToolUse: verify the current design, an independent audit verdict for its exact
+# content, and advice on that verdict (design #335), before explicit edits inside a repository.
 # Native tool names/denials: openai/codex codex-rs/hooks/src/events/pre_tool_use.rs:30-44.
 set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -116,6 +116,27 @@ if [[ "$(jq -r .reflection_due <<<"$request")" == true ]]; then
     "findings=$(listed open_findings)")" || deny 'audit instruction unavailable'
   deny "$message"
 fi
+# After any #309 stop, a recorded PASS or FAIL waits for one fresh advisor run, before
+# findings are shown. Advice never changes the verdict (design #335).
+if [[ "$(jq -r .advice_due <<<"$request")" == true ]]; then
+  advice_input="$(jq -c '{repo_root, design_url, content_sha256, verdict, findings, advisories}' \
+    <<<"$request")" || deny 'advice request unreadable'
+  advice_deadline="$(design_doc_advice_task "$(jq -r .repo_root <<<"$request")" \
+    "$(jq -r .design_url <<<"$request")" "$(jq -r .content_sha256 <<<"$request")")" \
+    || deny 'design advice deadline unavailable'
+  advisories="$(listed advisories)" || deny 'advice request unreadable'
+  if ! privacy="$(subagent_prompt audit/probe-privacy "$plugin_root")" \
+     || ! task="$(subagent_prompt audit/design-advice-task "$plugin_root" "plugin_root=$plugin_root" \
+       "probe_rules=$privacy" "deadline=$advice_deadline" "task_input_json=$advice_input")" \
+     || ! instruction="$(subagent_instruction --agent design-advisor --root "$plugin_root" \
+       --description 'Design advice' --task "$task")" \
+     || ! message="$(subagent_prompt design/advice-required "$plugin_root" \
+       "verdict=$(jq -r .verdict <<<"$request")" "advisories=${advisories:-- none}" \
+       "instruction=$instruction")"; then
+    deny 'design advice instruction unavailable'
+  fi
+  deny "$message"
+fi
 if ! task_input="$(jq -c '{repo_root, design_url, content_sha256}
        + (if (.prior_findings | length) > 0 then {prior_findings} else {} end)' <<<"$request")" \
    || ! findings="$(listed findings)"; then
@@ -125,16 +146,22 @@ fi
 deadline="$(design_doc_audit_task "$(jq -r .repo_root <<<"$request")" \
   "$(jq -r .design_url <<<"$request")" "$(jq -r .content_sha256 <<<"$request")")" \
   || deny 'design audit deadline unavailable'
+# The outline checks sit beside the criteria, which keep their 2,048-byte cap (design #335);
+# the probe rule rides in the task too, because Codex receives the spec only by path (#327).
 if ! criteria="$(subagent_prompt audit/design-criteria "$plugin_root" "plugin_root=$plugin_root")" \
+   || ! outline="$(subagent_prompt audit/design-outline "$plugin_root")" \
+   || ! privacy="$(subagent_prompt audit/probe-privacy "$plugin_root")" \
    || ! task="$(subagent_prompt audit/design-task "$plugin_root" \
-     "audit_criteria=$criteria" "deadline=$deadline" "task_input_json=$task_input")" \
+     "audit_criteria=$criteria"$'\n\n'"$outline"$'\n\n'"$privacy" "deadline=$deadline" \
+     "task_input_json=$task_input")" \
    || ! instruction="$(subagent_instruction --agent design-auditor --root "$plugin_root" \
      --description 'Design audit' --task "$task")"; then
   deny 'design audit instruction unavailable'
 fi
 if [[ -n "$findings" ]]; then
+  advice="$(listed advice)" || deny 'audit request unreadable'
   message="$(subagent_prompt design/audit-failed "$plugin_root" \
-    "findings=$findings" "instruction=$instruction")"
+    "findings=$findings" "advice=${advice:-- none}" "instruction=$instruction")"
 else
   message="$(subagent_prompt design/audit-required "$plugin_root" "instruction=$instruction")"
 fi || deny 'audit instruction unavailable'

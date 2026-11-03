@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# PreToolUse and SubagentStop: the timed-subagent deadline for native auditors (#309, #328).
-# Past its deadline, every tool call except the auditor's record step is answered "record
-# your verdict now". This hook blocks one verdict-less design-auditor stop; auditor-control.sh
-# closes commit/push stops with the same rule (subagent_timed_stop). Other agents pass.
+# PreToolUse and SubagentStop: the timed-subagent deadline for native auditors (#309, #328)
+# and the design advisor (#335). Past its deadline, every tool call except the agent's record
+# step is answered "record your verdict now". This hook blocks one record-less design-auditor
+# or design-advisor stop; auditor-control.sh closes commit/push stops with the same rule
+# (subagent_timed_stop). Other agents pass.
 set -uo pipefail
 payload="$(head -c 1048577)"
-[[ "$payload" == *auditor* || "$payload" == *'"default"'* ]] || exit 0
+[[ "$payload" == *auditor* || "$payload" == *advisor* || "$payload" == *'"default"'* ]] || exit 0
 lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd -P)" || exit 0
 plugin_root="${lib%/.agents/lib}"
 for name in subagent subagent-identity verdict-audit-state auditor-override-state commit-push-stop; do
@@ -24,7 +25,18 @@ case "$auditor" in
       "$task_path" 2>/dev/null)" || exit 0
     allow_command='design-doc\.sh"?[[:space:]]+(verdict|research)([[:space:]]|$)'
     allow_path=""
+    state_path="$git_dir/agent-tooling-design-audit.json"
     record="Pipe {content_sha256, verdict, findings, advisories} to bash \"$plugin_root/scripts/design-doc.sh\" verdict; checks you have not run are high: unchecked." ;;
+  design-advisor)
+    git_dir="$(git -C "${cwd:-$PWD}" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
+    task_path="$git_dir/agent-tooling-design-advice-task.json"
+    [[ -f "$task_path" && ! -L "$task_path" ]] || exit 0
+    task="$(jq -ce 'select((.deadline | type) == "number" and (.state_hash | type) == "string")' \
+      "$task_path" 2>/dev/null)" || exit 0
+    allow_command='design-doc\.sh"?[[:space:]]+advice([[:space:]]|$)'
+    allow_path=""
+    state_path="$git_dir/agent-tooling-design-advice.json"
+    record="Pipe {content_sha256, advice} to bash \"$plugin_root/scripts/design-doc.sh\" advice; zero items is valid." ;;
   commit-push-auditor)
     [[ "$event" == PreToolUse ]] || exit 0
     repo="$(git -C "${cwd:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
@@ -56,11 +68,10 @@ case "$event" in
   SubagentStop)
     resumed="$(jq -r '.stop_hook_active == true' <<<"$payload")"
     [[ "$resumed" != true ]] || exit 0
-    state_path="$git_dir/agent-tooling-design-audit.json"
     current=""
     [[ ! -f "$state_path" ]] \
       || current="$(perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$state_path")"
-    # A changed audit state means this auditor recorded its verdict.
+    # A changed record (audit state or advice) means this agent recorded its result.
     if [[ "$current" != "$(jq -r .state_hash <<<"$task")" ]]; then
       rm -f "$task_path"
       exit 0

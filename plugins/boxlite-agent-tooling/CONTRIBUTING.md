@@ -10,7 +10,11 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | --- | --- |
 | Research and design docs | [boxlite-design-doc](.agents/skills/boxlite-design-doc/SKILL.md) |
 | Design audit steps and entry format | [Design criteria](.agents/prompts/audit/design-criteria.md) |
+| Whole-design checks | [Design outline](.agents/prompts/audit/design-outline.md) |
 | Design auditor input and verdict object | [design-auditor](.claude/agents/design-auditor.md) |
+| Design advice rules | [Advice task](.agents/prompts/audit/design-advice-task.md) |
+| Design advisor input and advice object | [design-advisor](.claude/agents/design-advisor.md) |
+| Personal data in design probes | [Probe privacy](.agents/prompts/audit/probe-privacy.md) |
 | GitHub design issue starter | [Design issue template](../../.github/ISSUE_TEMPLATE/design.md) |
 | PR size, splitting, stacks, documentation, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
@@ -110,6 +114,13 @@ edits, and repeated FAILs stop for a `design-decision:` choice
 `agent-tooling-design-research.json` stay readable, and `design-doc.sh research` remains an
 alias of `verdict`. Update consumer tooling, refresh the host plugin, then reload or start
 a new task.
+
+Version 0.1.44 audits the whole design outline and adds a fresh `design-advisor` run after
+each PASS or FAIL ([#335](https://github.com/boxlite-ai/agent-tooling/issues/335)). Code
+edits wait for its advice, which never changes the verdict; a PASS recorded earlier needs
+one advice run. Design probes carry no personal identifiers or key requests
+([#327](https://github.com/boxlite-ai/agent-tooling/issues/327)), and `audit-privacy.sh`
+denies the obvious cases. Update consumer tooling, refresh the host plugin, then reload.
 
 ### Verification applicability rollout
 
@@ -235,7 +246,9 @@ worktree refusal ([#207](https://github.com/boxlite-ai/agent-tooling/issues/207)
 
 The first code edit then needs a design-audit PASS for the design's exact content. The
 pre-edit gate names the `design-auditor` route; the auditor records its
-verdict with `design-doc.sh verdict` within `DESIGN_AUDITOR_TIMEOUT` (900 s). Editing
+verdict with `design-doc.sh verdict` within `DESIGN_AUDITOR_TIMEOUT` (900 s). Next the
+gate names the `design-advisor` route, which records advice on that verdict with
+`design-doc.sh advice`; show the advice to the human, who decides what to adopt. Editing
 the design needs a new review.
 Only critical and high gaps FAIL. After repeated FAILs, the gate asks for a reflection
 (`design-doc.sh reflect`) or stops for your choice. To answer in text, make your

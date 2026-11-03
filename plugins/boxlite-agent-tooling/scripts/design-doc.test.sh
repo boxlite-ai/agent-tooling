@@ -131,6 +131,8 @@ request_has() { # description, jq condition on the edit gate's request
 }
 decide() { local status=0; gate decide "$3" >/dev/null 2>"$scratch/err" || status=$?; outcome "$1" "$2" "$status"; }
 reflect() { local status=0; bash "$cli" reflect <<<"$3" >/dev/null 2>"$scratch/err" || status=$?; outcome "$1" "$2" "$status"; }
+advise() { local status=0; bash "$cli" advice <<<"$3" >/dev/null 2>"$scratch/err" || status=$?; outcome "$1" "$2" "$status"; }
+no_advice() { jq -nc --arg sha "$1" '{content_sha256:$sha, advice:[]}'; }
 reflection() { # gate request -> a reflection bound to its history and FAIL ids
   jq -c '{history_hash, failure_ids, diagnosis:"the first fix edited wording only",
     previous_fixes_failed_because:"no source was re-read", changed_approach:"re-derive claims from sources",
@@ -140,8 +142,12 @@ reflection() { # gate request -> a reflection bound to its history and FAIL ids
 two='["high: research: Fidelity: quote lacks subject","critical: research: Search: no log"]'
 a="$(revise a)"
 record 'advisories alone record PASS' 0 "$(review "$a" '[]' '["low: research: Search: wording"]')"
+# A PASS waits for one advice record bound to it; its advisories ride in the request (#335).
+request_has 'a PASS with advisories waits for advice' \
+  '.advice_due and .verdict == "PASS" and .advisories == ["low: research: Search: wording"]'
+advise 'the advisor records advice on that PASS' 0 "$(no_advice "$a")"
 status=0; gate edit >/dev/null 2>"$scratch/err" || status=$?
-outcome 'a PASS with advisories allows edits' 0 "$status"
+outcome 'a PASS with its advice allows edits' 0 "$status"
 record 'a high advisory is rejected' 1 "$(review "$a" '[]' '["high: research: Search: missed item"]')"
 record 'FAIL 1 records its findings' 0 "$(review "$a" "$two")"
 b="$(revise b)"
@@ -212,8 +218,11 @@ rm -f "$research_state"
 legacy="$(git rev-parse --absolute-git-dir)/agent-tooling-design-research.json"
 jq -nc --arg root "$(pwd -P)" --arg url "$url" --arg sha "$reviewed" '{root:$root, branch:"feature",
   url:$url, content_sha256:$sha, verdict:"PASS", findings:[]}' > "$legacy"
+request_has 'a PASS in the old state file is still read and waits for advice' \
+  '.advice_due and .verdict == "PASS"'
+advise 'advice on the old-file PASS records' 0 "$(no_advice "$reviewed")"
 status=0; gate edit >/dev/null 2>"$scratch/err" || status=$?
-outcome 'a PASS in the old state file still allows edits' 0 "$status"
+outcome 'a PASS in the old state file, with advice, allows edits' 0 "$status"
 rm -f "$legacy"
 status=0; bash "$cli" research <<<"$(verdict "$reviewed" PASS '[]')" >/dev/null 2>"$scratch/err" || status=$?
 outcome 'research remains an alias of verdict' 0 "$status"
