@@ -402,8 +402,10 @@ echo "## Model-visible prompts and specs have explicit size ceilings"
 # These documents are injected into child context. The ceilings prevent a later
 # clarification from silently rebuilding the multi-thousand-word payload this suite
 # reduced; both word and byte bounds make the budget resistant to formatting tricks.
+# commit-push-criteria grew from 100w/900b for the anchor rule of design #326; raise a
+# ceiling only with the design that needs it.
 for budget in \
-  '.agents/prompts/audit/commit-push-criteria.md:100:900' \
+  '.agents/prompts/audit/commit-push-criteria.md:110:1050' \
   '.agents/prompts/audit/commit-push-runner.md:280:1900' \
   '.agents/prompts/audit/commit-push-task.md:140:1100' \
   '.agents/prompts/audit/design-criteria.md:380:3000' \
@@ -557,6 +559,41 @@ check "headless audit binds reverted baselines only when applicable" \
   'when defect proof applies' "$commit_runner_rendered"
 check "native audit binds reverted baselines only when applicable" \
   'when defect proof applies' "$(subagent_strip_frontmatter "$PLUGIN_ROOT/.claude/agents/commit-push-auditor.md")"
+
+echo
+echo "## Commit audits anchor findings before they block"
+# Design #326. Native and headless audits render the same criteria; a rule that reached
+# only one route would let their verdicts diverge on the same diff.
+for route in native headless; do
+  case "$route" in
+    native) route_prompt="$commit_task_rendered" ;;
+    headless) route_prompt="$commit_runner_rendered" ;;
+  esac
+  # Backticks are literal rule text, not command substitutions.
+  # shellcheck disable=SC2016
+  for rule in \
+    'Anchor each finding: `path:line` at the bound tree' \
+    '≤1024 bytes'; do
+    check "$route commit audit carries: $rule" "$rule" "$route_prompt"
+  done
+  # The replays dropped two rules: falsify-and-withdraw never withdrew a finding, and
+  # claims-as-hypotheses never turned a claim-vs-code mismatch into a FAIL.
+  for dropped in 'withdrawn:' 'falsify' 'hypotheses'; do
+    check_no "$route commit audit omits dropped rule: $dropped" "$dropped" "$route_prompt"
+  done
+done
+# Without a pin, Claude runs inherit the session level (medium on the 5.5 family).
+# Design #326's replays chose high: medium missed injected defects, and xhigh ran past
+# the 720 s audit budget. One key keeps the level unambiguous; Claude Code reads it per
+# subagent. Host-fixture subshells above do not change this suite's plugin root.
+# shellcheck disable=SC2031
+commit_auditor_frontmatter="$(sed -n '2,/^---$/p' "$PLUGIN_ROOT/.claude/agents/commit-push-auditor.md")"
+check "commit-push-auditor pins effort high" 'effort: high' "$commit_auditor_frontmatter"
+if (( $(grep -c '^effort:' <<<"$commit_auditor_frontmatter") == 1 )); then
+  ok "commit-push-auditor declares effort exactly once"
+else
+  bad "commit-push-auditor declares effort exactly once"
+fi
 
 model_documents="$(cat \
   "$PLUGIN_ROOT"/.agents/prompts/*/*.md \

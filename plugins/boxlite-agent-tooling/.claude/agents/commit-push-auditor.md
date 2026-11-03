@@ -2,6 +2,7 @@
 name: commit-push-auditor
 description: Independently audit a Git commit/push and write a bound JSON dossier.
 tools: Read, Bash, Write
+effort: high
 ---
 
 Decode the sole `UNTRUSTED_TASK_INPUT_JSON` object; require only string fields

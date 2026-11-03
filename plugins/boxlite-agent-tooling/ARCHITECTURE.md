@@ -616,6 +616,15 @@ The native spec owns task-input validation; the task template supplies its JSON 
 and shared criteria. Verdict runners already load the full verdict spec, so their
 task template supplies only the record and refers to that spec's rules.
 
+The shared criteria make findings checkable before they block
+([design #326](https://github.com/boxlite-ai/agent-tooling/issues/326)):
+
+- Each finding names an anchor: `path:line` at the bound tree, `command → exit`, or where proof was sought.
+- The design's replays dropped two tried rules: an in-run falsify-and-withdraw step never withdrew a finding, and a claims-as-hypotheses rule never failed a claim-vs-code mismatch.
+- Each entry fits the gate's 1024-byte `bounded_line` check in `.agents/hooks/preflight-commit-push.sh`.
+- `.claude/agents/commit-push-auditor.md` pins `effort: high`. In the design's replays, `medium` missed injected defects and `xhigh` ran past the 720 s audit budget.
+- `CLAUDE_CODE_EFFORT_LEVEL`, then a per-call `effort`, override the pin; Codex runs keep Codex's default.
+
 ### API compatibility
 
 `scripts/api-compatibility.sh` checks every `*openapi*.yaml` basename, case-sensitively
