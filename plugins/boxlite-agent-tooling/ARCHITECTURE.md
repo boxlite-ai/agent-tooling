@@ -23,7 +23,7 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | --- | --- | --- | --- |
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. Old authority is revoked; unchanged audit work may finish as prior evidence. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
-| Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card on Claude Code, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
+| Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card in launcher-configured Claude sessions, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
 | Calls a tool or stops as a timed auditor (design, commit/push) | `PreToolUse`, `SubagentStop` | `.agents/hooks/audit-deadline.sh` | Past its deadline, every call but the record step gets "record your verdict now"; one verdict-less design stop is blocked (commit/push stops: `auditor-control.sh`). See [timed subagents](#timed-subagents). |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-auditor` PASS for its exact content, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
@@ -404,6 +404,15 @@ exception. Splitting resumes when the dialog returns; this is not a hard deadlin
 for dismissing a busy UI. The launcher affects other questions in that session too.
 Sources: [question timeout](https://code.claude.com/docs/en/tools-reference#question-auto-continue-timeout),
 [timeout override](https://code.claude.com/docs/en/env-vars).
+
+Prompts outside this lifecycle never wait for a reply ([#334](https://github.com/boxlite-ai/agent-tooling/issues/334)):
+
+- The auditor still-running card also requires `timed_user_prompt_native_available`; other Claude sessions, such as Remote Control, wake with the typed status Codex receives.
+- A card closed without a choice keeps waiting and is never reopened.
+- API-compatibility skips, redesign approval, and CI-watch escalation ask once in plain text, then apply their default at once.
+- Those defaults keep the gate, keep the draft unposted, or leave the item unchanged; a later explicit reply still counts.
+- The native timer also stays off in screen reader mode and while the terminal window is focused, so a launcher card can still wait.
+
 PR prompts are runtime-loaded through `subagent_prompt`: `.agents/prompts/pr/pr-review-question.md`
 supplies the shared explanation check, `.agents/prompts/pr/pr-review-ack.md` supplies both
 normal and bounded local acknowledgment instructions, `.agents/prompts/pr/pr-description-guidance.md`
@@ -851,7 +860,7 @@ both attempts in history. See the [design](https://github.com/boxlite-ai/agent-t
 - Host to hook: each manifest command sets `BOXLITE_HOOK_HOST` to `codex`, `claude`, or `unknown`. `.agents/lib/hook-host.sh` validates this exported routing value before legacy root inference. Codex exports both root names as aliases; Claude commands prefer `CLAUDE_PLUGIN_ROOT` and Codex/generic commands prefer `PLUGIN_ROOT`, with the other name as fallback. Session markers never decide routing. The explicit marker is not authorization or runtime attestation.
 - Hook to agent: a hook is a bash process and cannot spawn a subagent. It emits text naming the route the calling host has, and the agent takes it. `.agents/lib/subagent.sh:8`
 - Agent to auditor: the auditor spec is the only writer of a dossier. Gates read verdicts and never write them.
-- Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/audit/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:677`). Receipt: parent, tree, subject. Research verdict: root, branch, design URL, and the SHA-256 of the content the auditor reviewed (`.agents/lib/design-doc.sh`).
+- Gate to state: each artifact is bound to what it judged. Turn dossier: branch, HEAD, tree hash, generation, session scope, prompt epoch; a mismatch is discarded and the Stop gate falls through to fresh detection (`.agents/hooks/audit/preflight-verdict-check.sh:28`). Commit and push dossier: branch, HEAD, the staged or pushed diff, the command, and for a commit the subject, for 5 hours after it is written; a mismatch or an older dossier denies until a fresh audit (`.agents/hooks/preflight-commit-push.sh:765`). Receipt: parent, tree, subject. Research verdict: root, branch, design URL, and the SHA-256 of the content the auditor reviewed (`.agents/lib/design-doc.sh`).
 - Incomplete evidence: a missing or empty source during refresh retains the published failed snapshot. Audit re-entry reads and validates that bounded snapshot before consuming the dossier; loss of the original source cannot become `empty-allow`. An initially absent or empty transcript still has nothing to judge.
 - Auditor transcript: the task supplies `parent_session_id`, `parent_host`, and
   `audit_started_at` with the existing repository and dossier bindings. The auditor
@@ -966,15 +975,15 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
 - Humans are not gated; named harness variables or recorded live ancestors activate audits. `.agents/lib/git-agent-origin.sh`
 - A receipt names a commit by parent and tree, never by a diff hash. `.agents/lib/commit-audit-receipt.sh:10`
-- An override is recorded as `OVERRIDDEN BY USER`, never PASS, and expires within an hour. `.agents/hooks/auditor-control.sh:707`, `.agents/lib/auditor-override-state.sh:55`
-- A StopFailure hook's result is ignored. A turn resumes only through an `asyncRewake` exit 2, at most three times per session in ten minutes, each resume recorded before it is announced. `.agents/hooks/resume-after-api-failure.sh:125`
+- An override is recorded as `OVERRIDDEN BY USER`, never PASS, and expires within an hour. `.agents/hooks/auditor-control.sh:710`, `.agents/lib/auditor-override-state.sh:55`
+- A StopFailure hook's result is ignored. A turn resumes only through an `asyncRewake` exit 2, at most three times per session in ten minutes, each resume recorded before it is announced. `.agents/hooks/resume-after-api-failure.sh:129`
 - An `asyncRewake` wake is internal only while its one-time nonce is unspent, and its owner spends it on first acceptance; a copy of a spent wake, or text riding after one, is a real prompt. `.agents/lib/hook-wake.sh:19`
-- An auditor's wake stays internal for 300 seconds after its escalation, or after the auditor stops once it has stopped. A foreground auditor blocks the parent turn, so the host delivers its wake only after the stop. `.agents/hooks/auditor-control.sh:578`
-- A closed escalation survives one auditor lifetime (3660 seconds) after it closes, so it can still authenticate a late `SubagentStop`; the next prompt in its session retires it after that, which keeps the prompt hook inside its 3-second lock. `.agents/hooks/auditor-control.sh:318`
-- A commit or push is denied with a reload instruction when the session's loaded plugin version differs from the version the git hooks run: the loaded auditors cannot read the newer gate's audit tasks. `.agents/hooks/preflight-commit-push.sh:819`
-- A finished auditor's completion is internal only while its credit lasts. Claude names the auditors under this plugin's namespace and submits each completion twice, as an `agent-message` hand-back and a `task-notification`, so `SubagentStop` credits two deliveries for 300 seconds. A hand-back that arrives while the auditor is still running is accepted once, and the stop then credits one; a replay, an uncredited sender, or a column-zero frame line inside the report is a real prompt. `.agents/hooks/auditor-control.sh:48`, `.agents/hooks/cancel-verdict-audit.sh:108`
+- An auditor's wake stays internal for 300 seconds after its escalation, or after the auditor stops once it has stopped. A foreground auditor blocks the parent turn, so the host delivers its wake only after the stop. `.agents/hooks/auditor-control.sh:487`
+- A closed escalation survives one auditor lifetime (3660 seconds) after it closes, so it can still authenticate a late `SubagentStop`; the next prompt in its session retires it after that, which keeps the prompt hook inside its 3-second lock. `.agents/hooks/auditor-control.sh:230`
+- A commit or push is denied with a reload instruction when the session's loaded plugin version differs from the version the git hooks run: the loaded auditors cannot read the newer gate's audit tasks. `.agents/hooks/preflight-commit-push.sh:892`
+- A finished auditor's completion is internal only while its credit lasts. Claude names the auditors under this plugin's namespace and submits each completion twice, as an `agent-message` hand-back and a `task-notification`, so `SubagentStop` credits two deliveries for 300 seconds. A hand-back that arrives while the auditor is still running is accepted once, and the stop then credits one; a replay, an uncredited sender, or a column-zero frame line inside the report is a real prompt. `.agents/hooks/auditor-control.sh:168`, `.agents/hooks/cancel-verdict-audit.sh:108`
 - Test evidence must bind the command, completion, and source state through host receipts, complete native records, or safe reruns; current-tree inference cannot certify an earlier run. `.agents/prompts/audit/commit-push-tests.md`
-- A FAIL verdict gets a fresh audit once a test runs after it; otherwise the gate repeats its findings. `.agents/hooks/preflight-commit-push.sh:375`
+- A FAIL verdict gets a fresh audit once a test runs after it; otherwise the gate repeats its findings. `.agents/hooks/preflight-commit-push.sh:797`
 - Codex's hook-event set is closed; an unknown key loads no hooks at all. `host-parity.test.sh:24`
 - Every wired command declares its host and prefers its host's plugin root, with the alternate root as fallback. `host-parity.test.sh:30`
 - A malformed hold fails closed. `templates/install.sh:15`

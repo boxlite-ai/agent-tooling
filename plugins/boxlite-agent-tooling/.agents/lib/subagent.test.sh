@@ -494,6 +494,26 @@ else
 fi
 
 echo
+echo "## Plain-text asks never wait and keep a safe default (#334)"
+# Each rule is asserted on delivered text: the guidance the Git audit names, and the
+# deny message the design gate renders when a design decision expires.
+compatibility_text="$(subagent_strip_frontmatter "$compatibility_policy" | tr '\n' ' ')"
+for rule in \
+  'Ask once whether to discuss or skip the compatibility gate, and do not wait for a reply' \
+  'keep the gate, continue authorized work that needs no skip, and report the blocked commit or push' \
+  'Never infer confirmation from silence'; do
+  check "compatibility ask: $rule" "$rule" "$compatibility_text"
+done
+expired_rendered="$(subagent_prompt design/audit-expired "$PLUGIN_ROOT" \
+  'findings=- high: example finding' | tr '\n' ' ')"
+for rule in \
+  'Ask the human once to approve its exact text, and do not wait for a reply' \
+  'Until they approve, keep it unposted, report it, and keep edits blocked' \
+  'Silence never overrules or approves'; do
+  check "expired design ask: $rule" "$rule" "$expired_rendered"
+done
+
+echo
 echo "## Delivered verification policy distinguishes fixes from new contracts"
 test_policy="$PLUGIN_ROOT/.agents/prompts/audit/commit-push-tests.md"
 check "native Git audit receives the test policy path" "$test_policy" "$commit_task_rendered"

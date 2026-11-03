@@ -206,7 +206,7 @@ Read and apply the [PR-size policy](guidance/workflow.md#pr-size-and-decompositi
 Use the [tracking-issue template](.agents/prompts/pr/split-pr-tracking-issue.md) when
 splitting; see [size enforcement](ARCHITECTURE.md#pr-size-and-stacks) for hook coverage.
 
-For managed native questions in local Claude sessions, launch with:
+For managed native questions and the auditor card in local Claude sessions, launch with:
 
 ```sh
 bash plugins/boxlite-agent-tooling/scripts/claude-with-timed-prompts.sh

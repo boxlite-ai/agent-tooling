@@ -39,7 +39,7 @@ A missed request field, missing case, or test without a passing `make test...` r
 
 ## Human confirmation
 
-Tell the user which files contain breaking or existing-default changes and explain their impact. Recommend discussing them in a GitHub issue. Ask whether to discuss or skip the compatibility gate; wait for the user's explicit choice. Discussion is recommended, not required; no issue/link or Notion token is required. Creating an issue needs separate authorization.
+Tell the user which files contain breaking or existing-default changes and explain their impact. Recommend discussing them in a GitHub issue. Ask once whether to discuss or skip the compatibility gate, and do not wait for a reply. Until the user replies, keep the gate, continue authorized work that needs no skip, and report the blocked commit or push. Discussion is recommended, not required; no issue/link or Notion token is required. Creating an issue needs separate authorization.
 
 To confirm skipping, the user submits exactly:
 
