@@ -171,13 +171,80 @@ for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
 done
 expect_denial 'Claude Code is routed to the design auditor' claude 'boxlite-agent-tooling:design-auditor'
 expect_denial 'Codex is routed to the design auditor spec' codex '.claude/agents/design-auditor.md'
+# Both hosts receive the task inline, so the probe rule must ride in it (#327).
+for host in claude codex; do
+  expect_denial "$host audit task forbids identifiers in probes" "$host" 'request no account or key'
+  expect_denial "$host audit task checks the whole design" "$host" 'testable acceptance'
+done
 # The task states the deadline audit-deadline.sh enforces: the one the gate recorded (#328).
 task_deadline="$(jq -r .deadline "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit-task.json")"
 expect_denial 'the design task states the deadline the hook enforces' claude "Deadline: Unix $task_deadline ("
 record_research FAIL '["research: no source supports the retry limit; cite one"]'
 check Write 'edit source' deny
+# A recorded verdict waits for one fresh advisor run, before findings are shown (design #335).
+expect_denial 'Claude Code is routed to the design advisor' claude 'boxlite-agent-tooling:design-advisor'
+expect_denial 'Codex is routed to the design advisor spec' codex '.claude/agents/design-advisor.md'
+expect_denial 'the advice task forbids identifiers in probes' codex 'request no account or key'
+git_dir="$(git -C "$scratch/repo" rev-parse --absolute-git-dir)"
+digest_of() { printf '%s' "$1" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'; }
+advise() { # advice items JSON -> design-doc.sh advice for the live design
+  jq -nc --arg sha "$(digest_of "$design")" --argjson advice "$1" '{content_sha256:$sha, advice:$advice}' |
+    (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" advice) >/dev/null 2>&1
+}
+equals() { # description, observed, wanted
+  if [[ "$2" == "$3" ]]; then printf 'PASS %s\n' "$1"; pass=$((pass+1))
+  else printf 'FAIL %s: got %s, wanted %s\n' "$1" "$2" "$3"; fail=$((fail+1)); fi
+}
+rejects() { # description, raw advice input
+  if (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" advice <<<"$2") >/dev/null 2>&1; then
+    printf 'FAIL advice rejects %s\n' "$1"; fail=$((fail+1))
+  else
+    printf 'PASS advice rejects %s\n' "$1"; pass=$((pass+1))
+  fi
+}
+live="$(digest_of "$design")"
+state_before="$(perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$git_dir/agent-tooling-design-audit.json")"
+rejects 'a severity label' \
+  "$(jq -nc --arg s "$live" '{content_sha256:$s, advice:["high: Scope: x. Why: finding 1. Try: y."]}')"
+rejects 'more than five items' "$(jq -nc --arg s "$live" '{content_sha256:$s, advice:["a","b","c","d","e","f"]}')"
+rejects 'extra keys' "$(jq -nc --arg s "$live" '{content_sha256:$s, advice:[], verdict:"PASS"}')"
+rejects 'another design version' "$(jq -nc '{content_sha256:("0" * 64), advice:[]}')"
+# The rejection names the item cap the advice task states (#335 A/B: items of 583-789 characters).
+too_long="$(jq -nc --arg s "$live" --arg a "$(printf 'Scope: %0500d' 0)" '{content_sha256:$s, advice:[$a]}')"
+rejects 'an item over 500 characters' "$too_long"
+said="$(cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" advice <<<"$too_long" 2>&1 >/dev/null)"
+equals 'the advice rejection names the 500-character cap' "$([[ "$said" == *'500 characters'* ]] && echo yes)" yes
+# A Why quote that closes its own sentence still ends at Try:, so the replacement is not a design quote.
+natural='TL;DR: keep it. Why: "Verify designs before edits." Try: "Audit every design first."'
+advise "$(jq -nc --arg a "$natural" '[$a]')" || { printf 'FAIL recording a closed quote\n'; fail=$((fail+1)); }
+equals 'a Why quote ending in ." keeps its Try out of the anchors' \
+  "$(jq -c '.advice' "$git_dir/agent-tooling-design-advice.json")" "$(jq -nc --arg a "$natural" '[$a]')"
+# Anchors (after CAPRA): an item whose quote, finding or file:line does not resolve is dropped.
+kept_quote='TL;DR: keep it. Why: "Verify designs before edits.". Try: none.'
+kept_finding='Problem: cite the retry source. Why: finding 1. Try: link the benchmark.'
+advise "$(jq -nc --arg a "$kept_quote" --arg b "$kept_finding" '[$a,
+  "Problem: x. Why: \"words the design never says\". Try: y.",
+  "Scope: x. Why: finding 9. Try: y.", "Validation: x. Why: missing.sh:3. Try: y.", $b]')" \
+  || { printf 'FAIL recording anchored advice\n'; fail=$((fail+1)); }
+equals 'resolvable advice is kept and the rest dropped' \
+  "$(jq -c '.advice' "$git_dir/agent-tooling-design-advice.json")" "$(jq -nc --arg a "$kept_quote" --arg b "$kept_finding" '[$a, $b]')"
+equals 'advice never writes the verdict state' \
+  "$(perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$git_dir/agent-tooling-design-audit.json")" "$state_before"
 expect_denial 'a failed review lists its findings' codex 'no source supports the retry limit'
+expect_denial 'a failed review lists its advice' codex 'cite the retry source'
+# Advice stays out of the next audit: its task carries findings only.
+publish "$design"$'\n\nA revision.'
+denial="$(design_denial codex)"
+if [[ "$denial" == *'no source supports the retry limit'* && "$denial" != *'cite the retry source'* ]]; then
+  printf 'PASS the next audit task carries findings, never advice\n'; pass=$((pass+1))
+else
+  printf 'FAIL the next audit task carries findings, never advice: %s\n' "$denial"; fail=$((fail+1))
+fi
+publish "$design"
 record_research PASS '[]'
+check Write 'edit source' deny
+expect_denial 'a PASS waits for advice too' claude 'boxlite-agent-tooling:design-advisor'
+advise '[]' || { printf 'FAIL recording empty advice\n'; fail=$((fail+1)); }
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' allow
 done
@@ -186,6 +253,14 @@ check Write 'edit source' deny
 expect_denial 'an edited design needs a new review' codex 'design-auditor'
 publish "$design"
 check Write 'edit source' allow
+# Stored advisories reach the parent with the advice route (design #335).
+advised="$design"$'\n\nWith an advisory.'
+publish "$advised"
+jq -nc --arg sha "$(digest_of "$advised")" '{content_sha256:$sha, verdict:"PASS", findings:[],
+  advisories:["low: search: log one more index. Evidence: probe. Pass if: logged"]}' |
+  (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" verdict) >/dev/null ||
+  { printf 'FAIL recording a PASS with an advisory\n'; fail=$((fail+1)); }
+expect_denial 'the advice route lists stored advisories' claude 'log one more index'
 # The research loop through the hook (design #309).
 cat > "$scratch/bin/date" <<'SH'
 #!/usr/bin/env bash

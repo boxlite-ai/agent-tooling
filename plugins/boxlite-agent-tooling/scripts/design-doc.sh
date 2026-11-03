@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Register, verify, or print the design doc for the current worktree and branch, record
-# the design auditor's verdict (stdin) for its live content, or store the reflection
-# a later audit waits for.
+# the design auditor's verdict or the design advisor's advice (stdin) for its live content,
+# or store the reflection a later audit waits for.
 set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 for dependency in jq perl git curl; do
@@ -24,7 +24,8 @@ case "${1:-}:$#" in
   # research stays an alias of verdict for auditors from older plugin versions.
   verdict:1|research:1) design_doc_audit_record "$PWD" ;;
   reflect:1) design_doc_audit_reflect "$PWD" ;;
+  advice:1) design_doc_advice_record "$PWD" ;;
   show:1) design_doc_show "$PWD" ;;
   show:2) design_doc_show "$2" ;;
-  *) printf 'usage: design-doc.sh register <URL> | check | verdict < verdict.json | reflect < reflection.json | show [repo-root]\n' >&2; exit 2 ;;
+  *) printf 'usage: design-doc.sh register <URL> | check | verdict < verdict.json | advice < advice.json | reflect < reflection.json | show [repo-root]\n' >&2; exit 2 ;;
 esac

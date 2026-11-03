@@ -116,15 +116,15 @@ _design_doc_file_hash() { # path -> SHA-256 of its bytes, or nothing when it is 
   [[ ! -f "$1" ]] || perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$1"
 }
 
-# The deadline the design auditor works to: DESIGN_AUDITOR_TIMEOUT (default 900 s, as for
-# the other audits). Repeated edit attempts reuse an unexpired deadline for the same content.
-# The task file also records the audit state's hash, so a stop can tell whether a verdict landed.
-design_doc_audit_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
+# The deadline a design agent works to: DESIGN_AUDITOR_TIMEOUT (default 900 s, as for the
+# other audits). Repeated edit attempts reuse an unexpired deadline for the same content.
+# The task file also records the hash of the agent's record, so a stop can tell whether it landed.
+_design_doc_timed_task() { # repo root, URL, content SHA-256, task file, record file -> deadline
   local timeout git_dir path now snapshot
   timeout="$(subagent_timed_timeout DESIGN_AUDITOR_TIMEOUT "${DESIGN_AUDITOR_TIMEOUT:-900}" 9999)" \
     || return 1
   git_dir="$(git -C "$1" rev-parse --absolute-git-dir)" || return 1
-  path="$git_dir/agent-tooling-design-audit-task.json"
+  path="$git_dir/$4"
   now="$(date +%s)" || return 1
   if [[ -e "$path" ]] && snapshot="$(verdict_audit_read_json_snapshot "$path" 2>/dev/null)" \
      && jq -er --arg url "$2" --arg digest "$3" --argjson now "$now" \
@@ -133,26 +133,131 @@ design_doc_audit_task() { # repo root, URL, content SHA-256 -> deadline (Unix se
     return 0
   fi
   jq -nc --arg url "$2" --arg digest "$3" --argjson deadline "$(( now + timeout ))" \
-    --arg state "$(_design_doc_file_hash "$git_dir/agent-tooling-design-audit.json")" \
+    --arg state "$(_design_doc_file_hash "$git_dir/$5")" \
     '{url:$url, content_sha256:$digest, deadline:$deadline, state_hash:$state}' \
     | verdict_audit_write_atomic "$path" || return 1
   printf '%s\n' "$(( now + timeout ))"
 }
 
-# Prints nothing and succeeds when a PASS or an overrule matches the live content.
-# Otherwise prints the gate's request: the auditor's task input, the prior findings, and
-# the loop state; a missing, unreadable, or mismatched verdict never counts.
+design_doc_audit_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
+  _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-audit-task.json \
+    agent-tooling-design-audit.json
+}
+
+# The advisor works to the same timeout; its record is the advice file (design #335).
+design_doc_advice_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
+  _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-advice-task.json \
+    agent-tooling-design-advice.json
+}
+
+# Prints nothing and succeeds when an overrule, or a PASS with its advice (design #335),
+# matches the live content. Otherwise prints the gate's request: the auditor's task input,
+# the prior findings, the loop state and the advice status; a missing, unreadable, or
+# mismatched verdict never counts.
 _design_doc_audit_passed() { # verdict path, root, branch, URL, content SHA-256
-  local state
+  local state request
   state="$(_design_doc_audit_state "$1" "$2" "$3")" || {
     _design_doc_error 'design-audit state is unreadable or malformed; inspect it before retrying'; return 1;
   }
-  _design_doc_jq -e --arg url "$4" --arg digest "$5" \
-    'include "design-audit"; da_passed($url; $digest)' <<<"$state" >/dev/null && return 0
-  _design_doc_jq -c --arg root "$2" --arg url "$4" --arg digest "$5" \
+  request="$(_design_doc_jq -c --arg root "$2" --arg url "$4" --arg digest "$5" \
     --arg history "$(_design_doc_history_hash "$state")" \
-    'include "design-audit"; da_request($root; $url; $digest; $history)' <<<"$state"
+    'include "design-audit"; da_request($root; $url; $digest; $history)' <<<"$state")" || return 1
+  request="$(_design_doc_advice_status "${1%/*}/agent-tooling-design-advice.json" "$2" "$3" \
+    "$request")" || {
+    _design_doc_error 'design advice record is unreadable or malformed; inspect it before retrying'; return 1;
+  }
+  if _design_doc_jq -e --arg url "$4" --arg digest "$5" \
+       'include "design-audit"; da_passed($url; $digest)' <<<"$state" >/dev/null \
+     && [[ "$(jq -r .advice_due <<<"$request")" != true ]]; then
+    return 0
+  fi
+  printf '%s\n' "$request"
   return 1
+}
+
+# Adds advice_due and the recorded advice to a gate request. A PASS or FAIL for the live
+# content needs one advice record bound to that verdict; a new verdict needs new advice.
+_design_doc_advice_status() { # advice path, root, branch, request JSON -> request JSON
+  local record=null snapshot
+  if [[ -e "$1" || -L "$1" ]]; then
+    snapshot="$(verdict_audit_read_json_snapshot "$1" 2>/dev/null)" || return 1
+    record="${snapshot#*$'\n'}"
+  fi
+  jq -ce --arg root "$2" --arg branch "$3" --argjson record "$record" '. as $request
+    | ($record | type == "object" and .root == $root and .branch == $branch
+        and .url == $request.design_url and .content_sha256 == $request.content_sha256
+        and $request.verdict_id != "" and .verdict_id == $request.verdict_id
+        and (.advice | type == "array")) as $advised
+    | . + {advice_due: ((.verdict | IN("PASS", "FAIL")) and ($advised | not)),
+           advice: (if $advised then $record.advice else [] end)}' <<<"$4" 2>/dev/null
+}
+
+# Keeps an advice item only when its Why resolves: each quote without a URL appears in the
+# design (whitespace-normalized), each "finding N" exists, and each file:line names a tracked
+# file with that line. Skill rules and outside quotes stay unchecked (design #335, after CAPRA).
+_design_doc_advice_anchor() { # repo root, design body, findings count, advice JSON -> kept JSON
+  local files kept='[]' item reason
+  files="$(git -C "$1" ls-files 2>/dev/null)" || files=''
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    reason="$(DESIGN_BODY="$2" TRACKED_FILES="$files" perl -e '
+      my ($item, $count, $root) = @ARGV;
+      my $why = $item =~ /\bWhy:\s*(.*?)(?:\bTry:|\z)/s ? $1 : "";
+      (my $body = $ENV{DESIGN_BODY}) =~ s/\s+/ /g;
+      if ($why !~ m{https?://}i) {
+        while ($why =~ /"([^"]+)"/g) {
+          (my $quote = $1) =~ s/\s+/ /g;
+          print("its quote is not in the design"), exit 0 if index($body, $quote) < 0;
+        }
+      }
+      while ($why =~ /\bfinding\s+(\d+)/gi) {
+        print("finding $1 does not exist"), exit 0 if $1 < 1 || $1 > $count;
+      }
+      my @files = split /\n/, $ENV{TRACKED_FILES};
+      while ($why =~ m{([\w./-]+\.[A-Za-z]+):(\d+)}g) {
+        my ($name, $line) = ($1, $2);
+        my $found = 0;
+        for my $file (grep { $_ eq $name || substr($_, -length($name) - 1) eq "/$name" } @files) {
+          open(my $fh, "<", "$root/$file") or next;
+          my $lines = 0; $lines++ while <$fh>; close $fh;
+          if ($lines >= $line) { $found = 1; last }
+        }
+        print("$name:$line does not resolve"), exit 0 unless $found;
+      }
+    ' "$item" "$3" "$1")" || return 1
+    if [[ -n "$reason" ]]; then
+      printf 'design-doc: dropped advice, %s: %s\n' "$reason" "${item:0:120}" >&2
+    else
+      kept="$(jq -c --arg item "$item" '. + [$item]' <<<"$kept")" || return 1
+    fi
+  done < <(jq -r '.advice[]' <<<"$4")
+  printf '%s\n' "$kept"
+}
+
+# Stores advice for the verdict that matches the live content. It never writes the verdict
+# state, so advice cannot change a verdict; later audits never receive it.
+_design_doc_advice_write() { # verdict path, root, branch, URL, live SHA-256, advice JSON
+  local state verdict_id body kept
+  jq -e --arg digest "$5" '.content_sha256 == $digest' <<<"$6" >/dev/null || {
+    _design_doc_error 'the design changed after this review; advise on the current design'; return 1;
+  }
+  state="$(_design_doc_audit_state "$1" "$2" "$3")" || {
+    _design_doc_error 'design-audit state is unreadable or malformed; inspect it before retrying'; return 1;
+  }
+  verdict_id="$(_design_doc_jq -r --arg url "$4" --arg digest "$5" 'include "design-audit";
+    select(.url == $url and .content_sha256 == $digest) | da_verdict_id' <<<"$state")"
+  [[ -n "$verdict_id" ]] || {
+    _design_doc_error 'no PASS or FAIL matches the live design; advice follows a recorded verdict'; return 1;
+  }
+  body="$(_design_doc_content "$4")" || {
+    _design_doc_error 'cannot read the design to check advice anchors'; return 1;
+  }
+  kept="$(_design_doc_advice_anchor "$2" "$body" "$(jq '.findings | length' <<<"$state")" "$6")" \
+    || return 1
+  jq -nc --arg root "$2" --arg branch "$3" --arg url "$4" --arg digest "$5" --arg id "$verdict_id" \
+    --argjson advice "$kept" \
+    '{root:$root, branch:$branch, url:$url, content_sha256:$digest, verdict_id:$id, advice:$advice}' \
+    | verdict_audit_write_atomic "${1%/*}/agent-tooling-design-advice.json"
 }
 
 # Applies one loop transition (design-audit.jq) and stores the result atomically.
@@ -198,6 +303,25 @@ design_doc_audit_record() { # working directory -> verified URL
   design_doc_binding verdict "$1" "$verdict"
 }
 
+# Records a design advisor's advice for the verdict on the live content (design #335).
+# stdin: one {content_sha256, advice} object; at most 5 one-line items of at most 500
+# characters, none with a severity.
+design_doc_advice_record() { # working directory -> verified URL
+  local input advice
+  input="$(head -c 65537)"
+  (( ${#input} <= 65536 )) || { _design_doc_error 'advice is too large'; return 1; }
+  advice="$(jq -cse 'if length == 1 then .[0] else empty end |
+    select(type == "object" and keys == ["advice","content_sha256"]
+      and (.content_sha256 | type == "string" and test("\\A[0-9a-f]{64}\\z"))
+      and (.advice | type == "array" and length <= 5 and all(.[]; type == "string"
+        and length >= 1 and length <= 500 and (test("[[:cntrl:]]") | not)
+        and (test("\\A\\s*(critical|high|low|nit)\\s*:"; "i") | not))))' <<<"$input" 2>/dev/null)" || {
+    _design_doc_error 'advice must be one {content_sha256, advice} object: at most 5 one-line items of at most 500 characters, none starting with a severity'
+    return 1
+  }
+  design_doc_binding advise "$1" "$advice"
+}
+
 # Stores the reflection that audit 3, or an audit after Reflect again, waits for.
 design_doc_audit_reflect() { # working directory -> verified URL
   local input
@@ -214,9 +338,10 @@ _design_doc_context() { # repo root -> branch identity
   printf '%s' "$branch"
 }
 
-# edit also requires an audit PASS for the live content; its exit 3 prints the gate's
-# request instead of the URL. decide applies a human choice that a hook already accepted.
-design_doc_binding() { # bind|check|edit|verdict|reflect|decide, working directory, URL, verdict, reflection or choice -> verified URL
+# edit also requires an audit PASS, with its advice, for the live content; its exit 3 prints
+# the gate's request instead of the URL. decide applies a human choice that a hook already
+# accepted; advise stores advice beside the verdict.
+design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working directory, URL, verdict, reflection, choice or advice -> verified URL
   local operation="$1" root branch git_dir state_path audit_path snapshot url record digest
   root="$(git -C "$2" rev-parse --show-toplevel)" || return 1
   root="$(cd "$root" && pwd -P)" || return 1
@@ -233,7 +358,7 @@ design_doc_binding() { # bind|check|edit|verdict|reflect|decide, working directo
         '{root:$root,branch:$branch,url:$url}' |
         verdict_audit_write_atomic "$state_path" || return 1
       ;;
-    check|edit|verdict|reflect|decide)
+    check|edit|verdict|reflect|decide|advise)
       snapshot="$(verdict_audit_read_json_snapshot "$state_path")" || {
         _design_doc_error 'no readable binding; register the design doc before writing code'; return 1;
       }
@@ -252,9 +377,11 @@ design_doc_binding() { # bind|check|edit|verdict|reflect|decide, working directo
           'da_reflect($argument | fromjson; $history)' "$3" || return 1 ;;
         decide) _design_doc_audit_update "$audit_path" "$root" "$branch" "$url" "$digest" \
           'da_decide($argument; $url; $digest)' "$3" || return 1 ;;
+        advise) _design_doc_advice_write "$audit_path" "$root" "$branch" "$url" "$digest" "$3" \
+          || return 1 ;;
       esac
       ;;
-    *) _design_doc_error 'expected bind, check, edit, verdict, reflect or decide'; return 1 ;;
+    *) _design_doc_error 'expected bind, check, edit, verdict, reflect, decide or advise'; return 1 ;;
   esac
   printf '%s\n' "$url"
 }

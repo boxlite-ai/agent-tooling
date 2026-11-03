@@ -42,7 +42,8 @@ matcher alone does not distinguish `git commit` from an unrelated command.
 | --- | --- |
 | `UserPromptSubmit` | [cancel-verdict-audit.sh](../.agents/hooks/cancel-verdict-audit.sh) |
 | `SubagentStart`, `SubagentStop` | [auditor-control.sh](../.agents/hooks/auditor-control.sh) |
-| `SubagentStop`; `PreToolUse` / `Read`, `Bash`, `Write`, `WebFetch`, `WebSearch`, `apply_patch` | [audit-deadline.sh](../.agents/hooks/audit-deadline.sh): the design and commit/push auditors’ deadline |
+| `SubagentStop`; `PreToolUse` / `Read`, `Bash`, `Write`, `WebFetch`, `WebSearch`, `apply_patch` | [audit-deadline.sh](../.agents/hooks/audit-deadline.sh): the design and commit/push auditors’ and the design advisor’s deadline |
+| `PreToolUse` / `Read`, `Bash`, `Write`, `WebFetch`, `WebSearch`, `apply_patch` | [audit-privacy.sh](../.agents/hooks/audit-privacy.sh): no personal identifiers or key requests in design auditor and advisor probes |
 | `PreToolUse` / editor or patch tools | [preflight-design-doc.sh](../.agents/hooks/preflight-design-doc.sh) |
 | `PreToolUse` / `Bash` | [preflight-commit-push.sh](../.agents/hooks/preflight-commit-push.sh), [preflight-pr-review.sh](../.agents/hooks/preflight-pr-review.sh) |
 | `PreToolUse`, `PostToolUse` / `AskUserQuestion` (Claude) | [claude-timed-question.sh](../.agents/hooks/claude-timed-question.sh) |

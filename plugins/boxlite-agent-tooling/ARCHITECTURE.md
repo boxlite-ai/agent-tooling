@@ -24,8 +24,9 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. Old authority is revoked; unchanged audit work may finish as prior evidence. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card in launcher-configured Claude sessions, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
-| Calls a tool or stops as a timed auditor (design, commit/push) | `PreToolUse`, `SubagentStop` | `.agents/hooks/audit-deadline.sh` | Past its deadline, every call but the record step gets "record your verdict now"; one verdict-less design stop is blocked (commit/push stops: `auditor-control.sh`). See [timed subagents](#timed-subagents). |
-| Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-auditor` PASS for its exact content, unless every target resolves outside every repository; shell commands are outside this gate. |
+| Calls a tool or stops as a timed auditor (design, commit/push) or the design advisor | `PreToolUse`, `SubagentStop` | `.agents/hooks/audit-deadline.sh` | Past its deadline, every call but the record step gets "record your verdict now"; one record-less design-auditor or design-advisor stop is blocked (commit/push stops: `auditor-control.sh`). See [timed subagents](#timed-subagents). |
+| Calls a tool as the design auditor or advisor | `PreToolUse` | `.agents/hooks/audit-privacy.sh` | Denies WebFetch URLs and network commands carrying `mailto`, `email=`, `"email"`, `/api-keys`, a `From:` header, an email address, or the local git email; WebSearch queries are checked for addresses only. A seatbelt for #327: shell expansion, encoding, `-d @file` and Codex's hosted WebSearch bypass it. |
+| Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-auditor` PASS for its exact content and `design-advisor` advice on that PASS, unless every target resolves outside every repository; shell commands are outside this gate. |
 | Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. Above 400 added code lines, asks the user to bypass the guideline or split. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely size choice or typed review answer. Idle expiry never authorizes; size choices cannot satisfy review acknowledgment. |
@@ -85,20 +86,37 @@ Designs are audited before code, not at commit or PR time
 
 - The pre-edit gate also requires `agent-tooling-design-audit.json` beside the
   binding: a PASS, or the human's overrule, bound to the root, branch, URL, and SHA-256
-  of the live content. Any edit to the design needs a new review. Verdicts in a
-  pre-0.1.41 `agent-tooling-design-research.json` stay readable until the next one is written.
+  of the live content. A PASS also needs its advice (below). Any edit to the design needs a
+  new review. Verdicts in a pre-0.1.41 `agent-tooling-design-research.json` stay readable
+  until the next one is written.
 - Missing or stale: the denial names the `design-auditor` route with
-  `.agents/prompts/audit/design-task.md` and its criteria. A FAIL for
-  unchanged content: the denial lists its findings.
+  `.agents/prompts/audit/design-task.md`. A FAIL for unchanged content, once advised: the
+  denial lists its findings, then the advice.
 - The auditor reads the design through `design-doc.sh show` and records through
   `design-doc.sh verdict` (alias `research`), which accepts one `{content_sha256, verdict, findings,
   advisories}` object for the live content only. Critical and high gaps are findings and
-  FAIL; low and nit gaps are advisories and never do. Every round runs in full.
+  FAIL; low and nit gaps are advisories and never do. Every round runs in full. Its
+  standard is the whole `boxlite-design-doc` skill: Research and the Design outline
+  ([design #335](https://github.com/boxlite-ai/agent-tooling/issues/335)).
 - Each audit rule has one owner ([design #323](https://github.com/boxlite-ai/agent-tooling/issues/323)):
   the spec holds input checks and the verdict object, the criteria hold the steps and entry
-  format, and the task holds the deadline. The task renders the criteria before the deadline
-  and record, so the shared rules stay a reusable prompt prefix, and it marks the record
-  untrusted right after it.
+  format, `design-outline.md` holds the whole-design checks, `probe-privacy.md` holds the
+  probe rule (#327), and the task holds the deadline. The criteria keep their 2,048-byte
+  cap. Both design specs repeat the probe rule on purpose, since Codex reads a spec only by
+  path. The task renders the shared rules before the deadline and record, so they stay a
+  reusable prompt prefix, and it marks the record untrusted right after it.
+- Advice ([design #335](https://github.com/boxlite-ai/agent-tooling/issues/335)): after any
+  #309 stop or due reflection (below), a PASS or FAIL for the live content waits for one
+  fresh `design-advisor` run.
+  The denial lists the verdict's advisories and the advisor route with `design-advice-task.md`.
+  The advisor records at most five one-line items of at most 500 characters, each with its
+  `Why:` evidence before `Try:`, through `design-doc.sh advice` into
+  `agent-tooling-design-advice.json`, bound to the verdict: a FAIL's attempt id or the
+  PASSed content. A new FAIL needs new advice; an overrule needs none.
+- The recorder rejects severity labels and drops each item whose design quote, `finding N`,
+  or `file:line` does not resolve; skill rules and outside quotes stay unchecked. It never
+  writes the verdict state, and `prior_findings` stays findings only, so later audits never
+  see advice.
 - The loop ([design #309](https://github.com/boxlite-ai/agent-tooling/issues/309),
   `.agents/lib/design-audit.jq`) counts FAILs per root and branch until a PASS, an
   overrule, or a redesign, so rebinding keeps the count. After an edit, the task input
@@ -119,8 +137,11 @@ Designs are audited before code, not at commit or PR time
   the task prompt states that deadline, which this hook enforces (#240 faulted a clock nothing
   enforced). Past it, the [timed-subagent](#timed-subagents) rule
   answers its tool calls, except `design-doc.sh verdict`, and one verdict-less stop is blocked.
-- It has no `force-pass-auditors` card: it blocks only edits, never a turn's end or a
-  commit. `host-parity.test.sh` names it as the one exception.
+  The advisor works to the same timeout through `agent-tooling-design-advice-task.json`;
+  past it, only `design-doc.sh advice` runs, and one advice-less stop is blocked.
+- Neither design agent has a `force-pass-auditors` card: they block only edits, never a
+  turn's end or a commit. `host-parity.test.sh` names the design auditor as the one
+  exception; the advisor's spec is no `*-auditor.md`.
 
 Commit-push auditors read the bound design through `design-doc.sh show`, which rechecks
 the binding and prints the same authenticated provider read, so Linear and Notion
@@ -555,7 +576,7 @@ past its deadline, an auditor may only record its verdict, and one verdict-less 
 | `subagent_timed_timeout` | `.agents/lib/subagent.sh` | Design and commit/push gates, both headless runners |
 | `subagent_timed_message`, `subagent_timed_stop` | `.agents/lib/subagent.sh` | `audit-deadline.sh`, `commit-push-stop.sh`, the verdict runner |
 | `subagent_timed_drive` | `.agents/lib/subagent.sh` | `run-verdict-audit.sh`, Claude route |
-| `subagent_identity_auditor` | `.agents/lib/subagent-identity.sh` | `audit-deadline.sh`, `auditor-control.sh` |
+| `subagent_identity_auditor` | `.agents/lib/subagent-identity.sh` | `audit-deadline.sh`, `audit-privacy.sh`, `auditor-control.sh` |
 
 | Auditor | Deadline from | Allowed past it |
 | --- | --- | --- |
@@ -969,7 +990,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A message is never judged twice. `.agents/hooks/audit/preflight-verdict-check.sh:62`
 - A parked dossier supplies prior evidence to a fresh audit; it cannot approve a new turn. `.agents/hooks/audit/preflight-verdict-check.sh`
 - A reply that leads with a valid TL;DR is never asked to shorten; the Stop gate's only writing check is that TL;DR. `.agents/hooks/stop-gate.sh:4`
-- No editor or patch edit lands in a repository before a design-audit PASS, or the human's overrule, for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
+- No editor or patch edit lands in a repository before a design-audit PASS with its advice, or the human's overrule, for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
 - A design decision is recorded only by the managed question's hook or the human's typed first prompt line; agent-relayed text never counts. `.agents/hooks/design-decision-prompt.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
@@ -1125,7 +1146,8 @@ whole directory; Codex UI metadata uses the same skill name. No runtime or hook 
 added. Original source is preserved unless modification was requested.
 
 `boxlite-design-doc` owns research requirements and the design outline; the design audit
-rules live in `design-criteria.md` and the `design-auditor` spec, and the audit loop lives in code.
+rules live in `design-criteria.md`, `design-outline.md` and the `design-auditor` spec, the
+advice rules in `design-advice-task.md` and the `design-advisor` spec, and the audit loop in code.
 Its five numbered steps run in work order: Frame, Search protocol and Analyze under Research, the auditor's standard; Write and Gate under Design.
 For complex sources, its Research section uses `boxlite-distill` in knowledge mode while retaining decision-relevant evidence and the design outline.
 Hosts discover it through their skill paths; consumers name the skill without

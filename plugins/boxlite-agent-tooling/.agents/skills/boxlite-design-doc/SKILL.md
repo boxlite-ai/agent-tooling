@@ -76,4 +76,4 @@ Outline:
 
 ### 5. Gate
 
-Gate: [register](../../../CONTRIBUTING.md#pull-request-descriptions) it, then pass `design-auditor` before the first code edit; registering is not research.
+Gate: [register](../../../CONTRIBUTING.md#pull-request-descriptions) it, then pass `design-auditor` and record `design-advisor` advice before the first code edit; registering is not research.

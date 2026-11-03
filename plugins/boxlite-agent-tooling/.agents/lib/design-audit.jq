@@ -31,8 +31,17 @@ def da_reflection_due:
 def da_redesign($digest): .verdict == "NONE" and .content_sha256 == $digest;
 def da_passed($url; $digest):
   .url == $url and .content_sha256 == $digest and (.verdict | IN("PASS","OVERRIDDEN"));
+# The verdict an advice record answers (design #335): a FAIL's attempt id, or the PASSed
+# content. An overrule needs no advice.
+def da_verdict_id:
+  if .verdict == "FAIL" then (.failures[-1] // "")
+  elif .verdict == "PASS" then "PASS:" + .content_sha256 else "" end;
 def da_request($root; $url; $digest; $history):
-  {repo_root:$root, design_url:$url, content_sha256:$digest,
+  (.url == $url and .content_sha256 == $digest) as $live
+  | {repo_root:$root, design_url:$url, content_sha256:$digest,
+   verdict:(if $live then .verdict else "NONE" end),
+   verdict_id:(if $live then da_verdict_id else "" end),
+   advisories:(if $live then .advisories else [] end),
    prior_findings:(if .url == $url then (if .verdict == "FAIL" then .findings else [] end)
      + (.overruled | map("overruled: " + .)) else [] end),
    findings:(if .verdict == "FAIL" and .url == $url and .content_sha256 == $digest

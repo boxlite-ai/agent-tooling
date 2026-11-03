@@ -407,6 +407,10 @@ for budget in \
   '.agents/prompts/audit/commit-push-runner.md:280:1900' \
   '.agents/prompts/audit/commit-push-task.md:140:1100' \
   '.agents/prompts/audit/design-criteria.md:380:3000' \
+  '.agents/prompts/audit/design-outline.md:140:1100' \
+  '.agents/prompts/audit/probe-privacy.md:70:550' \
+  '.agents/prompts/audit/design-advice-task.md:240:1900' \
+  '.claude/agents/design-advisor.md:300:2400' \
   '.agents/prompts/audit/design-task.md:140:1100' \
   '.agents/prompts/audit/verdict-runner.md:110:850' \
   '.claude/agents/commit-push-auditor.md:560:4200' \
@@ -470,6 +474,14 @@ design_task_rendered="$(subagent_prompt audit/design-task "$PLUGIN_ROOT" \
   'task_input_json={"marker":"DYNAMIC_DESIGN_TASK"}')"
 static_precedes_dynamic "design task keeps reusable policy before run data" \
   "$design_task_rendered" 'design-doc.sh" verdict' DYNAMIC_DESIGN_DEADLINE
+# The advice task follows the same order: its rules and probe rule before run data (#335).
+advice_task_rendered="$(subagent_prompt audit/design-advice-task "$PLUGIN_ROOT" \
+  "plugin_root=$PLUGIN_ROOT" "probe_rules=$(subagent_prompt audit/probe-privacy "$PLUGIN_ROOT")" \
+  deadline=DYNAMIC_ADVICE_DEADLINE 'task_input_json={"marker":"DYNAMIC_ADVICE_TASK"}')"
+static_precedes_dynamic "advice task keeps reusable policy before run data" \
+  "$advice_task_rendered" 'request no account or key' DYNAMIC_ADVICE_DEADLINE
+# The advisor is told the cap design-doc.sh advice enforces, or over-long items fail to record.
+check "advice task states the recorder's item cap" 'at most 500 characters' "$advice_task_rendered"
 # verdict-runner is the only verdict prompt. The Stop gate runs its auditor
 # synchronously rather than emitting a spawn instruction, so the task-prompt twin it
 # used to pair with is gone; the byte-identical-body check that compared the two went
@@ -511,6 +523,29 @@ for rule in \
   'Until they approve, keep it unposted, report it, and keep edits blocked' \
   'Silence never overrules or approves'; do
   check "expired design ask: $rule" "$rule" "$expired_rendered"
+done
+
+echo
+echo "## The whole-design checks follow the skill's outline (design #335)"
+# design-outline.md restates the outline for the auditor; every outline row must stay in it.
+outline_prompt="$PLUGIN_ROOT/.agents/prompts/audit/design-outline.md"
+outline_sections="$(sed -n '/^Outline:/,/^- Form:/p' \
+  "$PLUGIN_ROOT/.agents/skills/boxlite-design-doc/SKILL.md" \
+  | sed -n 's/^| \([^|]*[^ |]\) | .*/\1/p' | grep -v -x -e Section -e '---')"
+if [[ -n "$outline_sections" && -r "$outline_prompt" ]]; then
+  while IFS= read -r section; do
+    check "design-outline.md covers the outline row $section" "| $section |" "$(cat "$outline_prompt")"
+  done <<<"$outline_sections"
+else
+  bad "design-outline.md and the skill outline are both readable"
+fi
+
+echo
+echo "## Design agent specs forbid identifiers in probes (#327)"
+# The spec is the system prompt on Claude; the task carries the same rule inline for Codex.
+for spec in design-auditor design-advisor; do
+  check "$spec spec forbids identifiers in probes" 'request no account or key' \
+    "$(subagent_strip_frontmatter "$PLUGIN_ROOT/.claude/agents/$spec.md")"
 done
 
 echo
