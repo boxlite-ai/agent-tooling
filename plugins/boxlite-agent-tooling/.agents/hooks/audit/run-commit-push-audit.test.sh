@@ -685,6 +685,27 @@ rm -rf "$R_SWAP"
 
 echo
 echo "## Verdict and findings must agree"
+for matrix_case in valid pass-findings fail-empty no-advisories null-history wrong-kind; do
+  matrix_output="$(bound_output "$R" PASS '[]')"
+  expected=0
+  case "$matrix_case" in
+    pass-findings) matrix_output="$(jq '.findings=["high: unresolved"]' <<<"$matrix_output")"; expected=1 ;;
+    fail-empty) matrix_output="$(jq '.verdict="FAIL"' <<<"$matrix_output")"; expected=1 ;;
+    no-advisories) matrix_output="$(jq 'del(.advisories)' <<<"$matrix_output")" ;;
+    null-history) matrix_output="$(jq '.history_review=null | .reflection_review=null' <<<"$matrix_output")" ;;
+    wrong-kind) matrix_output="$(jq '.command_kind="push"' <<<"$matrix_output")"; expected=1 ;;
+  esac
+  candidate_rc=0
+  printf '%s' "$matrix_output" | bash "$REPO_ROOT/scripts/validate-audit-dossier.sh" commit - \
+    >"$TMP/candidate.out" 2>"$TMP/candidate.err" || candidate_rc=$?
+  parent_output="$(audit "$R" "$matrix_output")"
+  parent_valid=1; [[ "$(verdict_of "$parent_output")" != PASS ]] || parent_valid=0
+  if [[ "$candidate_rc" == "$expected" && "$parent_valid" == "$expected" ]]; then
+    ok "candidate/headless parent agree: $matrix_case"
+  else
+    bad "candidate/headless parent disagree: $matrix_case ($candidate_rc/$parent_valid)"
+  fi
+done
 # A self-contradictory answer is not a judgement, and resolving it either way would be
 # the producer inventing one.
 expect_fail "PASS carrying findings → FAIL" \
@@ -1039,6 +1060,12 @@ case "$(cat "$R_LARGE/prompt.txt")" in
   *)
     bad "bounded prompt carries evidence stat and changed paths (metadata=$(grep -E '^Evidence stat:|^Changed paths' "$R_LARGE/prompt.txt" | tr '\n' ' '))" ;;
 esac
+preview_count="$(sed -n 's/^Changed paths (sanitized diff headers as JSON, maximum 8 records): //p' "$R_LARGE/prompt.txt" | jq length)"
+if [[ "$preview_count" == 8 ]] && grep -q '^Dossier validator JSON: ' "$R_LARGE/prompt.txt"; then
+  ok "eight-path preview leaves room for shared validation instructions"
+else
+  bad "eight-path preview leaves room for shared validation instructions"
+fi
 evidence_observation="$(cat "$R_LARGE/evidence-observation.txt" 2>/dev/null || true)"
 case "$evidence_observation" in
   *"readable=yes"*"contains_marker=yes"*)

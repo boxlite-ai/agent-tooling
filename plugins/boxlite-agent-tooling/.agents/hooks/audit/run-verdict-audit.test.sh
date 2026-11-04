@@ -778,7 +778,10 @@ SESSION_DOSSIER_STUB='prompt="$(cat)"
   printf "{\"branch\":\"main\",\"head\":\"h\",\"tree_hash\":\"t\",\"generation\":\"%s\",\"verdict\":\"PASS\",\"proof\":[],\"findings\":[]}" \
     "$VERDICT_AUDITOR_GENERATION" > "$target"
   task="$(printf "%s\n" "$prompt" | sed -n "/^UNTRUSTED_TASK_INPUT_JSON:$/ { n; p; q; }")"
-  bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$target" bind'
+  bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$target" bind
+  validator="$(printf "%s\n" "$prompt" | sed -n "s/^Dossier validator JSON: //p" | jq -er .path)"
+  history="$(printf "%s" "$task" | jq -r ".history_path // \"-\"")"
+  bash "$validator" verdict "$history" "$target" > "$CLAUDE_PROJECT_DIR/.agents/state/validated-candidate"'
 R="$(setup)"; generation="301-302-4"; write_session_request "$R" session-a "$generation"
 stable_dossier="$(session_state_path "$R" last-verdict.json session-a)"
 previous_dossier_base="$(session_state_path "$R" last-verdict.prev.json session-a)"
@@ -922,6 +925,8 @@ lease_commit_chime_state="$lease_commit_chime_state complete=$(grep -q 'audit co
 check_eq "a chime before lease commit cancels without reporting stale success" \
   "$lease_commit_chime_state" \
   "prompt_rc=0 rc=130 barrier=hit dossier=gone complete=absent"
+check_eq "revocation still rejects a candidate that passed pre-delivery validation" \
+  "$(jq -r '.valid' "$R/.agents/state/validated-candidate" 2>/dev/null)" true
 rm -rf "$R"
 
 # The prompt hook is intentionally bounded: after three seconds it returns even if a
@@ -1318,7 +1323,9 @@ OBSERVE_STUB='cat >/dev/null
     printf "absent\n" > "$CLAUDE_PROJECT_DIR/lock-probe"
   fi
   printf "{\"branch\":\"main\",\"head\":\"h\",\"tree_hash\":\"t\",\"verdict\":\"PASS\",\"proof\":[],\"findings\":[]}" > "$CLAUDE_PROJECT_DIR/.agents/state/last-verdict.json"'
-( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_AUDITOR_CMD="$OBSERVE_STUB" bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
+# Keep this lease-versus-TTL case long; verdict-timeout.test.sh checks the shorter default.
+( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_AUDITOR_TIMEOUT=900 \
+    VERDICT_AUDITOR_CMD="$OBSERVE_STUB" bash "$RUNNER" "$R/transcript.jsonl" >/dev/null 2>&1 )
 probe="$(cat "$R/lock-probe" 2>/dev/null || echo NO-PROBE)"
 held="no"
 [[ "$probe" =~ ^present\ lockpid=[0-9]+\ deadline=[0-9]+\ lockpgid=[0-9]+\ auditparent=[0-9]+\ runnerpid=[0-9]+\ actualpgid=[0-9]+\ now=[0-9]+\ alive=yes$ ]] && held="yes"
@@ -2739,10 +2746,10 @@ check_eq "headless Claude request streams JSON both ways and echoes delivery (de
   "--input-format=stream-json --output-format=stream-json --verbose --replay-user-messages "
 check_eq "headless Claude prompt carries no timer procedure" \
   "$(jq -r '[.messages[0].content | scan("SUBAGENT_FINISH_NOW")] | length' "$REQUEST_CAP")" 0
-# The lease must outlast the Claude route's stop: 240 s past the deadline, capped where
+# The lease must outlast the Claude route's stop: 60 s past the deadline, capped where
 # the lease reaches the Stop gate's 3600 s ceiling.
 LOCK_CAP="$R/captured-lock.txt"
-for stop_case in 900:1140 3500:3540; do
+for stop_case in 900:960 3500:3540; do
   timeout_seconds="${stop_case%:*}"; expected_stop="${stop_case#*:}"
   started_at="$(date +%s)"
   ( cd "$R" && CLAUDE_PROJECT_DIR="$R" SPEC_CAPTURE="$CAP" REQUEST_CAPTURE="$REQUEST_CAP" \

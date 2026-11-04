@@ -280,6 +280,27 @@ check_raw "without a newer test run the FAIL stands" \
   "$([[ "$stale_reason" == "CLAUDE.md audit FAILED"* ]] && echo failed || echo "$stale_reason")" \
   failed
 
+for matrix_case in valid pass-findings fail-empty no-advisories null-history wrong-kind; do
+  write_audit "PASS" "[]" "commit"
+  matrix_filter='.'; expected=0
+  case "$matrix_case" in
+    pass-findings) matrix_filter='.findings=["high: unresolved"]'; expected=1 ;;
+    fail-empty) matrix_filter='.verdict="FAIL"'; expected=1 ;;
+    no-advisories) matrix_filter='del(.advisories)' ;;
+    null-history) matrix_filter='.history_review=null | .reflection_review=null' ;;
+    wrong-kind) matrix_filter='.command_kind="push"'; expected=1 ;;
+  esac
+  jq "$matrix_filter" "$TMP/.agents/state/last-audit.json" >"$TMP/matrix.json"
+  cp "$TMP/matrix.json" "$TMP/.agents/state/last-audit.json"
+  candidate_rc=0
+  bash "$REPO_ROOT/scripts/validate-audit-dossier.sh" commit - "$TMP/matrix.json" \
+    >"$TMP/candidate.out" 2>"$TMP/candidate.err" || candidate_rc=$?
+  parent_output="$(hook_raw "$GC -m foo")"
+  parent_valid=0
+  [[ "$(jq -r '.hookSpecificOutput.permissionDecision // "none"' <<<"$parent_output")" != deny ]] || parent_valid=1
+  check_raw "candidate/native parent agree: $matrix_case" "$candidate_rc/$parent_valid" "$expected/$expected"
+done
+
 # A dossier is untrusted state, including when a native auditor wrote it. PASS may not
 # launder findings, and unsafe path types must fail closed quickly instead of blocking
 # the hook or following state outside the repository.

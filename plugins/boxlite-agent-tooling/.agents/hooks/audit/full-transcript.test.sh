@@ -50,6 +50,17 @@ jq -nc --arg branch "$(git branch --show-current)" --arg head "$(git rev-parse H
   '{branch:$branch,head:$head,tree_hash:$tree,generation:$generation,
     verdict:"PASS",proof:[],findings:[]}' > "$VERDICT_AUDITOR_OUTPUT_FILE"
 bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$VERDICT_AUDITOR_OUTPUT_FILE"
+validator="$(sed -n 's/^Dossier validator JSON: //p' "$state/prompt" | jq -er .path)"
+if [[ -n "$history" ]]; then
+  jq '.history_review.coverage.reviewed=["transcript"]' "$VERDICT_AUDITOR_OUTPUT_FILE" >"$state/incomplete.json"
+  if bash "$validator" verdict "$history" "$state/incomplete.json" >"$state/validation.out" 2>"$state/validation.err"; then
+    exit 93
+  fi
+  grep -Fq 'coverage missing=["tree"]' "$state/validation.err"
+fi
+# The complete candidate is then checked through stdin, as read-only hosts require.
+bash "$validator" verdict "${history:--}" - <"$VERDICT_AUDITOR_OUTPUT_FILE" >"$state/validation.out"
+jq -e '.valid == true' "$state/validation.out" >/dev/null
 AUDITOR
 export TRANSCRIPT_TEST_AUDITOR="$fixture_root/auditor.sh"
 export TEST_HISTORY_RESULT_HELPER="$plugin_root/scripts/fixtures/audit-history-result.sh"
@@ -151,6 +162,9 @@ for host in claude codex unknown; do
     fi
     finished="$(date +%s)"
     check "$host $entry completes" "$rc" 0
+    validated=no
+    jq -e '.valid == true' "$state/validation.out" >/dev/null 2>&1 && validated=yes
+    check "$host $entry exposes working pre-delivery validation" "$validated" yes
     context=no
     if jq -e --arg host "$host" --arg session "$session" --arg root "$repo" \
         --argjson start "$started" --argjson finish "$finished" '

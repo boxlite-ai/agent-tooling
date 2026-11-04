@@ -20,8 +20,8 @@
 #      Unknown shell callers retain Claude-then-Codex executable discovery.
 #      A known host never falls through to the other provider.
 #      Claude — headless stream-json with the auditor spec as system prompt, tools
-#      whitelisted, hooks disabled (no nested gates). At the 15-minute deadline,
-#      subagent_timed_drive asks for the dossier; it stops the CLI 240 s later.
+#      whitelisted, hooks disabled (no nested gates). At the configured deadline,
+#      subagent_timed_drive asks for the dossier; it stops the CLI 60 s later.
 #      Codex — read-only, hooks disabled, ephemeral, stopped at the deadline. Codex writes
 #      only its final response through the host-owned --output-last-message channel;
 #      the parent runner validates and publishes those bytes.
@@ -48,7 +48,7 @@ repo_root="$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null \
 project_dir="$(cd "$repo_root" && pwd -P)"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 spec_file="$tooling_root/.claude/agents/verdict-auditor.md"
-audit_timeout_seconds="${VERDICT_AUDITOR_TIMEOUT:-900}"
+audit_timeout_seconds="${VERDICT_AUDITOR_TIMEOUT:-180}"
 auditor_model="${VERDICT_AUDITOR_MODEL:-claude-sonnet-5}"
 audit_pgid=0
 audit_group_identity_owned=false
@@ -135,15 +135,15 @@ audit_host="$(hook_host_kind)" || {
 }
 # The runner is chosen before the lease, which must cover its stop. The Claude route gets
 # its record message at the deadline, an interrupt 30 s later if it is still undelivered,
-# and its stop 240 s after the deadline, capped at the maximum (design #328): a live
-# record turn took about 120 s. Other routes stop at the deadline.
+# and its stop 60 s after the deadline, capped at the maximum. The default model
+# budget is 240 s; an unfinished record still fails closed. Other routes stop at the deadline.
 audit_runner=none
 audit_stop_seconds="$audit_timeout_seconds"
 if [[ -n "${VERDICT_AUDITOR_CMD:-}" ]]; then
   audit_runner=override
 elif [[ "$audit_host" != codex ]] && command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
   audit_runner=claude
-  audit_stop_seconds="$(( audit_timeout_seconds + 240 ))"
+  audit_stop_seconds="$(( audit_timeout_seconds + 60 ))"
   (( audit_stop_seconds <= max_audit_timeout_seconds )) \
     || audit_stop_seconds="$max_audit_timeout_seconds"
 elif [[ "$audit_host" != claude ]] && codex_bin="$(codex_cli_find)" && [[ -r "$spec_file" ]]; then
@@ -1005,6 +1005,9 @@ if ! audit_prompt="$(subagent_prompt audit/verdict-runner "$tooling_root" \
   printf 'run-verdict-audit.sh: could not load .agents/prompts/audit/verdict-runner.md.\n' >&2
   exit 2
 fi
+validation_prompt="$(subagent_prompt audit/dossier-validation "$tooling_root" \
+  "validator_json=$(jq -nc --arg path "$tooling_root/scripts/validate-audit-dossier.sh" '{path:$path}')")" || exit 2
+audit_prompt+=$'\n\n'"$validation_prompt"
 if [[ -n "$history_path" ]]; then
   reflection_prompt="$(subagent_prompt audit/audit-reflection "$tooling_root")" || exit 2
   audit_prompt+=$'\nHistory schema JSON: '"$(jq -nc --arg path "$tooling_root/.agents/hooks/audit/commit-push-audit.schema.json" '{path:$path}')"

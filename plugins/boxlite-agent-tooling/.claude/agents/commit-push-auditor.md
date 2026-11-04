@@ -81,4 +81,5 @@ Never cite time.
    }
    ```
 
+Run the task's dossier validator before delivery; correct rejected fields.
 Do not edit work, propose fixes, or run commit/push. Reply only with verdict and dossier path.

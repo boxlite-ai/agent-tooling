@@ -119,6 +119,7 @@ Optional `advisories`. Copy generation exactly; revoked/mismatched generations c
 
 ### 7. Deliver
 
+Run the task's dossier validator and correct rejected fields before delivery.
 Reply only with verdict and dossier path; honor host delivery overrides.
 
 ## Read the transcript
