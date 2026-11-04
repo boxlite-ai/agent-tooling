@@ -84,3 +84,30 @@ jq -e --arg hash "$pushed_hash" '.diff_hash == $hash and .history_review.attempt
 gate > .agents/state/gate-out
 assert_consumed
 printf 'PASS: headless and native Git audits share history, require reflection, and reject stale PASS\n'
+
+push_command="$command"
+for kind in commit push; do
+  if [[ "$kind" == commit ]]; then command="git commit -m 'test: verify history'"
+  else command="$push_command"; fi
+  state=""
+  for candidate in "$PWD"/.agents/state/audit-history-*.json; do
+    if jq -e --arg kind "$kind" '.context.gate==$kind' "$candidate" >/dev/null; then state="$candidate"; fi
+  done
+  [[ -n "$state" ]]
+  for attempt in 1 2 3; do
+    audit_test_submit_due "$plugin/scripts/audit-reflection.sh" "$state"
+    if run; then printf 'FAIL: fixture unexpectedly passed %s audit\n' "$kind" >&2; exit 1; fi
+  done
+  jq -e '[.attempts[] | select(.outcome.verdict=="FAIL")] | length==3' "$state" >/dev/null
+  for host in claude codex; do
+    BOXLITE_HOOK_HOST="$host" gate | jq -e --arg prefix "$kind-audit-decision:" \
+      '.hookSpecificOutput.permissionDecision=="deny"
+        and (.hookSpecificOutput.permissionDecisionReason | contains($prefix))' >/dev/null
+  done
+  runs="$(wc -l < .agents/state/model-runs)"
+  if run; then printf 'FAIL: headless %s bypassed the choice checkpoint\n' "$kind" >&2; exit 1; fi
+  [[ "$(wc -l < .agents/state/model-runs)" == "$runs" ]]
+  jq -e 'all(.attempts[]; .outcome != null)
+    and ([.attempts[] | select(.outcome.verdict=="FAIL")] | length)==3' "$state" >/dev/null
+done
+printf 'PASS: both host preflights and headless commit/push stop before a fourth failed-round retry\n'

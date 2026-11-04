@@ -126,6 +126,11 @@ spend_wake() {  # marker-name owner-hook
 spend_wake auditor-wake auditor-control.sh && exit 0
 spend_wake api-resume-wake resume-after-api-failure.sh && exit 0
 
+# A validated standalone choice resumes this same cycle; other prompts still revoke it.
+# shellcheck source=../lib/git-audit-decision.sh
+source "$tooling_root/.agents/lib/git-audit-decision.sh" || exit 2
+git_audit_decision_reply "$payload" "$project_dir" "$tooling_root" && exit 0
+
 # A failed confirmation approves nothing; report it to the session and keep the prompt.
 if [[ "$prompt_text" == 'api compatibility: skip' ]]; then
   if compatibility_record="$(printf '%s' "$payload" |

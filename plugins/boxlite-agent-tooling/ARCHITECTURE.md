@@ -341,7 +341,8 @@ lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-suppli
 context and a random ID; retries preserve the deadline, late replies are rejected,
 and acceptance can be consumed once. Callers select `split`, `keep-draft`, or
 `keep-blocked` as the timeout fallback for `pr-size-exception:`, `reviewed:`, or
-`design-decision:` respectively. The library
+`design-decision:` respectively. Git retry decisions use `reflect-again` for
+`commit-audit-decision:` and `push-audit-decision:`. The library
 serializes state transitions; its prompt renderer describes an agent-opened,
 non-blocking question. It never waits or opens a host dialog inside the state lock.
 
@@ -368,6 +369,15 @@ the deadline, which ends only the agent's wait. They cannot be renewed. The CLI 
 only `request`, `status`, `question`, `respond`, `renew`, `consume`, and `fallback`, so
 it cannot record a native or prompt reply.
 
+Git retry choices accept **Reflect again (Recommended)** or **Stop** through the
+managed native question. Codex and plain-text answers use a standalone
+`commit-audit-decision: <request-id> <Reflect again|Stop>` line (or `push-audit-decision:`).
+The prompt hook validates the request, session, epoch, branch and HEAD before
+recording the choice and retaining that cycle. A single structured Codex answer
+is decoded before the same validation; mixed messages, stale/replayed answers,
+and unrelated prompts keep ordinary epoch revocation. The CLI cannot relay these
+choices, consume them, or renew their deadline. Native replies reject stale epochs too.
+
 Renewal exclusively writes an archive containing the expired or declined record, human instruction,
 successor ID, and renewal time before atomically replacing the active state, all under
 the existing request lock. Archive collisions and unsafe paths fail closed. If publication
@@ -392,6 +402,8 @@ one-shot delivery remain state transitions in code.
 
 Before normal Stop checks, `scripts/continue-timed-prompts.sh` resumes pending requests or delivers their timeout
 fallback once: split oversized work, or leave an unreviewed PR draft/uncreated.
+Git retry expiry instead resumes reflection, fixes, tests, and one fresh audit;
+a timely Stop remains stopped. Expiry never produces PASS or a user override.
 A declined size request delivers its splitting continuation once too, without asking again.
 The agent performs the wait, issue creation, and splitting; these are not background
 jobs. `.agents/prompts/pr/pr-size-exception.md` carries the size-specific wording;
@@ -805,6 +817,23 @@ Audit history components:
 
 Cycles bind a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`; cap at eight failures,
 sixteen attempts, and 10 MiB. PASS closes a cycle; the next operation starts another.
+Within that safety budget, commit/push pause after three FAIL/ERROR rounds
+([design #359](https://github.com/boxlite-ai/agent-tooling/issues/359)).
+`.agents/lib/git-audit-decision.sh` reuses the timed prompt state machine:
+wait five minutes for Reflect again or Stop; silence selects the recommended
+Reflect again. Current reflection and a fresh independent PASS remain necessary.
+The checkpoint lives inside the history transition lock before preparation, with
+lock order history → timed request. Native preflight checks it before reflection
+and after recording a verdict; the headless producer reaches the same preparation guard.
+No lock spans a human wait or model invocation.
+
+Choices bind to the context and latest failed attempt. Canceled preparation and
+native-to-headless handoff retain the choice; another FAIL/ERROR opens a fresh window.
+History, findings, and the original result remain intact. A PASS closes the cycle;
+final-response and design audit limits retain their own policies.
+The scoped commit/push decision files keep only the current checkpoint per operation.
+`scripts/git-audit-decision.test.sh` covers boundaries, choices and prompt isolation;
+`scripts/audit-history-git.test.sh` checks both preflight hosts and headless launch blocking.
 Preparation and inspection share `audit_reflection_ready`: a terminal PASS needs no
 new reflection even though recording it changes the history hash. The reflection
 retains the failed history it explains. Git still validates the approval's bindings
@@ -1049,6 +1078,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A design decision is recorded only by the managed question's hook or the human's typed first prompt line; agent-relayed text never counts. `.agents/hooks/design-decision-prompt.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
+- A Git retry timeout permits reflection and another audit, never PASS; a validated standalone choice preserves its failed cycle. `.agents/lib/git-audit-decision.sh`
 - Humans are not gated; named harness variables or recorded live ancestors activate audits. `.agents/lib/git-agent-origin.sh`
 - A receipt names a commit by parent and tree, never by a diff hash. `.agents/lib/commit-audit-receipt.sh:10`
 - An override is recorded as `OVERRIDDEN BY USER`, never PASS, and expires within an hour. `.agents/hooks/auditor-control.sh:710`, `.agents/lib/auditor-override-state.sh:55`

@@ -8,7 +8,9 @@ payload="$(cat)"
 [[ "$(jq -r '.tool_name // ""' <<<"$payload")" == AskUserQuestion ]] || exit 0
 kind="$(jq -r '[.tool_input.questions[]?.question | select(type=="string") |
   if startswith("pr-size-exception:") then "pr-size" elif startswith("reviewed:") then "pr-review"
-  elif startswith("design-decision:") then "design-decision" else empty end][0] // ""' <<<"$payload")"
+  elif startswith("design-decision:") then "design-decision"
+  elif startswith("commit-audit-decision:") then "commit-audit-decision"
+  elif startswith("push-audit-decision:") then "push-audit-decision" else empty end][0] // ""' <<<"$payload")"
 [[ -n "$kind" ]] || exit 0
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 # shellcheck source=../lib/verdict-audit-state.sh
@@ -17,12 +19,24 @@ source "$plugin/.agents/lib/verdict-audit-state.sh"
 source "$plugin/.agents/lib/timed-user-prompt.sh"
 repo="$(git -C "${CLAUDE_PROJECT_DIR:-$PWD}" rev-parse --show-toplevel)" || fail 'cannot identify checkout'
 state="$repo/.agents/state/$kind-request.json"
+session="$(jq -r '.session_id // ""' <<<"$payload")"
+if [[ "$kind" == commit-audit-decision || "$kind" == push-audit-decision ]]; then
+  session="$(verdict_audit_scope_from_hook_payload "$payload" "$repo")" || fail 'missing session'
+  state="$repo/.agents/state/$kind-request-$session.json"
+fi
 snapshot="$(verdict_audit_read_regular_state "$state" 16384 json)" || fail 'request state unavailable'
 request="${snapshot#*$'\n'}"
+if [[ "$kind" == commit-audit-decision || "$kind" == push-audit-decision ]]; then
+  # shellcheck source=../lib/git-audit-decision.sh
+  source "$plugin/.agents/lib/git-audit-decision.sh"
+  git_audit_decision_current "$request" || fail 'audit choice no longer matches the prompt epoch'
+fi
 id="$(jq -er .id <<<"$request")" || fail 'request id unavailable'
 jq -e --arg repo "$repo" --arg head "$(git -C "$repo" rev-parse HEAD)" \
-  --arg branch "$(git -C "$repo" branch --show-current)" --arg session "$(jq -r '.session_id // ""' <<<"$payload")" '
-  .spec.binding | (.root // .repo) == $repo and .head == $head and .branch == $branch and .session == $session
+  --arg branch "$(git -C "$repo" branch --show-current)" --arg session "$session" '
+  . as $request | .spec.binding | (.root // .repo) == $repo and .head == $head
+    and .branch == (if $request.spec.fallback == "reflect-again" and $branch == "" then "HEAD" else $branch end)
+    and .session == $session
 ' <<<"$request" >/dev/null || fail 'request no longer matches this session and diff'
 question="$(timed_user_prompt question "$state" "$id")" || fail 'invalid request state'
 jq -e --argjson question "$question" '

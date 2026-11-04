@@ -19,7 +19,7 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   directory="$root/.agents/state"
   session="$(jq -r .session <<<"$context")"
   epoch="$(jq -r .epoch <<<"$context")"
-  if [[ "$operation" == prepare || "$operation" == record ]] \
+  if [[ "$operation" == prepare || "$operation" == record || "$operation" == checkpoint ]] \
      && [[ "$session" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
     actual_epoch=0
     if [[ -e "$directory/verdict-prompt-epoch.$session" || -L "$directory/verdict-prompt-epoch.$session" ]]; then
@@ -44,6 +44,10 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   path="$directory/audit-history-$scope_key-$key.json"
   request="$(jq -nc --argjson context "$context" '{context:$context}')" || return 2
   state="$(printf '%s' "$request" | audit_reflection status "$path")" || return 2
+  if [[ "$operation" == checkpoint ]]; then
+    printf '%s' "$request" | audit_reflection checkpoint "$path"
+    return $?
+  fi
   if [[ "$operation" == inspect ]]; then
     jq -c -L "$library" --arg path "$path" --argjson history_max_bytes "$(audit_reflection_history_limit)" \
       'include "audit-reflection-contract";
