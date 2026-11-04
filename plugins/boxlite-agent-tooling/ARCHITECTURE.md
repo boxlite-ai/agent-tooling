@@ -620,7 +620,7 @@ a timeout that never fired ([#240](https://github.com/boxlite-ai/agent-tooling/i
   path, and a deadline of `COMMIT_PUSH_AUDITOR_TIMEOUT` seconds.
 - **Close.** On `SubagentStop` in Claude Code or Codex, `.agents/lib/commit-push-stop.sh` records a
   dossier bound to the attempt. It blocks once when the dossier is missing, before or after
-  the deadline, or has an `unchecked:` finding while time remains; otherwise it records the
+  the deadline, or has a `high: unchecked:` finding (legacy `unchecked:` also accepted) while time remains; otherwise it records the
   dossier or `ERROR`. A check failure allows the stop, since the Git gate still holds.
 - **Deadline.** Past it, the [timed-subagent](#timed-subagents) rule answers every tool call
   except a write naming the attempt's `dossier_path` (#328).
@@ -645,6 +645,48 @@ The shared criteria make findings checkable before they block
 - Each entry fits the gate's 1024-byte `bounded_line` check in `.agents/hooks/preflight-commit-push.sh`.
 - `.claude/agents/commit-push-auditor.md` pins `effort: high`. In the design's replays, `medium` missed injected defects and `xhigh` ran past the 720 s audit budget.
 - `CLAUDE_CODE_EFFORT_LEVEL`, then a per-call `effort`, override the pin; Codex runs keep Codex's default.
+
+### Commit/push review criteria
+
+The shared criteria define a contract, investigation, and decision for both routes
+([design #357](https://github.com/boxlite-ai/agent-tooling/issues/357)).
+Native and headless task wrappers separate instructions from operation inputs.
+The shared criteria start at Contract, with labeled rule, priority, skill, design,
+policy, and trust bullets; neither route adds a TL;DR section.
+
+Rules govern every stage. Establish intended behavior, investigate the highest-risk
+changes first, and verify issues as found using source or targeted checks.
+The review concerns below guide coverage in any order.
+
+| Review concern | Required focus |
+| --- | --- |
+| Repository rules | Read applicable root/scoped instructions, contributor rules, policies, and the bound design; map requirements to evidence. |
+| Bugs | Trace changed code with callers, dependencies, tests, state, effects, and failure paths. |
+| Performance | Identify the affected workload and cost mechanism; measure when needed to establish impact. |
+| Code taste | Check clarity, cohesion, duplication, complexity, and ownership against written rules or concrete maintainability consequences. |
+
+A blocker does not end the remaining applicable review. Before deciding, reconcile
+every applicable requirement, changed path, and required check; record gaps.
+
+Decisions follow the design auditor: critical/high entries are findings; low/nit
+entries are advisories. Mandatory rule violations remain high/critical, and missing
+required proof is `high: unchecked`; preferences stay advisory.
+
+Each entry uses `<severity>: <check>: <gap>. Evidence: <anchor>. Pass if: <condition>`,
+on one line within 1,024 bytes. Recheck evidence, drop unsupported claims, and record
+each gap once. FAIL iff findings; advisories never FAIL.
+
+Candidate bindings, test-proof requirements, and runtime routing are unchanged.
+The shared stop handler accepts both unchecked prefixes while preserving deadline,
+one-resume, attempt-recording, and link-cleanup behavior on Claude Code and Codex.
+
+For a retry change, trace duplicate side effects, request amplification, and
+duplicated retry policy together; these span correctness, performance, and taste.
+
+The prompt contract suite checks flexible category order, verification during
+investigation, final coverage reconciliation, and complete shared-criteria delivery
+on both routes. These checks establish instruction delivery, not live
+model compliance or improved bug recall.
 
 ### API compatibility
 

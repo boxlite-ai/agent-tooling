@@ -94,6 +94,13 @@ inspect_history() {
   )
 }
 
+stop_as_host() {  # host, stop_hook_active
+  case "$1" in
+    claude) stop "$2" ;;
+    codex) codex_stop "$2" ;;
+  esac
+}
+
 attempts() {  # -> "id:verdict" per attempt
   inspect_history | jq -r '[.state.attempts[] | "\(.id):\(.outcome.verdict // "open")"] | join(" ")'
 }
@@ -160,15 +167,48 @@ write_dossier PASS '[]'
 check_eq "a bound dossier does not block" "$(stop false | jq -r '.decision // "allow"')" "allow"
 check_eq "SubagentStop records the dossier verdict" "$(attempts | sed 's/.*://')" "PASS"
 
-echo "SubagentStop resumes an early unchecked finding"
-use_session attempt-unchecked
-stage_change
-preflight >/dev/null
-write_dossier FAIL '["unchecked: design doc not read"]'
-check_eq "an unchecked finding before the deadline blocks" "$(stop false | jq -r .decision)" "block"
-jq -c '.deadline = 0' "$LINK" > "$LINK.tmp" && mv "$LINK.tmp" "$LINK"
-stop false >/dev/null
-check_eq "an unchecked finding after the deadline is recorded" "$(attempts | sed 's/.*://')" "FAIL"
+for host in claude codex; do
+  echo "SubagentStop preserves unchecked lifecycle decisions ($host)"
+  for prefix in 'unchecked:' 'high: unchecked:'; do
+    findings="$(jq -nc --arg prefix "$prefix" \
+      '[$prefix + " design doc not read. Evidence: required read absent. Pass if: read the bound design."]')"
+    use_session "attempt-$host-${prefix%%:*}-early"
+    stage_change
+    preflight >/dev/null
+    write_dossier FAIL "$findings"
+    check_eq "$host $prefix before deadline blocks" \
+      "$(stop_as_host "$host" false | jq -r .decision)" "block"
+    check_eq "$host $prefix early attempt stays open" "$(attempts | sed 's/.*://')" "open"
+    check_eq "$host $prefix early link stays present" \
+      "$([[ -e "$LINK" ]] && echo present || echo gone)" "present"
+    check_eq "$host $prefix already-resumed stop allows" \
+      "$(stop_as_host "$host" true | jq -r '.decision // "allow"')" "allow"
+    check_eq "$host $prefix resumed attempt records FAIL" "$(attempts | sed 's/.*://')" "FAIL"
+    check_eq "$host $prefix resumed link is removed" \
+      "$([[ -e "$LINK" ]] && echo present || echo gone)" "gone"
+
+    use_session "attempt-$host-${prefix%%:*}-late"
+    stage_change
+    preflight >/dev/null
+    write_dossier FAIL "$findings"
+    jq -c '.deadline = 0' "$LINK" > "$LINK.tmp" && mv "$LINK.tmp" "$LINK"
+    check_eq "$host $prefix after deadline allows" \
+      "$(stop_as_host "$host" false | jq -r '.decision // "allow"')" "allow"
+    check_eq "$host $prefix late attempt records FAIL" "$(attempts | sed 's/.*://')" "FAIL"
+    check_eq "$host $prefix late link is removed" \
+      "$([[ -e "$LINK" ]] && echo present || echo gone)" "gone"
+  done
+
+  use_session "attempt-$host-ordinary-high"
+  stage_change
+  preflight >/dev/null
+  write_dossier FAIL '["high: correctness: error text contains unchecked: literally. Evidence: reviewed path. Pass if: preserve the result."]'
+  check_eq "$host ordinary high finding allows stop" \
+    "$(stop_as_host "$host" false | jq -r '.decision // "allow"')" "allow"
+  check_eq "$host ordinary high finding records FAIL" "$(attempts | sed 's/.*://')" "FAIL"
+  check_eq "$host ordinary high finding removes link" \
+    "$([[ -e "$LINK" ]] && echo present || echo gone)" "gone"
+done
 
 echo "Codex SubagentStop closes the attempt the same way"
 use_session attempt-codex

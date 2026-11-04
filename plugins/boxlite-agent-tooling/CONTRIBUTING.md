@@ -122,6 +122,26 @@ one advice run. Design probes carry no personal identifiers or key requests
 ([#327](https://github.com/boxlite-ai/agent-tooling/issues/327)), and `audit-privacy.sh`
 denies the obvious cases. Update consumer tooling, refresh the host plugin, then reload.
 
+### Structured code-review rollout
+
+Version 0.1.45 gives repository rules highest priority throughout commit/push review.
+Both routes investigate changed behavior by risk, covering bugs, performance, and
+code taste in any order.
+
+Verify issues during investigation and reconcile coverage
+before deciding. Critical/high findings block; low/nit advisories do not.
+Mandatory rule violations and missing required proof remain blocking.
+
+The shared prompt starts with labeled Contract bullets and uses the design auditor's
+severity, Evidence, and Pass-if entry structure. Existing `unchecked:` records remain
+readable alongside the new `high: unchecked:` prefix.
+See [review criteria](ARCHITECTURE.md#commitpush-review-criteria).
+
+Refresh consumer tooling and the host plugin, then reload Claude Code or start a
+new Codex task to load the changed prompt. JSON fields and verdict gates are
+unchanged. Rendered-prompt tests cover delivery; live model behavior needs separate
+evaluation.
+
 ### Verification applicability rollout
 
 Version 0.1.39 scopes full-revert defect proof to fixes of existing behavior, including

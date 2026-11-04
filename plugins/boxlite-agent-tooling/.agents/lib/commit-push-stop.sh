@@ -6,7 +6,7 @@
 
 # The commit/push auditor's record step, for its deadline messages (design #328).
 commit_push_stop_record() {  # attempt id, dossier path
-  printf 'Write the dossier for attempt %s to %s; PASS or FAIL, with each check you have not run as an unchecked: finding.' "$1" "$2"
+  printf 'Write the dossier for attempt %s to %s; PASS or FAIL, with each check you have not run as a high: unchecked: finding.' "$1" "$2"
 }
 
 # Print a block reason to keep the auditor running, or nothing to let it stop.
@@ -34,7 +34,8 @@ commit_push_stop_check() {  # repo session-scope stop-hook-active
   fi
   if [[ -n "$document" ]]; then
     state=recorded
-    if jq -e 'any(.findings[]?; startswith("unchecked:"))' <<<"$document" >/dev/null; then
+    if jq -e 'any(.findings[]?; startswith("unchecked:") or startswith("high: unchecked:"))' \
+        <<<"$document" >/dev/null; then
       state=unchecked
     fi
   fi
