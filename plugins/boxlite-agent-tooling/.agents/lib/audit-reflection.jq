@@ -77,5 +77,5 @@ elif $operation == "record" then
   end
 elif $operation == "submit" and ($request | keys_are(["context","reflection"])) then
   audit_reflection_submit($request.reflection)
-elif $operation == "status" and ($request | keys_are(["context"])) then .
+elif ($operation == "status" or $operation == "checkpoint") and ($request | keys_are(["context"])) then .
 else error("unknown audit operation") end

@@ -48,6 +48,7 @@ audit_reflection() { # operation state-path; request on stdin
 _audit_reflection_transition() { # library operation state-path; lease already held
   local library="$1" operation="$2" path="$3" request state=null snapshot next history_hash reflection_hash
   local history_max_bytes
+  local checked checkpoint_request
   history_max_bytes="$(audit_reflection_history_limit)"
   local LC_ALL=C
   request="$(perl -e '
@@ -71,6 +72,24 @@ _audit_reflection_transition() { # library operation state-path; lease already h
       [[ "$(jq -r '.reflection.hash' <<<"$state")" == "$reflection_hash" ]] || return 2
     fi
   fi
+  if [[ "$operation" == prepare || "$operation" == checkpoint ]]; then
+    checkpoint_request="$(jq -c '{context}' <<<"$request")" || return 2
+    checked="$(printf '%s\n%s\n' "$state" "$checkpoint_request" \
+      | jq -ceSs -L "$library" --arg operation status --argjson history_max_bytes "$history_max_bytes" \
+        -f "$library/audit-reflection.jq")" || return 2
+    # Duplicate preparation is a read; no new round or question is created.
+    if ! jq -e --argjson request "$request" \
+      'any(.attempts[]; .input == $request.attempt)' <<<"$checked" >/dev/null; then
+      if jq -e -L "$library" --argjson history_max_bytes "$history_max_bytes" \
+          'include "audit-reflection-contract"; audit_history_exhausted($history_max_bytes)' <<<"$checked" >/dev/null; then
+        printf 'audit-reflection: audit history exhausted; verification remains incomplete\n' >&2
+        return 2
+      fi
+      # shellcheck source=git-audit-decision.sh
+      source "$library/git-audit-decision.sh" || return 2
+      git_audit_checkpoint "$library" "$checked" "$path" || return 2
+    fi
+  fi
   next="$(printf '%s\n%s\n' "$state" "$request" \
     | jq -ceSs -L "$library" --arg operation "$operation" --argjson history_max_bytes "$history_max_bytes" \
       -f "$library/audit-reflection.jq")" || return 2
@@ -89,7 +108,7 @@ _audit_reflection_transition() { # library operation state-path; lease already h
     next="$(jq -cS '.closed |= .[1:]' <<<"$next")" || return 2
   done
   (( ${#next} <= history_max_bytes )) || return 2
-  if [[ "$operation" != status ]]; then
+  if [[ "$operation" != status && "$operation" != checkpoint ]]; then
     printf '%s\n' "$next" | verdict_audit_write_atomic "$path" || return 2
   fi
   printf '%s\n' "$next"

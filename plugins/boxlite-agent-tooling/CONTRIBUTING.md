@@ -142,6 +142,22 @@ new Codex task to load the changed prompt. JSON fields and verdict gates are
 unchanged. Rendered-prompt tests cover delivery; live model behavior needs separate
 evaluation.
 
+### Commit/push retry choices
+
+After three FAIL/ERROR rounds, the audit pauses for **Reflect again (Recommended)**
+or **Stop**. The five-minute deadline selects Reflect again if unanswered.
+Keep the failed history, submit current reflection, fix and test, then run one fresh
+audit. A further failure asks again; eight failures, sixteen attempts, and storage
+limits remain terminal safety bounds. Timeout never approves a commit or push.
+
+Use the managed question or its exact standalone
+`commit-audit-decision: <request-id> <Reflect again|Stop>` answer; push uses
+`push-audit-decision:`. The prompt hook retains the failed cycle for a valid choice.
+Extra instructions or stale answers follow ordinary prompt cancellation.
+Stop keeps Git blocked; a later explicit task instruction starts a new prompt context.
+After adopting this change, refresh the whole plugin and start a new session so
+Git gates, prompt handling, and question callbacks use the same implementation.
+
 ### Verification applicability rollout
 
 Version 0.1.39 scopes full-revert defect proof to fixes of existing behavior, including

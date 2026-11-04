@@ -56,17 +56,21 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
     def spec:
       type == "object" and (keys == ["binding","fallback","minimum_words","prefix"])
       and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 8192))
-      and (.fallback | IN("split","keep-draft","keep-blocked"))
-      and (.prefix | IN("reviewed:","pr-size-exception:","design-decision:"))
+      and (.fallback | IN("split","keep-draft","keep-blocked","reflect-again"))
+      and (.prefix | IN("reviewed:","pr-size-exception:","design-decision:","commit-audit-decision:","push-audit-decision:"))
       and ((.prefix == "reviewed:") == (.fallback == "keep-draft"))
       and ((.prefix == "design-decision:") == (.fallback == "keep-blocked"))
+      and ((.prefix | IN("commit-audit-decision:","push-audit-decision:")) == (.fallback == "reflect-again"))
       and (.minimum_words | type == "number" and . >= 1 and . <= 100 and floor == .);
     # A design decision is a native label, or a typed line naming one with a reason.
     def decision_line: test("^design-decision: (Redesign|Reflect again|Overrule)\\s+\\S");
+    def git_decision: .prefix | IN("commit-audit-decision:","push-audit-decision:");
     def response_ok($s):
       line and (if $s.prefix == "pr-size-exception:" and . == "Bypass limit" then true
         elif $s.prefix == "design-decision:"
         then IN("Redesign","Reflect again","Overrule") or decision_line
+        elif ($s | git_decision) then IN("Reflect again","Reflect again (Recommended)","Stop")
+          or test("^"+$s.prefix+" [0-9a-f]{32} (Reflect again|Stop)$")
         else startswith($s.prefix + " ")
           and ([.[($s.prefix|length):] | scan("\\S+")] | length) >= $s.minimum_words end);
     def valid:
@@ -85,6 +89,9 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
         then .spec as $s | .response | response_ok($s)
         elif .status == "declined" then .spec.prefix == "pr-size-exception:" and .response == "Split PR"
         else .response == "" end)
+      and (. as $record | if (.spec | git_decision) and (.response | startswith($record.spec.prefix))
+        then .response | test("^"+$record.spec.prefix+" "+$record.id+" (Reflect again|Stop)$")
+        else true end)
       and (if .fallback_delivered then (.status | IN("expired","declined")) else true end);
     # Older version-one records predate native questions; preserve their deadline.
     if type == "object" and .version == 1 and (has("question_tool_id") | not)
@@ -113,8 +120,14 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
         or (.question_tool_id != "" and .question_tool_id != $reply)
       then error("question expired or was already presented")
       else .question_tool_id = $reply end
-    elif $op == "respond" and .spec.prefix == "design-decision:" then
-      error("design decisions come only from the human: the managed question or a typed design-decision line")
+    elif $op == "respond" and (.spec.prefix == "design-decision:" or (.spec | git_decision)) then
+      error("audit decisions come only from the human: the managed question or a typed decision line")
+    elif $op == "prompt-reply" and (.spec | git_decision) then
+      .spec as $spec |
+      if .status != "pending" or ($reply | line | not)
+        or ($reply | test("^"+$spec.prefix+" "+$arg+" (Reflect again|Stop)$") | not)
+      then error("Git audit choice is stale or does not match this request")
+      else .status = "accepted" | .response = $reply end
     elif $op == "prompt-reply" then
       # The human typed it, so it still counts after the deadline ended the agent wait.
       if .spec.prefix != "design-decision:" or ($reply | line and decision_line | not)
@@ -138,7 +151,8 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       then error("response does not match this confirmation")
       else .status = "accepted" | .response = $answer end
     elif $op == "consume" then
-      if .status != "accepted" then error("confirmation is not accepted")
+      if (.spec | git_decision) then error("Git retry choices remain bound to their failed round")
+      elif .status != "accepted" then error("confirmation is not accepted")
       else .status = "consumed" end
     elif $op == "fallback" then
       if (.status | IN("expired","declined") | not) then error("confirmation has not expired or been declined")
@@ -172,6 +186,7 @@ _timed_user_prompt_question() {
   case "$(jq -r .spec.fallback <<<"$1")" in
     split) template=questions/timed-question-size ;;
     keep-blocked) template=questions/timed-question-design ;;
+    reflect-again) template=questions/timed-question-git-audit ;;
   esac
   # Insert JSON string contents, never raw data, into the structured question.
   prefix="$(jq -er '.spec.prefix | tojson | .[1:-1]' <<<"$1")" || return 2

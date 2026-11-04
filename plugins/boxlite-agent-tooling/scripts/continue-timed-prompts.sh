@@ -13,6 +13,8 @@ source "$plugin/.agents/lib/timed-user-prompt.sh"
 payload="$(cat)"
 repo="$(git -C "${CLAUDE_PROJECT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
 names=(pr-size-request pr-review-request design-decision-request)
+scope="$(verdict_audit_scope_from_hook_payload "$payload" "$repo" 2>/dev/null)" || scope=""
+names+=("commit-audit-decision-request-$scope" "push-audit-decision-request-$scope")
 present=false
 for name in "${names[@]}"; do
   [[ ! -e "$repo/.agents/state/$name.json" && ! -L "$repo/.agents/state/$name.json" ]] || present=true
@@ -26,8 +28,16 @@ for name in "${names[@]}"; do
   [[ -e "$path" || -L "$path" ]] || continue
   snapshot="$(verdict_audit_read_regular_state "$path" 16384 json)" || exit 2
   request="${snapshot#*$'\n'}"
-  jq -e --arg repo "$repo" --arg head "$head" --arg branch "$branch" --arg session "$session" '
-    .spec.binding | (.root // .repo) == $repo and .head == $head and .branch == $branch
+  request_session="$session"
+  if [[ "$(jq -r .spec.fallback <<<"$request")" == reflect-again ]]; then
+    # shellcheck source=../.agents/lib/git-audit-decision.sh
+    source "$plugin/.agents/lib/git-audit-decision.sh"
+    git_audit_decision_current "$request" || continue
+    request_session="$scope"
+  fi
+  jq -e --arg repo "$repo" --arg head "$head" --arg branch "$branch" --arg session "$request_session" '
+    . as $request | .spec.binding | (.root // .repo) == $repo and .head == $head
+      and .branch == (if $request.spec.fallback == "reflect-again" and $branch == "" then "HEAD" else $branch end)
       and .session == $session' <<<"$request" >/dev/null || continue
   id="$(jq -er .id <<<"$request")" || exit 2
   request="$(timed_user_prompt status "$path" "$id")" || exit 2
@@ -47,6 +57,7 @@ for name in "${names[@]}"; do
       case "$(jq -r .spec.fallback <<<"$request")" in
         split) reason="$(subagent_prompt questions/timed-continue-expired-size "$plugin")" || exit 2 ;;
         keep-blocked) reason="$(subagent_prompt questions/timed-continue-expired-design "$plugin")" || exit 2 ;;
+        reflect-again) reason="$(subagent_prompt questions/timed-continue-expired-git-audit "$plugin")" || exit 2 ;;
         *) reason="$(subagent_prompt questions/timed-continue-expired-review "$plugin")" || exit 2 ;;
       esac
       timed_user_prompt fallback "$path" "$id" >/dev/null || exit 2 ;;

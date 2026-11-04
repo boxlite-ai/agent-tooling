@@ -1,5 +1,8 @@
 include "audit-reconciliation";
 def audit_failure_ids: [.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR")) | .id];
+def audit_git_decision_due:
+  (.context.gate | IN("commit","push")) and (audit_failure_ids | length) >= 3
+  and .attempts[-1].outcome != null and .attempts[-1].outcome.verdict != "PASS";
 # Reserve snapshot/binding, outcome, registry growth, and reflection/metadata.
 # Closed cycles are removable; pending results must remain recordable.
 def audit_history_exhausted($max_bytes):

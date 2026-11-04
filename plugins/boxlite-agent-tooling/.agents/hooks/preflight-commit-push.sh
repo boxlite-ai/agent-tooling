@@ -780,6 +780,11 @@ Re-audit is required."
       rm -f "$audit_selection"
       deny_with_audit "The audit did not reconcile current history; verification remains incomplete."
     fi
+    local decision_error
+    if ! decision_error="$(audit_reflection_gate "$reflection_context" checkpoint 2>&1)"; then
+      rm -f "$audit_selection"
+      deny "$decision_error"
+    fi
   fi
 
   # `findings` blocks, `advisories` never does. Two arrays rather than a per-finding
@@ -933,9 +938,11 @@ fi
 if [[ -n "$reflection_context" ]]; then
   history="$(audit_reflection_gate "$reflection_context" inspect)" \
     || deny "Audit history is unreadable; verification remains incomplete."
-  if [[ "$(jq '.state.attempts[-1].outcome.verdict != "PASS" and ((.state.attempts | length) >= 16 or
-    ([.state.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR"))] | length) >= 8)' <<<"$history")" == true ]]; then
+  if [[ "$(jq -r .exhausted <<<"$history")" == true ]]; then
     deny "Audit retry budget exhausted. Verification is incomplete; report unresolved findings from $(jq -r .state_path <<<"$history") and await human direction."
+  fi
+  if ! decision_error="$(audit_reflection_gate "$reflection_context" checkpoint 2>&1)"; then
+    deny "$decision_error"
   fi
   if [[ "$(jq -r .reflection_due <<<"$history")" == true ]]; then
     reflection_instruction="$(subagent_prompt audit/commit-push-reflection-required "$tooling_root" \
