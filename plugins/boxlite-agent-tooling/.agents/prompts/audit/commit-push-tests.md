@@ -9,7 +9,7 @@ description: Bind executions and source.
 Use host receipts, complete native records, or safe reruns; direct Bash suites count.
 Check command/subject/design bindings first. Inventory evidence; probe sandbox capabilities.
 Denials need authentic records, not claimed failures; preserve lifecycle checks/permissions.
-Missing proof: unchecked FAIL.
+Missing proof: `high: unchecked` FAIL.
 
 ## Bind execution
 

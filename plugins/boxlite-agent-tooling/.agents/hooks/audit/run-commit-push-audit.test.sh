@@ -984,8 +984,8 @@ case "$prompt" in
   *)                      bad "command is JSON-encoded, not interpolated raw" ;;
 esac
 case "$prompt" in
-  *"advisories NEVER make a verdict FAIL"*) ok "prompt came from the extracted document" ;;
-  *)                                        bad "prompt came from the extracted document" ;;
+  *"FAIL iff findings; advisories never FAIL."*) ok "prompt carries the shared verdict rule" ;;
+  *)                                           bad "prompt carries the shared verdict rule" ;;
 esac
 
 echo
