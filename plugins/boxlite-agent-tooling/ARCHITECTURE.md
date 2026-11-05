@@ -599,7 +599,11 @@ past its deadline, an auditor may only record its verdict, and one verdict-less 
 - The hook sees every tool a timed auditor's spec lists; `.agents/hooks/design/audit-deadline.test.sh`
   fails when the matcher misses one. Codex-hosted web search bypasses hooks.
 - `--safe-mode` keeps hooks away from the headless verdict auditor, so the runner drives
-  `claude -p` over stream-json with `--replay-user-messages`. `subagent_timed_drive` is one
+  `claude -p` over stream-json with `--replay-user-messages`. Safe mode also ignores
+  user/project permission settings, and print mode has no approver, so the runner grants
+  the auditor's four tools with `--allowedTools`; a tool listed only in `--tools` is
+  denied, and an ungranted `Write` leaves no dossier.
+  `subagent_timed_drive` is one
   Perl process (`IPC::Open2`, `IO::Select`, `JSON::PP`, `alarm`) that reads each event's
   `type` and the record message's echo:
   1. Sends the audit prompt as the first user message.
