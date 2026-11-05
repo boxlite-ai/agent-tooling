@@ -140,8 +140,9 @@ if [[ "$prompt_text" == 'api compatibility: skip' ]]; then
     printf 'api-compatibility: confirmation not recorded: %s\n' "${compatibility_record#api-compatibility: }"
   fi
 fi
-# Only the human's own first prompt line records a design decision; wakes exit above.
-if [[ "$prompt_text" =~ ^[[:space:]]*design-decision: ]]; then
+# The receiver validates typed decisions and correlated Codex replies; wakes exit above.
+if [[ "$prompt_text" =~ ^[[:space:]]*design-decision: \
+   || "$prompt_text" =~ ^[[:space:]]*\<send_user_message_question_reply\> ]]; then
   printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$project_dir" \
     bash "$tooling_root/.agents/hooks/design-decision-prompt.sh"
 fi
