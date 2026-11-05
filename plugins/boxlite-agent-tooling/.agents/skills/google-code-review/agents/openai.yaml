@@ -1,0 +1,3 @@
+interface:
+  display_name: "Google Code Review"
+  short_description: "Google review guidance with local audit rules"

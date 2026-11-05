@@ -608,8 +608,8 @@ for route in native headless; do
   # Backticks are literal rule text, not command substitutions.
   # shellcheck disable=SC2016
   for rule in \
-    'Anchor each finding: bound-tree' \
-    '≤1024 bytes'; do
+    'Per finding: bound-tree' \
+    '≤1024 B'; do
     check "$route commit audit carries: $rule" "$rule" "$route_prompt"
   done
   # The replays dropped two rules: falsify-and-withdraw never withdrew a finding, and
@@ -627,8 +627,8 @@ for route in native headless; do
     headless) route_prompt="$commit_runner_rendered" ;;
   esac
   for rule in \
-    '- Rules: read applicable AGENTS.md/CLAUDE.md, CONTRIBUTING.md, and scoped policies' \
-    '- Priority: respect rule precedence' \
+    '- Rules: read applicable AGENTS.md/CLAUDE.md, CONTRIBUTING.md, scoped policies; obey precedence and map requirements to evidence' \
+    'scoped policies; obey precedence and map requirements to evidence' \
     'map requirements to evidence' \
     '- Skills: apply' \
     '- Design: run' \
