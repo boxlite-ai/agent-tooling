@@ -26,7 +26,7 @@ case "$auditor" in
     allow_command='design-doc\.sh"?[[:space:]]+(verdict|research)([[:space:]]|$)'
     allow_path=""
     state_path="$git_dir/agent-tooling-design-audit.json"
-    record="Pipe {content_sha256, verdict, findings, advisories} to bash \"$plugin_root/scripts/design-doc.sh\" verdict; checks you have not run are high: unchecked." ;;
+    record="Pipe {content_sha256, verdict, findings, advisories} to bash \"$plugin_root/scripts/design-doc.sh\" verdict. At deadline: confirmed blockers FAIL; otherwise PASS; unfinished checks and reasons are advisories." ;;
   design-advisor)
     git_dir="$(git -C "${cwd:-$PWD}" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
     task_path="$git_dir/agent-tooling-design-advice-task.json"
@@ -47,7 +47,31 @@ case "$auditor" in
                        and (.attempt_id | type) == "string")' 2>/dev/null)" || exit 0
     allow_command=""
     allow_path="$(jq -r .dossier_path <<<"$task")"
-    record="$(commit_push_stop_record "$(jq -r .attempt_id <<<"$task")" "$allow_path")" ;;
+    record="$(audit_attempt_stop_record "$(jq -r .attempt_id <<<"$task")" "$allow_path")" ;;
+  verdict-auditor)
+    repo="$(git -C "${cwd:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
+    repo="$(cd "$repo" && pwd -P)" || exit 0
+    scope="$(verdict_audit_scope_from_hook_payload "$payload" "$repo" 2>/dev/null)" || exit 0
+    for name in audit-request audit-reflection audit-reflection-gate verdict-audit-task; do
+      # shellcheck source=/dev/null
+      source "$lib/$name.sh" || exit 2
+    done
+    if [[ "$event" == SubagentStop ]]; then
+      reason="$(audit_attempt_stop_check "$repo" "$scope" \
+        "$(jq -r '.stop_hook_active == true' <<<"$payload")" verdict-auditor \
+        "$(jq -r '.agent_id // ""' <<<"$payload")")" || exit 2
+      [[ -z "$reason" ]] || jq -nc --arg reason "$reason" '{decision:"block",reason:$reason}'
+      exit 0
+    fi
+    status=0
+    task="$(verdict_audit_task_prepare "$repo" "$scope" \
+      "$(jq -r '.agent_id // ""' <<<"$payload")" "$event")" || status=$?
+    (( status != 1 )) || exit 0  # No live request grants no deadline authority.
+    (( status == 0 )) || { printf 'audit-deadline: native verdict task could not be prepared\n' >&2; exit 2; }
+    [[ "$event" != SubagentStart ]] || exit 0
+    allow_command=""
+    allow_path="$(jq -r .dossier_path <<<"$task")"
+    record="$(audit_attempt_stop_record "$(jq -r .attempt_id <<<"$task")" "$allow_path")" ;;
   *) exit 0 ;;
 esac
 deadline="$(jq -r .deadline <<<"$task")"
@@ -55,6 +79,7 @@ case "$event" in
   PreToolUse)
     (( $(date +%s) >= deadline )) || exit 0
     tool="$(jq -r '.tool_name // ""' <<<"$payload")"
+    [[ "$tool" != TaskStop ]] || exit 0
     command="$(jq -r '.tool_input.command // "" | strings' <<<"$payload")"
     if [[ -n "$allow_command" && "$tool" == Bash && "$command" =~ $allow_command ]]; then
       exit 0

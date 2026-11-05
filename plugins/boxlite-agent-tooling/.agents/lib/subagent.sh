@@ -182,9 +182,18 @@ subagent_timed_message() {  # passed|stop, record step
   esac
 }
 
-# Prints why a stop must be blocked, or nothing to allow it. A resumed stop always
-# passes, so each stop is blocked at most once. `unchecked` (a verdict with unrun
-# checks) is sent back for more checks only while time remains.
+# Record grace never consumes investigation time or exceeds the lease ceiling.
+subagent_timed_stop_seconds() { # investigation seconds, lease maximum
+  local budget="$1" maximum="$2" grace=60
+  (( budget >= grace )) || grace="$budget"
+  if (( budget + grace > maximum )); then
+    printf 'audit timeout leaves no room for the bounded record window\n' >&2
+    return 2
+  fi
+  printf '%s\n' "$((budget + grace))"
+}
+
+# A resumed stop passes; unchecked results get more investigation only before expiry.
 subagent_timed_stop() {  # deadline, recorded|missing|unchecked, resumed, record step
   [[ "$3" != true && "$2" != recorded ]] || return 0
   if (( $(date +%s) < $1 )); then

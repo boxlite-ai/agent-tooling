@@ -139,7 +139,7 @@
       "properties": {
         "reflection_hash": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"},
         "auditor_assessment": {"$ref": "#/$defs/text"},
-        "assessment": {"type": "string", "enum": ["sufficient", "insufficient"]}
+        "assessment": {"type": "string", "enum": ["sufficient", "insufficient", "unchecked"]}
       }
     }
   }

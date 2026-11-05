@@ -1,4 +1,5 @@
 # Shared candidate checks; persistence and live authorization remain with callers.
+include "audit-reconciliation";
 def audit_dossier_normalize_git:
   def exact_keys($wanted): (keys | sort) == ($wanted | sort);
   def bounded_line($bytes):
@@ -39,7 +40,8 @@ def audit_dossier_record_request($payload; $id):
     if .reflection_review == null then del(.reflection_review) else . end
   end) as $dossier |
   .attempts[-1].input.binding as $binding |
-  if $id == "" or $id != .attempts[-1].id or $dossier.history_review.attempt_id != $id
+  if ($payload | has("deadline_review")) then error("deadline metadata is runtime-owned")
+  elif $id == "" or $id != .attempts[-1].id or $dossier.history_review.attempt_id != $id
   then error("history_review.attempt_id does not match the current attempt")
   elif $dossier.verdict == "FAIL" and
     (($dossier.history_review.findings | length) == 0 and
@@ -48,5 +50,11 @@ def audit_dossier_record_request($payload; $id):
   else . end |
   [$binding | to_entries[] | select(.value != $dossier[.key]) | .key] as $mismatches |
   if ($mismatches | length) > 0 then error("dossier binding mismatch: " + ($mismatches | tojson)) else . end |
+  $state.attempts[-1] as $attempt |
+  (now | floor) as $now |
+  (if $attempt.outcome != null then $attempt.outcome.deadline_review
+   elif ($attempt.input.deadline | ar_timestamp) and $now >= $attempt.input.deadline
+   then {deadline:$attempt.input.deadline,recorded_at:$now} else null end) as $deadline |
   $dossier | {context:$state.context,id:$id,outcome:({verdict,evidence:del(.history_review,.reflection_review),
-    history_review} + (if has("reflection_review") then {reflection_review} else {} end))};
+    history_review} + (if has("reflection_review") then {reflection_review} else {} end)
+    + (if $deadline != null then {deadline_review:$deadline} else {} end))};

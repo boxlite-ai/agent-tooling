@@ -39,10 +39,14 @@ def audit_reflection_assess($outcome; $attempt):
   if $attempt.reflection_hash == "" or ($outcome.verdict | IN("ERROR","CANCELED")) then .
   elif ($outcome.reflection_review | ar_keys(["reflection_hash","assessment","evidence","auditor_assessment"]) | not)
     or $outcome.reflection_review.reflection_hash != $attempt.reflection_hash
-    or ($outcome.reflection_review.assessment | IN("sufficient","insufficient") | not)
+    or ($outcome.reflection_review.assessment | IN("sufficient","insufficient","unchecked") | not)
     or ($outcome.reflection_review.evidence | ar_text | not)
     or ($outcome.reflection_review.auditor_assessment | ar_text | not)
   then error("missing or stale independent reflection assessment")
+  elif $outcome.reflection_review.assessment == "unchecked"
+    and (audit_deadline_qualified($outcome; $attempt) | not)
+  then error("unchecked reflection requires an elapsed runtime deadline")
   elif $outcome.verdict == "PASS" and $outcome.reflection_review.assessment != "sufficient"
+    and ($outcome.reflection_review.assessment != "unchecked" or (audit_deadline_qualified($outcome; $attempt) | not))
   then error("PASS requires sufficient reflection and verified follow-through")
   else . end;

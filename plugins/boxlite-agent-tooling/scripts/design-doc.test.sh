@@ -101,6 +101,28 @@ record 'a FAIL with findings is recorded' 0 "$(verdict "$reviewed" FAIL '["resea
 record 'a PASS for the reviewed content is recorded' 0 "$(verdict "$reviewed" PASS '[]')"
 expect 'recording leaves the binding intact' 0 check
 
+# Runtime task state, not auditor input, supplies deadline provenance.
+deadline="$(env DESIGN_AUDITOR_TIMEOUT=1 bash -c '
+  for lib in verdict-audit-state subagent design-doc; do source "$1/.agents/lib/$lib.sh"; done
+  design_doc_audit_task "$PWD" "$2" "$3"' task "$plugin" "$url" "$reviewed")"
+perl -e 'my $wait=$ARGV[0]-time+1; sleep $wait if $wait>0' "$deadline"
+partial="$(verdict "$reviewed" PASS '[]' | jq '.advisories=["low: unchecked at deadline: citation chase; finish remaining sources"]')"
+record 'deadline PASS records unfinished work as advisory' 0 "$partial"
+deadline_state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
+if jq -e --argjson deadline "$deadline" '.deadline_review.deadline == $deadline and
+    .deadline_review.recorded_at >= $deadline and .verdict == "PASS" and (.advisories | length) == 1' \
+    "$deadline_state" >/dev/null; then
+  printf 'PASS design deadline provenance persisted\n'; pass=$((pass+1))
+else
+  printf 'FAIL design deadline provenance missing\n'; fail=$((fail+1))
+fi
+original_deadline_record="$(cat "$deadline_state")"
+rm "${deadline_state%/*}/agent-tooling-design-audit-task.json"
+record 'deadline PASS replay survives task cleanup' 0 "$partial"
+[[ "$(cat "$deadline_state")" == "$original_deadline_record" ]] || fail=$((fail+1))
+record 'an auditor cannot supply its own deadline marker' 1 \
+  "$(jq '.deadline_review={deadline:1,recorded_at:2}' <<<"$partial")"
+
 # The research loop (design #309): severity, carried findings, the FAIL cap, and the
 # human's choice. Each revision is new design content.
 research_state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"

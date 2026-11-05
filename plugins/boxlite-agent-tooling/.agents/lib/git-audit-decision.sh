@@ -17,9 +17,11 @@ git_audit_decision_current() { # request JSON; caller separately verifies the ho
   ' <<<"$request" >/dev/null
 }
 
-git_audit_checkpoint() { # library directory, validated history JSON, history path; history lock held
+git_audit_checkpoint_result() { # library, validated history, path; typed result under history lock
   local library="$1" state="$2" history="$3" root scope kind path spec request id instruction
-  jq -e -L "$library" 'include "audit-reflection-contract"; audit_git_decision_due' <<<"$state" >/dev/null || return 0
+  if ! jq -e -L "$library" 'include "audit-reflection-contract"; audit_git_decision_due' <<<"$state" >/dev/null; then
+    printf '%s\n' '{"action":"continue","reason":""}'; return 0
+  fi
   root="$(jq -r .context.repo_root <<<"$state")"
   scope="$(jq -r .context.session <<<"$state")"
   kind="$(jq -r .context.gate <<<"$state")"
@@ -44,20 +46,30 @@ git_audit_checkpoint() { # library directory, validated history JSON, history pa
   case "$(jq -r .status <<<"$request")" in
     accepted)
       if [[ "$(jq -r '.response | endswith("Stop")' <<<"$request")" == true ]]; then
-        printf 'audit-decision: the human chose Stop; verification remains incomplete. History: %s\n' "$history" >&2
-        return 2
+        jq -nc --arg history "$history" '{action:"stop",reason:
+          ("audit-decision: the human chose Stop; verification remains incomplete. History: " + $history)}'
+        return
       fi
-      return 0 ;;
+      printf '%s\n' '{"action":"continue","reason":""}'; return 0 ;;
     expired)
       timed_user_prompt fallback "$path" "$id" >/dev/null || return 2
-      return 0 ;;
+      printf '%s\n' '{"action":"continue","reason":""}'; return 0 ;;
     pending)
       instruction="$(timed_user_prompt_instruction "$library/../.." "$request")" || return 2
-      subagent_prompt audit/git-audit-decision "$library/../.." \
-        "prefix=$kind-audit-decision:" "id=$id" "history=$history" "instruction=$instruction" >&2 || return 2
-      return 2 ;;
+      instruction="$(subagent_prompt audit/git-audit-decision "$library/../.." \
+        "prefix=$kind-audit-decision:" "id=$id" "history=$history" "instruction=$instruction")" || return 2
+      jq -nc --arg reason "$instruction" --arg path "$path" '{action:"wait",reason:$reason,request_path:$path}'
+      return ;;
     *) printf 'audit-decision: invalid checkpoint status\n' >&2; return 2 ;;
   esac
+}
+
+git_audit_checkpoint() { # Legacy callers retain stderr and exit 2 for a blocked checkpoint.
+  local result
+  result="$(git_audit_checkpoint_result "$@")" || return 2
+  [[ "$(jq -r .action <<<"$result")" != continue ]] || return 0
+  jq -r .reason <<<"$result" >&2
+  return 2
 }
 
 git_audit_decision_reply() { # actual UserPromptSubmit payload, repository root, plugin root

@@ -6,16 +6,16 @@ description: Bind executions and source.
 
 # Test evidence
 
-Use host receipts, complete native records, or safe reruns; direct Bash suites count.
-Check command/subject/design bindings first. Inventory evidence; probe sandbox capabilities.
+Use host receipts, complete native records, or safe reruns; Bash suites count.
+Check command/subject/design bindings first. Inventory evidence; probe sandbox.
 Denials need authentic records, not claimed failures; preserve lifecycle checks/permissions.
-Missing proof: `high: unchecked` FAIL.
+Missing proof: `high: unchecked` FAIL before deadline; then apply deadline-policy.md.
 
 ## Bind execution
 
 Bind command, cwd, completion, exit, output, source state to captured index or validated
-push trees. Verify state before/after; today's index, summaries, logs, prior dossiers,
-filenames cannot certify past runs. Read up to 50 newest `test-runs/` receipts beside
+push trees. Verify state before/after; current index, summaries, logs, prior dossiers,
+filenames cannot certify past runs. Read ≤50 newest `test-runs/` receipts beside
 dossier: `command`, `status`, `exit_code`, `head`, `tree`.
 
 ## Native records
@@ -39,4 +39,4 @@ Wholly new contracts: base/source evidence of no equivalent prior contract;
 positive, negative, and boundary tests against implementation; security:
 allowed/denied at real security boundaries. Defect proof: not applicable, with reason.
 Mixed changes: both standards per claim.
-Missing APIs, compilation errors, and setup errors never reproduce a defect.
+Missing APIs, compile/setup errors never reproduce a defect.

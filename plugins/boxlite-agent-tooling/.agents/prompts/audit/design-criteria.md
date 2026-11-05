@@ -25,7 +25,7 @@ Format: `<severity>: <check>: <gap>. Evidence: <quote+URL | file:line | probe>. 
 
 - `findings`: critical (bypass, unsafe), high (changes decision, scope or verdict).
 - `advisories`: low, nit.
-- A check not run or finished by the deadline: `high: unchecked: <check; reason>`.
+- At runtime deadline, apply deadline-policy.md; unchecked checks are advisories.
 - Record: pipe the verdict object to `bash "{{plugin_root}}/scripts/design-doc.sh" verdict` in `repo_root`.
 
 ## `prior_findings`

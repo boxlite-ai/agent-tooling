@@ -19,7 +19,7 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   directory="$root/.agents/state"
   session="$(jq -r .session <<<"$context")"
   epoch="$(jq -r .epoch <<<"$context")"
-  if [[ "$operation" == prepare || "$operation" == record || "$operation" == checkpoint ]] \
+  if [[ "$operation" == prepare || "$operation" == record || "$operation" == checkpoint || "$operation" == next-action ]] \
      && [[ "$session" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
     actual_epoch=0
     if [[ -e "$directory/verdict-prompt-epoch.$session" || -L "$directory/verdict-prompt-epoch.$session" ]]; then
@@ -44,8 +44,8 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   path="$directory/audit-history-$scope_key-$key.json"
   request="$(jq -nc --argjson context "$context" '{context:$context}')" || return 2
   state="$(printf '%s' "$request" | audit_reflection status "$path")" || return 2
-  if [[ "$operation" == checkpoint ]]; then
-    printf '%s' "$request" | audit_reflection checkpoint "$path"
+  if [[ "$operation" == checkpoint || "$operation" == next-action ]]; then
+    printf '%s' "$request" | audit_reflection "$operation" "$path"
     return $?
   fi
   if [[ "$operation" == inspect ]]; then
@@ -66,8 +66,13 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
       [[ -n "$id" ]] || id="$(perl -e 'open my $f,"<","/dev/urandom" or exit 2;
         read($f,my $b,16)==16 or exit 2; print unpack("H*",$b)')" || return 2
     fi
-    request="$(printf '%s' "$payload" | jq -ce --argjson context "$context" --arg id "$id" \
-      '{context:$context,attempt:{id:$id,binding:.binding,snapshot:.snapshot}}')" || return 2
+    request="$(printf '%s\n%s\n' "$state" "$payload" | jq -ces --argjson context "$context" --arg id "$id" '
+      if length != 2 then error("expected one audit input") else . end |
+      .[0] as $state | .[1] |
+      {id:$id,binding:.binding,snapshot:.snapshot} + (if has("deadline") then {deadline} else {} end)
+      | . as $input | ([$state.attempts[]? | select(.id == $id) | .input][0]) as $existing
+      | if $existing != null and ($existing | del(.deadline)) == ($input | del(.deadline)) then $existing else $input end
+      | {context:$context,attempt:.}')" || return 2
     state="$(printf '%s' "$request" | audit_reflection prepare "$path")" || {
       printf 'audit-reflection: inspect %s; submit reflection through scripts/audit-reflection.sh before retrying\n' "$path" >&2
       return 2
@@ -89,7 +94,9 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
     fi
     _audit_reflection_prune "$directory" "$scope_key" "$key" "$epoch" "$history_path" || return 2
     jq -nc --arg path "$path" --arg input "$history_path" --arg id "$id" \
-      '{state_path:$path,history_path:$input,attempt_id:$id}'
+      --argjson deadline "$(jq '.attempts[-1].input.deadline // null' <<<"$state")" \
+      '{state_path:$path,history_path:$input,attempt_id:$id}
+        + (if $deadline != null then {deadline:$deadline} else {} end)'
     return $?
   fi
   current_id="$(jq -r '.attempts[-1].id // ""' <<<"$state")" || return 2
