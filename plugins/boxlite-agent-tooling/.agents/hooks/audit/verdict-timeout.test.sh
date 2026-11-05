@@ -23,7 +23,7 @@ chmod +x "$scratch/bin/claude"
 # Source the lease slack instead of duplicating an unrelated lock constant.
 # shellcheck source=../../lib/verdict-audit-state.sh
 source "$plugin/.agents/lib/verdict-audit-state.sh"
-for scenario in claude:default:240 claude:10:70 claude:3500:3540 override:default:180; do
+for scenario in claude:default:240 claude:10:20 claude:3480:3540 override:default:240 override:10:20; do
   route="${scenario%%:*}"; rest="${scenario#*:}"
   timeout="${rest%:*}"; expected_stop="${rest#*:}"
   runner_env=(env -u VERDICT_AUDITOR_TIMEOUT -u VERDICT_AUDITOR_CMD)
@@ -48,3 +48,10 @@ for scenario in claude:default:240 claude:10:70 claude:3500:3540 override:defaul
   fi
   printf 'PASS: %s timeout %s stops at %ss with bounded lease\n' "$route" "$timeout" "$expected_stop"
 done
+if (cd "$repo" && env VERDICT_AUDITOR_TIMEOUT=3500 CLAUDE_PROJECT_DIR="$repo" \
+    bash "$plugin/.agents/hooks/audit/run-verdict-audit.sh" "$repo/transcript.jsonl" \
+      >"$scratch/out" 2>"$scratch/err"); then
+  printf 'FAIL: timeout accepted without room for its record window\n' >&2; exit 1
+fi
+[[ "$(cat "$scratch/err")" == *'no room for the bounded record window'* ]]
+printf 'PASS: oversized total runtime is rejected before launch\n'

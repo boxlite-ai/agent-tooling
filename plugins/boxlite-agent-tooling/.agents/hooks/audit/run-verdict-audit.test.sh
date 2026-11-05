@@ -2764,7 +2764,7 @@ check_eq "headless Claude prompt carries no timer procedure" \
 # The lease must outlast the Claude route's stop: 60 s past the deadline, capped where
 # the lease reaches the Stop gate's 3600 s ceiling.
 LOCK_CAP="$R/captured-lock.txt"
-for stop_case in 900:960 3500:3540; do
+for stop_case in 900:960 3480:3540; do
   timeout_seconds="${stop_case%:*}"; expected_stop="${stop_case#*:}"
   started_at="$(date +%s)"
   ( cd "$R" && CLAUDE_PROJECT_DIR="$R" SPEC_CAPTURE="$CAP" REQUEST_CAPTURE="$REQUEST_CAP" \

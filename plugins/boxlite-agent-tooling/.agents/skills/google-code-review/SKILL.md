@@ -14,7 +14,7 @@ Apply Google's review guidance to the assigned change; preserve the caller's sco
 4. Support findings with source locations, triggering conditions, and consequences; distinguish required changes from optional improvements.
 5. Use the caller's required review format; report incomplete coverage and missing evidence explicitly.
 
-For example, an optional naming preference is a nit; a missing required regression check remains a blocker.
+For example, an optional naming preference is a nit; classify a missing regression check under the caller's evidence and deadline policies.
 
 ## References
 

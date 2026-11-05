@@ -10,20 +10,22 @@ def context_ok:
   and (.repo_root | text and startswith("/")) and (.session | identifier)
   and (.epoch | identifier) and (.branch | text) and (.gate | IN("verdict","commit","push"));
 def input_ok:
-  keys_are(["id","binding","snapshot"]) and (.id | identifier)
+  (del(.deadline) | keys_are(["id","binding","snapshot"])) and (.id | identifier)
+  and ((has("deadline") | not) or (.deadline | ar_timestamp))
   and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 4096))
   and (.snapshot | type == "object" and length > 0 and (tojson | utf8bytelength <= 327680));
 # Advisories never decide a verdict, so a rewrite that changes only them is the same outcome.
 def outcome_decision: if (.evidence | type) == "object" then del(.evidence.advisories) else . end;
 def outcome_ok:
-  (del(.history_review,.reflection_review) | keys_are(["verdict","evidence"]))
+  (del(.history_review,.reflection_review,.deadline_review) | keys_are(["verdict","evidence"]))
   and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS","CANCELED"))
   and (.evidence | type == "string" or type == "object") and (tojson | utf8bytelength <= 65536);
 def attempt_ok:
   keys_are(["id","input","outcome","reflection_hash","history_hash"]) and (.input | input_ok) and .id == .input.id
   and (.history_hash | type == "string" and test("^[0-9a-f]{64}$"))
   and (.reflection_hash | type == "string" and test("^([0-9a-f]{64})?$"))
-  and (.outcome == null or (.outcome | outcome_ok));
+  and (.outcome == null or (.outcome | outcome_ok))
+  and (.outcome.deadline_review == null or audit_deadline_qualified(.outcome; .));
 def state_ok:
   keys_are(["version","context","attempts","registry","history_hash","reflection","closed"])
   and .version == 1 and (.context | context_ok) and (.registry | ar_registry)
@@ -68,9 +70,18 @@ elif $operation == "record" then
   # The same decision records again; the first outcome stays (#339).
   elif .attempts[$index].outcome != null then .
   else
+    if $request.outcome.deadline_review != null
+      and (audit_deadline_qualified($request.outcome; .attempts[$index]) | not)
+    then error("invalid runtime deadline marker") else . end |
+    audit_deadline_qualified($request.outcome; .attempts[$index]) as $deadline |
+    if $request.outcome.verdict == "PASS" and $deadline
+      and ((($request.outcome.history_review.coverage.unread // []) | length) > 0
+        or $request.outcome.reflection_review.assessment == "unchecked")
+      and (($request.outcome.evidence.advisories // []) | length) == 0
+    then error("deadline-unchecked evidence requires advisories") else . end |
     audit_reflection_assess($request.outcome; .attempts[$index]) |
     if $request.outcome.history_review != null then
-      audit_reconcile($request.outcome.history_review; .attempts[$index]; $request.outcome.verdict)
+      audit_reconcile($request.outcome.history_review; .attempts[$index]; $request.outcome.verdict; $deadline)
     elif (.registry | length) > 0 and ($request.outcome.verdict | IN("ERROR","CANCELED") | not)
     then error("history review is required for existing findings") else . end |
     .attempts[$index].outcome = $request.outcome

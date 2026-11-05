@@ -68,7 +68,7 @@ auditor_control_state_dispatch() {  # operation scope arguments...
   local operation="$1" scope="$2"
   shift 2
   case "$operation" in
-    start|escalate|stop|handle-prompt|select|consume-wake|consume-completion)
+    start|escalate|stop|inspect|handle-prompt|select|consume-wake|consume-completion)
       auditor_control_state_with_lock "$scope" "--locked-$operation" "$scope" "$@"
       ;;
     *)

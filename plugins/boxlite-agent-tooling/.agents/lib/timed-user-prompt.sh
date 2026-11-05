@@ -129,9 +129,9 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       then error("Git audit choice is stale or does not match this request")
       else .status = "accepted" | .response = $reply end
     elif $op == "prompt-reply" then
-      # The human typed it, so it still counts after the deadline ended the agent wait.
+      # The human supplied a directive; the deadline only ends the agent wait.
       if .spec.prefix != "design-decision:" or ($reply | line and decision_line | not)
-      then error("only a typed design-decision line from the human prompt counts")
+      then error("only an explicit design-decision line from the human prompt counts")
       elif (.status | IN("pending","expired") | not) then error("confirmation no longer accepts replies")
       else .status = "accepted" | .response = $reply | .fallback_delivered = false end
     elif $op == "respond" or $op == "native-reply" then
@@ -207,7 +207,13 @@ timed_user_prompt_instruction() { # tooling-root request-json
   source "$1/.agents/lib/hook-host.sh" || return 2
   host="$(hook_host_kind)"
   route="$(subagent_prompt questions/timed-route-async "$1")" || return 2
-  if [[ "$host" == claude ]]; then
+  if [[ "$host" == codex && "$(jq -r .spec.prefix <<<"$2")" == design-decision: ]]; then
+    question="$(_timed_user_prompt_question "$2")" || return 2
+    question="$(jq -c '{questions:[.questions[0] | {title:.question,
+      options:[.options[] | "design-decision: " + .label + " " + .description]}]}' \
+      <<<"$question")" || return 2
+    route="$(subagent_prompt questions/timed-route-design-async "$1" "question=$question")" || return 2
+  elif [[ "$host" == claude ]]; then
     if [[ "$(jq -r '.question_tool_id // ""' <<<"$2")" != "" ]]; then
       route="$(subagent_prompt questions/timed-route-shown "$1")" || return 2
     elif timed_user_prompt_native_available; then

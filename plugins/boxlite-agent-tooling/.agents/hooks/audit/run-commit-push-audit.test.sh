@@ -1060,11 +1060,12 @@ case "$(cat "$R_LARGE/prompt.txt")" in
   *)
     bad "bounded prompt carries evidence stat and changed paths (metadata=$(grep -E '^Evidence stat:|^Changed paths' "$R_LARGE/prompt.txt" | tr '\n' ' '))" ;;
 esac
-preview_count="$(sed -n 's/^Changed paths (sanitized diff headers as JSON, maximum 8 records): //p' "$R_LARGE/prompt.txt" | jq length)"
-if [[ "$preview_count" == 8 ]] && grep -q '^Dossier validator JSON: ' "$R_LARGE/prompt.txt"; then
-  ok "eight-path preview leaves room for shared validation instructions"
+preview_count="$(sed -n 's/^Changed paths (sanitized diff headers as JSON, maximum 4 records): //p' "$R_LARGE/prompt.txt" | jq length)"
+if [[ "$preview_count" == 4 ]] && grep -q '^Dossier validator JSON: ' "$R_LARGE/prompt.txt" \
+    && grep -q '^## Runtime deadline' "$R_LARGE/prompt.txt"; then
+  ok "four-path preview leaves room for shared validation and deadline instructions"
 else
-  bad "eight-path preview leaves room for shared validation instructions"
+  bad "four-path preview leaves room for shared validation and deadline instructions"
 fi
 evidence_observation="$(cat "$R_LARGE/evidence-observation.txt" 2>/dev/null || true)"
 case "$evidence_observation" in

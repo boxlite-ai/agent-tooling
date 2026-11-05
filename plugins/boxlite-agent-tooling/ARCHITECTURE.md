@@ -24,10 +24,10 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Submits a prompt | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Nothing. Old authority is revoked; unchanged audit work may finish as prior evidence. |
 | Submits a prompt in a consumer that opted in | `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Names boxlite-writing and points to the workflow. Not wired by the plugin manifests. |
 | Starts or finishes an auditor subagent | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | After 30 seconds, one Keep waiting or Force pass card in launcher-configured Claude sessions, a typed status elsewhere. A commit/push auditor without a bound dossier is resumed once, and every stop closes its attempt. |
-| Calls a tool or stops as a timed auditor (design, commit/push) or the design advisor | `PreToolUse`, `SubagentStop` | `.agents/hooks/audit-deadline.sh` | Past its deadline, every call but the record step gets "record your verdict now"; one record-less design-auditor or design-advisor stop is blocked (commit/push stops: `auditor-control.sh`). See [timed subagents](#timed-subagents). |
+| Starts, calls a tool, or stops as an auditor or design advisor | `SubagentStart`, `PreToolUse`, `SubagentStop` | `.agents/hooks/audit-deadline.sh` | Initializes native verdict timing; past deadline permits recording and owned-task cleanup. One record-less stop is blocked (commit/push stops: `auditor-control.sh`). See [timed subagents](#timed-subagents). |
 | Calls a tool as the design auditor or advisor | `PreToolUse` | `.agents/hooks/audit-privacy.sh` | Denies WebFetch URLs and network commands carrying `mailto`, `email=`, `"email"`, `/api-keys`, a `From:` header, an email address, or the local git email; WebSearch queries are checked for addresses only. A seatbelt for #327: shell expansion, encoding, `-d @file` and Codex's hosted WebSearch bypass it. |
 | Calls an editor, notebook editor, or patch tool | `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Blocks without a live, readable design doc bound to the worktree and branch, or without a `design-auditor` PASS for its exact content and `design-advisor` advice on that PASS, unless every target resolves outside every repository; shell commands are outside this gate. |
-| Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial naming the route to `commit-push-auditor`, or the command runs on a fresh PASS. Delegates to the Git gates when they are installed. |
+| Runs `git commit` or `git push` from the agent's shell | `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | A denial with an explicit next action, or the command runs on a fresh PASS; delegates to installed Git gates. |
 | Publishes GitHub text, or runs `gh pr create`, `gh pr edit` or `gh pr ready` | `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Blocks recognizable private context or requests shorter text. Above 400 added code lines, asks the user to bypass the guideline or split. Non-draft PR operations also require the human's typed `reviewed:` acknowledgment. |
 | Opens or answers a managed Claude question | `PreToolUse`, `PostToolUse` on `AskUserQuestion`, Claude only | `.agents/hooks/claude-timed-question.sh` | Validates the exact question and records a timely size choice or typed review answer. Idle expiry never authorizes; size choices cannot satisfy review acknowledgment. |
 | Completes a remote write | `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Context telling this session how to attach to the pr-watch stream. |
@@ -129,7 +129,7 @@ Designs are audited before code, not at commit or PR time
   - Reflect again: one more audit after a reflection.
   - Overrule: recorded as `OVERRIDDEN`, never PASS. The findings ride along as
     `overruled:` prior findings that are not re-raised.
-- Only the managed question's hook or a typed first prompt line
+- Only the managed question's hook, a correlated Codex reply, or a typed first prompt line
   `design-decision: <choice> <reason>` records a choice. Unanswered after five
   minutes, edits stay blocked.
 - The auditor works to `DESIGN_AUDITOR_TIMEOUT` (default 900 s). The
@@ -338,8 +338,8 @@ existing PR URLs and matching bases. This is workflow guidance, not a new hook b
 
 `.agents/lib/timed-user-prompt.sh` provides the reusable five-minute confirmation
 lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-supplied
-context and a random ID; retries preserve the deadline, late replies are rejected,
-and acceptance can be consumed once. Callers select `split`, `keep-draft`, or
+context and a random ID; retries preserve the deadline, and acceptance can be consumed
+once. Late replies are rejected except explicit human design replies below. Callers select `split`, `keep-draft`, or
 `keep-blocked` as the timeout fallback for `pr-size-exception:`, `reviewed:`, or
 `design-decision:` respectively. Git retry decisions use `reflect-again` for
 `commit-audit-decision:` and `push-audit-decision:`. The library
@@ -364,10 +364,27 @@ verbatim human text; it does not authenticate human identity.
 Design decisions accept the labels `Redesign`, `Reflect again`, and `Overrule`, or a
 typed `design-decision: <label> <reason>` line. `respond` rejects them. Only the
 managed question's hook (`native-reply`) or the prompt hook (`prompt-reply`, through
-`.agents/hooks/design-decision-prompt.sh`) records one. A typed line still counts after
-the deadline, which ends only the agent's wait. They cannot be renewed. The CLI exposes
+`.agents/hooks/design-decision-prompt.sh`) records one. Typed lines and correlated Codex
+question replies still count after the deadline, which ends only the agent's wait.
+They cannot be renewed. The CLI exposes
 only `request`, `status`, `question`, `respond`, `renew`, `consume`, and `fallback`, so
 it cannot record a native or prompt reply.
+
+Codex design questions use the exact generated `request_user_input_async` payload;
+the title includes the plugin request ID, and each option contains a complete directive.
+After internal wakes are filtered, the prompt hook accepts one
+`send_user_message_question_reply` item with string `questionItemId`, `question`, and
+`answer` fields. The question must match the generated title exactly; the opaque host
+item ID is not the plugin request ID or authentication. Malformed, mixed, unbound legacy,
+and superseded replies record nothing. Ordinary prompt cancellation still runs.
+
+The receiver checks repository, session, branch, and HEAD before the serialized
+`prompt-reply` transition checks request identity and pending/expired status.
+Edit re-entry also binds design content and audit history. The decision writer compares
+the accepted binding with its fresh provider read and audit state before mutation;
+changes reject without consuming the reply. An expiry fallback grants nothing.
+For example, a matching late **Reflect again** reply requests reflection and one more
+audit; it never grants PASS. These checks do not serialize independent design writers.
 
 Git retry choices accept **Reflect again (Recommended)** or **Stop** through the
 managed native question. Codex and plain-text answers use a standalone
@@ -580,12 +597,19 @@ Counts and citations locate proof; the independent auditor verifies it.
 
 ### Timed subagents
 
-One deadline contract serves every auditor ([design #328](https://github.com/boxlite-ai/agent-tooling/issues/328)):
-past its deadline, an auditor may only record its verdict, and one verdict-less stop is blocked.
+One deadline policy serves design, commit/push, and final-response auditors on every
+native/headless route ([design #371](https://github.com/boxlite-ai/agent-tooling/issues/371)).
+At the runtime deadline, confirmed blockers remain FAIL; otherwise PASS, even with
+zero completed checks. Each unfinished check is advisory. For example, an unread
+test receipt yields PASS plus an unchecked advisory; an observed failing assertion
+remains FAIL. No valid report, cancellation, crash, or hard kill remains an execution error.
+The shared owner is `.agents/prompts/audit/deadline-policy.md`; the advisor remains advice-only.
+Past deadline, stop investigating, record, and clean up owned tasks; one record-less stop is blocked.
 
 | Piece | Home | Used by |
 | --- | --- | --- |
 | `subagent_timed_timeout` | `.agents/lib/subagent.sh` | Design and commit/push gates, both headless runners |
+| `subagent_timed_stop_seconds` | `.agents/lib/subagent.sh` | Both headless runners; investigation budget plus `min(60, budget)` seconds for recording |
 | `subagent_timed_message`, `subagent_timed_stop` | `.agents/lib/subagent.sh` | `audit-deadline.sh`, `commit-push-stop.sh`, the verdict runner |
 | `subagent_timed_drive` | `.agents/lib/subagent.sh` | `run-verdict-audit.sh`, Claude route |
 | `subagent_identity_auditor` | `.agents/lib/subagent-identity.sh` | `audit-deadline.sh`, `audit-privacy.sh`, `auditor-control.sh` |
@@ -594,7 +618,12 @@ past its deadline, an auditor may only record its verdict, and one verdict-less 
 | --- | --- | --- |
 | Design | `agent-tooling-design-audit-task.json` | `design-doc.sh verdict` |
 | Commit/push | The attempt link | A write naming its `dossier_path` |
-| Headless verdict, Claude | `VERDICT_AUDITOR_TIMEOUT` (default 180 s) | One record turn; stopped 60 s after the deadline |
+| Native verdict | Immutable attempt input, initialized from the live request | Bound dossier write/validation and owned-task cleanup |
+| Headless verdict, all routes | `VERDICT_AUDITOR_TIMEOUT` (default 180 s) | Bounded record window; default stop at 240 s |
+
+Design/Git investigation defaults remain 900 s. Headless budgets must leave room for
+the entire record window within the 3540 s runner ceiling; oversized totals fail before launch.
+Repeated preflight or native startup preserves a matching attempt's original deadline.
 
 - The hook sees every tool a timed auditor's spec lists; `.agents/hooks/design/audit-deadline.test.sh`
   fails when the matcher misses one. Codex-hosted web search bypasses hooks.
@@ -615,16 +644,24 @@ past its deadline, an auditor may only record its verdict, and one verdict-less 
      message runs next. It is never resent (a resend runs a duplicate turn), and a delivered
      message is never interrupted. Only delivery racing the interrupt can end the record
      turn; the stop then exits 1, as before #328.
-  5. 60 s after the deadline (at most 3540 s), its alarm fires and the runner stops the
+  5. After the record window (at most 3540 s total), its alarm fires and the runner stops the
      process group. By default: record at 180 s, interrupt at 210 s if undelivered,
      stop at 240 s. A delayed record turn has about 30 s after interruption;
      incomplete output fails closed. The lease and completion monitor cover the stop.
-     Timers start at model launch; startup and cleanup add elapsed time. This shorter
-     grace may reject turns that previously needed about 120 s to record (#328).
+     The investigation deadline is captured during preparation; the hard-stop timer
+     starts at model launch. Startup and cleanup add elapsed time.
 - Design #328 links the Claude Code 2.1.316 probes behind steps 2–4. Native Win32 Perl
   selects only on sockets, so there the task runs without a record turn.
-- The headless Codex runners and `VERDICT_AUDITOR_CMD` stop at the deadline; Codex takes no
-  input after it starts.
+- Headless Codex and `VERDICT_AUDITOR_CMD` receive the absolute investigation deadline
+  and policy at launch; they also get the bounded record window. Codex takes no later input.
+- Native verdict initialization runs synchronously at `SubagentStart`, with an idempotent
+  `PreToolUse` fallback requiring matching host/task or active-control ownership.
+  `.agents/lib/verdict-audit-task.sh` validates the live request,
+  requested generation, origin epoch, and Git binding. It stores host agent identity
+  separately, prepares/reuses immutable history, and links the requested dossier.
+  Missing/revoked requests grant no deadline authority. Native stop records or closes ERROR;
+  a parent-consumed outcome survives task cleanup and identical replay. Delayed old-host
+  tool/stop events cannot take over or close a replacement task; cleanup compares its record.
 
 ### Commit/push attempts
 
@@ -632,20 +669,45 @@ Native commit/push auditors no longer prepare or record history, and their promp
 timer: no Monitor event reached a Claude subagent in about 80 audits, and auditors cited
 a timeout that never fired ([#240](https://github.com/boxlite-ai/agent-tooling/issues/240)).
 
-- **Prepare.** On each deny, `preflight-commit-push.sh` prepares the attempt for the
+- **Prepare.** On an `audit` action, `preflight-commit-push.sh` prepares the attempt for the
   current binding, cancels an open attempt with another binding, and passes `attempt_id`
   and `history_path` to the auditor. It writes
   `auditor-control/audit-task.<scope>.commit-push-auditor.json` with the context, dossier
-  path, and a deadline of `COMMIT_PUSH_AUDITOR_TIMEOUT` seconds.
+  path, a deadline of `COMMIT_PUSH_AUDITOR_TIMEOUT` seconds, and an empty `host_agent_id`.
+  `SubagentStart` binds that field to the worker generation under the control lock.
 - **Close.** On `SubagentStop` in Claude Code or Codex, `.agents/lib/commit-push-stop.sh` records a
-  dossier bound to the attempt. It blocks once when the dossier is missing, before or after
+  dossier bound to the attempt only when the worker matches the task link; old Stop replays cannot close a replacement.
+  It blocks once when the dossier is missing, before or after
   the deadline, or has a `high: unchecked:` finding (legacy `unchecked:` also accepted) while time remains; otherwise it records the
   dossier or `ERROR`. A check failure allows the stop, since the Git gate still holds.
 - **Deadline.** Past it, the [timed-subagent](#timed-subagents) rule answers every tool call
   except a write naming the attempt's `dossier_path` (#328).
 - **Hosts.** Claude Code 2.1.296 and Codex CLI 0.162.1 both resumed a blocked subagent and
   then set `stop_hook_active`. The headless runner cancels the preflight's open attempt,
-  then prepares and records its own.
+  then prepares and records its own, after checking for unfinished same-scope workers.
+
+Every denied Git operation names `Next action`, owner, next step, and completion condition
+inside `permissionDecisionReason`; host JSON and exit behavior stay unchanged.
+
+| Action | Parent behavior |
+| --- | --- |
+| `audit` | Launch the supplied bound review and retry Git after its result; matching FAIL needs no cosmetic change or newer receipt. |
+| `recover` | Repair the named prerequisite and rerun its verification; an unscoped FAIL must return through a real session-bound host route. |
+| `reflect` | Execute a discriminating check, submit reflection through the existing history validator, and retry automatically. |
+| `wait` | Finish the existing worker/choice or repair unverifiable state; preserve history, task links, and timers. |
+| `stop` | End the retry chain on user Stop or budget exhaustion; do not prepare, launch, or reset history. |
+
+`audit-reflection.sh next-action` returns structured checkpoint outcomes under the history lock;
+legacy `checkpoint` callers retain stderr and exit 2 on a blocked decision.
+The control owner's `inspect-scope` distinguishes prepared tasks from active, pending-stop,
+and unresolved worker state without treating the active slot as attempt ownership.
+Preflight checks exclusion before replacing requests and before returning launch instructions;
+the headless producer checks before cancellation and preparation.
+Native launch instructions require a cooperative parent; they do not enforce admission for arbitrary independent Agent calls.
+
+One local reread/reselection is allowed per preflight invocation; persistent conflicts name the required intervention.
+A consumed PASS is never restored, and a changed live candidate requires a new invocation.
+Receipts remain audit evidence; their timestamps no longer decide whether a failed candidate may be reviewed again.
 
 The procedure is embedded literally into each task. Agent specs reference the supplied
 procedure instead of duplicating it; prompt tests verify delivery, not live model compliance.
@@ -670,15 +732,15 @@ The shared criteria make findings checkable before they block
 The shared criteria define a contract, investigation, and decision for both routes
 ([design #357](https://github.com/boxlite-ai/agent-tooling/issues/357)).
 Native and headless task wrappers separate instructions from operation inputs.
-The shared criteria start at Contract, with labeled rule, priority, skill, design,
-policy, and trust bullets; neither route adds a TL;DR section.
+The shared criteria start at Contract with rules, skills, design, policy, and trust
+bullets; the rules include precedence. Neither route adds a TL;DR section.
 
 Both routes load `google-code-review` through the shared criteria's canonical skill
 path. Its entrypoint loads the copied Google reviewer guide by topic and preserves
 repository style, permissions, deadlines, required evidence, coverage, and verdict
 contracts over Google's human-review process conventions. The skill records its
 pinned source revision, link-only source changes, attribution, and CC BY 3.0 license.
-Version 0.1.47 packages this guidance; existing installations need the updated
+Version 0.1.48 packages this guidance; existing installations need the updated
 package and a plugin reload or new session to use it.
 
 Rules govern every stage. Establish intended behavior, investigate the highest-risk
@@ -696,8 +758,8 @@ A blocker does not end the remaining applicable review. Before deciding, reconci
 every applicable requirement, changed path, and required check; record gaps.
 
 Decisions follow the design auditor: critical/high entries are findings; low/nit
-entries are advisories. Mandatory rule violations remain high/critical, and missing
-required proof is `high: unchecked`; preferences stay advisory.
+entries are advisories. Confirmed mandatory rule violations remain high/critical;
+missing proof is `high: unchecked` before deadline and advisory at runtime expiry.
 
 Each entry uses `<severity>: <check>: <gap>. Evidence: <anchor>. Pass if: <condition>`,
 on one line within 1,024 bytes. Recheck evidence, drop unsupported claims, and record
@@ -845,8 +907,18 @@ delivery, within their deadline. Read-only hosts pipe JSON and return that same
 candidate. Success reports `scope:history` for captured-input checks or `scope:shape`
 without history. Neither replaces the parent's live binding, freshness, lease,
 publication, or final history checks. Design auditors retain their validating recorder.
-Headless Git prompts preview eight changed paths to keep validation instructions
+Headless Git prompts preview four changed paths to keep validation and deadline instructions
 within the existing 6 KiB budget; the complete sanitized diff remains available on demand.
+
+The runtime captures optional `attempt.input.deadline`. The shared record builder derives
+`outcome.deadline_review = {deadline, recorded_at}` only at/after that timestamp;
+auditor-supplied markers are rejected. Validator and recorder use the same transition.
+Qualified PASS may retain unread coverage and `reflection_review.assessment: unchecked`,
+with advisories; partition checks, unresolved findings, and confirmed insufficient reflection
+still block. Known unverified verdict claims retain `proof.status: blocked` and a reason.
+Legacy attempts without a runtime deadline retain strict completeness. Recording persists
+qualification before cleanup and reuses the first marker on replay; old FAILs are never rewritten.
+Design recording similarly captures metadata from the matching content/task predecessor.
 
 Cycles bind a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`; cap at eight failures,
 sixteen attempts, and 10 MiB. PASS closes a cycle; the next operation starts another.
@@ -1108,7 +1180,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A parked dossier supplies prior evidence to a fresh audit; it cannot approve a new turn. `.agents/hooks/audit/preflight-verdict-check.sh`
 - A reply that leads with a valid TL;DR is never asked to shorten; the Stop gate's only writing check is that TL;DR. `.agents/hooks/stop-gate.sh:4`
 - No editor or patch edit lands in a repository before a design-audit PASS with its advice, or the human's overrule, for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
-- A design decision is recorded only by the managed question's hook or the human's typed first prompt line; agent-relayed text never counts. `.agents/hooks/design-decision-prompt.sh:2`
+- A design decision is recorded only by the managed question's hook, a correlated Codex reply, or the human's typed first prompt line; agent-relayed text never counts. `.agents/hooks/design-decision-prompt.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
 - A Git retry timeout permits reflection and another audit, never PASS; a validated standalone choice preserves its failed cycle. `.agents/lib/git-audit-decision.sh`

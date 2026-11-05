@@ -120,6 +120,13 @@ run() {
     decision=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null || echo "parse_error")
   fi
   if [[ "$decision" == "$expect" ]]; then
+    if [[ "$expect" == deny ]] && ! jq -e '
+        .hookSpecificOutput.permissionDecisionReason |
+        test("^Next action: (audit|recover|reflect|wait|stop)\\n") and
+        contains("Owner:") and contains("Next step:") and contains("Resume when:")' <<<"$out" >/dev/null; then
+      fail=$((fail + 1)); printf '  FAIL  %s: denial lacks an explicit action contract\n' "$desc"
+      return
+    fi
     pass=$((pass + 1))
     printf '  PASS  %s\n' "$desc"
   else
@@ -258,27 +265,60 @@ else
     "$concurrent_audit_allows" "$concurrent_audit_denies" "$concurrent_audit_wait_status"
 fi
 
+# Replace the selected inode while the real gate is paused before consumption.
+# The replacement is another producer's valid dossier for the same candidate.
+write_audit "PASS" '[]' commit
+mkdir "$TMP/reselect-bin"
+mkfifo "$TMP/reselect-ready" "$TMP/reselect-resume"
+cat > "$TMP/reselect-bin/date" <<'DATE'
+#!/usr/bin/env bash
+selected=false
+for path in "$TEST_AUDIT".inspect-*; do
+  [[ ! -f "$path" ]] || selected=true
+done
+if [[ "$selected" == true ]] && mkdir "$TEST_ONCE" 2>/dev/null; then
+  printf 'selected\n' > "$TEST_READY"
+  read -r release < "$TEST_RESUME"
+fi
+exec "$TEST_REAL_DATE" "$@"
+DATE
+chmod +x "$TMP/reselect-bin/date"
+(printf '%s' "$GC -m foo" | jq -Rs '{tool_input:{command:.}}' \
+  | (cd "$REPO_ROOT" && PATH="$TMP/reselect-bin:$PATH" \
+    TEST_ONCE="$TMP/reselect-once" TEST_READY="$TMP/reselect-ready" TEST_AUDIT="$TMP/.agents/state/last-audit.json" \
+    TEST_RESUME="$TMP/reselect-resume" TEST_REAL_DATE="$CONCURRENT_AUDIT_REAL_DATE" \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='' "$HOOK") \
+    > "$TMP/reselect-out") &
+reselect_pid=$!
+read -r reselect_ready < "$TMP/reselect-ready"
+cp "$TMP/.agents/state/last-audit.json" "$TMP/replacement-audit"
+mv "$TMP/replacement-audit" "$TMP/.agents/state/last-audit.json"
+printf 'continue\n' > "$TMP/reselect-resume"
+reselect_status=0
+wait "$reselect_pid" || reselect_status=$?
+check_raw 'one selection race recovers and consumes the replacement exactly once' \
+  "$([[ "$reselect_ready" == selected && "$reselect_status" == 0 \
+    && ! -s "$TMP/reselect-out" && ! -e "$TMP/.agents/state/last-audit.json" ]] && echo recovered || echo blocked)" recovered
+
 write_audit "FAIL" '["Test: missing"]' "commit"
 run "FAIL verdict → deny"               "$GC -m foo"                  "deny"
 
-# A test run recorded after a FAIL is evidence that audit never saw: the gate hands out
-# a fresh audit task instead of repeating the old findings.
+# Receipts remain evidence, but cannot give an unscoped caller an unlimited retry path.
 write_audit "FAIL" '["test: no run observed"]' "commit"
 perl -e 'utime($ARGV[0], $ARGV[0], $ARGV[1]) or exit 1' "$(( $(date +%s) - 120 ))" \
   "$TMP/.agents/state/last-audit.json"
 mkdir -p "$TMP/.agents/state/test-runs"
 printf '{}\n' > "$TMP/.agents/state/test-runs/$(date +%s)-1-1.json"
 reaudit_reason="$(hook_raw "$GC -m foo" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')"
-check_raw "a test run after a FAIL earns a fresh audit task" \
-  "$([[ "$reaudit_reason" == "Tests ran after this audit; re-audit is required."* \
-        && "$reaudit_reason" == *"commit-push-auditor"* ]] && echo fresh || echo "$reaudit_reason")" \
-  fresh
+check_raw "a legacy FAIL with newer receipts requires a bound lifecycle" \
+  "$([[ "$reaudit_reason" == 'Next action: recover'* && "$reaudit_reason" == *'session-bound retry lifecycle'* ]] \
+    && echo recover || echo "$reaudit_reason")" recover
 rm -f "$TMP/.agents/state/test-runs/"*.json
 rmdir "$TMP/.agents/state/test-runs"
 stale_reason="$(hook_raw "$GC -m foo" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')"
-check_raw "without a newer test run the FAIL stands" \
-  "$([[ "$stale_reason" == "CLAUDE.md audit FAILED"* ]] && echo failed || echo "$stale_reason")" \
-  failed
+check_raw "a legacy FAIL without newer receipts requires the same bound lifecycle" \
+  "$([[ "$stale_reason" == 'Next action: recover'* && "$stale_reason" == *'session-bound retry lifecycle'* ]] \
+    && echo recover || echo "$stale_reason")" recover
 
 for matrix_case in valid pass-findings fail-empty no-advisories null-history wrong-kind; do
   write_audit "PASS" "[]" "commit"

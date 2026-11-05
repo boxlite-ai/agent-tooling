@@ -292,6 +292,13 @@ Only critical and high gaps FAIL. After repeated FAILs, the gate asks for a refl
 prompt's first line `design-decision: <Redesign|Reflect again|Overrule> <reason>`
 ([design #309](https://github.com/boxlite-ai/agent-tooling/issues/309)).
 
+On Codex, use the gate's exact asynchronous question payload, including the request ID
+in its title. Select an option or enter the directive above as free text.
+A matching reply remains valid after the five-minute wait; silence leaves edits blocked.
+Changed design content or history needs a new question. Older cards without request
+correlation cannot authorize the current request; use a fresh question or a plain-text directive.
+Reload the host plugin after adopting this change; already displayed cards are not rewritten.
+
 GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
 `LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.
 Re-register after changing branches.

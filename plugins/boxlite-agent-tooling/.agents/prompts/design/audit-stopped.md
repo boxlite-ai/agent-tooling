@@ -13,6 +13,6 @@ Only the human chooses:
 - Overrule: OVERRIDDEN BY USER, never PASS.
 
 Never answer for them or relay their words.
-On Claude Code, use the managed question; otherwise ask them to reply with the first line `design-decision: <Redesign|Reflect again|Overrule> <reason>`.
+Use the supplied managed question on Claude Code or Codex; otherwise request the first line `design-decision: <Redesign|Reflect again|Overrule> <reason>`.
 
 {{instruction}}

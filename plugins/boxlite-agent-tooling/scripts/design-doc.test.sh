@@ -101,6 +101,28 @@ record 'a FAIL with findings is recorded' 0 "$(verdict "$reviewed" FAIL '["resea
 record 'a PASS for the reviewed content is recorded' 0 "$(verdict "$reviewed" PASS '[]')"
 expect 'recording leaves the binding intact' 0 check
 
+# Runtime task state, not auditor input, supplies deadline provenance.
+deadline="$(env DESIGN_AUDITOR_TIMEOUT=1 bash -c '
+  for lib in verdict-audit-state subagent design-doc; do source "$1/.agents/lib/$lib.sh"; done
+  design_doc_audit_task "$PWD" "$2" "$3"' task "$plugin" "$url" "$reviewed")"
+perl -e 'my $wait=$ARGV[0]-time+1; sleep $wait if $wait>0' "$deadline"
+partial="$(verdict "$reviewed" PASS '[]' | jq '.advisories=["low: unchecked at deadline: citation chase; finish remaining sources"]')"
+record 'deadline PASS records unfinished work as advisory' 0 "$partial"
+deadline_state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
+if jq -e --argjson deadline "$deadline" '.deadline_review.deadline == $deadline and
+    .deadline_review.recorded_at >= $deadline and .verdict == "PASS" and (.advisories | length) == 1' \
+    "$deadline_state" >/dev/null; then
+  printf 'PASS design deadline provenance persisted\n'; pass=$((pass+1))
+else
+  printf 'FAIL design deadline provenance missing\n'; fail=$((fail+1))
+fi
+original_deadline_record="$(cat "$deadline_state")"
+rm "${deadline_state%/*}/agent-tooling-design-audit-task.json"
+record 'deadline PASS replay survives task cleanup' 0 "$partial"
+[[ "$(cat "$deadline_state")" == "$original_deadline_record" ]] || fail=$((fail+1))
+record 'an auditor cannot supply its own deadline marker' 1 \
+  "$(jq '.deadline_review={deadline:1,recorded_at:2}' <<<"$partial")"
+
 # The research loop (design #309): severity, carried findings, the FAIL cap, and the
 # human's choice. Each revision is new design content.
 research_state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
@@ -129,7 +151,19 @@ request_has() { # description, jq condition on the edit gate's request
   jq -e "$2" <<<"$request" >/dev/null 2>&1 || status="unmatched $status: $request"
   outcome "$1" 3 "$status"
 }
-decide() { local status=0; gate decide "$3" >/dev/null 2>"$scratch/err" || status=$?; outcome "$1" "$2" "$status"; }
+decide() {
+  local status=0 history decision
+  # Bind the choice to production state, including after a cycle has ended.
+  if ! history="$(bash -c 'source "$1/.agents/lib/design-doc.sh" || exit 2
+      _design_doc_history_hash "$(cat "$2")"' history "$plugin" "$research_state")" \
+    || ! decision="$(jq -c --arg choice "$3" --arg head "$(git rev-parse HEAD)" --arg history "$history" \
+    '{choice:$choice, binding:{root,branch,url,content_sha256,head:$head,history_hash:$history}}' \
+    "$research_state")"; then
+    outcome "$1: binding setup" 0 2; return 1
+  fi
+  gate decide "$decision" >/dev/null 2>"$scratch/err" || status=$?
+  outcome "$1" "$2" "$status"
+}
 reflect() { local status=0; bash "$cli" reflect <<<"$3" >/dev/null 2>"$scratch/err" || status=$?; outcome "$1" "$2" "$status"; }
 advise() { local status=0; bash "$cli" advice <<<"$3" >/dev/null 2>"$scratch/err" || status=$?; outcome "$1" "$2" "$status"; }
 no_advice() { jq -nc --arg sha "$1" '{content_sha256:$sha, advice:[]}'; }
@@ -164,6 +198,8 @@ record 'FAIL 3 records' 0 "$(review "$c" "$(high 'Transfer: unsupported')")"
 request_has 'FAIL 3 stops for the human' '.blocked and .stop == "cap" and .fails == 3'
 record 'a stopped loop refuses another verdict' 1 "$(review "$c" '[]')"
 decide 'a choice the gate does not know is refused' 1 'Approve'
+status=0; grep -q 'unknown research decision' "$scratch/err" || status=1
+outcome 'an unknown choice reaches the decision check' 0 "$status"
 decide 'Reflect again reopens one audit' 0 'Reflect again'
 request_has 'Reflect again waits for a reflection' '.reflection_due and (.blocked | not)'
 request="$(gate edit 2>/dev/null)" || true
@@ -176,6 +212,8 @@ outcome 'an overrule allows edits for this content' 0 "$status"
 status=0; [[ "$(jq -r .verdict "$research_state")" == OVERRIDDEN ]] || status=1
 outcome 'an overrule is recorded as OVERRIDDEN, never PASS' 0 "$status"
 decide 'no decision is pending after an overrule' 1 Overrule
+status=0; grep -q 'no research decision is pending' "$scratch/err" || status=1
+outcome 'the ended cycle reaches the pending-decision check' 0 "$status"
 d="$(revise d)"
 request_has 'overruled findings ride along, marked' \
   '.prior_findings == ["overruled: high: research: Transfer: unsupported"] and .fails == 0'

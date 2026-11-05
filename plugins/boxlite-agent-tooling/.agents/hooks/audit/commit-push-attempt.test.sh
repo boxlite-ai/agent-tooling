@@ -57,9 +57,26 @@ preflight() {
         GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='' bash "$HOOK")
 }
 
+start_prepared_task() { # generation; model the native Start before its Stop delivery
+  local status=0
+  [[ -e "$LINK" ]] || return 0
+  [[ "$(jq -r '.host_agent_id // ""' "$LINK")" == "" ]] || return 0
+  jq -nc --arg session "$SESSION" --arg generation "$1" \
+    '{hook_event_name:"SubagentStart",session_id:$session,agent_id:$generation,
+      agent_type:"boxlite-agent-tooling:commit-push-auditor"}' \
+    | (cd "$R" && AUDITOR_PROMPT_AFTER_SECONDS=0 CLAUDE_PROJECT_DIR="$R" bash "$CONTROL") \
+      >/dev/null 2>&1 || status=$?
+  (( status == 0 || status == 2 )) || return 1
+  jq -e --arg generation "$1" '.generation==$generation and .state=="running"' \
+    "$R/.agents/state/auditor-control/active.$SCOPE.commit-push-auditor.json" >/dev/null
+}
+
 stop() {  # stop_hook_active
-  jq -nc --arg session "$SESSION" --argjson resumed "$1" \
-    '{hook_event_name:"SubagentStop",session_id:$session,agent_id:"auditor-1",
+  local generation
+  generation="auditor-$(jq -r .attempt_id "$LINK" 2>/dev/null || printf closed)"
+  start_prepared_task "$generation" || return 1
+  jq -nc --arg session "$SESSION" --argjson resumed "$1" --arg generation "$generation" \
+    '{hook_event_name:"SubagentStop",session_id:$session,agent_id:$generation,
       agent_type:"boxlite-agent-tooling:commit-push-auditor",stop_hook_active:$resumed,
       last_assistant_message:"FAIL"}' \
     | (cd "$R" && env -u PLUGIN_ROOT CLAUDE_PLUGIN_ROOT="$REPO_ROOT" CLAUDE_PROJECT_DIR="$R" \
@@ -69,13 +86,16 @@ stop() {  # stop_hook_active
 # Codex names its native subagent "default" and identifies it through the subagent
 # transcript's spawn metadata.
 codex_stop() {  # stop_hook_active
+  local generation
+  generation="codex-auditor-$(jq -r .attempt_id "$LINK" 2>/dev/null || printf closed)"
+  start_prepared_task "$generation" || return 1
   local transcript="$R/.agents/state/codex-auditor.jsonl"
-  jq -nc --arg parent "$SESSION" \
-    '{type:"session_meta",payload:{id:"codex-auditor-1",session_id:$parent,thread_source:"subagent",
+  jq -nc --arg parent "$SESSION" --arg generation "$generation" \
+    '{type:"session_meta",payload:{id:$generation,session_id:$parent,thread_source:"subagent",
       source:{subagent:{thread_spawn:{parent_thread_id:$parent,depth:1,
         agent_path:"/root/commit_push_auditor",agent_nickname:"test",agent_role:null}}}}}' > "$transcript"
-  jq -nc --arg session "$SESSION" --argjson resumed "$1" --arg transcript "$transcript" \
-    '{hook_event_name:"SubagentStop",session_id:$session,agent_id:"codex-auditor-1",
+  jq -nc --arg session "$SESSION" --argjson resumed "$1" --arg transcript "$transcript" --arg generation "$generation" \
+    '{hook_event_name:"SubagentStop",session_id:$session,agent_id:$generation,
       agent_type:"default",agent_transcript_path:$transcript,stop_hook_active:$resumed,
       last_assistant_message:"FAIL"}' \
     | (cd "$R" && env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$REPO_ROOT" CLAUDE_PROJECT_DIR="$R" \
@@ -255,7 +275,32 @@ for host in claude codex; do
   stage_change
   cp "$R/.agents/state/retry-pass-$host.json" "$R/.agents/state/last-audit.json"
   check_eq "$host changed staged diff rejects the old PASS" \
-    "$(preflight | jq -r '.hookSpecificOutput.permissionDecisionReason | startswith("Existing audit does not match current state:")')" "true"
+    "$(preflight | jq -r '.hookSpecificOutput.permissionDecisionReason | startswith("Next action: audit") and contains("Existing audit does not match current state:")')" "true"
+done
+
+for host in claude codex; do
+  use_session "deadline-pass-$host"
+  stage_change
+  COMMIT_PUSH_AUDITOR_TIMEOUT=1 preflight >/dev/null || exit 1
+  deadline="$(jq -r .deadline "$LINK")"
+  COMMIT_PUSH_AUDITOR_TIMEOUT=900 preflight >/dev/null || exit 1
+  check_eq "$host repeated preflight preserves deadline" "$(jq -r .deadline "$LINK")" "$deadline"
+  perl -e 'my $wait=$ARGV[0]-time+1; sleep $wait if $wait>0' "$deadline"
+  write_dossier PASS '[]'
+  dossier="$R/.agents/state/last-audit.json"
+  jq '.advisories=["low: unchecked at deadline: test execution; verify remaining receipts"] |
+    .history_review.coverage |= {reviewed:[],unread:.reviewed}' "$dossier" >"$dossier.tmp"
+  mv "$dossier.tmp" "$dossier"
+  stop_as_host "$host" false >/dev/null
+  check_eq "$host deadline PASS retains unread evidence and provenance" \
+    "$(inspect_history | jq -r --argjson deadline "$deadline" '.state.attempts[-1].outcome |
+      .verdict == "PASS" and .deadline_review.deadline == $deadline and
+      (.history_review.coverage.unread | length) > 0')" true
+  accepted="$(preflight)"
+  check_eq "$host deadline PASS reaches the Git gate" \
+    "$(jq -r '.hookSpecificOutput.permissionDecision // "allow"' <<<"$accepted")" allow
+  check_eq "$host deadline advisory remains visible" \
+    "$([[ "$accepted" == *'unchecked at deadline'* ]] && echo yes || echo no)" yes
 done
 
 echo
