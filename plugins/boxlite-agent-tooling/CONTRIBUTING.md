@@ -18,6 +18,7 @@ Follow these shared sources; this guide adds contributor commands and examples:
 | GitHub design issue starter | [Design issue template](../../.github/ISSUE_TEMPLATE/design.md) |
 | PR size, splitting, stacks, documentation, disclosure, and verification | [Shared workflow](guidance/workflow.md#workflow) |
 | General coding decisions and test quality | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) |
+| Google review guidance and its local application | [google-code-review](.agents/skills/google-code-review/SKILL.md) |
 | Human-facing writing rules | [boxlite-writing](.agents/skills/boxlite-writing/SKILL.md), referenced by name in workflow and PR guidance |
 | PR preparation and examples | [boxlite-pr-preparation](.agents/skills/boxlite-pr-preparation/SKILL.md) |
 | PR output outline | [PR template](../../.github/PULL_REQUEST_TEMPLATE.md) |

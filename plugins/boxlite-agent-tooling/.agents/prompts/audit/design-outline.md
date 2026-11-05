@@ -14,6 +14,6 @@ Check every row of the skill’s outline; record gaps as Entries.
 | TL;DR | One sentence: problem → outcome |
 | Problem | Current behavior or need, concrete evidence, impact |
 | Scope | Constraints, non-goals, testable acceptance |
-| Related work and lessons | Alternatives include reuse, simplify and no change; a recommendation |
+| Related work and lessons | Alternatives include reuse, simplify and no change; comparison and recommendation follow boxlite-design-doc's option-selection principles |
 | How it works | Mechanism → outcome; trade-offs; the simplest approach that meets acceptance |
 | Validation | Each claim or risk has a check and an expected result; observed apart from planned |

@@ -673,6 +673,14 @@ Native and headless task wrappers separate instructions from operation inputs.
 The shared criteria start at Contract, with labeled rule, priority, skill, design,
 policy, and trust bullets; neither route adds a TL;DR section.
 
+Both routes load `google-code-review` through the shared criteria's canonical skill
+path. Its entrypoint loads the copied Google reviewer guide by topic and preserves
+repository style, permissions, deadlines, required evidence, coverage, and verdict
+contracts over Google's human-review process conventions. The skill records its
+pinned source revision, link-only source changes, attribution, and CC BY 3.0 license.
+Version 0.1.47 packages this guidance; existing installations need the updated
+package and a plugin reload or new session to use it.
+
 Rules govern every stage. Establish intended behavior, investigate the highest-risk
 changes first, and verify issues as found using source or targeted checks.
 The review concerns below guide coverage in any order.
@@ -1194,7 +1202,7 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         boxlite-design-doc, boxlite-clean-code, boxlite-pr-preparation, shell-engineering, boxlite-visualize, boxlite-examples, boxlite-distill, adversarial-iteration, boxlite-writing
+.agents/skills/         boxlite-design-doc, boxlite-clean-code, google-code-review, boxlite-pr-preparation, shell-engineering, boxlite-visualize, boxlite-examples, boxlite-distill, adversarial-iteration, boxlite-writing
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
@@ -1255,10 +1263,13 @@ they are not loaded by ordinary skill use. Existing skill discovery exposes the
 whole directory; Codex UI metadata uses the same skill name. No runtime or hook is
 added. Original source is preserved unless modification was requested.
 
-`boxlite-design-doc` owns research requirements and the design outline; the design audit
+`boxlite-design-doc` owns research requirements, option-selection principles, and the design outline; the design audit
 rules live in `design-criteria.md`, `design-outline.md` and the `design-auditor` spec, the
 advice rules in `design-advice-task.md` and the `design-advisor` spec, and the audit loop in code.
 Its five numbered steps run in work order: Frame, Search protocol and Analyze under Research, the auditor's standard; Write and Gate under Design.
+The issue template and whole-design audit reference its option-selection principles
+when requesting or checking the comparison and recommendation. These remain agent
+guidance; no runtime score or LOC threshold selects an option.
 For complex sources, its Research section uses `boxlite-distill` in knowledge mode while retaining decision-relevant evidence and the design outline.
 Hosts discover it through their skill paths; consumers name the skill without
 copying its rules. The full Test section and reproduce-before-fix remain in workflow guidance.

@@ -145,6 +145,7 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 | --- | --- |
 | Research and write a design before coding | Use `boxlite-design-doc`. |
 | Implement, refactor, or review maintainability | [boxlite-clean-code](plugins/boxlite-agent-tooling/.agents/skills/boxlite-clean-code/SKILL.md) |
+| Review code with Google's engineering practices | [google-code-review](plugins/boxlite-agent-tooling/.agents/skills/google-code-review/SKILL.md) |
 | Write or shorten a reply, document, or PR description as structured output | [boxlite-writing](plugins/boxlite-agent-tooling/.agents/skills/boxlite-writing/SKILL.md) |
 | Explain a subsystem with a concrete example | “Use `boxlite-examples` to explain how this subsystem works.” |
 | Draw a diagram grounded in source | [boxlite-visualize](plugins/boxlite-agent-tooling/.agents/skills/boxlite-visualize/SKILL.md) |
@@ -177,6 +178,14 @@ Recovery honors the original deadline. Full pending storage stops polling until
 drained; host and OS settings still control desktop notifications.
 
 For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh) retries recorded transient failures within bounded budgets. It requires `claude`, `jq`, `curl`, the failure-recording hook, and a matching `CLAUDE_PROJECT_DIR`.
+
+### Google Code Review skill
+
+Use `google-code-review` for Google's reviewer standards, coverage, navigation,
+comments, pushback, and review timing. The skill includes the pinned source guide
+and adapts its application to repository requirements. Both commit/push auditor
+routes load it; required checks, coverage, and verdict rules still govern.
+Try: "Use google-code-review to review this diff."
 
 ### BoxLite Clean Code skill
 
@@ -321,4 +330,5 @@ The optional [GitHub author-review workflow](.github/workflows/author-review.yml
 
 ## License
 
-[Apache 2.0](LICENSE).
+[Apache 2.0](LICENSE), except the Google review guide and skill adaptation, which
+retain [CC BY 3.0](plugins/boxlite-agent-tooling/.agents/skills/google-code-review/LICENSE).

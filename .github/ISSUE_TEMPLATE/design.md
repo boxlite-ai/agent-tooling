@@ -21,7 +21,7 @@ before filling in this outline. Example: https://github.com/boxlite-ai/agent-too
 
 ## Related work and lessons
 
-<!-- Research evidence, search log, alternatives, and recommendation per boxlite-design-doc. -->
+<!-- Research evidence, search log, alternatives, and recommendation using boxlite-design-doc's option-selection principles; identify the deciding trade-off. -->
 
 ## How it works
 

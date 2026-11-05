@@ -50,10 +50,29 @@ Every design follows these steps:
 ### 3. Analyze
 
 1. Trace questions → sources → mechanisms and failures → constraint differences.
-2. Compare alternatives and counterevidence; never invent consensus.
+2. Compare alternatives using the option-selection principles below; include counterevidence; never invent consensus.
 3. Separate observations from inferences.
 4. Adopt, adapt, or reject with reasons; justify local fit and deviations.
 5. Resolve approach and correctness gaps before registering or coding; give each remaining unknown its impact and next check.
+
+#### Option-selection principles
+
+Set hard constraints and decision priorities before comparing options; apply `boxlite-clean-code` to implementation trade-offs.
+
+| Criterion | Principle |
+| --- | --- |
+| Correctness and safety | Reject options that violate required behavior, security, or compatibility; fewer lines cannot compensate. |
+| Industry practice | Among viable options, prefer established industry best practice supported by standards or mature implementations; justify departures with local evidence. |
+| Readability | Prefer explicit control flow, ownership, and familiar repository patterns; avoid clever compression and unnecessary indirection. |
+| Performance | Meet workload and resource requirements; support claimed advantages or equivalence with measurements or source evidence; mark estimates and unknowns. |
+| Simplicity and reuse | Prefer existing capabilities and fewer moving parts; new abstractions or dependencies must justify their cost against current requirements. |
+| Maintenance risk | Prefer options easier to test, diagnose, change, and roll back; consider migration and operational costs. |
+| Lines of code (LOC) | Among equally suitable options, prefer fewer maintained lines without harming correctness, readability, performance, or maintenance. |
+
+- Compare the whole solution, including helpers and configuration; never reduce LOC by hiding complexity, compressing formatting, or removing necessary checks or tests.
+- Use the same criteria for every viable option; record benefits, costs, evidence, and the deciding trade-off in the recommendation.
+- When criteria conflict, explain which task constraint takes priority; resolve decision-changing unknowns before choosing.
+- Do not equate popularity with consensus; when no industry best practice is established, state that uncertainty and compare the evidence.
 
 ## Design
 
@@ -66,7 +85,7 @@ Outline:
 | TL;DR | Problem → outcome |
 | Problem | Current behavior or unmet need, concrete evidence, and impact |
 | Scope | Constraints, non-goals, acceptance |
-| Related work and lessons | The research above; alternatives include reuse, simplify, and no change; recommendation |
+| Related work and lessons | Research above; alternatives include reuse, simplify, and no change; comparison and recommendation using the option-selection principles |
 | How it works | Approach or mechanism → outcome; trade-offs |
 | Validation | Claim or risk → check → expected result; observed versus planned |
 
