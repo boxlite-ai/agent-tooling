@@ -129,7 +129,7 @@ Designs are audited before code, not at commit or PR time
   - Reflect again: one more audit after a reflection.
   - Overrule: recorded as `OVERRIDDEN`, never PASS. The findings ride along as
     `overruled:` prior findings that are not re-raised.
-- Only the managed question's hook or a typed first prompt line
+- Only the managed question's hook, a correlated Codex reply, or a typed first prompt line
   `design-decision: <choice> <reason>` records a choice. Unanswered after five
   minutes, edits stay blocked.
 - The auditor works to `DESIGN_AUDITOR_TIMEOUT` (default 900 s). The
@@ -338,8 +338,8 @@ existing PR URLs and matching bases. This is workflow guidance, not a new hook b
 
 `.agents/lib/timed-user-prompt.sh` provides the reusable five-minute confirmation
 lifecycle through `scripts/timed-user-prompt.sh`. Requests bind to caller-supplied
-context and a random ID; retries preserve the deadline, late replies are rejected,
-and acceptance can be consumed once. Callers select `split`, `keep-draft`, or
+context and a random ID; retries preserve the deadline, and acceptance can be consumed
+once. Late replies are rejected except explicit human design replies below. Callers select `split`, `keep-draft`, or
 `keep-blocked` as the timeout fallback for `pr-size-exception:`, `reviewed:`, or
 `design-decision:` respectively. Git retry decisions use `reflect-again` for
 `commit-audit-decision:` and `push-audit-decision:`. The library
@@ -364,10 +364,27 @@ verbatim human text; it does not authenticate human identity.
 Design decisions accept the labels `Redesign`, `Reflect again`, and `Overrule`, or a
 typed `design-decision: <label> <reason>` line. `respond` rejects them. Only the
 managed question's hook (`native-reply`) or the prompt hook (`prompt-reply`, through
-`.agents/hooks/design-decision-prompt.sh`) records one. A typed line still counts after
-the deadline, which ends only the agent's wait. They cannot be renewed. The CLI exposes
+`.agents/hooks/design-decision-prompt.sh`) records one. Typed lines and correlated Codex
+question replies still count after the deadline, which ends only the agent's wait.
+They cannot be renewed. The CLI exposes
 only `request`, `status`, `question`, `respond`, `renew`, `consume`, and `fallback`, so
 it cannot record a native or prompt reply.
+
+Codex design questions use the exact generated `request_user_input_async` payload;
+the title includes the plugin request ID, and each option contains a complete directive.
+After internal wakes are filtered, the prompt hook accepts one
+`send_user_message_question_reply` item with string `questionItemId`, `question`, and
+`answer` fields. The question must match the generated title exactly; the opaque host
+item ID is not the plugin request ID or authentication. Malformed, mixed, unbound legacy,
+and superseded replies record nothing. Ordinary prompt cancellation still runs.
+
+The receiver checks repository, session, branch, and HEAD before the serialized
+`prompt-reply` transition checks request identity and pending/expired status.
+Edit re-entry also binds design content and audit history. The decision writer compares
+the accepted binding with its fresh provider read and audit state before mutation;
+changes reject without consuming the reply. An expiry fallback grants nothing.
+For example, a matching late **Reflect again** reply requests reflection and one more
+audit; it never grants PASS. These checks do not serialize independent design writers.
 
 Git retry choices accept **Reflect again (Recommended)** or **Stop** through the
 managed native question. Codex and plain-text answers use a standalone
@@ -1100,7 +1117,7 @@ Often stated as an absence. Each names the line that states or enforces it.
 - A parked dossier supplies prior evidence to a fresh audit; it cannot approve a new turn. `.agents/hooks/audit/preflight-verdict-check.sh`
 - A reply that leads with a valid TL;DR is never asked to shorten; the Stop gate's only writing check is that TL;DR. `.agents/hooks/stop-gate.sh:4`
 - No editor or patch edit lands in a repository before a design-audit PASS with its advice, or the human's overrule, for the bound design's live content. `.agents/hooks/preflight-design-doc.sh:2`
-- A design decision is recorded only by the managed question's hook or the human's typed first prompt line; agent-relayed text never counts. `.agents/hooks/design-decision-prompt.sh:2`
+- A design decision is recorded only by the managed question's hook, a correlated Codex reply, or the human's typed first prompt line; agent-relayed text never counts. `.agents/hooks/design-decision-prompt.sh:2`
 - The prompt hook never signals a PID chosen from workspace state. `.agents/hooks/cancel-verdict-audit.sh:13`
 - A hook emits text; only the agent spawns a subagent. `.agents/lib/subagent.sh:8`
 - A Git retry timeout permits reflection and another audit, never PASS; a validated standalone choice preserves its failed cycle. `.agents/lib/git-audit-decision.sh`

@@ -340,7 +340,7 @@ _design_doc_context() { # repo root -> branch identity
 
 # edit also requires an audit PASS, with its advice, for the live content; its exit 3 prints
 # the gate's request instead of the URL. decide applies a human choice that a hook already
-# accepted; advise stores advice beside the verdict.
+# accepted, carrying its binding through the fresh provider read; advise stores advice.
 design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working directory, URL, verdict, reflection, choice or advice -> verified URL
   local operation="$1" root branch git_dir state_path audit_path snapshot url record digest
   root="$(git -C "$2" rev-parse --show-toplevel)" || return 1
@@ -375,8 +375,17 @@ design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working 
         verdict) _design_doc_audit_write "$audit_path" "$root" "$branch" "$url" "$digest" "$3" || return 1 ;;
         reflect) _design_doc_audit_update "$audit_path" "$root" "$branch" "$url" "$digest" \
           'da_reflect($argument | fromjson; $history)' "$3" || return 1 ;;
-        decide) _design_doc_audit_update "$audit_path" "$root" "$branch" "$url" "$digest" \
-          'da_decide($argument; $url; $digest)' "$3" || return 1 ;;
+        decide)
+          jq -e --arg root "$root" --arg branch "$(git -C "$root" branch --show-current)" \
+            --arg head "$(git -C "$root" rev-parse HEAD)" --arg url "$url" --arg digest "$digest" \
+            '.binding | .root == $root and .branch == $branch and .head == $head
+              and .url == $url and .content_sha256 == $digest' <<<"$3" >/dev/null || {
+            _design_doc_error 'the design decision no longer matches this checkout and content'; return 1;
+          }
+          _design_doc_audit_update "$audit_path" "$root" "$branch" "$url" "$digest" \
+            '($argument | fromjson) as $decision |
+             if $decision.binding.history_hash != $history then error("the design decision history changed")
+             else da_decide($decision.choice; $url; $digest) end' "$3" || return 1 ;;
         advise) _design_doc_advice_write "$audit_path" "$root" "$branch" "$url" "$digest" "$3" \
           || return 1 ;;
       esac

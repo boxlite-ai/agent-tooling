@@ -76,14 +76,16 @@ design_decision() {
   decisions="$root/.agents/state/design-decision-request.json"
   if ! spec="$(jq -c --arg session "$session" --arg head "$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
       --arg branch "$(git -C "$root" branch --show-current 2>/dev/null)" \
-      '{binding:{root:.repo_root, branch:$branch, head:$head, session:$session, url:.design_url, fails, stop},
+      '{binding:{root:.repo_root, branch:$branch, head:$head, session:$session, url:.design_url,
+        content_sha256, history_hash, fails, stop},
         prefix:"design-decision:", fallback:"keep-blocked", minimum_words:1}' <<<"$request")" \
      || ! decision="$(timed_user_prompt request "$decisions" "$spec")"; then
     deny 'design decision unavailable'
   fi
   case "$(jq -r .status <<<"$decision")" in
     accepted)
-      if ! choice="$(jq -r '.response | capture("(?<c>Redesign|Reflect again|Overrule)").c' <<<"$decision")" \
+      if ! choice="$(jq -c '{choice:(.response | capture("(?<c>Redesign|Reflect again|Overrule)").c),
+          binding:.spec.binding}' <<<"$decision")" \
          || ! design_doc_binding decide "$cwd" "$choice" >/dev/null \
          || ! timed_user_prompt consume "$decisions" "$(jq -r .id <<<"$decision")" >/dev/null; then
         deny 'the design decision could not be applied'
