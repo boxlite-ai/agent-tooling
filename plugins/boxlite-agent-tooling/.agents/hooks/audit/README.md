@@ -62,6 +62,9 @@ and [state files](../../../ARCHITECTURE.md#state-files).
 1. `VERDICT_AUDITOR_CMD`
 2. `hook_host_kind`, shared with native subagent dispatch: Claude Code uses
    `claude -p --safe-mode`; Codex uses read-only `codex exec` with hooks disabled.
+   The Claude route grants its auditor tools with `--allowedTools` and not only
+   `--tools`: safe mode ignores user/project permission settings and print mode has no
+   approver, so an ungranted `Write` leaves the auditor without a dossier.
 3. Unknown hosts retain availability order: Claude, then Codex.
 4. No matching CLI: exit 2. A known host never falls through to another provider.
 

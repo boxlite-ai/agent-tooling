@@ -1260,12 +1260,17 @@ elif [[ "$audit_runner" == claude ]]; then
   # context. Replace the coding-agent prompt with the stripped auditor procedure and
   # expose its audit tools; --name suppresses a separate title request. The driver's
   # alarm is the portable outer timeout for the complete agent/tool loop.
+  # --tools only declares the set; it grants nothing. Print mode has no approver and
+  # --safe-mode ignores user/project permission settings, so without the explicit
+  # --allowedTools grant every listed tool is denied and the auditor cannot write its
+  # dossier. Keep both lists identical.
   if ! run_in_audit_group \
       "$audit_prompt" \
       subagent_timed_drive "$audit_timeout_seconds" 30 "$audit_stop_seconds" "$record_message" \
         claude -p --safe-mode --input-format stream-json --output-format stream-json --verbose \
           --replay-user-messages \
-          --system-prompt "$spec_body" --tools Read Bash Write TaskStop --effort xhigh \
+          --system-prompt "$spec_body" --tools Read Bash Write TaskStop \
+          --allowedTools "Read Bash Write TaskStop" --effort xhigh \
           --name verdict-auditor --no-session-persistence --model "$auditor_model"; then
     rm -f "$audit_output_file"
     remove_owned_verdict while-current

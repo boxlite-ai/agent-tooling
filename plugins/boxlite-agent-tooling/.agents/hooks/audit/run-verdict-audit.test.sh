@@ -2651,6 +2651,7 @@ system_mode="default"
 system_prompt=""
 stream_flags=""
 tool_names=()
+allowed_tools=""
 while (( $# > 0 )); do
   case "$1" in
     --input-format|--output-format) stream_flags+="$1=${2:-} "; shift 2 ;;
@@ -2671,6 +2672,13 @@ while (( $# > 0 )); do
         shift
       done
       ;;
+    --allowedTools|--allowed-tools)
+      shift
+      while (( $# > 0 )) && [[ "$1" != --* ]]; do
+        allowed_tools+="${allowed_tools:+ }$1"
+        shift
+      done
+      ;;
     *) shift ;;
   esac
 done
@@ -2688,11 +2696,13 @@ calls=2
 [[ "$has_name" == true ]] && calls=1
 jq -nc --arg system "$system_prompt" --arg message "$audit_prompt" \
   --arg effort "$effort" --arg system_mode "$system_mode" --arg stream "$stream_flags" \
+  --arg allowed_tools "$allowed_tools" \
   --argjson tools "$tools" --argjson calls "$calls" --argjson safe "$safe_mode" \
   --argjson persistence "$has_no_persistence" \
   '{system:$system,messages:[{role:"user",content:$message}],tools:$tools,
     calls:$calls,safe_mode:$safe,no_session_persistence:$persistence,
-    effort:$effort,system_mode:$system_mode,stream:$stream}' > "$REQUEST_CAPTURE"
+    effort:$effort,system_mode:$system_mode,stream:$stream,
+    allowed_tools:$allowed_tools}' > "$REQUEST_CAPTURE"
 mkdir -p "$CLAUDE_PROJECT_DIR/.agents/state"
 [[ -z "${LOCK_CAPTURE:-}" ]] \
   || cp "$CLAUDE_PROJECT_DIR/.agents/state/verdict-audit.lock" "$LOCK_CAPTURE"
@@ -2734,6 +2744,11 @@ headless_budget="$headless_budget persist=$(jq -r '.no_session_persistence' "$RE
 check_eq "headless Claude request replaces ambient context within a hard budget" \
   "$headless_budget" \
   "bytes=bounded system=bounded tools=4:Read,Bash,Write,TaskStop calls=1 safe=true mode=replace persist=true effort=xhigh"
+# --safe-mode ignores user/project permission settings and print mode has no approver,
+# so a tool listed only in --tools is denied. The auditor could not write its dossier.
+check_eq "headless Claude pre-approves the auditor tools it lists" \
+  "$(jq -r '.allowed_tools' "$REQUEST_CAP")" \
+  "Read Bash Write TaskStop"
 check_eq "headless Claude request streams JSON both ways and echoes delivery (design #328)" \
   "$(jq -r '.stream' "$REQUEST_CAP")" \
   "--input-format=stream-json --output-format=stream-json --verbose --replay-user-messages "
