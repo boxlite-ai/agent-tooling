@@ -408,6 +408,7 @@ for budget in \
   '.agents/prompts/audit/commit-push-criteria.md:260:2048' \
   '.agents/prompts/audit/commit-push-runner.md:280:1900' \
   '.agents/prompts/audit/commit-push-task.md:140:1100' \
+  '.agents/prompts/audit/dossier-validation.md:180:1500' \
   '.agents/prompts/audit/design-criteria.md:380:3000' \
   '.agents/prompts/audit/design-outline.md:140:1100' \
   '.agents/prompts/audit/probe-privacy.md:70:550' \

@@ -633,6 +633,8 @@ audit_instruction() {
   fi
   task="$(subagent_prompt audit/commit-push-task "$tooling_root" \
     "audit_criteria=${audit_criteria}" "task_input_json=${input}")" || return 2
+  task+=$'\n\n'"$(subagent_prompt audit/dossier-validation "$tooling_root" \
+    "validator_json=$(jq -nc --arg path "$tooling_root/scripts/validate-audit-dossier.sh" '{path:$path}')")" || return 2
   instruction="$(subagent_instruction \
     --agent commit-push-auditor \
     --root "$tooling_root" \
@@ -678,40 +680,10 @@ validate_audit() {
     audit_mtime="${audit_snapshot%%$'\n'*}"
     audit_json="${audit_snapshot#*$'\n'}"
   fi
-  audit_document="$(printf '%s' "$audit_json" | jq -ecs '
-    def exact_keys($wanted): (keys | sort) == ($wanted | sort);
-    def bounded_line($bytes):
-      type == "string" and length > 0 and utf8bytelength <= $bytes
-      and (explode | all(. != 0 and . != 10 and . != 13));
-    def base_keys: ["branch", "head", "command_kind", "diff_hash",
-      "command_hash", "commit_subject_hash", "verdict", "findings"];
-    if length == 1 and (.[0] | type) == "object"
-       and ((.[0] | del(.history_review,.reflection_review) | exact_keys(base_keys))
-            or (.[0] | del(.history_review,.reflection_review) | exact_keys(base_keys + ["advisories"])))
-       and (.[0].branch | type) == "string"
-       and (.[0].branch | utf8bytelength) <= 256
-       and (.[0].branch | explode | all(. != 0 and . != 10 and . != 13))
-       and (.[0].head | type) == "string"
-       and (.[0].head | test("^[0-9a-f]{40}([0-9a-f]{24})?$|^\\?$"))
-       and (.[0].command_kind == "commit" or .[0].command_kind == "push")
-       and (.[0].diff_hash | type) == "string"
-       and (.[0].diff_hash | test("^[0-9a-f]{64}$"))
-       and (.[0].command_hash | type) == "string"
-       and (.[0].command_hash | test("^[0-9a-f]{64}$"))
-       and (.[0].commit_subject_hash | type) == "string"
-       and (.[0].commit_subject_hash | test("^[0-9a-f]{64}$|^$"))
-       and (.[0].verdict == "PASS" or .[0].verdict == "FAIL")
-       and (.[0].findings | type) == "array" and (.[0].findings | length) <= 32
-       and all(.[0].findings[]; bounded_line(1024))
-       and ((.[0] | has("advisories") | not)
-            or ((.[0].advisories | type) == "array"
-                and (.[0].advisories | length) <= 32
-                and all(.[0].advisories[]; bounded_line(1024))))
-       and (if .[0].verdict == "PASS"
-            then (.[0].findings | length) == 0
-            else (.[0].findings | length) > 0 end)
-    then .[0] + {advisories:(.[0].advisories // [])}
-    else empty end
+  audit_document="$(printf '%s' "$audit_json" | jq -ecs -L "$tooling_root/.agents/lib" '
+    include "audit-dossier";
+    audit_dossier_normalize_git |
+    select(if .verdict == "PASS" then (.findings | length) == 0 else (.findings | length) > 0 end)
   ' 2>/dev/null || true)"
   if [[ -z "$audit_document" || ! "$audit_mtime" =~ ^[0-9]+$ ]]; then
     rm -f "$audit_selection"

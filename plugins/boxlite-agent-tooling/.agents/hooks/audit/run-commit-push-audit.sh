@@ -721,19 +721,20 @@ build_audit_context() {  # exact raw source file
 build_audit_summary() {  # evidence file, evidence sha256
   local evidence_file="$1" evidence_hash="$2"
   local evidence_bytes evidence_lines evidence_path_json changed_path_count changed_paths changed_paths_truncated=no
+  local changed_path_limit=8
   evidence_bytes="$(wc -c < "$evidence_file" | tr -d ' ')"
   evidence_lines="$(wc -l < "$evidence_file" | tr -d ' ')"
   evidence_path_json="$(jq -Rn --arg path "$evidence_file" '$path')"
   changed_path_count="$(awk '/^diff --git / { count++ } END { print count + 0 }' "$evidence_file")"
-  if (( changed_path_count > 12 )); then
+  if (( changed_path_count > changed_path_limit )); then
     changed_paths_truncated=yes
   fi
-  changed_paths="$(awk '
+  changed_paths="$(awk -v limit="$changed_path_limit" '
     /^diff --git / {
       sub(/^diff --git /, "")
       if (length($0) > 96) $0 = substr($0, 1, 93) "..."
       print
-      if (++count == 12) exit
+      if (++count == limit) exit
     }
   ' "$evidence_file" | jq -R . | jq -sc .)"
 
@@ -741,6 +742,7 @@ build_audit_summary() {  # evidence file, evidence sha256
     "evidence_path_json=$evidence_path_json" "evidence_hash=$evidence_hash" \
     "evidence_bytes=$evidence_bytes" "evidence_lines=$evidence_lines" \
     "changed_path_count=$changed_path_count" "changed_paths=$changed_paths" \
+    "changed_path_limit=$changed_path_limit" \
     "changed_paths_truncated=$changed_paths_truncated"
 }
 
@@ -828,6 +830,8 @@ build_prompt() {  # evidence file, evidence sha256
       "$(jq -nc --arg history "$history_path" '{history_path:$history}')"
     subagent_prompt audit/audit-reflection "$tooling_root" || return 1
   fi
+  subagent_prompt audit/dossier-validation "$tooling_root" \
+    "validator_json=$(jq -nc --arg path "$tooling_root/scripts/validate-audit-dossier.sh" '{path:$path}')" || return 1
 }
 
 normalize_agentic_output() {
@@ -850,37 +854,9 @@ normalize_agentic_output() {
   if [[ -z "${raw_json//[[:space:]]/}" ]]; then
     write_fail "Internal: Codex audit produced no output at all; the auditor exited without writing a result, so check its process limits and CLI availability rather than its answer"
   fi
-  normalized_output="$(printf '%s' "$raw_json" | jq -ecs '
-    def exact_keys($wanted): (keys | sort) == ($wanted | sort);
-    def bounded_line($bytes):
-      type == "string" and length > 0 and utf8bytelength <= $bytes
-      and (explode | all(. != 0 and . != 10 and . != 13));
-    if length == 1 and (.[0] | type) == "object"
-       and (.[0] | del(.history_review,.reflection_review) | (exact_keys(["branch", "head", "command_kind", "diff_hash",
-              "command_hash", "commit_subject_hash", "verdict", "findings"])
-              or exact_keys(["branch", "head", "command_kind", "diff_hash",
-              "command_hash", "commit_subject_hash", "verdict", "findings", "advisories"])))
-       and (.[0].branch | type) == "string"
-       and (.[0].branch | utf8bytelength) <= 256
-       and (.[0].branch | explode | all(. != 0 and . != 10 and . != 13))
-       and (.[0].head | type) == "string"
-       and (.[0].head | test("^[0-9a-f]{40}([0-9a-f]{24})?$|^\\?$"))
-       and (.[0].command_kind == "commit" or .[0].command_kind == "push")
-       and (.[0].diff_hash | type) == "string"
-       and (.[0].diff_hash | test("^[0-9a-f]{64}$"))
-       and (.[0].command_hash | type) == "string"
-       and (.[0].command_hash | test("^[0-9a-f]{64}$"))
-       and (.[0].commit_subject_hash | type) == "string"
-       and (.[0].commit_subject_hash | test("^[0-9a-f]{64}$|^$"))
-       and (.[0].verdict == "PASS" or .[0].verdict == "FAIL")
-       and (.[0].findings | type) == "array" and (.[0].findings | length) <= 32
-       and all(.[0].findings[]; bounded_line(1024))
-       and ((.[0] | has("advisories") | not)
-            or ((.[0].advisories | type) == "array"
-                and (.[0].advisories | length) <= 32
-                and all(.[0].advisories[]; bounded_line(1024))))
-    then .[0] | .advisories = (.advisories // [])
-      | with_entries(select(.value != null)) else empty end
+  normalized_output="$(printf '%s' "$raw_json" | jq -ecs -L "$tooling_root/.agents/lib" '
+    include "audit-dossier";
+    audit_dossier_normalize_git | with_entries(select(.value != null))
   ' 2>/dev/null || true)"
   if [[ -z "$normalized_output" ]]; then
     write_fail "Internal: Codex audit returned malformed JSON"

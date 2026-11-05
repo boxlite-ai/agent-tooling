@@ -95,20 +95,9 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   current_id="$(jq -r '.attempts[-1].id // ""' <<<"$state")" || return 2
   [[ -n "$id" && "$id" == "$current_id" ]] || return 2
   if [[ "$operation" == record ]]; then
-    if [[ "$(jq -r .gate <<<"$context")" != verdict ]]; then
-      payload="$(jq -c '.advisories=(.advisories // []) |
-        if .reflection_review == null then del(.reflection_review) else . end' <<<"$payload")" || return 2
-    fi
-    # Only the original operation may consume the independently supplied judgment.
-    binding="$(jq -c '.attempts[-1].input.binding' <<<"$state")" || return 2
-    printf '%s' "$payload" | jq -e --argjson binding "$binding" --arg id "$id" '
-      . as $dossier | .history_review.attempt_id == $id and
-      (.verdict != "FAIL" or (.history_review.findings | length) > 0
-        or any(.history_review.dispositions[]; .status == "open" or .status == "not_assessed")) and
-      ($binding | to_entries | all(.[]; .value == $dossier[.key]))' >/dev/null || return 2
-    request="$(printf '%s' "$payload" | jq -ce --argjson context "$context" --arg id "$id" \
-      '{context:$context,id:$id,outcome:({verdict:.verdict,evidence:del(.history_review,.reflection_review),
-        history_review:.history_review} + (if has("reflection_review") then {reflection_review} else {} end))}')" || return 2
+    request="$(printf '%s\n%s\n' "$state" "$payload" | jq -ces -L "$library" --arg id "$id" '
+      include "audit-dossier";
+      .[1] as $dossier | .[0] | audit_dossier_record_request($dossier; $id)')" || return 2
   elif [[ "$operation" == error || "$operation" == cancel ]]; then
     request="$(jq -nc --argjson context "$context" --arg id "$id" --arg operation "$operation" \
       --arg evidence "$payload" '{context:$context,id:$id,outcome:{

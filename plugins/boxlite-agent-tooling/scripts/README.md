@@ -83,6 +83,16 @@ host installation are separate transactions.
 | [pr-author-review.sh](pr-author-review.sh) `<github-event.json>` | CI publisher: update the author-review check and prompt, and return an unacknowledged PR to draft. Exit 0: acknowledged/irrelevant; 1: awaiting acknowledgment; 2: API/validation error. |
 | [audit-reflection.sh](audit-reflection.sh) `prepare\|record\|status\|submit\|checkpoint STATE` | Read bounded request JSON; persist audit transitions or check the Git retry decision, returning cycle JSON on stdout. |
 | [audit-reflection-gate.sh](audit-reflection-gate.sh) `CONTEXT OPERATION [ATTEMPT_ID]` | Adapt audit history to scoped gates: validate context, snapshot evidence, and reconcile outcomes; payload JSON arrives on stdin. |
+| [validate-audit-dossier.sh](validate-audit-dossier.sh) `verdict\|commit\|push HISTORY [DOSSIER]` | Read-only candidate validation; `-` means no history or dossier on stdin; writes no audit state or approval. |
+
+Before delivery, run the validator with the task's immutable history input and
+candidate. It checks shape, captured bindings, coverage, dispositions, and reflection
+through the parent's shared rules. Correct errors and rerun within the audit deadline.
+Success emits `{"valid":true,"scope":"history"}`; without history it reports
+`scope:shape`. The parent still checks live state and controls acceptance.
+Exit codes: 0 valid, 1 invalid candidate/history, 2 usage, dependency, or input-read
+failure. Reads reject NUL and unsafe file types; limits are 1 MiB for dossiers,
+10 MiB for history, and five seconds for stdin. No network or Git operation is needed.
 
 From a consumer checkout, `bash <plugin-root>/scripts/design-doc.sh check`
 revalidates its registered design; `show` also prints it, which is how auditors

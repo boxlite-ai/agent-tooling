@@ -38,11 +38,15 @@ def audit_reconcile($review; $attempt; $verdict):
     or ($review.coverage.reviewed | type != "array") or ($review.coverage.unread | type != "array")
   then error("invalid or stale history review") else . end |
   ($review.coverage.reviewed + $review.coverage.unread) as $coverage |
-  if ($coverage | sort) != ($attempt.input.snapshot | keys)
-    or ($coverage | length) != ($coverage | unique | length)
-    or ([$review.dispositions[].id] | sort) != ([$registry[] |
+  ($attempt.input.snapshot | keys) as $required |
+  if ($coverage | sort) != $required or ($coverage | length) != ($coverage | unique | length)
+  then error("history_review.coverage missing=" + (($required - $coverage) | tojson)
+    + " unexpected=" + (($coverage - $required | unique) | tojson)
+    + " duplicated=" + ([$coverage | group_by(.)[] | select(length > 1) | .[0]] | tojson))
+  else . end |
+  if ([$review.dispositions[].id] | sort) != ([$registry[] |
       select(.status == "open" or .status == "not_assessed") | .id] | sort)
-  then error("history review omitted or duplicated required coverage/dispositions") else . end |
+  then error("history_review.dispositions must cover each open/not_assessed ID exactly once") else . end |
   if $verdict == "PASS" and (($review.findings | length) > 0
     or ($review.coverage.unread | length) > 0
     or any($review.dispositions[]; .status == "open" or .status == "not_assessed"))

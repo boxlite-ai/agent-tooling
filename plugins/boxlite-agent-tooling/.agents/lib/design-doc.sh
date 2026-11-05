@@ -116,8 +116,8 @@ _design_doc_file_hash() { # path -> SHA-256 of its bytes, or nothing when it is 
   [[ ! -f "$1" ]] || perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$1"
 }
 
-# The deadline a design agent works to: DESIGN_AUDITOR_TIMEOUT (default 900 s, as for the
-# other audits). Repeated edit attempts reuse an unexpired deadline for the same content.
+# The deadline a design agent works to: DESIGN_AUDITOR_TIMEOUT (default 900 s).
+# Repeated edit attempts reuse an unexpired deadline for the same content.
 # The task file also records the hash of the agent's record, so a stop can tell whether it landed.
 _design_doc_timed_task() { # repo root, URL, content SHA-256, task file, record file -> deadline
   local timeout git_dir path now snapshot

@@ -132,7 +132,7 @@ Designs are audited before code, not at commit or PR time
 - Only the managed question's hook or a typed first prompt line
   `design-decision: <choice> <reason>` records a choice. Unanswered after five
   minutes, edits stay blocked.
-- The auditor works to `DESIGN_AUDITOR_TIMEOUT` (default 900 s, as for other audits). The
+- The auditor works to `DESIGN_AUDITOR_TIMEOUT` (default 900 s). The
   gate writes the deadline once per design content into `agent-tooling-design-audit-task.json`;
   the task prompt states that deadline, which this hook enforces (#240 faulted a clock nothing
   enforced). Past it, the [timed-subagent](#timed-subagents) rule
@@ -594,7 +594,7 @@ past its deadline, an auditor may only record its verdict, and one verdict-less 
 | --- | --- | --- |
 | Design | `agent-tooling-design-audit-task.json` | `design-doc.sh verdict` |
 | Commit/push | The attempt link | A write naming its `dossier_path` |
-| Headless verdict, Claude | `VERDICT_AUDITOR_TIMEOUT` | One record turn; stopped 240 s after the deadline |
+| Headless verdict, Claude | `VERDICT_AUDITOR_TIMEOUT` (default 180 s) | One record turn; stopped 60 s after the deadline |
 
 - The hook sees every tool a timed auditor's spec lists; `.agents/hooks/design/audit-deadline.test.sh`
   fails when the matcher misses one. Codex-hosted web search bypasses hooks.
@@ -611,9 +611,12 @@ past its deadline, an auditor may only record its verdict, and one verdict-less 
      message runs next. It is never resent (a resend runs a duplicate turn), and a delivered
      message is never interrupted. Only delivery racing the interrupt can end the record
      turn; the stop then exits 1, as before #328.
-  5. 240 s after the deadline (at most 3540 s), its alarm fires and the runner stops the
-     process group; a live record turn took about 120 s. The lease and the completion
-     monitor cover that stop.
+  5. 60 s after the deadline (at most 3540 s), its alarm fires and the runner stops the
+     process group. By default: record at 180 s, interrupt at 210 s if undelivered,
+     stop at 240 s. A delayed record turn has about 30 s after interruption;
+     incomplete output fails closed. The lease and completion monitor cover the stop.
+     Timers start at model launch; startup and cleanup add elapsed time. This shorter
+     grace may reject turns that previously needed about 120 s to record (#328).
 - Design #328 links the Claude Code 2.1.316 probes behind steps 2–4. Native Win32 Perl
   selects only on sockets, so there the task runs without a record turn.
 - The headless Codex runners and `VERDICT_AUDITOR_CMD` stop at the deadline; Codex takes no
@@ -814,6 +817,24 @@ Audit history components:
 | `.agents/lib/audit-reflection-contract.jq` | After two failures, require current reflection covering every failed ID and an independent sufficient assessment for PASS. Freeze active reflection; invalidate after failure. |
 | `scripts/audit-reflection-gate.sh` → `.agents/lib/audit-reflection-gate.sh` | Bind scoped verdict/Git audits before launch and acceptance; snapshot evidence; recheck prompt epoch; reconcile dossiers. |
 | `.agents/prompts/audit/audit-reflection.md`, `.agents/prompts/audit/git-audit-history.md` | Shared reconciliation contract and native Git history review; hooks prepare and record native Git attempts. |
+
+`scripts/validate-audit-dossier.sh` checks a candidate before auditor delivery without
+writing files, locking history, or granting approval. It accepts verdict/commit/push,
+an immutable history input (or `-` when absent), and a dossier file (or stdin).
+The CLI reuses the verdict normalizer, the Git shape predicate in
+`.agents/lib/audit-dossier.jq`, and the pure record transition. The history gate uses
+the same record-request builder; it retains epoch checks, locking, and persistence.
+Coverage errors name missing, unexpected, and duplicated keys; for example,
+reviewing only `transcript` when `tree` is also required reports missing `tree`.
+
+All runner tasks include `.agents/prompts/audit/dossier-validation.md` with an
+absolute validator path encoded as JSON. Auditors correct rejected fields before
+delivery, within their deadline. Read-only hosts pipe JSON and return that same
+candidate. Success reports `scope:history` for captured-input checks or `scope:shape`
+without history. Neither replaces the parent's live binding, freshness, lease,
+publication, or final history checks. Design auditors retain their validating recorder.
+Headless Git prompts preview eight changed paths to keep validation instructions
+within the existing 6 KiB budget; the complete sanitized diff remains available on demand.
 
 Cycles bind a context of `repo_root`, `session`, `epoch`, `branch`, and `gate`; cap at eight failures,
 sixteen attempts, and 10 MiB. PASS closes a cycle; the next operation starts another.
