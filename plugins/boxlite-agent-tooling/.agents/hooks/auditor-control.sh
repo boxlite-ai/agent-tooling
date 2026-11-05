@@ -359,6 +359,45 @@ repo="$(auditor_control_project_repo)" || {
 auditor_control_state_initialize "$repo" "$0" || exit 1
 
 case "${1:-}" in
+  inspect-scope)
+    scope="${2:-}"; auditor="${3:-}"
+    [[ "$scope" =~ ^[A-Za-z0-9_-]{1,128}$ ]] && auditor_control_is_auditor "$auditor" || exit 2
+    auditor_control_state_dispatch inspect "$scope" "$auditor"
+    exit $?
+    ;;
+  --locked-inspect)
+    scope="$2"; auditor="$3"
+    active_file="$auditor_control_state_dir/active.$scope.$auditor.json"
+    if [[ -e "$active_file" || -L "$active_file" ]]; then
+      active_json="$(verdict_audit_read_single_record "$active_file")" || exit 2
+      auditor_control_active_record_is_bound "$active_json" "$scope" "$auditor" "$active_file" || exit 2
+      jq -c --arg path "$active_file" '{state:"running",generation,path:$path}' <<<"$active_json"
+      exit $?
+    fi
+    for pending_file in "$auditor_control_state_dir"/pending-stop."$scope"."$auditor".*.json; do
+      [[ -e "$pending_file" || -L "$pending_file" ]] || continue
+      pending_json="$(verdict_audit_read_single_record "$pending_file")" || exit 2
+      generation="$(jq -er '.generation | strings' <<<"$pending_json")" || exit 2
+      auditor_control_pending_stop_record_is_bound "$pending_json" "$scope" "$auditor" \
+        "$generation" "$(date +%s)" "$((verdict_audit_lock_max_seconds + verdict_audit_deadline_slack_seconds))" \
+        "$pending_file" || exit 2
+      jq -nc --arg generation "$generation" --arg path "$pending_file" \
+        '{state:"pending-stop",generation:$generation,path:$path}'
+      exit $?
+    done
+    task_link="$auditor_control_state_dir/audit-task.$scope.$auditor.json"
+    if [[ -e "$task_link" || -L "$task_link" ]]; then
+      task="$(verdict_audit_read_single_record "$task_link")" || exit 2
+      jq -e --arg scope "$scope" '.context.session==$scope and (.attempt_id | type=="string")' \
+        <<<"$task" >/dev/null || exit 2
+      if [[ "$(jq -r '.host_agent_id // "unknown"' <<<"$task")" != "" ]]; then
+        jq -nc --arg path "$task_link" '{state:"unresolved",path:$path}'
+        exit $?
+      fi
+    fi
+    printf '%s\n' '{"state":"idle"}'
+    exit 0
+    ;;
   external-start)
     auditor="$2"; generation="$3"; scope="$4"; epoch="$5"
     auditor_control_is_auditor "$auditor" || exit 1
@@ -387,6 +426,17 @@ case "${1:-}" in
     ;;
   --locked-start)
     scope="$2"; auditor="$3"; generation="$4"; epoch="$5"
+    if [[ "$auditor" == commit-push-auditor && "${6:-}" == native ]]; then
+      task_link="$auditor_control_state_dir/audit-task.$scope.$auditor.json"
+      if [[ -e "$task_link" || -L "$task_link" ]]; then
+        task="$(verdict_audit_read_single_record "$task_link")" || exit 2
+        jq -e --arg scope "$scope" --arg epoch "$epoch" --arg generation "$generation" \
+          '.context.session==$scope and .context.epoch==$epoch and
+            ((.host_agent_id // "") | .=="" or .==$generation)' <<<"$task" >/dev/null || exit 2
+        jq -c --arg generation "$generation" '.host_agent_id=$generation' <<<"$task" \
+          | auditor_control_write_json_atomic "$task_link" || exit 2
+      fi
+    fi
     events_file="$auditor_control_state_dir/events.$scope.jsonl"
     active_file="$auditor_control_state_dir/active.$scope.$auditor.json"
     escalation_file="$auditor_control_state_dir/escalation.$scope.$auditor.$generation.json"
@@ -795,7 +845,7 @@ epoch="$(auditor_control_prompt_epoch_for "$repo" "$scope" 2>/dev/null)" || exit
 
 case "$event" in
   SubagentStart)
-    auditor_control_state_dispatch start "$scope" "$auditor" "$generation" "$epoch" \
+    auditor_control_state_dispatch start "$scope" "$auditor" "$generation" "$epoch" native \
       || exit $?
     threshold="${AUDITOR_PROMPT_AFTER_SECONDS:-30}"
     [[ "$threshold" =~ ^[0-9]+$ && ${#threshold} -le 4 ]] || threshold=30
@@ -855,7 +905,7 @@ case "$event" in
       if ! { source "$tooling_root/.agents/lib/audit-reflection.sh" \
           && source "$tooling_root/.agents/lib/audit-reflection-gate.sh" \
           && source "$tooling_root/.agents/lib/commit-push-stop.sh" \
-          && block_reason="$(commit_push_stop_check "$repo" "$scope" "$resumed")"; }; then
+          && block_reason="$(audit_attempt_stop_check "$repo" "$scope" "$resumed" "$auditor" "$generation")"; }; then
         printf 'auditor-control.sh: could not close the commit/push audit attempt.\n' >&2
         block_reason=""
       fi

@@ -48,7 +48,7 @@ audit_reflection() { # operation state-path; request on stdin
 _audit_reflection_transition() { # library operation state-path; lease already held
   local library="$1" operation="$2" path="$3" request state=null snapshot next history_hash reflection_hash
   local history_max_bytes
-  local checked checkpoint_request
+  local checked checkpoint_request decision
   history_max_bytes="$(audit_reflection_history_limit)"
   local LC_ALL=C
   request="$(perl -e '
@@ -72,11 +72,27 @@ _audit_reflection_transition() { # library operation state-path; lease already h
       [[ "$(jq -r '.reflection.hash' <<<"$state")" == "$reflection_hash" ]] || return 2
     fi
   fi
-  if [[ "$operation" == prepare || "$operation" == checkpoint ]]; then
+  if [[ "$operation" == prepare || "$operation" == checkpoint || "$operation" == next-action ]]; then
     checkpoint_request="$(jq -c '{context}' <<<"$request")" || return 2
     checked="$(printf '%s\n%s\n' "$state" "$checkpoint_request" \
       | jq -ceSs -L "$library" --arg operation status --argjson history_max_bytes "$history_max_bytes" \
         -f "$library/audit-reflection.jq")" || return 2
+    if [[ "$operation" == next-action ]]; then
+      if jq -e -L "$library" --argjson history_max_bytes "$history_max_bytes" \
+          'include "audit-reflection-contract"; audit_history_exhausted($history_max_bytes)' <<<"$checked" >/dev/null; then
+        jq -nc --arg path "$path" '{action:"stop",reason:"Audit retry budget exhausted; verification remains incomplete.",state_path:$path}'
+        return
+      fi
+      # shellcheck source=git-audit-decision.sh
+      source "$library/git-audit-decision.sh" || return 2
+      decision="$(git_audit_checkpoint_result "$library" "$checked" "$path")" || return 2
+      if [[ "$(jq -r .action <<<"$decision")" == continue ]] \
+          && ! jq -e -L "$library" 'include "audit-reflection-contract"; audit_reflection_ready' <<<"$checked" >/dev/null; then
+        decision='{"action":"reflect","reason":"Current failed audit history requires reflection."}'
+      fi
+      jq -c --arg path "$path" '. + {state_path:$path}' <<<"$decision"
+      return
+    fi
     # Duplicate preparation is a read; no new round or question is created.
     if ! jq -e --argjson request "$request" \
       'any(.attempts[]; .input == $request.attempt)' <<<"$checked" >/dev/null; then

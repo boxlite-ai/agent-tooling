@@ -37,9 +37,9 @@ flowchart TB
   verdict_gate e_run_verdict@-->|"claim needs proof"| verdict_runner
   verdict_runner e_write_verdict@-->|"publishes"| verdict_dossier
   verdict_gate e_check_verdict@-->|"re-entry validates"| verdict_dossier
-  commit_gate e_deny@-->|"denies, names routes"| agent
-  agent e_spawn_native@-->|"spawns"| native_auditor
-  agent e_run_headless@-->|"or runs"| commit_runner
+  commit_gate e_deny@-->|"denies, names next action"| agent
+  agent e_spawn_native@-->|"audit action: spawns"| native_auditor
+  agent e_run_headless@-->|"audit action: or runs"| commit_runner
   commit_gate e_delegated_push@-->|"delegated Codex push"| commit_runner
   schema e_schema@-.->|"output shape"| commit_runner
   commit_runner e_write_commit@-->|"writes"| commit_dossier
@@ -48,7 +48,12 @@ flowchart TB
 ```
 
 1. **Turn end.** When the final turn asks the reader to trust a conclusion, the verdict gate runs `run-verdict-audit.sh` inside the same Stop. It then re-enters itself to validate the new dossier: PASS allows silently; FAIL blocks with findings.
-2. **Commit or push.** `preflight-commit-push.sh` prepares the history attempt, denies, and names the auditor routes. The agent spawns `commit-push-auditor` or runs the headless runner. `SubagentStop` closes the attempt. The retried command runs only on a fresh, matching PASS, which the gate consumes.
+2. **Commit or push.** `preflight-commit-push.sh` denies with an explicit next action; an `audit` action prepares an attempt and supplies the route. Native Start binds the worker; its matching Stop closes the attempt. Git runs only on a fresh, matching PASS, consumed once.
+
+For example, an unchanged FAIL can request a bounded review without a newer test receipt.
+An active worker produces `wait`; user Stop or exhausted history produces `stop` without another launch.
+Recovery instructions repair named prerequisites before retrying; persistent state errors preserve evidence and require intervention.
+See the [action and lifecycle contract](../../../ARCHITECTURE.md#commitpush-attempts).
 
 Each dossier is bound to what it judged. A stale turn dossier is discarded; a stale commit/push dossier denies until a fresh audit.
 Auditor tasks supply a read-only [candidate validator](../../../scripts/validate-audit-dossier.sh)
@@ -152,8 +157,8 @@ Stop errors name this local file. Diagnostics never grant dossier authority.
 | `BOXLITE_HOOK_HOST` | Shared host detector | Legacy root inference | Set by each manifest: `claude`, `codex`, or `unknown`; invalid nonempty exported values yield unknown. Routing metadata only. |
 | `VERDICT_AUDITOR_CMD` | `run-verdict-audit.sh` | unset | Replaces the model CLI; reads the audit prompt on stdin and must write the requested dossier. |
 | `VERDICT_AUDITOR_MODEL` | `run-verdict-audit.sh` | `claude-sonnet-5` | Model for the `claude -p` route. |
-| `VERDICT_AUDITOR_TIMEOUT` | `run-verdict-audit.sh` | `180` seconds | Deadline, 1–3540. Claude: record at 180 s, interrupt at 210 s if undelivered, stop at 240 s by default; overrides retain 60 s grace, capped at 3540 s. Codex and `VERDICT_AUDITOR_CMD` stop at the deadline. Startup and cleanup add elapsed time; incomplete dossiers remain rejected. |
-| `COMMIT_PUSH_AUDITOR_TIMEOUT` | `preflight-commit-push.sh`, `run-commit-push-audit.sh` | `900` seconds | Native auditor deadline (1–9999): past it, only the dossier write is allowed. The headless Codex runner (1–3540) stops the audit at the deadline and records FAIL. |
+| `VERDICT_AUDITOR_TIMEOUT` | Native deadline hook, `run-verdict-audit.sh` | `180` seconds | Investigation, 1–3480. All headless routes add `min(60, budget)` seconds to record. Claude defaults: record 180 s, interrupt 210 s if undelivered, hard stop 240 s. Startup/cleanup add elapsed time. No valid report remains an execution error. |
+| `COMMIT_PUSH_AUDITOR_TIMEOUT` | `preflight-commit-push.sh`, `run-commit-push-audit.sh` | `900` seconds | Native investigation: 1–9999; headless: 1–3480 plus `min(60, budget)` record seconds. At deadline, no confirmed blockers means PASS with unchecked advisories; known blockers stay FAIL. Native hooks allow recording and owned-task cleanup. |
 | `DESIGN_AUDITOR_TIMEOUT` | `preflight-design-doc.sh` | `900` seconds | Design audit and advice deadline; past it, the auditor or advisor is told to record now. |
 | `CODEX_BIN` | Both runners and Stop classifier | `codex` on `PATH`, then the macOS app bundle | Codex binary; does not override host selection. |
 | `CODEX_COMMIT_PUSH_AUDIT_MODE` | `run-commit-push-audit.sh` | `agentic` | `local` runs offline checks, for tests and diagnostics only. |

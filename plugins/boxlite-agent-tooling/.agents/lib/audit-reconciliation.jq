@@ -2,6 +2,14 @@
 def ar_keys($expected): type == "object" and keys == ($expected | sort);
 def ar_text: type == "string" and test("\\S") and utf8bytelength <= 2048;
 def ar_id: type == "string" and test("^F[1-9][0-9]{0,3}$");
+def ar_timestamp: type == "number" and . == floor and . > 0 and . <= 9999999999;
+# Only the runtime record builder supplies this marker, from immutable attempt input.
+def audit_deadline_qualified($outcome; $attempt):
+  ($attempt.input.deadline | ar_timestamp)
+  and ($outcome.deadline_review | ar_keys(["deadline","recorded_at"]))
+  and ($outcome.deadline_review.deadline == $attempt.input.deadline)
+  and ($outcome.deadline_review.recorded_at | ar_timestamp)
+  and ($outcome.deadline_review.recorded_at >= $attempt.input.deadline);
 def ar_finding:
   ar_keys(["id","invariant","behavior","criterion","evidence","origin","origin_evidence",
     "review_gap","review_change","reopening","conflict","criterion_change"])
@@ -27,7 +35,7 @@ def ar_registry:
   and ([.[].id] | length == (unique | length))
   and ([.[] | [.invariant,.behavior]] | length == (unique | length));
 
-def audit_reconcile($review; $attempt; $verdict):
+def audit_reconcile($review; $attempt; $verdict; $deadline):
   .registry as $registry |
   if ($review | ar_keys(["attempt_id","history_hash","dispositions","findings","coverage"]) | not)
     or $review.attempt_id != $attempt.id
@@ -48,7 +56,7 @@ def audit_reconcile($review; $attempt; $verdict):
       select(.status == "open" or .status == "not_assessed") | .id] | sort)
   then error("history_review.dispositions must cover each open/not_assessed ID exactly once") else . end |
   if $verdict == "PASS" and (($review.findings | length) > 0
-    or ($review.coverage.unread | length) > 0
+    or (($review.coverage.unread | length) > 0 and ($deadline | not))
     or any($review.dispositions[]; .status == "open" or .status == "not_assessed"))
   then error("PASS has unresolved history or unread evidence") else . end |
   .registry |= map(. as $entry |

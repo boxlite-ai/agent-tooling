@@ -117,7 +117,7 @@ _design_doc_file_hash() { # path -> SHA-256 of its bytes, or nothing when it is 
 }
 
 # The deadline a design agent works to: DESIGN_AUDITOR_TIMEOUT (default 900 s).
-# Repeated edit attempts reuse an unexpired deadline for the same content.
+# Repeated edit attempts reuse the deadline until content or the recorded result changes.
 # The task file also records the hash of the agent's record, so a stop can tell whether it landed.
 _design_doc_timed_task() { # repo root, URL, content SHA-256, task file, record file -> deadline
   local timeout git_dir path now snapshot
@@ -127,8 +127,9 @@ _design_doc_timed_task() { # repo root, URL, content SHA-256, task file, record 
   path="$git_dir/$4"
   now="$(date +%s)" || return 1
   if [[ -e "$path" ]] && snapshot="$(verdict_audit_read_json_snapshot "$path" 2>/dev/null)" \
-     && jq -er --arg url "$2" --arg digest "$3" --argjson now "$now" \
-       'select(.url == $url and .content_sha256 == $digest and .deadline > $now) | .deadline' \
+     && jq -er --arg url "$2" --arg digest "$3" --arg state "$(_design_doc_file_hash "$git_dir/$5")" \
+       'select(.url == $url and .content_sha256 == $digest and .state_hash == $state
+         and (.deadline | type == "number" and . > 0 and . == floor)) | .deadline' \
        <<<"${snapshot#*$'\n'}" 2>/dev/null; then
     return 0
   fi
@@ -273,11 +274,26 @@ _design_doc_audit_update() { # verdict path, root, branch, URL, live SHA-256, fi
 }
 
 _design_doc_audit_write() { # verdict path, root, branch, URL, live SHA-256, verdict JSON
+  local verdict="$6" task previous marker
   jq -e --arg digest "$5" '.content_sha256 == $digest' <<<"$6" >/dev/null || {
     _design_doc_error 'the design changed after this review; review the current design'; return 1;
   }
+  task="$(verdict_audit_read_single_record "${1%/*}/agent-tooling-design-audit-task.json" 2>/dev/null)" || task=null
+  previous="$(_design_doc_audit_state "$1" "$2" "$3")" || return 1
+  marker="$(printf '%s\n' "$previous" | _design_doc_jq -c --argjson task "$task" \
+    --argjson verdict "$verdict" --arg url "$4" --arg digest "$5" \
+    --arg state "$(_design_doc_file_hash "$1")" 'include "audit-reconciliation"; . as $previous |
+    (now | floor) as $now |
+    if $task.url == $url and $task.content_sha256 == $digest and $task.state_hash == $state
+      and ($task.deadline | ar_timestamp) and $now >= $task.deadline
+    then {deadline:$task.deadline,recorded_at:$now}
+    elif $previous.url == $url and $previous.content_sha256 == $digest
+      and ($previous | {content_sha256,verdict,findings,advisories}) == $verdict
+    then $previous.deadline_review else null end')" || return 1
+  verdict="$(jq -c --argjson marker "$marker" \
+    'if $marker == null then . else . + {deadline_review:$marker} end' <<<"$verdict")" || return 1
   _design_doc_audit_update "$1" "$2" "$3" "$4" "$5" \
-    'da_record($argument | fromjson; $url; $digest)' "$6"
+    'da_record($argument | fromjson; $url; $digest)' "$verdict"
 }
 
 # Records an independent design auditor's verdict for the live content it reviewed.

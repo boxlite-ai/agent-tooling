@@ -15,6 +15,14 @@
         "hooks": [
           {
             "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/audit-deadline.sh\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "/usr/bin/env BOXLITE_HOOK_HOST=unknown bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\"",
             "async": true,
             "timeout": 3600
@@ -68,7 +76,7 @@
         ]
       },
       {
-        "matcher": "^(Read|Bash|Write|WebFetch|WebSearch|apply_patch)$",
+        "matcher": "^(Read|Bash|Write|WebFetch|WebSearch|apply_patch|TaskStop)$",
         "hooks": [
           {
             "type": "command",

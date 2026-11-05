@@ -175,7 +175,7 @@ now="$(date +%s)"
 ok 'another edit attempt keeps the deadline' "$(lib DESIGN_AUDITOR_TIMEOUT=60)" "$first"
 jq '.deadline = 1' "$task_file" > "$scratch/expired" && mv "$scratch/expired" "$task_file"
 second="$(lib DESIGN_AUDITOR_TIMEOUT=60)"
-(( second >= now + 58 && second <= now + 61 )); ok 'an expired deadline starts a new audit' "$?" 0
+ok 'repeated preflight preserves an expired unfinished deadline' "$second" 1
 lib DESIGN_AUDITOR_TIMEOUT=soon >/dev/null 2>&1; ok 'a malformed timeout is refused' "$?" 1
 for manifest in hooks.json codex-hooks.json; do
   ok "$manifest wires the deadline to tool calls and stops" "$(jq '[(.hooks.PreToolUse[]
@@ -183,7 +183,7 @@ for manifest in hooks.json codex-hooks.json; do
     | select(contains("audit-deadline.sh"))] | length' "$plugin/hooks/$manifest")" 2
 done
 # Every tool a timed agent's spec lists must reach the deadline hook (designs #328, #335).
-for spec in design-auditor design-advisor commit-push-auditor; do
+for spec in design-auditor design-advisor commit-push-auditor verdict-auditor; do
   tools="$(sed -n 's/^tools: //p' "$plugin/.claude/agents/$spec.md" | tr -d ' ')"
   for manifest in hooks.json codex-hooks.json generic-hooks.json; do
     missed="$(jq -r --arg tools "$tools" '

@@ -91,6 +91,7 @@ if [[ -r "$tooling_root/.agents/lib/subagent.sh" ]]; then
   max_audit_timeout_seconds="$(( verdict_audit_lock_max_seconds - verdict_audit_deadline_slack_seconds ))"
   audit_timeout_seconds="$(subagent_timed_timeout COMMIT_PUSH_AUDITOR_TIMEOUT \
     "$audit_timeout_seconds" "$max_audit_timeout_seconds")" || exit 2
+  audit_stop_seconds="$(subagent_timed_stop_seconds "$audit_timeout_seconds" "$max_audit_timeout_seconds")" || exit 2
 fi
 
 cleanup_runner() {
@@ -721,7 +722,7 @@ build_audit_context() {  # exact raw source file
 build_audit_summary() {  # evidence file, evidence sha256
   local evidence_file="$1" evidence_hash="$2"
   local evidence_bytes evidence_lines evidence_path_json changed_path_count changed_paths changed_paths_truncated=no
-  local changed_path_limit=8
+  local changed_path_limit=4
   evidence_bytes="$(wc -c < "$evidence_file" | tr -d ' ')"
   evidence_lines="$(wc -l < "$evidence_file" | tr -d ' ')"
   evidence_path_json="$(jq -Rn --arg path "$evidence_file" '$path')"
@@ -824,6 +825,8 @@ build_prompt() {  # evidence file, evidence sha256
     printf 'Internal: .agents/prompts/audit/commit-push-runner.md is missing or has an unfilled placeholder\n' >&2
     return 1
   fi
+  printf '\nRuntime investigation deadline (Unix seconds): %s\n' "$investigation_deadline"
+  subagent_prompt audit/deadline-policy "$tooling_root" || return 1
   if [[ -n "$history_path" ]]; then
     printf '\nHistory schema JSON: %s\nHistory input JSON: %s\n' \
       "$(jq -nc --arg path "$schema_file" '{path:$path}')" \
@@ -905,6 +908,7 @@ normalize_agentic_output() {
   published_audit_identity="$identity"
   audit_execution_outcome="$audit_verdict"
   printf 'codex audit %s: %s\n' "$kind" "$audit_verdict"
+  printf '%s' "$normalized_output" | jq -r '.advisories[]? | "  ~ " + .' >&2
   if [[ "$audit_verdict" == "FAIL" ]]; then
     printf '%s' "$normalized_output" | jq -r '.findings[]' >&2
     exit 1
@@ -969,7 +973,7 @@ start_codex_monitors() {  # status reason raw-output stderr-log
       or exit 0;
     print {$reason} "timeout\n" or exit 125;
     close($reason) or exit 125;
-  ' "$audit_timeout_seconds" "$runner_pid" "$status_file" "$reason_file" \
+  ' "$audit_stop_seconds" "$runner_pid" "$status_file" "$reason_file" \
     >/dev/null 2>&1 &
   active_audit_timeout_pid=$!
   finish_audit_group_launch
@@ -1216,6 +1220,7 @@ run_agentic_audit() {
       || [[ ! "$evidence_hash" =~ ^[0-9a-f]{64}$ ]]; then
     write_fail "Internal: could not hash the private sanitized evidence file"
   fi
+  investigation_deadline="$(( $(date +%s) + audit_timeout_seconds ))"
   if [[ -n "${AUDITOR_SESSION_SCOPE:-}" && -n "${AUDITOR_PROMPT_EPOCH:-}" ]]; then
     # shellcheck source=../../lib/audit-reflection.sh
     source "$tooling_root/.agents/lib/audit-reflection.sh" || exit 2
@@ -1225,14 +1230,40 @@ run_agentic_audit() {
       --arg session "$AUDITOR_SESSION_SCOPE" --arg epoch "$AUDITOR_PROMPT_EPOCH" \
       --arg branch "${branch:-HEAD}" --arg kind "$kind" \
       '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:$kind}')"
-    local history_input history_request
+    local history_input history_request worker recovery_action recovery_step
+    if ! history_request="$(audit_reflection_gate "$reflection_context" next-action 2>&1)"; then
+      printf 'Next action: wait\nOwner: parent agent\nReason: history cannot be validated: %s\nNext step: restore access or verified history evidence; preserve counters.\nResume when: the same history validates.\n' "$history_request" >&2
+      exit 1
+    fi
+    recovery_action="$(jq -r .action <<<"$history_request")"
+    if [[ "$recovery_action" != continue ]]; then
+      recovery_step="$(jq -r .reason <<<"$history_request")"
+      case "$recovery_action" in
+        stop) recovery_step="End this retry chain; report unresolved findings from $(jq -r .state_path <<<"$history_request"). Do not launch or reset history." ;;
+        reflect) recovery_step="$(subagent_prompt audit/commit-push-reflection-required "$tooling_root" \
+          "history_path=$(jq -r .state_path <<<"$history_request")" "tooling_root=$tooling_root")" || exit 1 ;;
+        wait) ;;
+        *) recovery_action='wait'; recovery_step='Restore the checkpoint adapter and validate its result without resetting history.' ;;
+      esac
+      printf 'Next action: %s\nOwner: parent agent\nReason: %s\nNext step: %s\nResume when: the existing lifecycle permits another attempt; Stop requires explicit user direction.\n' \
+        "$recovery_action" "$(jq -r .reason <<<"$history_request")" "$recovery_step" >&2
+      exit 1
+    fi
+    # A direct headless invocation must preserve the same native-worker exclusion.
+    if ! worker="$(CLAUDE_PROJECT_DIR="$repo_root" bash "$auditor_control" \
+        inspect-scope "$AUDITOR_SESSION_SCOPE" commit-push-auditor 2>&1)" \
+        || [[ "$(jq -r '.state // empty' <<<"$worker" 2>/dev/null)" != idle ]]; then
+      printf 'Next action: wait\nOwner: parent agent\nReason: unfinished or unverifiable auditor lifecycle: %s\nNext step: finish or reconcile the existing worker through its host lifecycle; preserve the task link and history.\nResume when: the same-scope lifecycle is idle.\n' "$worker" >&2
+      exit 1
+    fi
     # The preflight prepares an attempt on each deny; running this producer replaces it.
     audit_reflection_cancel_open "$reflection_context" "Superseded by the headless runner" \
       || write_fail "Audit history requires recovery; inspect the reported state path and .agents/prompts/audit/audit-reflection.md"
     history_input="$(jq -nc --arg branch "$branch" --arg head "$head" --arg kind "$kind" \
       --arg diff "$diff_hash" --arg command "$command_hash" --arg subject "$bound_commit_subject_hash" \
-      --rawfile evidence "$evidence_file" '{binding:{branch:$branch,head:$head,command_kind:$kind,
-        diff_hash:$diff,command_hash:$command,commit_subject_hash:$subject},snapshot:{evidence:$evidence}}')"
+      --argjson deadline "$investigation_deadline" --rawfile evidence "$evidence_file" \
+      '{binding:{branch:$branch,head:$head,command_kind:$kind,
+        diff_hash:$diff,command_hash:$command,commit_subject_hash:$subject},snapshot:{evidence:$evidence},deadline:$deadline}')"
     history_id="$$-$(date +%s)-${RANDOM:-0}"
     history_request="$(audit_reflection_gate "$reflection_context" prepare "$history_id" "$history_input")" \
       || write_fail "Audit history requires recovery; inspect the reported state path and .agents/prompts/audit/audit-reflection.md"
@@ -1263,7 +1294,7 @@ run_agentic_audit() {
     || codex_group_rc=$?
   case "$codex_group_reason" in
     timeout)
-      write_fail "Internal: Codex audit timed out after ${audit_timeout_seconds} seconds"
+      write_fail "Internal: Codex audit timed out after ${audit_stop_seconds} seconds (including record window)"
       ;;
     output-limit)
       write_fail "Internal: Codex audit output crossed its active limit (result ${agent_output_max_bytes} bytes, stderr ${agent_stderr_max_bytes} bytes); the monitor terminated the auditor's process group"

@@ -33,8 +33,15 @@
 # Tests: bash .agents/hooks/audit/preflight-commit-push.test.sh
 set -euo pipefail
 
-payload="$(cat)"
-command="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')"
+infrastructure_failure() { # prerequisite, recovery; retain the existing fatal exit contract
+  printf 'Next action: recover\nOwner: parent agent\nReason: %s\nNext step: %s\nResume when: the named prerequisite validates; retry the original Git operation.\n' "$1" "$2" >&2
+  exit 2
+}
+
+command -v jq >/dev/null 2>&1 || infrastructure_failure 'Required command jq is unavailable' 'Restore jq on the host hook PATH and verify jq --version.'
+payload="$(cat)" || infrastructure_failure 'Cannot read the host hook payload' 'Restore readable stdin and resubmit the same host tool call.'
+command="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')" \
+  || infrastructure_failure 'The host hook payload is not valid JSON' 'Resubmit the original tool call through the supported host JSON adapter.'
 
 # Match when the command actually IS a `git commit` / `git push` invocation —
 # at the start of the command OR at the start of any chain segment (after &&,
@@ -62,6 +69,11 @@ else
   exit 0
 fi
 
+for required in git perl shasum; do
+  command -v "$required" >/dev/null 2>&1 \
+    || infrastructure_failure "Required command $required is unavailable" "Restore $required on the host hook PATH and verify it is executable before retrying."
+done
+
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 project_dir="${CLAUDE_PROJECT_DIR:-$repo_root}"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -70,13 +82,13 @@ handoff_file="$project_dir/.agents/state/last-audit-handoff.json"
 verdict_state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
 override_state_lib="$tooling_root/.agents/lib/auditor-override-state.sh"
 if [[ ! -r "$verdict_state_lib" || ! -r "$override_state_lib" ]]; then
-  printf 'preflight-commit-push: shared audit state libraries are unavailable.\n' >&2
-  exit 2
+  infrastructure_failure "Shared audit state libraries are unavailable: $verdict_state_lib, $override_state_lib" \
+    'Restore these files from the installed plugin version, reload the host, and verify both paths are readable.'
 fi
 # shellcheck source=../lib/verdict-audit-state.sh
-source "$verdict_state_lib"
+source "$verdict_state_lib" || infrastructure_failure "$verdict_state_lib could not load" 'Restore the installed plugin library and rerun its Bash syntax check.'
 # shellcheck source=../lib/auditor-override-state.sh
-source "$override_state_lib"
+source "$override_state_lib" || infrastructure_failure "$override_state_lib could not load" 'Restore the installed plugin library and rerun its Bash syntax check.'
 # Assigned by auditor_override_load_valid_grant; initialize the sourced public output
 # explicitly so `set -u` and static analysis share the same boundary contract.
 auditor_override_nonce_hash=""
@@ -351,11 +363,11 @@ else
   # Hook commands run in a short-lived launcher child. The launcher disappears before
   # git starts, while its parent is the task runner shared by both command trees.
   handoff_owner_pid="$(ps -p "$PPID" -o ppid= 2>/dev/null)" \
-    || { printf 'preflight-commit-push: cannot determine agent origin.\n' >&2; exit 2; }
+    || infrastructure_failure 'Cannot determine agent origin with ps.' 'Restart the current host launcher and verify that its parent process is visible.'
   handoff_owner_pid="${handoff_owner_pid//[[:space:]]/}"
   [[ "$handoff_owner_pid" =~ ^[1-9][0-9]*$ ]] || handoff_owner_pid="$PPID"
   handoff_owner_start_token="$(verdict_audit_process_start_token "$handoff_owner_pid" 2>/dev/null)" \
-    || { printf 'preflight-commit-push: could not bind git handoff ownership.\n' >&2; exit 2; }
+    || infrastructure_failure 'Could not bind Git handoff ownership to a live process.' 'Restart the current host launcher and verify its PID/start token before retrying.'
   load_session_override 2>/dev/null || true
 fi
 
@@ -371,25 +383,35 @@ if [[ -z "$hook_session_scope" && -z "${GITHOOK_DELEGATED:-}" ]]; then
   fi
 fi
 
-# Receipts that record-test-run.sh wrote after `since` (epoch seconds); their names
-# start with the epoch they were recorded at.
-test_runs_after() {  # since -> 0 when a newer receipt exists
-  local since="$1" receipt_dir="$project_dir/.agents/state/test-runs" name
-  [[ "$since" =~ ^[0-9]+$ && -d "$receipt_dir" && ! -L "$receipt_dir" ]] || return 1
-  while IFS= read -r name; do
-    [[ "$name" =~ ^([0-9]+)-[0-9]+-[0-9]+\.json$ ]] || continue
-    (( BASH_REMATCH[1] > since )) && return 0
-  done < <(ls -1 "$receipt_dir" 2>/dev/null)
-  return 1
+recovery_remaining=1
+retry_local_recovery() {
+  (( recovery_remaining > 0 )) || return 1
+  recovery_remaining=0
 }
 
-deny() {
-  local reason="$1" reason_bytes
+block_git() { # action, reason, parent action, completion condition
+  local action="$1" reason="$2" next="$3" complete="$4" reason_bytes
+  printf -v reason 'Next action: %s\nOwner: parent agent\nReason: %s\nNext step: %s\nResume when: %s' \
+    "$action" "$reason" "$next" "$complete"
   reason_bytes="$(LC_ALL=C printf '%s' "$reason" | wc -c | tr -d ' ')"
   if (( reason_bytes > deny_max_bytes )); then
-    # The exact command and dossier findings are caller-controlled. Keep the model
-    # response bounded without opening the gate or silently dropping the recovery path.
-    reason="$(subagent_prompt audit/commit-push-oversized "$tooling_root")" || exit 2
+    if [[ "$action" == stop ]]; then
+      reason=$'Next action: stop\nOwner: parent agent\nReason: user Stop or audit budget exhausted; details exceed the 8192-byte safety limit.\nNext step: end this retry chain and report unresolved history; do not launch or reset attempts.\nResume when: the user explicitly authorizes a new course of work.'
+    elif [[ "$action" == wait ]]; then
+      reason="Next action: wait
+Owner: parent agent
+Reason: pending lifecycle or managed choice; details exceed the 8192-byte safety limit.
+Next step: read the existing worker/choice records for $hook_session_scope under $project_dir/.agents/state; finish that pending step without launching another worker.
+Resume when: its existing lifecycle or choice resolves."
+    else
+      next="$(subagent_prompt audit/commit-push-oversized "$tooling_root")" \
+        || infrastructure_failure 'Oversized-response prompt unavailable' 'Restore .agents/prompts/audit/commit-push-oversized.md from this plugin version.'
+      reason="Next action: recover
+Owner: parent agent
+Reason: rendered instruction exceeds the 8192-byte safety limit.
+Next step: $next
+Resume when: an equivalent bounded invocation can be audited."
+    fi
   fi
   jq -nc --arg r "$reason" '{
     hookSpecificOutput: {
@@ -456,7 +478,9 @@ allow_override() {
   [[ -n "${GITHOOK_DELEGATED:-}" ]] && boundary="${kind}-preflight"
   if ! auditor_override_log_use "$repo_root" "$override_scope" "$boundary" \
       "$diff_hash" >/dev/null 2>&1; then
-    deny "Auditor override evidence could not be recorded; git ${kind} remains gated."
+    block_git recover "Auditor override evidence could not be recorded; git ${kind} remains gated." \
+      "Check access and the existing override record under $project_dir/.agents/state/auditor-control; preserve the grant and retry its evidence write." \
+      'The current grant validates and its evidence write succeeds.'
   fi
   jq -nc --arg kind "$kind" '{hookSpecificOutput:{hookEventName:"PreToolUse",
     additionalContext:("OVERRIDDEN BY USER: " + $kind + " auditor skipped for this prompt; no PASS verdict was created.")}}'
@@ -524,11 +548,10 @@ recover_handoff_command() {
 # proceeds unaudited — the one outcome worse than a noisy failure. Exit 2 blocks.
 subagent_lib="$tooling_root/.agents/lib/subagent.sh"
 if [[ ! -r "$subagent_lib" ]]; then
-  printf 'preflight-commit-push: missing %s — refusing to gate without it\n' "$subagent_lib" >&2
-  exit 2
+  infrastructure_failure "Missing $subagent_lib" 'Restore this library from the installed plugin version and reload the host.'
 fi
 # shellcheck source=../lib/subagent.sh
-source "$subagent_lib"
+source "$subagent_lib" || infrastructure_failure "$subagent_lib could not load" 'Restore the installed library and run its Bash syntax check.'
 
 # One instruction, naming the calling host's route — or every route when that host
 # cannot be named. The choice comes from the plugin root the host injects into this
@@ -546,7 +569,8 @@ if [[ -n "${GITHOOK_DELEGATED:-}" && "$kind" == "commit" ]]; then
   if recovered_command="$(recover_handoff_command 2>/dev/null)"; then
     audit_target_command="$recovered_command"
   else
-    target_command_note="$(subagent_prompt audit/commit-push-target-note "$tooling_root")" || exit 2
+    target_command_note="$(subagent_prompt audit/commit-push-target-note "$tooling_root")" \
+      || infrastructure_failure 'Target-command prompt unavailable' 'Restore .agents/prompts/audit/commit-push-target-note.md.'
     target_command_note=$'\n\n'"$target_command_note"
   fi
 fi
@@ -571,9 +595,11 @@ task_input_json="$(jq -nc \
 reflection_context=""
 if [[ -n "$hook_session_scope" && -n "$hook_prompt_epoch" ]]; then
   # shellcheck source=../lib/audit-reflection.sh
-  source "$tooling_root/.agents/lib/audit-reflection.sh"
+  source "$tooling_root/.agents/lib/audit-reflection.sh" \
+    || infrastructure_failure 'Audit history library could not load' 'Restore .agents/lib/audit-reflection.sh from the installed plugin and verify its Bash syntax.'
   # shellcheck source=../lib/audit-reflection-gate.sh
-  source "$tooling_root/.agents/lib/audit-reflection-gate.sh"
+  source "$tooling_root/.agents/lib/audit-reflection-gate.sh" \
+    || infrastructure_failure 'Audit history adapter could not load' 'Restore .agents/lib/audit-reflection-gate.sh from the installed plugin and verify its Bash syntax.'
   reflection_context="$(jq -nc --arg root "$(cd "$repo_root" && pwd -P)" \
     --arg session "$hook_session_scope" --arg epoch "$hook_prompt_epoch" \
     --arg branch "${branch:-HEAD}" --arg kind "$kind" \
@@ -589,12 +615,14 @@ printf -v headless_command \
 headless_command+=$'\n    (set CODEX_BIN if the default codex command is not usable)'
 if ! audit_criteria="$(subagent_prompt audit/commit-push-criteria "$tooling_root" "plugin_root=$tooling_root")" \
    || [[ "$audit_criteria" != *[![:space:]]* ]]; then
-  printf 'preflight-commit-push: cannot load nonempty commit-push-criteria prompt\n' >&2
-  exit 2
+  infrastructure_failure 'Cannot load nonempty commit-push-criteria prompt' 'Restore .agents/prompts/audit/commit-push-criteria.md and validate its prompt contract.'
 fi
 
 audit_timeout="$(subagent_timed_timeout COMMIT_PUSH_AUDITOR_TIMEOUT \
-  "${COMMIT_PUSH_AUDITOR_TIMEOUT:-900}" 9999)" || exit 2
+  "${COMMIT_PUSH_AUDITOR_TIMEOUT:-900}" 9999)" \
+  || infrastructure_failure 'Invalid COMMIT_PUSH_AUDITOR_TIMEOUT' 'Correct the reported timeout configuration and rerun its validator.'
+audit_criteria+=$'\n\n'"$(subagent_prompt audit/deadline-policy "$tooling_root")" \
+  || infrastructure_failure 'Deadline policy prompt unavailable' 'Restore .agents/prompts/audit/deadline-policy.md.'
 
 # The hook owns the history attempt so an auditor that stops early cannot leave it
 # open or unbound. It is prepared only where an auditor is requested; a passing
@@ -602,6 +630,7 @@ audit_timeout="$(subagent_timed_timeout COMMIT_PUSH_AUDITOR_TIMEOUT \
 # The binding omits the commit subject: the dossier and commit-msg hook still bind it.
 prepare_audit_attempt() {  # task input JSON -> task input JSON with attempt fields
   local input="$1" binding tree request link
+  audit_worker_idle || return 2
   binding="$(jq -nc --arg branch "$branch" --arg head "$head" --arg kind "$kind" \
     --arg diff "$diff_hash" --arg command "$(printf '%s' "$audit_target_command" | hash_stdin)" \
     '{branch:$branch,head:$head,command_kind:$kind,diff_hash:$diff,command_hash:$command}')" || return 2
@@ -614,13 +643,15 @@ prepare_audit_attempt() {  # task input JSON -> task input JSON with attempt fie
     "Superseded: the change no longer matches this attempt" "$binding" || return 2
   request="$(audit_reflection_gate "$reflection_context" prepare "" "$(jq -nc \
     --argjson binding "$binding" --arg tree "$tree" --arg command "$audit_target_command" \
-    '{binding:$binding,snapshot:{tree:$tree,command:$command}}')")" || return 2
+    --argjson deadline "$(( $(date +%s) + audit_timeout ))" \
+    '{binding:$binding,snapshot:{tree:$tree,command:$command},deadline:$deadline}')")" || return 2
+  audit_worker_idle || return 2
   # SubagentStop reads this link to check the dossier and close the attempt.
   link="$(auditor_override_control_dir "$(jq -r .repo_root <<<"$reflection_context")")" || return 2
   mkdir -p "$link" || return 2
   jq -nc --argjson context "$reflection_context" --argjson request "$request" \
-    --arg dossier "$audit_file" --argjson deadline "$(( $(date +%s) + audit_timeout ))" \
-    '{context:$context,attempt_id:$request.attempt_id,dossier_path:$dossier,deadline:$deadline}' \
+    --arg dossier "$audit_file" \
+    '{context:$context,attempt_id:$request.attempt_id,dossier_path:$dossier,deadline:($request.deadline // 0),host_agent_id:""}' \
     | verdict_audit_write_atomic "$link/audit-task.$hook_session_scope.commit-push-auditor.json" || return 2
   jq -c --argjson request "$request" \
     '. + {attempt_id:$request.attempt_id,history_path:$request.history_path}' <<<"$input"
@@ -646,19 +677,89 @@ audit_instruction() {
     "instruction=$instruction" "target_command_note=$target_command_note"
 }
 
+gate_checkpoint() {
+  [[ -n "$reflection_context" ]] || return 0
+  local result action path instruction
+  while ! result="$(audit_reflection_gate "$reflection_context" next-action 2>&1)"; do
+    if retry_local_recovery; then continue; fi
+    block_git wait "Audit history/checkpoint remains unreadable after one reread: $result" \
+      "Preserve the reported state and mutex under $project_dir/.agents/state; restore read/write access or verified history evidence before retrying. Never delete history or reset counters." \
+      'The same scoped history validates and its transition lease can be acquired.'
+  done
+  action="$(jq -r '.action // empty' <<<"$result")"
+  path="$(jq -r '.state_path // empty' <<<"$result")"
+  case "$action" in
+    continue) return 0 ;;
+    stop) block_git stop "$(jq -r .reason <<<"$result")" \
+      "End this retry chain; report unresolved findings from $path. Do not prepare, launch, or reset audit history." \
+      'Only explicit user direction can start a new course of work.' ;;
+    reflect)
+      instruction="$(subagent_prompt audit/commit-push-reflection-required "$tooling_root" \
+        "history_path=$path" "tooling_root=$tooling_root")" \
+        || infrastructure_failure 'Reflection prompt unavailable' 'Restore .agents/prompts/audit/commit-push-reflection-required.md.'
+      block_git reflect "$(jq -r .reason <<<"$result")" "$instruction" \
+        'The existing reflection validator accepts this history; retry Git automatically.' ;;
+    wait) block_git wait 'The existing audit decision is pending.' "$(jq -r .reason <<<"$result")" \
+      'The existing managed choice or its existing fallback resolves; preserve its timer.' ;;
+    *) block_git wait "Invalid checkpoint result for $path" \
+      'Restore the matching checkpoint adapter and validate its structured result; preserve all history.' \
+      'The owner returns a valid action for the current history.' ;;
+  esac
+}
+
+audit_worker_state() {
+  [[ -n "$reflection_context" ]] || { printf '%s\n' '{"state":"idle"}'; return; }
+  CLAUDE_PROJECT_DIR="$repo_root" bash "$tooling_root/.agents/hooks/auditor-control.sh" \
+    inspect-scope "$hook_session_scope" commit-push-auditor
+}
+
+audit_worker_idle() {
+  local worker
+  worker="$(audit_worker_state)" || return 2
+  [[ "$(jq -r .state <<<"$worker")" == idle ]]
+}
+
+require_idle_worker() {
+  local worker
+  while ! worker="$(audit_worker_state 2>&1)"; do
+    if retry_local_recovery; then continue; fi
+    block_git wait "Auditor lifecycle cannot be validated: $worker" \
+      "Preserve the active, pending-stop, and task records for $hook_session_scope under $project_dir/.agents/state/auditor-control; restore validated state and access before retrying." \
+      'The lifecycle owner can inspect the scope without guessing or erasing records.'
+  done
+  [[ "$(jq -r .state <<<"$worker")" != idle ]] || return 0
+  block_git wait "An auditor still owns an unfinished lifecycle: $worker" \
+    'Wait through the host task-status/wait route for that worker and its terminal hook delivery; retry Git automatically afterward. If the host reports termination but the record persists, reconcile that terminal evidence through the existing lifecycle owner before retrying; do not replace the task link or launch another auditor.' \
+    'The existing worker has completed teardown and the same-scope lifecycle inspection is idle.'
+}
+
 deny_with_audit() {  # reason preceding the auditor instruction
   local instruction
-  instruction="$(audit_instruction)" || deny "$1
-
-Audit history requires recovery; inspect .agents/state/audit-history-* and .agents/prompts/audit/audit-reflection.md."
-  deny "$1
-
-$instruction"
+  gate_checkpoint
+  require_idle_worker
+  while ! instruction="$(audit_instruction 2>&1)"; do
+    gate_checkpoint
+    require_idle_worker
+    if retry_local_recovery; then continue; fi
+    block_git wait "Audit request preparation failed after one retry: $instruction" \
+      "Preserve $project_dir/.agents/state/audit-history-* and auditor-control/audit-task.$hook_session_scope.commit-push-auditor.json; repair the named input, permissions, or writer failure and validate that same history before retrying." \
+      'The bound attempt and task link can be persisted without resetting evidence.'
+  done
+  require_idle_worker
+  block_git audit "$1" "$instruction" 'A fresh bound audit passes existing acceptance checks; retry the original Git command.'
 }
 
 validate_audit() {
   local consume_on_pass="${1:-consume}"
 
+  while :; do
+  if [[ "$(git -C "$repo_root" rev-parse HEAD)" != "$head" \
+      || "$(git -C "$repo_root" branch --show-current)" != "$branch" \
+      || "$(current_diff_hash)" != "$diff_hash" ]]; then
+    block_git recover 'The candidate changed during audit selection.' \
+      'Retry the original Git operation against the current candidate so all bindings are recomputed.' \
+      'The selected dossier and live branch, HEAD, and diff agree.'
+  fi
   if [[ ! -r "$audit_file" ]]; then
     deny_with_audit "No CLAUDE.md audit found for this change."
   fi
@@ -671,7 +772,10 @@ validate_audit() {
   selected_identity="$(verdict_audit_link_no_clobber_identity \
     "$audit_file" "$audit_selection" 2>/dev/null)" || selected_identity=""
   if [[ -z "$selected_identity" ]]; then
-    deny_with_audit "Existing audit is not a stable regular file; re-audit is required."
+    if retry_local_recovery; then continue; fi
+    block_git wait "Cannot select a stable regular dossier at $audit_file after one retry." \
+      'Preserve the existing entry; repair its type/access or finish the current writer, then retry selection.' \
+      'The dossier can be selected through the existing identity checks.'
   fi
   audit_snapshot="$(verdict_audit_read_json_snapshot \
     "$audit_selection" 2>/dev/null)" || audit_snapshot=""
@@ -698,9 +802,9 @@ validate_audit() {
   audit_verdict="$(printf '%s' "$audit_document" | jq -r '.verdict')"
   if [[ "$kind" == "push" && ! "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
     rm -f "$audit_selection"
-    deny "Push audits must be bound to git pre-push ref-update stdin via pushed_diff_sha256.
-
-Retry the push through the git-level pre-push gate so it can produce the exact ref-update audit command."
+    block_git recover 'Push audits must bind real pre-push ref-update stdin via pushed_diff_sha256.' \
+      'Retry the push through the installed Git pre-push gate; let Git supply the exact ref-update input. Do not reconstruct it.' \
+      'The pre-push route provides a bound audit for those actual ref updates.'
   fi
 
   now_epoch="$(date +%s)"
@@ -752,11 +856,6 @@ Re-audit is required."
       rm -f "$audit_selection"
       deny_with_audit "The audit did not reconcile current history; verification remains incomplete."
     fi
-    local decision_error
-    if ! decision_error="$(audit_reflection_gate "$reflection_context" checkpoint 2>&1)"; then
-      rm -f "$audit_selection"
-      deny "$decision_error"
-    fi
   fi
 
   # `findings` blocks, `advisories` never does. Two arrays rather than a per-finding
@@ -769,31 +868,38 @@ Re-audit is required."
     | jq -r '.advisories[]? | "  ~ " + .' 2>/dev/null || echo '')"
 
   if [[ "$audit_verdict" != "PASS" ]]; then
-    # Tests run after this audit are evidence it never saw. A missing-evidence finding
-    # has no diff to change, so new receipts earn a fresh audit, not the old verdict.
-    if test_runs_after "$audit_mtime"; then
-      rm -f "$audit_selection"
-      deny_with_audit "Tests ran after this audit; re-audit is required."
-    fi
     findings="$(printf '%s' "$audit_document" \
       | jq -r '.findings[]? | "  - " + .' 2>/dev/null || echo '')"
     rm -f "$audit_selection"
-    deny "CLAUDE.md audit FAILED on branch '${branch}':
+    if [[ -z "$reflection_context" ]]; then
+      block_git recover "A matching FAIL requires a session-bound retry lifecycle.
+Findings:
+$findings
+${advisories:+Advisories (NOT blocking — do not re-audit for these alone):
+$advisories}" \
+        'Retry through the current Claude Code or Codex hook route with its real session and prompt epoch; preserve the FAIL and test receipts.' \
+        'The existing history owner can enforce reflection, Stop, and the retry budget.'
+    fi
+    deny_with_audit "CLAUDE.md audit FAILED on branch '${branch}':
 
 ${findings}
 ${advisories:+
 Advisories (NOT blocking — do not re-audit for these alone):
 ${advisories}
 }
-Address each finding, then re-run the audit producer before retrying git ${kind}."
+Reassess each finding with current evidence; a code change or newer test receipt is not required merely to request review."
   fi
 
+  gate_checkpoint
   if [[ "$consume_on_pass" == "consume" ]]; then
     verdict_audit_unlink_if_identity \
       "$audit_file" "$selected_identity" 2>/dev/null || consume_status=$?
     if (( consume_status != 0 )); then
       rm -f "$audit_selection"
-      deny "The matching audit could not be consumed safely; git ${kind} remains gated."
+      if retry_local_recovery; then continue; fi
+      block_git wait "Dossier consumption still conflicts at $audit_file after reselection." \
+        'Wait for the overlapping consumer/writer to finish, then retry the original Git operation; never restore a consumed PASS.' \
+        'A fresh bound selection can be consumed exactly once.'
     fi
     if [[ -n "$handoff_selected_identity" ]]; then
       handoff_consume_status=0
@@ -802,7 +908,15 @@ Address each finding, then re-run the audit producer before retrying git ${kind}
         || handoff_consume_status=$?
       if (( handoff_consume_status != 0 )); then
         rm -f "$audit_selection"
-        deny "The matching command handoff could not be consumed safely; git ${kind} remains gated."
+        cleanup_handoff_selection
+        handoff_load_attempted=0
+        if retry_local_recovery; then
+          load_matching_handoff || true
+          continue
+        fi
+        block_git wait "Command handoff consumption still conflicts at $handoff_file." \
+          'Let the overlapping handoff writer finish and retry the original Git operation; obtain a fresh audit because the earlier PASS was consumed.' \
+          'Both a fresh bound dossier and its command handoff can be consumed safely.'
       fi
       remove_matching_legacy "$handoff_selection" "$legacy_handoff_file"
       cleanup_handoff_selection
@@ -814,6 +928,8 @@ Address each finding, then re-run the audit producer before retrying git ${kind}
     mirror_to_legacy "$audit_selection" "$legacy_audit_file" || true
     rm -f "$audit_selection"
   fi
+  break
+  done
 
   # Surface without touching the permission decision. Deliberately NOT
   # permissionDecision:"allow", which would auto-approve a command the user might
@@ -866,39 +982,55 @@ if [[ -z "${GITHOOK_DELEGATED:-}" ]]; then
         2>/dev/null || true)"
       if [[ -n "$loaded_version" && -n "$adopted_version" \
             && "$loaded_version" != "$adopted_version" ]]; then
-        deny "This session loaded agent-tooling $loaded_version, but this repository's git hooks run $adopted_version. Run /reload-plugins in Claude Code, or start a new session, then retry."
+        block_git recover "This session loaded agent-tooling $loaded_version, but this repository's git hooks run $adopted_version." \
+          'Run /reload-plugins in Claude Code; if the host cannot reload, wait for a new session with the repository version and retry there.' \
+          'Loaded and adopted plugin versions match.'
       fi
       if [[ -z "${CLAUDECODE:-}" && -z "${CODEX_SANDBOX:-}" && -z "${AGENT_GATED:-}" ]]; then
         # The manifest retains its shell with `; exit $?`. Without that launcher,
         # a final-command exec would make the grandparent a possible human shell.
         if [[ "$#" != 2 || "${1:-}" != --launcher-pid || "${2:-}" != "$PPID" ]]; then
-          deny 'Agent origin requires the current retained-launcher hook wiring. Reload the plugin or update custom PreToolUse wiring to pass --launcher-pid "$$" and end with ; exit $?.'
+          block_git recover 'Agent origin requires the current retained-launcher hook wiring.' \
+            'Reload the plugin or update custom PreToolUse wiring to pass --launcher-pid "$$" and end with ; exit $?.' \
+            'The retained launcher is the live parent of this hook.'
         fi
         handoff_owner_pid="$(ps -p "$PPID" -o ppid= 2>/dev/null)" \
-          || deny 'Cannot determine agent origin; Git delegation remains blocked.'
+          || block_git recover 'Cannot determine agent origin; Git delegation remains blocked.' \
+            'Restart the installed host launcher, verify its parent PID with ps, and retry through that live host.' 'The retained launcher identifies a live parent process.'
         handoff_owner_pid="${handoff_owner_pid//[[:space:]]/}"
         [[ "$handoff_owner_pid" =~ ^[1-9][0-9]*$ && "$handoff_owner_pid" != 1 ]] \
-          || deny 'Cannot determine agent origin; Git delegation remains blocked.'
+          || block_git recover 'Cannot determine agent origin; Git delegation remains blocked.' \
+            'Restart the installed host launcher and retry through its retained PreToolUse hook.' 'The parent PID is valid and is not the init process.'
         handoff_owner_start_token="$(verdict_audit_process_start_token "$handoff_owner_pid")" \
-          || deny 'Cannot bind agent origin to a live process; Git delegation remains blocked.'
+          || block_git recover 'Cannot bind agent origin to a live process; Git delegation remains blocked.' \
+            'Restart the installed host launcher and recheck its process start token before retrying.' 'The same live parent PID has a verifiable start token.'
         origin_lib="$tooling_root/.agents/lib/git-agent-origin.sh"
         [[ -r "$origin_lib" && -r "$hooks_path/../.agents/lib/git-agent-origin.sh" ]] \
-          || deny 'Installed Git hooks cannot preserve agent origin. Update the repository tooling and reload the plugin before retrying.'
+          || block_git recover 'Installed Git hooks cannot preserve agent origin.' \
+            'Update the repository tooling and reload the plugin before retrying.' 'Both installed git-agent-origin.sh libraries are readable and versions match.'
         # shellcheck source=../lib/git-agent-origin.sh
-        source "$origin_lib"
+        source "$origin_lib" || infrastructure_failure "$origin_lib could not load" 'Restore the installed origin library and verify its Bash syntax.'
         git_agent_origin_record "$repo_root" "$handoff_owner_pid" "$handoff_owner_start_token" \
-          || deny 'Cannot record agent origin; Git delegation remains blocked.'
+          || block_git recover 'Cannot record agent origin; Git delegation remains blocked.' \
+            'Repair access to the origin state reported by git-agent-origin.sh, then retry through the live retained launcher.' 'The origin writer persists the current PID and start token.'
       fi
       # No validation here: the git-level gate runs this same script with
       # GITHOOK_DELEGATED set, and that pass is the single consumer of the artifact.
-      write_command_handoff
+      while ! write_command_handoff; do
+        if retry_local_recovery; then continue; fi
+        block_git wait "Cannot persist the command handoff at $handoff_file after one retry." \
+          'Preserve the existing handoff; repair the named state path or finish its overlapping writer, then retry through the same live host.' \
+          'The original command and live process identity can be written atomically.'
+      done
       exit 0
     fi
   fi
 fi
 
 if ! compatibility_error="$(bash "$tooling_root/scripts/api-compatibility.sh" "$kind" "$repo_root" 2>&1)"; then
-  deny "$compatibility_error"
+  block_git recover "$compatibility_error" \
+    "Apply the checker-specific fix above, then rerun scripts/api-compatibility.sh $kind for this repository before retrying Git." \
+    'The same compatibility check passes; an audit cannot bypass it.'
 fi
 
 # Installation/guidance/framework checks remain owned by the git hooks above this
@@ -907,21 +1039,7 @@ fi
 if [[ "$override_active" == true ]]; then
   allow_override
 fi
-if [[ -n "$reflection_context" ]]; then
-  history="$(audit_reflection_gate "$reflection_context" inspect)" \
-    || deny "Audit history is unreadable; verification remains incomplete."
-  if [[ "$(jq -r .exhausted <<<"$history")" == true ]]; then
-    deny "Audit retry budget exhausted. Verification is incomplete; report unresolved findings from $(jq -r .state_path <<<"$history") and await human direction."
-  fi
-  if ! decision_error="$(audit_reflection_gate "$reflection_context" checkpoint 2>&1)"; then
-    deny "$decision_error"
-  fi
-  if [[ "$(jq -r .reflection_due <<<"$history")" == true ]]; then
-    reflection_instruction="$(subagent_prompt audit/commit-push-reflection-required "$tooling_root" \
-      "history_path=$(jq -r .state_path <<<"$history")" "tooling_root=$tooling_root")" || exit 2
-    deny "$reflection_instruction"
-  fi
-fi
+gate_checkpoint
 
 # A push audit can only be produced HERE. validate_audit refuses any push dossier not
 # bound to pushed_diff_sha256, and that hash comes from the ref-update stdin git hands
@@ -930,6 +1048,7 @@ fi
 # it to bind to data that no longer exists, so the producer runs at the one moment the
 # exact ref update is known.
 if [[ -n "${CODEX_SANDBOX:-}" && -n "${GITHOOK_DELEGATED:-}" && "$kind" == "push" ]]; then
+  require_idle_worker
   headless_auditor="$tooling_root/.agents/hooks/audit/run-commit-push-audit.sh"
   if [[ -r "$headless_auditor" ]]; then
     AUDITOR_SESSION_SCOPE="$hook_session_scope" \

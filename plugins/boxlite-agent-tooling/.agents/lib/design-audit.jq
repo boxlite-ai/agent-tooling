@@ -1,6 +1,7 @@
 # Design-research loop state (design #309): one record per worktree, bound to root and
 # branch. A cycle ends with PASS, OVERRIDDEN or Redesign; FAILs count until then.
 include "audit-reflection-contract";
+include "audit-reconciliation";
 def da_keys: ["advisories","branch","content_sha256","extra","failures","findings",
   "overruled","reflection","root","stop","url","verdict"];
 def da_line: type == "string" and length >= 1 and length <= 500 and (test("[[:cntrl:]]") | not);
@@ -9,7 +10,10 @@ def da_empty($root; $branch):
   {root:$root, branch:$branch, url:"", content_sha256:"", verdict:"NONE", findings:[],
    advisories:[], failures:[], stop:"none", extra:false, reflection:null, overruled:[]};
 def da_valid:
-  keys == da_keys and all(.url, .content_sha256; type == "string")
+  (del(.deadline_review) | keys) == da_keys and all(.url, .content_sha256; type == "string")
+  and (.deadline_review == null or (.deadline_review |
+    ar_keys(["deadline","recorded_at"]) and all(.deadline,.recorded_at; ar_timestamp)
+    and .recorded_at >= .deadline))
   and (.verdict | IN("NONE","PASS","FAIL","OVERRIDDEN"))
   and all(.findings, .advisories, .overruled; da_lines)
   and (.failures | type == "array" and length <= 64 and all(.[]; type == "string"))
@@ -69,6 +73,7 @@ def da_record($v; $url; $digest):
       end
     | .url = $url | .content_sha256 = $digest | .advisories = $v.advisories
     | .overruled = $overruled | .extra = false | .reflection = null
+    | del(.deadline_review) | if $v.deadline_review != null then . + {deadline_review:$v.deadline_review} else . end
   end;
 def da_reflect($body; $history):
   if (da_reflection_due | not) then error("no reflection is due")
@@ -81,9 +86,9 @@ def da_decide($choice; $url; $digest):
   elif $choice == "Overrule" then
     .overruled = ((if .url == $url then .overruled else [] end) + .findings | unique | .[:50])
     | .verdict = "OVERRIDDEN" | .findings = [] | .failures = [] | .stop = "none"
-    | .extra = false | .reflection = null | .url = $url | .content_sha256 = $digest
+    | .extra = false | .reflection = null | .url = $url | .content_sha256 = $digest | del(.deadline_review)
   elif $choice == "Reflect again" then .extra = true | .reflection = null
   elif $choice == "Redesign" then
     .verdict = "NONE" | .findings = [] | .advisories = [] | .failures = [] | .stop = "none"
-    | .extra = false | .reflection = null | .url = $url | .content_sha256 = $digest
+    | .extra = false | .reflection = null | .url = $url | .content_sha256 = $digest | del(.deadline_review)
   else error("unknown research decision") end;

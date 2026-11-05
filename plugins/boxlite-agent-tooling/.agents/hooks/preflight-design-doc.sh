@@ -151,8 +151,9 @@ deadline="$(design_doc_audit_task "$(jq -r .repo_root <<<"$request")" \
 if ! criteria="$(subagent_prompt audit/design-criteria "$plugin_root" "plugin_root=$plugin_root")" \
    || ! outline="$(subagent_prompt audit/design-outline "$plugin_root")" \
    || ! privacy="$(subagent_prompt audit/probe-privacy "$plugin_root")" \
+   || ! deadline_policy="$(subagent_prompt audit/deadline-policy "$plugin_root")" \
    || ! task="$(subagent_prompt audit/design-task "$plugin_root" \
-     "audit_criteria=$criteria"$'\n\n'"$outline"$'\n\n'"$privacy" "deadline=$deadline" \
+     "audit_criteria=$criteria"$'\n\n'"$outline"$'\n\n'"$privacy"$'\n\n'"$deadline_policy" "deadline=$deadline" \
      "task_input_json=$task_input")" \
    || ! instruction="$(subagent_instruction --agent design-auditor --root "$plugin_root" \
      --description 'Design audit' --task "$task")"; then

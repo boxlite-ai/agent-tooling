@@ -22,7 +22,7 @@
 #      Claude — headless stream-json with the auditor spec as system prompt, tools
 #      whitelisted, hooks disabled (no nested gates). At the configured deadline,
 #      subagent_timed_drive asks for the dossier; it stops the CLI 60 s later.
-#      Codex — read-only, hooks disabled, ephemeral, stopped at the deadline. Codex writes
+#      Codex — read-only, hooks disabled, ephemeral, bounded record window. Codex writes
 #      only its final response through the host-owned --output-last-message channel;
 #      the parent runner validates and publishes those bytes.
 #   3. No matching CLI → exit 2 with instructions (the caller sees why).
@@ -133,19 +133,14 @@ audit_host="$(hook_host_kind)" || {
   printf 'run-verdict-audit.sh: shared host detector is unavailable.\n' >&2
   exit 2
 }
-# The runner is chosen before the lease, which must cover its stop. The Claude route gets
-# its record message at the deadline, an interrupt 30 s later if it is still undelivered,
-# and its stop 60 s after the deadline, capped at the maximum. The default model
-# budget is 240 s; an unfinished record still fails closed. Other routes stop at the deadline.
+# Every route gets a bounded record window. Claude also receives a live record message;
+# Codex and overrides receive the investigation deadline in their launch prompt.
 audit_runner=none
-audit_stop_seconds="$audit_timeout_seconds"
+audit_stop_seconds="$(subagent_timed_stop_seconds "$audit_timeout_seconds" "$max_audit_timeout_seconds")" || exit 2
 if [[ -n "${VERDICT_AUDITOR_CMD:-}" ]]; then
   audit_runner=override
 elif [[ "$audit_host" != codex ]] && command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
   audit_runner=claude
-  audit_stop_seconds="$(( audit_timeout_seconds + 60 ))"
-  (( audit_stop_seconds <= max_audit_timeout_seconds )) \
-    || audit_stop_seconds="$max_audit_timeout_seconds"
 elif [[ "$audit_host" != claude ]] && codex_bin="$(codex_cli_find)" && [[ -r "$spec_file" ]]; then
   audit_runner=codex
 fi
@@ -969,15 +964,17 @@ compute_audit_tree_hash() {
 
 expected_branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || printf '')"
 expected_head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || printf '')"
+investigation_deadline="$(( $(date +%s) + audit_timeout_seconds ))"
 if [[ "$session_scope" != "-" ]]; then
   reflection_context="$(jq -nc --arg root "$project_dir" --arg session "$session_scope" \
     --arg epoch "${audit_prompt_epoch:-0}" --arg branch "${expected_branch:-HEAD}" \
     '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"verdict"}')" || exit 2
   history_tree="$(compute_audit_tree_hash)" || exit 2
   history_input="$(jq -nc --arg branch "$expected_branch" --arg head "$expected_head" \
-    --arg tree "$history_tree" --arg generation "$audit_generation" --slurpfile turn "$history_snapshot_path" \
+    --arg tree "$history_tree" --arg generation "$audit_generation" --argjson deadline "$investigation_deadline" \
+    --slurpfile turn "$history_snapshot_path" \
     '{binding:{branch:$branch,head:$head,tree_hash:$tree,generation:$generation},
-      snapshot:{transcript:$turn,tree:$tree}}')" || exit 2
+      snapshot:{transcript:$turn,tree:$tree},deadline:$deadline}')" || exit 2
   history_request="$(audit_reflection_gate "$reflection_context" prepare "$audit_token" "$history_input")" || exit 2
   reflection_pending=true
   history_path="$(jq -r .history_path <<<"$history_request")"
@@ -1008,6 +1005,8 @@ fi
 validation_prompt="$(subagent_prompt audit/dossier-validation "$tooling_root" \
   "validator_json=$(jq -nc --arg path "$tooling_root/scripts/validate-audit-dossier.sh" '{path:$path}')")" || exit 2
 audit_prompt+=$'\n\n'"$validation_prompt"
+audit_prompt+=$'\nRuntime investigation deadline (Unix seconds): '"$investigation_deadline"
+audit_prompt+=$'\n\n'"$(subagent_prompt audit/deadline-policy "$tooling_root")" || exit 2
 if [[ -n "$history_path" ]]; then
   reflection_prompt="$(subagent_prompt audit/audit-reflection "$tooling_root")" || exit 2
   audit_prompt+=$'\nHistory schema JSON: '"$(jq -nc --arg path "$tooling_root/.agents/hooks/audit/commit-push-audit.schema.json" '{path:$path}')"
@@ -1247,7 +1246,7 @@ if [[ "$audit_runner" == override ]]; then
   rm -f "$audit_output_file"
   if ! run_in_audit_group \
       "$audit_prompt" \
-      perl -e 'alarm shift; exec @ARGV' "$audit_timeout_seconds" \
+      perl -e 'alarm shift; exec @ARGV' "$audit_stop_seconds" \
         bash -c "$VERDICT_AUDITOR_CMD"; then
     rm -f "$audit_output_file"
     remove_owned_verdict while-current
@@ -1289,7 +1288,7 @@ elif [[ "$audit_runner" == codex ]]; then
     "spec_body=$spec_body" "audit_prompt=$audit_prompt" "codex_tree_hash=$codex_tree_hash")" || exit 2
   if ! run_in_audit_group \
       "$codex_prompt" \
-      perl -e 'alarm shift; exec @ARGV' "$audit_timeout_seconds" \
+      perl -e 'alarm shift; exec @ARGV' "$audit_stop_seconds" \
         "$codex_bin" --ask-for-approval never \
           exec \
           --disable hooks \
