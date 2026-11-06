@@ -34,18 +34,20 @@ two consecutive fix-attempt-induced material defects → DIVERGED → split or r
 ## Preserve the review surface
 
 Freeze the objective, scoped instruction/spec set, full OID, snapshot, and surface.
-Bind `change_objective_digest` and `applicable_instructions_digest` through reviewer
-request/receipt and fixer dispatch/candidate. Drift is `INPUT_ERROR`; changed intent
-requires rebaseline. Union every fix delta and retain lifecycle/adjacent evidence.
+
+- Bind `change_objective_digest` and `applicable_instructions_digest` through reviewer request/receipt and fixer dispatch/candidate.
+- Drift is `INPUT_ERROR`; changed intent requires rebaseline.
+- Union every fix delta and retain lifecycle/adjacent evidence.
 
 Before each review, run bounded local forward/reverse-reference, schema/event,
 lifecycle, and variant discovery. Add validated adjacent contracts first. Incomplete or
 opaque discovery cannot authorize public review or zero.
 
-Preserve an immutable pre-attempt snapshot; a fingerprint is not one. Bind red proof to
-the finding's immutable defect snapshot, not an already-fixed correction snapshot.
-Reuse it only while snapshot, reproducer, adapter, and signal are unchanged. Run
-restores and mutants separately in disposable copies, never the authoritative tree.
+Preserve an immutable pre-attempt snapshot; a fingerprint is not one.
+
+- Bind red proof to the finding's immutable defect snapshot, not an already-fixed correction snapshot.
+- Reuse it only while snapshot, reproducer, adapter, and signal are unchanged.
+- Run restores and mutants separately in disposable copies, never the authoritative tree.
 
 Each receipt binds the fingerprint and classifies every surface/adjacent item full,
 partial, or unread. Inherited context is not coverage; zero requires no partial/unread.

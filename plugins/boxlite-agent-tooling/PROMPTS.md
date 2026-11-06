@@ -22,6 +22,14 @@ Edit runtime instructions and questions in Markdown; code owns routing, serializ
 
 Use a qualified name, such as `subagent_prompt audit/commit-push-task "$root" ...`; lookup is relative to the prompt root. Keep templates one directory below that root and update callers, fixtures, and guidance when moving them.
 
-Templates declare `used-by` and `placeholders`. `subagent_prompt` reads them on each call, strips metadata, and substitutes explicit values literally. Missing, blank, or unresolved templates fail before dispatch. JSON question templates receive escaped string contents or complete JSON values.
+Templates declare `used-by` and `placeholders`.
 
-Keep error/status diagnostics, usage help, protocol markers, commands, and user-supplied text in code. Preserve output limits and test runtime edits through callers. The optional standalone reminder stays best effort. Do not modify the protected writing skill without explicit authorization.
+- `subagent_prompt` reads them on each call, strips metadata, and substitutes explicit values literally.
+- Missing, blank, or unresolved templates fail before dispatch.
+- JSON question templates receive escaped string contents or complete JSON values.
+
+Keep error/status diagnostics, usage help, protocol markers, commands, and user-supplied text in code.
+
+- Preserve output limits and test runtime edits through callers.
+- The optional standalone reminder stays best effort.
+- Do not modify the protected writing skill without explicit authorization.

@@ -160,105 +160,88 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 Workflow and writing reminders reference `boxlite-writing` by name; the host loads
 its instructions. Try: "Use boxlite-writing to shorten this PR description."
 
-After a push, the Git hook starts the PR watcher. Codex setup requests one ten-minute
-schedule per chat to keep watchers alive and report new events. Scheduled and
-foreground turns report before acknowledging handled events. Empty scheduled reads
-emit no events; consumers omit routine status prose. Visible silence depends on
-the host and requires separate verification. Scheduled input rows remain visible.
-Pauses, mutes, and opt-outs remain in force.
-Claude uses Monitor; desktop alerts require separate host verification.
-See the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
+After a push, the Git hook starts the PR watcher.
+
+- Codex setup requests one ten-minute schedule per chat to keep watchers alive and report new events.
+- Scheduled and foreground turns report before acknowledging handled events.
+- Empty scheduled reads emit no events; consumers omit routine status prose.
+- Visible silence depends on the host and requires separate verification.
+- Scheduled input rows remain visible.
+- Pauses, mutes, and opt-outs remain in force.
+- Claude uses Monitor; desktop alerts require separate host verification.
+- See the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
 
 Monitoring intent and pending events survive execution-session replacement.
-From the watched worktree, register once with
-`bash <plugin-root>/.agents/watch/pr-watch-session.sh --start --branch <branch> --pr <number>`.
-Subsequent calls without `--start` return bounded pending events and reconcile the
-producer. Acknowledge reported event IDs with `--ack <id>`; use `--cancel` to stop.
-Recovery honors the original deadline. Full pending storage stops polling until
-drained; host and OS settings still control desktop notifications.
+
+- From the watched worktree, register once with `bash <plugin-root>/.agents/watch/pr-watch-session.sh --start --branch <branch> --pr <number>`.
+- Subsequent calls without `--start` return bounded pending events and reconcile the producer.
+- Acknowledge reported event IDs with `--ack <id>`; use `--cancel` to stop.
+- Recovery honors the original deadline.
+- Full pending storage stops polling until drained; host and OS settings still control desktop notifications.
 
 For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh) retries recorded transient failures within bounded budgets. It requires `claude`, `jq`, `curl`, the failure-recording hook, and a matching `CLAUDE_PROJECT_DIR`.
 
 ### Google Code Review skill
 
-Use `google-code-review` for Google's reviewer standards, coverage, navigation,
-comments, pushback, and review timing. The skill includes the pinned source guide
-and adapts its application to repository requirements. Both commit/push auditor
-routes load it; required checks, coverage, and verdict rules still govern.
+Use `google-code-review` for reviewer standards, coverage, navigation, comments, pushback, and timing.
+
+- The condensed guide retains its pinned source and attribution; repository requirements govern its application.
+- Both commit/push auditor routes load it; required checks, coverage, and verdict rules still apply.
+
 Try: "Use google-code-review to review this diff."
 
 ### BoxLite Clean Code skill
 
-Use `boxlite-clean-code` to connect concrete maintainability problems to small changes
-while preserving contracts, resource ownership, and repository conventions.
+Use `boxlite-clean-code` for small maintainability improvements that preserve contracts, ownership, and repository conventions.
+
+- Before non-obvious algorithm, layout, protocol, ownership, or concurrency work, read its comment guidance for visual models and worked examples.
+- The [example index](plugins/boxlite-agent-tooling/.agents/skills/boxlite-clean-code/references/examples.md) routes concerns to focused addons; load only relevant topics.
+- For standalone use, copy the whole skill directory, including `references/`; no helper scripts or plugin dependencies are required.
+- Repository workflow stays in `AGENTS.md`.
+
 Try: "Use boxlite-clean-code to review this module's error handling without editing it."
 
-For non-obvious algorithms, layouts, protocols, ownership, or concurrency, the
-skill directs agents to its comment guidance before implementation or review.
-That guidance teaches visual layouts, algorithm traces, and worked calculations.
 Try: "Implement this search and explain duplicate handling with a worked trace."
-
-The plugin exposes the skill through its existing shared skills directory.
-For standalone sharing, copy the entire `boxlite-clean-code` directory into a skill
-location supported by your agent, including its `references/` directory. The core
-keeps essential principles and verification guidance; the
-[example index](plugins/boxlite-agent-tooling/.agents/skills/boxlite-clean-code/references/examples.md)
-routes concrete coding concerns to focused addons. Load only the relevant topics.
-There are no helper scripts or plugin dependencies. Repository workflow rules
-remain in `AGENTS.md`; the skill supplies focused engineering guidance.
 
 ### Reading highlights
 
-Use `boxlite-reading-highlights` to select short source phrases across a text.
-It aims for five highlighted words per sentence, expanding when meaning requires
-it; an explicitly requested hard limit takes precedence. Selections preserve
-conditions and negation, with skip reasons when meaningful partial selection fails.
+Use `boxlite-reading-highlights` to select exact source phrases while preserving conditions and negation.
+
+- Aim for five highlighted words per sentence; expand when meaning requires it, unless an explicit hard limit applies.
+- Explain skipped selections when meaningful partial highlighting fails.
+- Text selection needs no browser; page highlighting uses the optional browser guide and verifies coverage and text preservation.
+- Long scopes use one extraction, reviewed plans, and authorized text-only workers; one owner applies the result.
+- Before batch application or cache reuse, verify live text, sentence fingerprints, scope, and settings; reload clears temporary marks.
 
 Try: “Use boxlite-reading-highlights on this article; return the selected phrases.”
-Plain-text selection needs no browser. Applying yellow highlights to a page uses
-the optional browser reference and verifies actual coverage and text preservation.
-
-For long pages or multiple chapters, the skill prepares reviewed plans from one
-extraction and supports bounded text-only workers when authorized. Browser
-application checks live text and sentence fingerprints before applying ranges in
-batches. Cached plans can be reused after validation; refreshing clears temporary
-marks, and cache data does not automatically restore them.
 
 ### Distill knowledge and implementations
 
-Use `boxlite-distill` to reduce a topic or system to the core needed to understand
-or reproduce one behavior. It retains an element when removing it would break the
-explanation, a necessary condition, or that behavior. A whole-system request gets
-an overview of its major responsibilities and connections; selected deep dives
-do not replace that coverage. A requested implementation preserves one complete
-instance of the system's defining behavior. An explicitly requested subsystem
-stays narrow. For codebases, actual types or modules explain responsibilities,
-important state, interfaces, and collaboration, then map to the reduced example.
+Use `boxlite-distill` to extract the core needed to understand or reproduce one behavior.
+
+- Retain anything whose removal would break the explanation, a necessary condition, or defining behavior.
+- Whole-system requests cover major responsibilities and connections; deep dives supplement that overview, while subsystem requests stay narrow.
+- Codebase explanations connect actual types, state, interfaces, ownership, and collaboration to a reduced example.
+- Choose the knowledge guide, implementation guide, or both; return the goal, core, demonstration, omissions, and verification.
+- Keep essential roles, a causal example, run commands, and limits in the main lesson; link detailed internals and proof.
+- Match notation to the reader; explain unfamiliar syntax, and report unavailable runtimes and other verification gaps.
+- Requested implementations are separate learning artifacts unless source modification was requested; code explanations alone require no generated code.
 
 Try: "Use boxlite-distill to explain this module's core mechanism," or
 "Extract a minimal runnable example with boxlite-distill."
-The skill selects a knowledge guide, an implementation guide, or both, then returns
-the goal, essential core, demonstration, omissions, and verification. Code inputs
-can be explained without generating code; requested implementations are separate
-learning artifacts unless source modification was requested. Unavailable runtimes
-remain explicit verification gaps. Representations match the reader's background;
-unfamiliar syntax is explained. The main lesson retains essential roles, a causal
-example, run commands, and limits; deeper internals, layouts, encodings, and proof
-sit behind links. Coverage, fidelity, execution, reader sufficiency, and evidence
-completeness have separate results. Missing required checks prevent a complete
-verdict. The [usage evaluation workflow](plugins/boxlite-agent-tooling/tests/boxlite_distill/README.md)
-keeps source fixtures, frozen artifacts, and evidence budgets outside the skill.
+
+Coverage, fidelity, execution, reader sufficiency, and evidence completeness have separate results; missing required checks prevent a complete verdict.
+
+The [usage evaluation workflow](plugins/boxlite-agent-tooling/tests/boxlite_distill/README.md) keeps source fixtures, frozen artifacts, and evidence budgets outside ordinary skill use.
 
 ### Optional prompt reminders
 
-For prompt-only reminders, copy [rule-recency.sh](plugins/boxlite-agent-tooling/.agents/hooks/rule-recency.sh)
-and its [Markdown companion](plugins/boxlite-agent-tooling/.agents/hooks/rule-recency.md)
-to the consumer's `.agent-tooling/` directory and use the [Codex](templates/codex-hooks.json)
-or [Claude](templates/claude-settings.json) template. The host must discover
-`boxlite-writing`; the copied hook references its name without embedding its rules.
-The companion is read on each invocation; missing files remain best effort and do
-not block prompts. Edit the companion to change the reminder.
-Set `consumer` to the destination repository before running the recipe below.
+For prompt-only reminders, copy [rule-recency.sh](plugins/boxlite-agent-tooling/.agents/hooks/rule-recency.sh) and its [Markdown companion](plugins/boxlite-agent-tooling/.agents/hooks/rule-recency.md) to the consumer's `.agent-tooling/` directory and use the [Codex](templates/codex-hooks.json) or [Claude](templates/claude-settings.json) template.
+
+- The host must discover `boxlite-writing`; the copied hook references its name without embedding its rules.
+- The companion is read on each invocation; missing files remain best effort and do not block prompts.
+- Edit the companion to change the reminder.
+- Set `consumer` to the destination repository before running the recipe below.
 
 Claude Code needs a **merge**, not a copy — `.claude/settings.json` also carries keys
 such as `env`, and overwriting it would drop them:
@@ -306,7 +289,11 @@ A hold constrains repository tooling; it does not silently roll back host plugin
 
 After 0.1.35 merges, run the existing installer, then replace all three `.agent-tooling/*.sh` files listed above with the released templates. Review and commit the consumer changes; merge customizations explicitly. Keep the older scripts for a hold pinned below 0.1.35.
 
-The host scripts become loaders for the adopted package. The consumer installer delegates later adoptions to that package too, retaining its self-contained first-install fallback. Later updater fixes arrive with releases; automatic refresh leaves tracked scripts and guidance alone. A missing compatible runtime fails with migration instructions.
+The host scripts become loaders for the adopted package.
+
+- The consumer installer delegates later adoptions to that package too, retaining its self-contained first-install fallback.
+- Later updater fixes arrive with releases; automatic refresh leaves tracked scripts and guidance alone.
+- A missing compatible runtime fails with migration instructions.
 
 ## Develop and contribute
 

@@ -34,10 +34,11 @@ flowchart TB
     changed retain@-->|"No"| keep
 ```
 
-Refresh honors holds, interval checks, and a lock. Lifecycle-triggered installs
-defer committed guidance edits. Explicit installation updates those instructions;
-`setup.sh` validates the profile and configures hooks. Verification stays local
-and works offline.
+Refresh honors holds, interval checks, and a lock.
+
+- Lifecycle-triggered installs defer committed guidance edits.
+- Explicit installation updates those instructions; `setup.sh` validates the profile and configures hooks.
+- Verification stays local and works offline.
 
 Design, audit-history, and confirmation commands are separate entry points. Their
 wrappers validate arguments and dependencies, then call libraries under
@@ -61,18 +62,19 @@ read-only; omitting the argument keeps the current-checkout behavior.
 | [sync-guidance.sh](sync-guidance.sh) `[--check\|--check-current\|--force] [repo-root]` | Splice canonical workflow into consumer instructions. `--check` validates integrity; `--check-current` also rejects stale content; `--force` permits updating modified instruction files. |
 | [check-writing-ownership.sh](check-writing-ownership.sh) `[repo-root]` | Check generated guidance and scan repository Markdown for copied rules owned by `boxlite-writing`. |
 
-Lifecycle-triggered installs defer instruction edits. Run the consumer installer
-explicitly to update committed guidance. Lifecycle events attempt background
-refresh at most once every 15 minutes, sharing the stamp with session startups.
-`AGENT_TOOLING_REFRESH=0` disables automatic checks and
-`AGENT_TOOLING_REFRESH_MINUTES` changes the interval. Failed network attempts back
-off too; invalid profiles fail. A busy refresh skips without breaking its lock.
+Lifecycle-triggered installs defer instruction edits.
 
-Network commands have 30-second limits within a 30-second refresh or 120-second
-host phase. `AGENT_TOOLING_COMMAND_TIMEOUT_SECONDS` can shorten each command's
-limit to 1–30 seconds. The standalone first-install fallback still relies on its
-caller's deadline. Native CLI failures are visible; an updated repository and a
-host installation are separate transactions.
+- Run the consumer installer explicitly to update committed guidance.
+- Lifecycle events attempt background refresh at most once every 15 minutes, sharing the stamp with session startups.
+- `AGENT_TOOLING_REFRESH=0` disables automatic checks and `AGENT_TOOLING_REFRESH_MINUTES` changes the interval.
+- Failed network attempts back off too; invalid profiles fail.
+- A busy refresh skips without breaking its lock.
+
+Network commands have 30-second limits within a 30-second refresh or 120-second host phase.
+
+- `AGENT_TOOLING_COMMAND_TIMEOUT_SECONDS` can shorten each command's limit to 1–30 seconds.
+- The standalone first-install fallback still relies on its caller's deadline.
+- Native CLI failures are visible; an updated repository and a host installation are separate transactions.
 
 ## Design, review, and audit history
 
@@ -85,14 +87,15 @@ host installation are separate transactions.
 | [audit-reflection-gate.sh](audit-reflection-gate.sh) `CONTEXT OPERATION [ATTEMPT_ID]` | Adapt audit history to scoped gates: validate context, snapshot evidence, and reconcile outcomes; payload JSON arrives on stdin. |
 | [validate-audit-dossier.sh](validate-audit-dossier.sh) `verdict\|commit\|push HISTORY [DOSSIER]` | Read-only candidate validation; `-` means no history or dossier on stdin; writes no audit state or approval. |
 
-Before delivery, run the validator with the task's immutable history input and
-candidate. It checks shape, captured bindings, coverage, dispositions, and reflection
-through the parent's shared rules. Correct errors and rerun within the audit deadline.
-Success emits `{"valid":true,"scope":"history"}`; without history it reports
-`scope:shape`. The parent still checks live state and controls acceptance.
-Exit codes: 0 valid, 1 invalid candidate/history, 2 usage, dependency, or input-read
-failure. Reads reject NUL and unsafe file types; limits are 1 MiB for dossiers,
-10 MiB for history, and five seconds for stdin. No network or Git operation is needed.
+Before delivery, run the validator with the task's immutable history input and candidate.
+
+- It checks shape, captured bindings, coverage, dispositions, and reflection through the parent's shared rules.
+- Correct errors and rerun within the audit deadline.
+- Success emits `{"valid":true,"scope":"history"}`; without history it reports `scope:shape`.
+- The parent still checks live state and controls acceptance.
+- Exit codes: 0 valid, 1 invalid candidate/history, 2 usage, dependency, or input-read failure.
+- Reads reject NUL and unsafe file types; limits are 1 MiB for dossiers, 10 MiB for history, and five seconds for stdin.
+- No network or Git operation is needed.
 
 From a consumer checkout, `bash <plugin-root>/scripts/design-doc.sh check`
 revalidates its registered design; `show` also prints it, which is how auditors
@@ -115,15 +118,16 @@ See [state contracts](../ARCHITECTURE.md#state-files) and the
 | [resume-on-network-error.sh](resume-on-network-error.sh) `[--max-restarts N] [--max-wait SECONDS] [--probe-url URL] [--] <prompt> [claude args...]` | Supervise `claude -p`, retry eligible API failures within budgets, and print final result JSON. |
 
 Git preparation checks the three-failure decision under the history lock.
-`checkpoint` checks the same decision without creating an attempt; it returns
-exit 2 while waiting or stopped. Five-minute expiry permits one reflected retry,
-preserving failed outcomes. See [retry choices](../CONTRIBUTING.md#commitpush-retry-choices).
 
-The recovery wrapper needs [record-api-failure.sh](../.agents/hooks/record-api-failure.sh)
-and a matching `CLAUDE_PROJECT_DIR`. Defaults allow 50 restarts and six hours of
-total waiting; unknown failure kinds get a smaller budget. Run it with `--help`
-for exit codes. Interactive recovery uses a separate
-[StopFailure hook](../.agents/hooks/resume-after-api-failure.sh).
+- `checkpoint` checks the same decision without creating an attempt; it returns exit 2 while waiting or stopped.
+- Five-minute expiry permits one reflected retry, preserving failed outcomes.
+- See [retry choices](../CONTRIBUTING.md#commitpush-retry-choices).
+
+The recovery wrapper needs [record-api-failure.sh](../.agents/hooks/record-api-failure.sh) and a matching `CLAUDE_PROJECT_DIR`.
+
+- Defaults allow 50 restarts and six hours of total waiting; unknown failure kinds get a smaller budget.
+- Run it with `--help` for exit codes.
+- Interactive recovery uses a separate [StopFailure hook](../.agents/hooks/resume-after-api-failure.sh).
 
 See [timed confirmations](../ARCHITECTURE.md#timed-confirmations) for supported
 host modes and response rules.
@@ -139,9 +143,8 @@ bash plugins/boxlite-agent-tooling/scripts/refresh-installation.test.sh
 make test:bootstrap
 ```
 
-Most commands have adjacent `*.test.sh` suites. Installation also uses
-[template tests](../../../templates/install.test.sh) and
-[Git lifecycle tests](../.githooks/lifecycle.test.sh). `audit-history-*.test.sh`,
-`audit-reconciliation.test.sh`, and `audit-reflection-*.test.sh` cover shared
-history behavior; `claude-timed-*.test.sh` cover launcher and question integration.
-`fixtures/` contains test helpers, not operator commands.
+Most commands have adjacent `*.test.sh` suites.
+
+- Installation also uses [template tests](../../../templates/install.test.sh) and [Git lifecycle tests](../.githooks/lifecycle.test.sh).
+- `audit-history-*.test.sh`, `audit-reconciliation.test.sh`, and `audit-reflection-*.test.sh` cover shared history behavior; `claude-timed-*.test.sh` cover launcher and question integration.
+- `fixtures/` contains test helpers, not operator commands.

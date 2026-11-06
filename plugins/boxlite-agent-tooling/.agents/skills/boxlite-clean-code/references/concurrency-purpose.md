@@ -18,12 +18,11 @@ Before: fetch A → parse A → fetch B → parse B → merge
 After:  bounded workers fetch/parse A and B independently → ordered merge
 ```
 
-**Modern adaptation:** cap active requests and queued work, apply per-request and
-whole-job deadlines, and retain each site's success/failure. The book's idealized
-one-second fetch and half-second parse illustrates overlap, not a performance
-promise. **Check:** same required results, deliberate partial-failure policy,
-provider limits, measured completion time. **Limit:** shared bandwidth, CPU, and
-rate limits can dominate; concurrency may make them worse.
+**Modern adaptation:** cap active requests and queued work, apply per-request and whole-job deadlines, and retain each site's success/failure.
+
+- The book's idealized one-second fetch and half-second parse illustrates overlap, not a performance promise.
+- **Check:** same required results, deliberate partial-failure policy, provider limits, measured completion time.
+- **Limit:** shared bandwidth, CPU, and rate limits can dominate; concurrency may make them worse.
 
 ## A queue of users: latency differs from throughput
 
@@ -36,9 +35,10 @@ After:  requests use bounded concurrent capacity;
 ```
 
 **Why:** executing independent waiting work together can reduce queue delay.
-**Check:** successful completions, queue time, service time, and rejection behavior
-at saturation. **Limit:** increasing threads cannot create an unavailable database
-connection or additional CPU capacity. A faster rejected request is not success.
+
+- **Check:** successful completions, queue time, service time, and rejection behavior at saturation.
+- **Limit:** increasing threads cannot create an unavailable database connection or additional CPU capacity.
+- A faster rejected request is not success.
 
 ## Large data sets: partition before merging
 
@@ -51,10 +51,10 @@ After:  partials = bounded_map(partition → evaluate_partition(partition))
 ```
 
 **Why:** independent ownership removes shared accumulator races.
-**Check:** every input belongs to one partition; empty/failed partitions are handled;
-results match the required ordering and numerical contract. **Limit:** floating
-point and other non-associative merges may change when regrouped. Distribution
-adds failure and retry semantics; local parallelism is not a transparent substitute.
+
+- **Check:** every input belongs to one partition; empty/failed partitions are handled; results match the required ordering and numerical contract.
+- **Limit:** floating point and other non-associative merges may change when regrouped.
+- Distribution adds failure and retry semantics; local parallelism is not a transparent substitute.
 
 ## Servlet state: local references can still share objects
 
@@ -86,7 +86,7 @@ After:  snapshot = freeze_required_input()
 ```
 
 **Why:** ownership narrows the places where the result can change.
-**Check:** snapshot depth, stable inputs, duplicate handling, failure policy, and
-memory use. **Limit:** shallow copies can still share mutable children; a snapshot
-may intentionally become stale. Measure allocation and lock costs for the actual
-workload instead of adopting the book's broad performance predictions.
+
+- **Check:** snapshot depth, stable inputs, duplicate handling, failure policy, and memory use.
+- **Limit:** shallow copies can still share mutable children; a snapshot may intentionally become stale.
+- Measure allocation and lock costs for the actual workload instead of adopting the book's broad performance predictions.

@@ -1,10 +1,10 @@
 # How to do a code review
 
-The pages in this section contain recommendations on the best way to do code
-reviews, based on long experience. All together they represent one complete
-document, broken up into many separate sections. You don't have to read them
-all, but many people have found it very helpful to themselves and their team to
-read the entire set.
+## TL;DR
+
+Use these condensed Google review guides by topic; the skill entrypoint defines local requirements, attribution, and the pinned source.
+
+## Guides
 
 -   [The Standard of Code Review](standard.md)
 -   [What to Look For In a Code Review](looking-for.md)

@@ -1,21 +1,18 @@
 # Round Fixer Prompt Template
 
-Construct the fixer prompt by filling every bracketed section. Spawn a fresh
-general-purpose agent with write/edit/shell capability only after the orchestrator has
-allocated a unique `fix_attempt_id`. Attempt A1 consumes a valid `FINDINGS` reviewer
-receipt; each later correction consumes the immediately preceding valid `BLOCKED`
-receipt for the same review round. Each spawn also receives a single-use
-`fix_dispatch_id`; a retry requires a bound prior dispatch rejection and unchanged
-authorization, snapshot, authoritative fingerprint, and projection.
+Construct the fixer prompt by filling every bracketed section.
+
+- Spawn a fresh general-purpose agent with write/edit/shell capability only after the orchestrator has allocated a unique `fix_attempt_id`.
+- Attempt A1 consumes a valid `FINDINGS` reviewer receipt; each later correction consumes the immediately preceding valid `BLOCKED` receipt for the same review round.
+- Each spawn also receives a single-use `fix_dispatch_id`; a retry requires a bound prior dispatch rejection and unchanged authorization, snapshot, authoritative fingerprint, and projection.
 
 Fill the REFLECT placeholder from [the skill's shared analysis procedure](../SKILL.md#reflect-before-fixing)
 with its complete section text, not a link; the fresh fixer has no inherited skill context.
 
-Before spawning, inspect the private ledger's sensitivity metadata. If any cumulative
-review item is opaque or likely-secret, route the entire prompt and workspace to an
-explicitly authorized local-only fixer, or return `INPUT_ERROR`. Never withhold the
-secret locator from an ordinary fixer while still requiring it to re-read the complete
-surface.
+Before spawning, inspect the private ledger's sensitivity metadata.
+
+- If any cumulative review item is opaque or likely-secret, route the entire prompt and workspace to an explicitly authorized local-only fixer, or return `INPUT_ERROR`.
+- Never withhold the secret locator from an ordinary fixer while still requiring it to re-read the complete surface.
 
 ---
 
@@ -51,11 +48,11 @@ Only the orchestrator updates the ledger. Treat this projection as immutable inp
 Include read-only artifacts for deleted/renamed entries; list adjacent contracts
 separately.]
 
-Re-read each present entry from disk and each non-present entry's validated prior
-blob/patch before changing anything. For symlinks, use only orchestrator-provided inert
-link-object evidence and never dereference the target. Do not treat inherited context
-as coverage. For gitlinks, inspect only inert OID/patch evidence; never enter or
-initialize a submodule.
+Re-read each present entry from disk and each non-present entry's validated prior blob/patch before changing anything.
+
+- For symlinks, use only orchestrator-provided inert link-object evidence and never dereference the target.
+- Do not treat inherited context as coverage.
+- For gitlinks, inspect only inert OID/patch evidence; never enter or initialize a submodule.
 
 ## Independent reviewer receipt or corrective BLOCKED receipt
 
@@ -69,14 +66,15 @@ FINDINGS receipt ID.]
 
 ## Boundary validation
 
-1. Validate `fix_attempt_id`, its append-only attempt record, and its consumed,
-   single-use authorization. A1 requires the exact accepted `FINDINGS` receipt and its
-   reviewed fingerprints. A2+ requires the exact `BLOCKED` receipt for A[M-1], its
-   current candidate fingerprint, and its bounded correction scope. Missing, malformed,
-   reused, stale, or wrong-surface evidence returns `INPUT_ERROR`; do not edit files or
-   invent review results.
-   For A2+, validate the structured permitted existing IDs, exact new paths, roles, and
-   required phases; the orchestrator discards/rejects any candidate outside that scope.
+1. Validate `fix_attempt_id`, its append-only attempt record, and its consumed, single-use authorization.
+
+   A1 requires the exact accepted `FINDINGS` receipt and its reviewed fingerprints.
+
+   A2+ requires the exact `BLOCKED` receipt for A[M-1], its current candidate fingerprint, and its bounded correction scope.
+
+   Missing, malformed, reused, stale, or wrong-surface evidence returns `INPUT_ERROR`; do not edit files or invent review results.
+
+   For A2+, validate the structured permitted existing IDs, exact new paths, roles, and required phases; the orchestrator discards/rejects any candidate outside that scope.
 2. A fixer never consumes an explicit `ZERO_FINDINGS`. That receipt belongs to the orchestrator's
    termination gate and must not be converted into a fixer result.
 3. Validate the orchestrator-owned divergence evaluation against this receipt and
@@ -99,35 +97,39 @@ For each finding:
    consecutive reviewer receipts attributing material defects to preceding attempts.
    If new contradictory evidence appears, return it as a proposal for orchestrator
    validation and re-evaluation.
-2. **Reproducer:** write a system-level test first and capture its test-only patch and
-   digest before changing production. Bind the red proof to the finding's immutable
-   defect snapshot, named by `red_snapshot_attempt_id` and digest. On A1 this is usually
-   the pre-attempt snapshot. On a corrective A2+, do not mislabel the already-fixed
-   pre-attempt tree as buggy: reuse a red receipt only when the defect snapshot,
-   reproducer, adapter, and expected signal digests are unchanged; otherwise rerun it
-   in an isolated disposable copy of that original defect snapshot. In that copy,
-   apply only that reproducer patch plus any approved
-   temporary test compatibility adapter. Capture the adapter as a protected immutable
-   patch with its digest and test/setup-only touched entries, then require the defect
-   signal. Never synthesize red by reverting this attempt's production delta or the
-   original loop-start implementation to the comparison base. A compile/setup-only
-   failure is `INVALID` unless it is the defect.
+2. **Reproducer:** write a system-level test first and capture its test-only patch and digest before changing production.
+
+   Bind the red proof to the finding's immutable defect snapshot, named by `red_snapshot_attempt_id` and digest.
+
+   On A1 this is usually the pre-attempt snapshot.
+
+   On a corrective A2+, do not mislabel the already-fixed pre-attempt tree as buggy: reuse a red receipt only when the defect snapshot, reproducer, adapter, and expected signal digests are unchanged; otherwise rerun it in an isolated disposable copy of that original defect snapshot.
+
+   In that copy, apply only that reproducer patch plus any approved temporary test compatibility adapter.
+
+   Capture the adapter as a protected immutable patch with its digest and test/setup-only touched entries, then require the defect signal.
+
+   Never synthesize red by reverting this attempt's production delta or the original loop-start implementation to the comparison base.
+
+   A compile/setup-only failure is `INVALID` unless it is the defect.
+
    Remove the adapter before the fixed pass and discard the copy afterward.
 3. **Plan and fix:** reference REFLECT, the assertion, decisive cheap check, smallest
    satisfying primitive, and adjacent contracts; implement using `boxlite-clean-code`.
-4. **Mutation preparation:** propose a semantic mutant for every new
-   finding. Capture each as a protected immutable patch with digest and expected touched
-   entries. Do not call it representative or claim it was killed. A fresh read-only
-   potency adjudicator must bind the finding invariant and mutant digest before the
-   orchestrator may use it. The orchestrator validates/applies the candidate, appends a
-   `fixed_snapshots` entry, and reruns fixed/mutant evidence in isolated copies.
-5. **Verification candidates:** prepare one structured recipe per reverted, fixed,
-   mutant, adjacent-contract, or executable-preflight phase with repository runner ID,
-   argv tokens, artifact digests, and expected outcome. The orchestrator supplies
-   snapshot/fingerprint, runs it, and records exit and decisive signal; counts or
-   provisional fixer runs are not proof. Report any suspected failure only as a
-   provisional blocker candidate; the orchestrator re-runs it and alone emits
-   `BLOCKED` with a phase-bound receipt and smallest correction.
+4. **Mutation preparation:** propose a semantic mutant for every new finding.
+
+   Capture each as a protected immutable patch with digest and expected touched entries.
+
+   Do not call it representative or claim it was killed.
+
+   A fresh read-only potency adjudicator must bind the finding invariant and mutant digest before the orchestrator may use it.
+
+   The orchestrator validates/applies the candidate, appends a `fixed_snapshots` entry, and reruns fixed/mutant evidence in isolated copies.
+5. **Verification candidates:** prepare one structured recipe per reverted, fixed, mutant, adjacent-contract, or executable-preflight phase with repository runner ID, argv tokens, artifact digests, and expected outcome.
+
+   The orchestrator supplies snapshot/fingerprint, runs it, and records exit and decisive signal; counts or provisional fixer runs are not proof.
+
+   Report any suspected failure only as a provisional blocker candidate; the orchestrator re-runs it and alone emits `BLOCKED` with a phase-bound receipt and smallest correction.
 6. **Audit:** search the validated changed-file argv for round narrative, `TODO.*round`,
    `HACK`, `FIXME`, `debugging`, and `TEMP`, using end-of-options and no shell-built path list.
 7. **Evidence proposal:** return proposed finding state, provenance, attempt delta,
@@ -234,16 +236,11 @@ verification_candidates:
     expected_result: EXPECTED_FAILURE | PASS | KILLED
 ```
 
-Phase matrix: `reverted` requires finding/reproducer and optional adapter; `fixed`
-requires finding/reproducer; `mutant` also requires its mutant artifact; `adjacent`
-requires adjacent-contract/check IDs; `preflight` requires a check ID plus either an
-executable runner or manual evidence. Every field outside its phase is
-`NOT_APPLICABLE`; contradictory combinations are `INPUT_ERROR`. Before verification,
-the orchestrator validates each `proposed_preflights` record, allocates its stable
-`check_id`, and rewrites every matching local reference. A class with at least two recorded occurrences
-and no valid installed preflight requires exactly one proposal;
-missing,
-duplicate, unbound, or digest-mismatched proposals are `INPUT_ERROR`.
+Phase matrix: `reverted` requires finding/reproducer and optional adapter; `fixed` requires finding/reproducer; `mutant` also requires its mutant artifact; `adjacent` requires adjacent-contract/check IDs; `preflight` requires a check ID plus either an executable runner or manual evidence.
+
+- Every field outside its phase is `NOT_APPLICABLE`; contradictory combinations are `INPUT_ERROR`.
+- Before verification, the orchestrator validates each `proposed_preflights` record, allocates its stable `check_id`, and rewrites every matching local reference.
+- A class with at least two recorded occurrences and no valid installed preflight requires exactly one proposal; missing, duplicate, unbound, or digest-mismatched proposals are `INPUT_ERROR`.
 
 The fresh potency adjudicator receives only the bound finding invariant/evidence,
 isolated candidate-snapshot interface contract, mutant artifact/digest, and touched entries. It
@@ -253,11 +250,11 @@ returns exactly:
 MUTANT_POTENCY_V1 {"potency_request_id":"...","fix_attempt_id":"R<N>-A<M>","finding_id":"R<N>-F<K>","finding_invariant_digest":"...","candidate_snapshot_digest":"...","mutant_local_id":"MUT#k","mutant_digest":"...","expected_kill_signal_digest":"...","decision":"representative|reject","observation":"semantic fault and exact kill signal are representative or mismatched"}
 ```
 
-Only `representative` permits mutant execution. Sensitive inputs require an authorized
-local-only adjudicator; stale, malformed, or rejected potency evidence is `INPUT_ERROR`.
-After acceptance, the orchestrator allocates the next stable mutant ID, persists the
-local-to-stable mapping, and rewrites every potency/recipe reference. Duplicate local
-IDs, digest collisions, or unmapped references are `INPUT_ERROR`.
+Only `representative` permits mutant execution.
+
+- Sensitive inputs require an authorized local-only adjudicator; stale, malformed, or rejected potency evidence is `INPUT_ERROR`.
+- After acceptance, the orchestrator allocates the next stable mutant ID, persists the local-to-stable mapping, and rewrites every potency/recipe reference.
+- Duplicate local IDs, digest collisions, or unmapped references are `INPUT_ERROR`.
 
 An evidence-bound-manual `adjacent` or `preflight` candidate supplies protected
 `evidence_artifact`/`evidence_digest` and uses `NOT_APPLICABLE` for runner, argv, and
@@ -265,33 +262,27 @@ runner/timeout/termination/exit fields, while retaining a bound signal predicate
 Executable checks do the reverse.
 
 Executable recipes must reference orchestrator-owned runner and finite timeout policies.
-The orchestrator resolves their contract digests; fixer text cannot define exit/signal
-semantics. The
-fixer cannot choose a raw deadline or claim a hang result. Only the orchestrator may
-record a bounded expected timeout after terminating and reaping the whole process group.
 
-For an existing path, `review_item_id` must match the ledger and the orchestrator checks
-its current identity. For a new path, the fixer uses `NOT_ASSIGNED` plus a normalized
-repository-relative path. Before accepting the candidate, the orchestrator rejects
-absolute paths, traversal, duplicate aliases, special files, and symlink escapes;
-uses `lstat`/`readlink` without dereference; checks the path against the actual tree;
-applies local no-log label/type/binary/content/hardlink sensitivity classification; allocates a stable
-surface-entry ID; and rewrites every artifact-local reference. A fixer never chooses a
-stable ledger ID for a newly created path.
+- The orchestrator resolves their contract digests; fixer text cannot define exit/signal semantics.
+- The fixer cannot choose a raw deadline or claim a hang result.
+- Only the orchestrator may record a bounded expected timeout after terminating and reaping the whole process group.
 
-Blob content comes only from the candidate copy. Because symlinks and gitlinks are
-inert there, their create/modify/delete/rename operations come only from these
-structured fields. The orchestrator validates kind transitions, raw link targets, and
-locally available full gitlink OIDs before safe apply; it never treats an inert metadata
-file as the target entry.
+For an existing path, `review_item_id` must match the ledger and the orchestrator checks its current identity.
 
-For each `proposed_adjacent_contracts` item, the orchestrator validates the normalized
-path with the same no-follow/sensitivity boundary and requires its content to be
-unchanged from the pre-attempt tree; changed entries belong in the surface delta. It
-then allocates the stable adjacent ID, validates/maps its check and finding references,
-rewrites verification candidates, and adds it before fingerprinting and verification.
-An absent or invalid executable/manual check rejects the proposal. The fixer does not
-award review coverage.
+- For a new path, the fixer uses `NOT_ASSIGNED` plus a normalized repository-relative path.
+- Before accepting the candidate, the orchestrator rejects absolute paths, traversal, duplicate aliases, special files, and symlink escapes; uses `lstat`/`readlink` without dereference; checks the path against the actual tree; applies local no-log label/type/binary/content/hardlink sensitivity classification; allocates a stable surface-entry ID; and rewrites every artifact-local reference.
+- A fixer never chooses a stable ledger ID for a newly created path.
+
+Blob content comes only from the candidate copy.
+
+- Because symlinks and gitlinks are inert there, their create/modify/delete/rename operations come only from these structured fields.
+- The orchestrator validates kind transitions, raw link targets, and locally available full gitlink OIDs before safe apply; it never treats an inert metadata file as the target entry.
+
+For each `proposed_adjacent_contracts` item, the orchestrator validates the normalized path with the same no-follow/sensitivity boundary and requires its content to be unchanged from the pre-attempt tree; changed entries belong in the surface delta.
+
+- It then allocates the stable adjacent ID, validates/maps its check and finding references, rewrites verification candidates, and adds it before fingerprinting and verification.
+- An absent or invalid executable/manual check rejects the proposal.
+- The fixer does not award review coverage.
 
 ## Rules
 

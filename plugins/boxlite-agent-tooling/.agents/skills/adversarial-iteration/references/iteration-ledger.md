@@ -1,16 +1,16 @@
 # Iteration Ledger Contract
 
-The ledger is the cumulative source of truth for one adversarial loop. Serialize it as
-a session-local artifact outside the repository and model context. Use a private
-directory/file (POSIX `0700`/`0600` or host equivalent), generation counter, content
-digest, and temp-file plus atomic replacement. Reload and validate it before every
-round. Round summaries are bounded projections, not replacements.
+The ledger is the cumulative source of truth for one adversarial loop.
+
+- Serialize it as a session-local artifact outside the repository and model context.
+- Use a private directory/file (POSIX `0700`/`0600` or host equivalent), generation counter, content digest, and temp-file plus atomic replacement.
+- Reload and validate it before every round.
+- Round summaries are bounded projections, not replacements.
 
 Canonicalize as UTF-8 JSON with sorted object keys and schema-defined array order.
-Compute the content hash with `ledger_digest` omitted, then store that value in the
-artifact; verification repeats the same omission. Canonicalize the surface fingerprint
-by stable item ID and include lifecycle, paths, ordered origins/attempt deltas, kind/mode,
-content/patch digests, and adjacent-contract digests.
+
+- Compute the content hash with `ledger_digest` omitted, then store that value in the artifact; verification repeats the same omission.
+- Canonicalize the surface fingerprint by stable item ID and include lifecycle, paths, ordered origins/attempt deltas, kind/mode, content/patch digests, and adjacent-contract digests.
 
 ## Initialization and surface
 
@@ -250,113 +250,92 @@ adjacent_contracts:
     check_digest: <check definition and assertion/invariant digest>
 ```
 
-Every reviewer, class-adjudicator, potency-adjudicator, and fixer invocation uses a
-fresh single-use ID, host-owned finite deadline, bounded input/result, and explicit
-cancellation. Before a class/potency dispatch, atomically append its pending request
-with parent, generation, projection, and deadline. Acceptance atomically consumes it
-with the bound decision/receipt and `adjudication_results`; rejection or timeout consumes it into
-`adjudication_request_rejections` and rejects the parent review request/fix dispatch in
-the same transition. Never retry a subordinate under the same parent; retry requires a
-fresh parent and subordinate ID within the parent's finite cap. Replays and late results
-are `INPUT_ERROR`. On
-timeout or output overflow, discard late output, cancel the task or
-terminate/reap its process group, atomically consume/reject the request or dispatch,
-and append `role_timeout_rejections`. Exhaustion is `INPUT_ERROR`.
-An adjudication result is usable only by its still-pending parent and exact chain; parent
-rejection leaves it immutable but orphaned and never reusable.
+Every reviewer, class-adjudicator, potency-adjudicator, and fixer invocation uses a fresh single-use ID, host-owned finite deadline, bounded input/result, and explicit cancellation.
+
+- Before a class/potency dispatch, atomically append its pending request with parent, generation, projection, and deadline.
+- Acceptance atomically consumes it with the bound decision/receipt and `adjudication_results`; rejection or timeout consumes it into `adjudication_request_rejections` and rejects the parent review request/fix dispatch in the same transition.
+- Never retry a subordinate under the same parent; retry requires a fresh parent and subordinate ID within the parent's finite cap.
+- Replays and late results are `INPUT_ERROR`.
+- On timeout or output overflow, discard late output, cancel the task or terminate/reap its process group, atomically consume/reject the request or dispatch, and append `role_timeout_rejections`.
+- Exhaustion is `INPUT_ERROR`.
+- An adjudication result is usable only by its still-pending parent and exact chain; parent rejection leaves it immutable but orphaned and never reusable.
 
 Resolve any branch/ref to the full commit object ID at loop start. Never store a moving
 name such as `main`; abort with `INPUT_ERROR` if the review checkout's comparison OID
 or HEAD changes during the loop.
 
-Freeze the exact user objective plus every applicable instruction/spec artifact before
-review. Resolve repository scope and precedence from the authorized root; record exact
-content, locators, and digests. Include the bounded authority artifacts and both
-digests in reviewer and fixer projections/receipts. Revalidate the protected authority
-snapshot—not a deliberately edited source file—before each dispatch/review. Drift,
-unresolved precedence, truncation, or conflict is `INPUT_ERROR`.
-Candidate intake rejects paths or behavior outside this immutable change contract;
-neither agent may broaden or reinterpret it. An instruction/spec source intentionally
-changed in the review surface is reviewed as output but does not become loop authority.
-External authority drift or a newly applicable external binding requires `INPUT_ERROR`;
-adopting proposed authority or changed user intent requires explicit rebaseline. Apply
-the same no-log sensitivity and projection boundary as review artifacts.
+Freeze the exact user objective plus every applicable instruction/spec artifact before review.
 
-Before capture or any projection, enumerate changed tracked and untracked entries
-without logging contents. Combine user/host sensitivity labels, path/type policy, and a
-local no-log content scan. Ambiguous encodings, unclassified binaries, high-risk secret
-patterns, or unavailable required scanning classify the item `likely-secret`; record
-only decision metadata/digests, never matched text. Reject special files, insufficient free space, absent finite limits, or a
-file/byte total over policy. Likely-secret paths stay out of prompts and logs, and their
-contents may enter only protected local snapshot storage. If private bounded capture
-is unavailable, return `INPUT_ERROR` before a fixer starts.
+- Resolve repository scope and precedence from the authorized root; record exact content, locators, and digests.
+- Include the bounded authority artifacts and both digests in reviewer and fixer projections/receipts.
+- Revalidate the protected authority snapshot—not a deliberately edited source file—before each dispatch/review.
+- Drift, unresolved precedence, truncation, or conflict is `INPUT_ERROR`.
+- Candidate intake rejects paths or behavior outside this immutable change contract; neither agent may broaden or reinterpret it.
+- An instruction/spec source intentionally changed in the review surface is reviewed as output but does not become loop authority.
+- External authority drift or a newly applicable external binding requires `INPUT_ERROR`; adopting proposed authority or changed user intent requires explicit rebaseline.
+- Apply the same no-log sensitivity and projection boundary as review artifacts.
 
-At loop start and after every authoritative-tree change, inspect entry identity with
-`lstat` and symlink text with `readlink`; never dereference a symlink during capture,
-review, restoration validation, or candidate intake. Resolve its target lexically from
-the link's parent only to classify it. Absolute or repository-escaping targets become
-`escaping`, likely-secret review items and may be handled only through inert link-object
-artifacts by explicitly authorized local-only agents; otherwise return `INPUT_ERROR`.
-Snapshots restore the link object, never copy or hash the target's contents.
+Before capture or any projection, enumerate changed tracked and untracked entries without logging contents.
+
+- Combine user/host sensitivity labels, path/type policy, and a local no-log content scan.
+- Ambiguous encodings, unclassified binaries, high-risk secret patterns, or unavailable required scanning classify the item `likely-secret`; record only decision metadata/digests, never matched text.
+- Reject special files, insufficient free space, absent finite limits, or a file/byte total over policy.
+- Likely-secret paths stay out of prompts and logs, and their contents may enter only protected local snapshot storage.
+- If private bounded capture is unavailable, return `INPUT_ERROR` before a fixer starts.
+
+At loop start and after every authoritative-tree change, inspect entry identity with `lstat` and symlink text with `readlink`; never dereference a symlink during capture, review, restoration validation, or candidate intake.
+
+- Resolve its target lexically from the link's parent only to classify it.
+- Absolute or repository-escaping targets become `escaping`, likely-secret review items and may be handled only through inert link-object artifacts by explicitly authorized local-only agents; otherwise return `INPUT_ERROR`.
+- Snapshots restore the link object, never copy or hash the target's contents.
 
 For regular files, record `st_nlink`. A multiply linked inode is `likely-secret` unless
 the host proves every link is inside the authorized root and ordinary. Never edit a
 hardlink in place; candidate application uses a new-file atomic replacement so no
 outside alias is mutated.
 
-Treat every submodule/gitlink as an inert commit-OID artifact. Never traverse,
-initialize, or read a populated submodule worktree during this loop. A dirty submodule
-worktree is `INPUT_ERROR` unless explicitly declared as a separate bounded review root
-with its own authorization, ledger, and snapshot. The superproject review inspects only
-the gitlink OID and patch.
+Treat every submodule/gitlink as an inert commit-OID artifact.
+
+- Never traverse, initialize, or read a populated submodule worktree during this loop.
+- A dirty submodule worktree is `INPUT_ERROR` unless explicitly declared as a separate bounded review root with its own authorization, ledger, and snapshot.
+- The superproject review inspects only the gitlink OID and patch.
 
 The private ledger may retain a likely-secret path and locator, but every non-local or
 unauthorized projection replaces them with `redacted_token` and omits content. Such an
 entry remains `unread` until an explicitly authorized local-only reviewer validates the
 private artifact; without that review, zero findings is impossible.
 
-The snapshot must actually restore changed tracked files, modes/types, symlink objects, and
-untracked contents; a path list or fingerprint alone is insufficient. Preserve it in
-the same private session storage and prove a round trip in a temporary copy before any
-fixer edit. Record whether artifacts were retained or cleaned; clean them under host
-retention policy only after a terminal handoff, never while verification may rerun.
+The snapshot must actually restore changed tracked files, modes/types, symlink objects, and untracked contents; a path list or fingerprint alone is insufficient.
 
-Before dispatch, round-trip the append-only pre-attempt snapshot and materialize an
-isolated candidate copy from it. The fixer edits only that copy, never the authoritative
-tree. Confine its filesystem/process access to the candidate and approved tooling;
-surface symlinks/gitlinks are inert artifacts, and no link can escape the sandbox.
-After return, validate the full candidate/handoff before authoritative CAS: binding,
-complete lifecycle delta, proposed identities/adjacent/preflight records, every required
-accumulated phase recipe, stable/local references, runner/argv/timeout allowlists,
-artifact digests, and objective/instruction scope. Blob bytes come from the candidate;
-inert symlink/gitlink changes require structured fields, never metadata-file inference.
-Build and round-trip an isolated `candidate_snapshots` artifact after provisional ID
-mapping, then obtain every required independent potency decision against its digest.
-Any structural, binding, recipe, or potency failure rejects the dispatch and discards
-the candidate with no authoritative delta applied.
+- Preserve it in the same private session storage and prove a round trip in a temporary copy before any fixer edit.
+- Record whether artifacts were retained or cleaned; clean them under host retention policy only after a terminal handoff, never while verification may rerun.
 
-Only then recapture authoritative preimages and apply the validated delta. Commit
-provisional allocations with candidate acceptance, recompute the surface fingerprint,
-and round-trip a `fixed_snapshots` entry whose state matches the candidate snapshot.
-Once apply succeeds, an independently executed evidence failure produces `BLOCKED`,
-not dispatch rejection or rollback. Any later
-authoritative-tree write invalidates its use as the current-candidate snapshot and
-stales attempt-current receipts bound to it. The immutable artifact remains valid as a
-historical red snapshot, with finding-red receipts governed by their own bound digests.
+Before dispatch, round-trip the append-only pre-attempt snapshot and materialize an isolated candidate copy from it.
 
-Snapshot, fix-attempt, and BLOCKED-receipt lists are append-only and keyed by
-`fix_attempt_id`; never overwrite an older artifact needed to replay a finding. The
-first attempt in a review round consumes that round's `FINDINGS` receipt authorization.
-Each correction is a new attempt and consumes the immediately preceding evidence-bound
-`BLOCKED` receipt. Never use an attempt ID for another candidate lineage or consume its
-authorization twice. If a fixer crashes or returns malformed/overbroad output before
-any authoritative delta is applied, atomically reject its `fix_dispatch_id`, discard the
-candidate copy, and append `fix_dispatch_rejections`. A same-attempt retry gets a fresh
-dispatch ID bound through `retry_of_dispatch_id` and is allowed only when authorization,
-pre-attempt snapshot, actual authoritative fingerprint, and fixer projection all remain
-byte-identical. Otherwise return `INPUT_ERROR` and require a fresh review binding.
-Exceeding `max_fix_dispatch_retries` is `INPUT_ERROR`, not another silent retry. Retain
-every locator through terminal cleanup.
+- The fixer edits only that copy, never the authoritative tree.
+- Confine its filesystem/process access to the candidate and approved tooling; surface symlinks/gitlinks are inert artifacts, and no link can escape the sandbox.
+- After return, validate the full candidate/handoff before authoritative CAS: binding, complete lifecycle delta, proposed identities/adjacent/preflight records, every required accumulated phase recipe, stable/local references, runner/argv/timeout allowlists, artifact digests, and objective/instruction scope.
+- Blob bytes come from the candidate; inert symlink/gitlink changes require structured fields, never metadata-file inference.
+- Build and round-trip an isolated `candidate_snapshots` artifact after provisional ID mapping, then obtain every required independent potency decision against its digest.
+- Any structural, binding, recipe, or potency failure rejects the dispatch and discards the candidate with no authoritative delta applied.
+
+Only then recapture authoritative preimages and apply the validated delta.
+
+- Commit provisional allocations with candidate acceptance, recompute the surface fingerprint, and round-trip a `fixed_snapshots` entry whose state matches the candidate snapshot.
+- Once apply succeeds, an independently executed evidence failure produces `BLOCKED`, not dispatch rejection or rollback.
+- Any later authoritative-tree write invalidates its use as the current-candidate snapshot and stales attempt-current receipts bound to it.
+- The immutable artifact remains valid as a historical red snapshot, with finding-red receipts governed by their own bound digests.
+
+Snapshot, fix-attempt, and BLOCKED-receipt lists are append-only and keyed by `fix_attempt_id`; never overwrite an older artifact needed to replay a finding.
+
+- The first attempt in a review round consumes that round's `FINDINGS` receipt authorization.
+- Each correction is a new attempt and consumes the immediately preceding evidence-bound `BLOCKED` receipt.
+- Never use an attempt ID for another candidate lineage or consume its authorization twice.
+- If a fixer crashes or returns malformed/overbroad output before any authoritative delta is applied, atomically reject its `fix_dispatch_id`, discard the candidate copy, and append `fix_dispatch_rejections`.
+- A same-attempt retry gets a fresh dispatch ID bound through `retry_of_dispatch_id` and is allowed only when authorization, pre-attempt snapshot, actual authoritative fingerprint, and fixer projection all remain byte-identical.
+- Otherwise return `INPUT_ERROR` and require a fresh review binding.
+- Exceeding `max_fix_dispatch_retries` is `INPUT_ERROR`, not another silent retry.
+- Retain every locator through terminal cleanup.
 
 After accepting a review and before allocating any fix attempt, the orchestrator—not a
 fixer—evaluates both divergence rules from the full immutable ledger and appends
@@ -364,84 +343,72 @@ fixer—evaluates both divergence rules from the full immutable ledger and appen
 exact evaluation into the fixer projection; omitted prior receipts cannot be
 reconstructed from summaries.
 
-If a fixer returns `proposed_divergence_evidence`, validate every referenced receipt,
-finding, attempt, class, preflight, and artifact against the full ledger before any
-candidate apply. Malformed evidence rejects/discards the dispatch as `INPUT_ERROR`.
-Valid evidence appends a `source: fixer_proposal` evaluation; a true result discards the
-candidate and emits `DIVERGED`, while a false result permits normal candidate validation.
+If a fixer returns `proposed_divergence_evidence`, validate every referenced receipt, finding, attempt, class, preflight, and artifact against the full ledger before any candidate apply.
 
-For a correction, normalize and map its actual candidate delta, then
-require every existing entry, proposed new path, role, and verification phase to be a
-subset of structured `allowed_correction`. If anything exceeds that scope, discard only
-the isolated candidate, return `INPUT_ERROR`, and do not add the delta to the surface.
+- Malformed evidence rejects/discards the dispatch as `INPUT_ERROR`.
+- Valid evidence appends a `source: fixer_proposal` evaluation; a true result discards the candidate and emits `DIVERGED`, while a false result permits normal candidate validation.
 
-Before applying a validated candidate, safely recapture authoritative HEAD, status, and
-every preimage digest and require an exact pre-attempt match. If user/external work
-appeared, leave it untouched and return `INPUT_ERROR`. Apply with expected-preimage
-compare-and-swap semantics. On partial failure, revert an entry only if its current
-digest still equals the orchestrator-written postimage; never overwrite a foreign edit.
-Capture the fixed snapshot only after this safe apply completes.
+For a correction, normalize and map its actual candidate delta, then require every existing entry, proposed new path, role, and verification phase to be a subset of structured `allowed_correction`.
 
-Before any receipt, resolve every existing stable or candidate-local entry reference
-against the pre-attempt surface and validated touched proposals. Rewrite local IDs to
-allocated stable IDs; reject unknown, ambiguous, wrong-role, or digest-mismatched
-references. Accumulated evidence may keep existing stable IDs even when that entry is
-unchanged in the current attempt.
+If anything exceeds that scope, discard only the isolated candidate, return `INPUT_ERROR`, and do not add the delta to the surface.
 
-Never rebuild the surface from only the latest summary or fix. Deduplicate identities
-while retaining every value in `origins`. A deletion stays reviewable through its prior blob and
-deletion patch; a rename keeps both paths and its rename patch. Mode and file-kind
-transitions remain reviewable even when content is unchanged. A newly discovered
-adjacent contract does not imply it changed; record why it matters separately.
+Before applying a validated candidate, safely recapture authoritative HEAD, status, and every preimage digest and require an exact pre-attempt match.
 
-Before every reviewer request, the orchestrator runs a bounded local read-only context
-discovery against the actual tree. Trace both forward and reverse references plus
-schema/event, serialization, lifecycle, generated, and variant relationships; do not
-rely on changed files naming their consumers. Expand to a fixed point within the finite
-limits. Validate discovered paths through the
-same no-follow/sensitivity boundary and add ordinary adjacent contracts before freezing
-the request. Record `context_discovery_receipts`. Truncation, an unsupported required
-index/search, or any unexplained unread ordinary source sets `complete: false` and
-returns `INPUT_ERROR`; likely-secret results require the authorized local-only route.
+- If user/external work appeared, leave it untouched and return `INPUT_ERROR`.
+- Apply with expected-preimage compare-and-swap semantics.
+- On partial failure, revert an entry only if its current digest still equals the orchestrator-written postimage; never overwrite a foreign edit.
+- Capture the fixed snapshot only after this safe apply completes.
 
-Reviewer-discovered adjacent paths are proposals, not coverage. Validate each path and
-content locally with the same no-follow/sensitivity boundary. Require its normalized
-path and no-follow identity to be absent from the surface/adjacent registry and unique
-across proposals after hardlink classification; duplicates are schema `INPUT_ERROR`,
-not expansion. Then allocate its stable
-`adjacent_contract_id`, and append it before another review. Atomically reject the
-pending request with reason `surface_expanded`; do not accept findings or zero against
-the old surface. A fresh request must fully review the expansion. Each proposal includes
-an executable or evidence-bound-manual check definition; absent/invalid check evidence
-rejects the proposal rather than creating an unfixable missing-check state.
+Before any receipt, resolve every existing stable or candidate-local entry reference against the pre-attempt surface and validated touched proposals.
+
+- Rewrite local IDs to allocated stable IDs; reject unknown, ambiguous, wrong-role, or digest-mismatched references.
+- Accumulated evidence may keep existing stable IDs even when that entry is unchanged in the current attempt.
+
+Never rebuild the surface from only the latest summary or fix.
+
+- Deduplicate identities while retaining every value in `origins`.
+- A deletion stays reviewable through its prior blob and deletion patch; a rename keeps both paths and its rename patch.
+- Mode and file-kind transitions remain reviewable even when content is unchanged.
+- A newly discovered adjacent contract does not imply it changed; record why it matters separately.
+
+Before every reviewer request, the orchestrator runs a bounded local read-only context discovery against the actual tree.
+
+- Trace both forward and reverse references plus schema/event, serialization, lifecycle, generated, and variant relationships; do not rely on changed files naming their consumers.
+- Expand to a fixed point within the finite limits.
+- Validate discovered paths through the same no-follow/sensitivity boundary and add ordinary adjacent contracts before freezing the request.
+- Record `context_discovery_receipts`.
+- Truncation, an unsupported required index/search, or any unexplained unread ordinary source sets `complete: false` and returns `INPUT_ERROR`; likely-secret results require the authorized local-only route.
+
+Reviewer-discovered adjacent paths are proposals, not coverage.
+
+- Validate each path and content locally with the same no-follow/sensitivity boundary.
+- Require its normalized path and no-follow identity to be absent from the surface/adjacent registry and unique across proposals after hardlink classification; duplicates are schema `INPUT_ERROR`, not expansion.
+- Then allocate its stable `adjacent_contract_id`, and append it before another review.
+- Atomically reject the pending request with reason `surface_expanded`; do not accept findings or zero against the old surface.
+- A fresh request must fully review the expansion.
+- Each proposal includes an executable or evidence-bound-manual check definition; absent/invalid check evidence rejects the proposal rather than creating an unfixable missing-check state.
 
 A fixer may also propose an unchanged adjacent contract with an artifact-local ID.
-Require the same path/no-follow identity novelty across the registry, touched proposal,
-and adjacent proposal sets. After validating path, reason, content, and check, allocate the stable ID,
-rewrite all local references, add it before the fixed-snapshot fingerprint and
-verification, and include it in the next full review. The fixer cannot claim coverage.
 
-Whenever a class has at least two recorded occurrences and no valid installed
-preflight, require exactly one `proposed_preflights` entry until installation succeeds.
-It contains a unique
-`preflight_local_id`, stable class and occurrence finding IDs, kind, exact class
-invariant, `check_artifact`, `check_artifact_digest`, and expected touched-item local
-IDs. Executable checks bind to a validated candidate test/setup entry; manual checks
-bind a protected revision-scoped evidence definition and use `NOT_APPLICABLE` touched
-entries. Validate objective/instruction scope, identity, bytes, role, digest, and
-references or reject the candidate as `INPUT_ERROR`. Then allocate the next stable
-`pf-K`, rewrite the registry and every verification candidate from the local ID to that
-stable `check_id`, and only then capture/verify the fixed snapshot. Fixers never
-allocate stable preflight IDs.
+- Require the same path/no-follow identity novelty across the registry, touched proposal, and adjacent proposal sets.
+- After validating path, reason, content, and check, allocate the stable ID, rewrite all local references, add it before the fixed-snapshot fingerprint and verification, and include it in the next full review.
+- The fixer cannot claim coverage.
+
+Whenever a class has at least two recorded occurrences and no valid installed preflight, require exactly one `proposed_preflights` entry until installation succeeds.
+
+- It contains a unique `preflight_local_id`, stable class and occurrence finding IDs, kind, exact class invariant, `check_artifact`, `check_artifact_digest`, and expected touched-item local IDs.
+- Executable checks bind to a validated candidate test/setup entry; manual checks bind a protected revision-scoped evidence definition and use `NOT_APPLICABLE` touched entries.
+- Validate objective/instruction scope, identity, bytes, role, digest, and references or reject the candidate as `INPUT_ERROR`.
+- Then allocate the next stable `pf-K`, rewrite the registry and every verification candidate from the local ID to that stable `check_id`, and only then capture/verify the fixed snapshot.
+- Fixers never allocate stable preflight IDs.
 
 ## Independent reviewer receipt
 
-Only the read-only reviewer may report `FINDINGS` or `ZERO_FINDINGS`. Record request
-issuance before invoking it: append a pending request and atomically advance the ledger
-to the generation named by `review_invocation_generation`. No surface, tree,
-change-contract, or unrelated ledger write may occur before acceptance/rejection. Only
-parent-bound subordinate adjudication transitions may advance the generation, and each
-must extend `parent_generation_chain_digest` atomically.
+Only the read-only reviewer may report `FINDINGS` or `ZERO_FINDINGS`.
+
+- Record request issuance before invoking it: append a pending request and atomically advance the ledger to the generation named by `review_invocation_generation`.
+- No surface, tree, change-contract, or unrelated ledger write may occur before acceptance/rejection.
+- Only parent-bound subordinate adjudication transitions may advance the generation, and each must extend `parent_generation_chain_digest` atomically.
 
 ```yaml
 pending_review_requests:
@@ -508,39 +475,28 @@ review_request_rejections:
 consumed_review_request_ids: []
 ```
 
-Accept only while the request remains pending and every generation after
-`review_invocation_generation` belongs to its contiguous, digest-valid subordinate
-class-adjudication chain; all subordinate IDs must be consumed exactly once.
-Immediately before either acceptance or terminal
-`COMPLETE`, safely recapture actual HEAD, canonical status, entry/item digests, adjacent
-contract versions, the protected objective/authority artifacts and complete ordered
-instruction/spec records,
-both change-contract digests, `surface_fingerprint`, and `review_target_digest`; require
-exact equality with the pending or accepted binding and reject unrelated dirty entries.
-New external bindings require a fresh request/rebaseline; instruction/spec source files
-in the intended surface remain review output, not adopted authority. Changed intent
-requires rebaseline. An
-external tree write does not need to advance the ledger, so generation equality alone
-is insufficient. In one atomic replacement, remove the request from pending,
-append its ID to `consumed_review_request_ids`, append the immutable receipt, and set
-`accepted_generation` to the new generation. Finding/class allocations and sequence
-increments commit in that same write only after all checks; rejection discards them.
-On invalid transport, receipt, or class
-adjudication, perform the same atomic pending removal and consumption but append a
-`review_request_rejections` entry at `rejected_generation`; then return `INPUT_ERROR`.
-Retry only with a fresh request ID at the new generation. Replays are `INPUT_ERROR`. A fixer later
-validates the stored `receipt_id`, consumed request ID, reviewed surface, and projection
-digests; it does not compare the receipt to the ledger's now-newer current generation.
+Accept only while the request remains pending and every generation after `review_invocation_generation` belongs to its contiguous, digest-valid subordinate class-adjudication chain; all subordinate IDs must be consumed exactly once.
 
-Coverage lists contain every `review_item_id`: surface entries and adjacent contracts,
-not bare paths. Every full/partial claim requires exactly one structured evidence item
-bound to its complete `review_item_digest`. Reviewing a deleted or renamed entry requires its patch
-and prior blob; it need not exist on disk.
-Missing/malformed receipt fields or a base/surface mismatch produce `INPUT_ERROR`.
-`ZERO_FINDINGS` is valid only when every review item is in `reviewed_full`,
-`reviewed_partial`, `unread`, findings, remaining risk, and public-command `next_steps`
-are explicitly empty. An empty prompt section, missing payload, or inherited earlier
-read never means zero.
+- Immediately before either acceptance or terminal `COMPLETE`, safely recapture actual HEAD, canonical status, entry/item digests, adjacent contract versions, the protected objective/authority artifacts and complete ordered instruction/spec records, both change-contract digests, `surface_fingerprint`, and `review_target_digest`; require exact equality with the pending or accepted binding and reject unrelated dirty entries.
+- New external bindings require a fresh request/rebaseline; instruction/spec source files in the intended surface remain review output, not adopted authority.
+- Changed intent requires rebaseline.
+- An external tree write does not need to advance the ledger, so generation equality alone is insufficient.
+### Atomic receipt acceptance
+
+- In one atomic replacement, remove the request from pending, append its ID to `consumed_review_request_ids`, append the immutable receipt, and set `accepted_generation` to the new generation.
+- Finding/class allocations and sequence increments commit in that same write only after all checks; rejection discards them.
+- On invalid transport, receipt, or class adjudication, perform the same atomic pending removal and consumption but append a `review_request_rejections` entry at `rejected_generation`; then return `INPUT_ERROR`.
+- Retry only with a fresh request ID at the new generation.
+- Replays are `INPUT_ERROR`.
+- A fixer later validates the stored `receipt_id`, consumed request ID, reviewed surface, and projection digests; it does not compare the receipt to the ledger's now-newer current generation.
+
+Coverage lists contain every `review_item_id`: surface entries and adjacent contracts, not bare paths.
+
+- Every full/partial claim requires exactly one structured evidence item bound to its complete `review_item_digest`.
+- Reviewing a deleted or renamed entry requires its patch and prior blob; it need not exist on disk.
+- Missing/malformed receipt fields or a base/surface mismatch produce `INPUT_ERROR`.
+- `ZERO_FINDINGS` is valid only when every review item is in `reviewed_full`, `reviewed_partial`, `unread`, findings, remaining risk, and public-command `next_steps` are explicitly empty.
+- An empty prompt section, missing payload, or inherited earlier read never means zero.
 
 ## Finding lineage
 
@@ -598,13 +554,11 @@ failure_class_registry:
       check_digest: <artifact digest>
 ```
 
-A first occurrence allocates its registry slug and uses
-`preflight_id: NOT_APPLICABLE`. On the second, install the class-level preflight and
-reference its check ID from every later occurrence. Reviewer invocations carry the
-registry's slugs, invariants, occurrence IDs, and preflight IDs/digests so a reviewer
-must reuse an existing class instead of evading recurrence by renaming it. Against a
-non-empty registry, a proposed new class requires a separately bound semantic
-`class_decision_receipt`; string inequality alone cannot allocate a new slug.
+A first occurrence allocates its registry slug and uses `preflight_id: NOT_APPLICABLE`.
+
+- On the second, install the class-level preflight and reference its check ID from every later occurrence.
+- Reviewer invocations carry the registry's slugs, invariants, occurrence IDs, and preflight IDs/digests so a reviewer must reuse an existing class instead of evading recurrence by renaming it.
+- Against a non-empty registry, a proposed new class requires a separately bound semantic `class_decision_receipt`; string inequality alone cannot allocate a new slug.
 
 Detection is not introduction. Attribute `introduced_by` only when revision-bound
 lifecycle/mode/type/path/patch evidence establishes it; context or a prior summary is
@@ -636,16 +590,15 @@ mutant_potency_receipts:
     adjudicated_by: fresh-read-only | authorized-local-only
 ```
 
-The fixer only proposes a mutant. A fresh read-only potency adjudicator runs before authoritative apply
-and compares it with the exact finding invariant, detection evidence, and candidate-snapshot interface
-contract. It must confirm the intended semantic fault, not an easier or different
-break. Sensitive inputs require the authorized local-only route. Only an immutable
-`representative` receipt permits execution or later `KILLED` credit; stale, rejected,
-or missing potency evidence is `INPUT_ERROR`.
-Candidate mutant IDs are unique artifact-local values. After representative potency,
-provisionally allocate `mut-K`, bind it in `mutant_id_mappings`, and rewrite every
-recipe before authoritative apply; commit the mapping with parent acceptance. Reject
-local/stable collisions, unknown finding/digest bindings, or unmapped references.
+The fixer only proposes a mutant.
+
+- A fresh read-only potency adjudicator runs before authoritative apply and compares it with the exact finding invariant, detection evidence, and candidate-snapshot interface contract.
+- It must confirm the intended semantic fault, not an easier or different break.
+- Sensitive inputs require the authorized local-only route.
+- Only an immutable `representative` receipt permits execution or later `KILLED` credit; stale, rejected, or missing potency evidence is `INPUT_ERROR`.
+- Candidate mutant IDs are unique artifact-local values.
+- After representative potency, provisionally allocate `mut-K`, bind it in `mutant_id_mappings`, and rewrite every recipe before authoritative apply; commit the mapping with parent acceptance.
+- Reject local/stable collisions, unknown finding/digest bindings, or unmapped references.
 
 ## Guarded finding transitions
 
@@ -669,31 +622,33 @@ attempt-current scopes follow the distinct rules below.
 
 For each finding, retain both proofs:
 
-1. **Two-side proof:** capture the reproducer patch before production edits and bind it
-   to the finding's immutable `red_snapshot_attempt_id`, artifact, and digest. In an
-   isolated disposable copy, restore that exact defect snapshot and apply only that
-   test patch plus the recorded compatibility-adapter artifact; validate its
-   digest and test/setup-only touched entries first. Never revert the
-   original loop-start implementation to `base_revision`. Reach `expected_failure`,
-   remove the adapter, then use the fixed snapshot and pass. The adapter may adapt setup
-   or invocation for a changed API/signature/schema; it cannot implement the fix, alter
-   the check, or become the red signal. An earlier compile/setup failure is `INVALID`
-   unless it is the defect.
-2. **Potency proof:** validate the independent representative potency receipt, protected
-   mutant artifact, digest, and expected touched entries. In a fresh isolated copy, apply
-   that exact `representative_mutant`, require the intended failure, then discard it.
-   Never apply baseline reverts or mutants to the authoritative working tree. A
-   survivor, no coverage, invalid baseline, or weakened assertion blocks verification.
-   `KILLED` requires the decisive signal to match the adjudicator-approved
-   `expected_kill_signal_digest`; unrelated lint/setup failure is `INVALID` or
-   `NO_COVERAGE`. Replace equivalent mutants and re-adjudicate another fault.
+1. **Two-side proof:** capture the reproducer patch before production edits and bind it to the finding's immutable `red_snapshot_attempt_id`, artifact, and digest.
 
-Every fix attempt re-runs every accumulated reproducer on its current fixed snapshot
-and every representative mutant. A historical `EXPECTED_FAILURE` receipt may be reused
-only while its red snapshot, reproducer/assertion, compatibility adapter, and expected
-signal digests are unchanged; a corrective attempt's pre-snapshot is not automatically
-a red snapshot. Older tests may not inherit a prior `KILLED` or fixed-pass result after
-their assertion or covered production path changes.
+   In an isolated disposable copy, restore that exact defect snapshot and apply only that test patch plus the recorded compatibility-adapter artifact; validate its digest and test/setup-only touched entries first.
+
+   Never revert the original loop-start implementation to `base_revision`.
+
+   Reach `expected_failure`, remove the adapter, then use the fixed snapshot and pass.
+
+   The adapter may adapt setup or invocation for a changed API/signature/schema; it cannot implement the fix, alter the check, or become the red signal.
+
+   An earlier compile/setup failure is `INVALID` unless it is the defect.
+2. **Potency proof:** validate the independent representative potency receipt, protected mutant artifact, digest, and expected touched entries.
+
+   In a fresh isolated copy, apply that exact `representative_mutant`, require the intended failure, then discard it.
+
+   Never apply baseline reverts or mutants to the authoritative working tree.
+
+   A survivor, no coverage, invalid baseline, or weakened assertion blocks verification.
+
+   `KILLED` requires the decisive signal to match the adjudicator-approved `expected_kill_signal_digest`; unrelated lint/setup failure is `INVALID` or `NO_COVERAGE`.
+
+   Replace equivalent mutants and re-adjudicate another fault.
+
+Every fix attempt re-runs every accumulated reproducer on its current fixed snapshot and every representative mutant.
+
+- A historical `EXPECTED_FAILURE` receipt may be reused only while its red snapshot, reproducer/assertion, compatibility adapter, and expected signal digests are unchanged; a corrective attempt's pre-snapshot is not automatically a red snapshot.
+- Older tests may not inherit a prior `KILLED` or fixed-pass result after their assertion or covered production path changes.
 
 ## Verification receipt
 
@@ -767,54 +722,48 @@ The orchestrator resolves `runner_contract_id` and predicates from protected rep
 tooling; fixer free text is never result authority. Predicate evaluation occurs inside
 the protected verifier before output redaction and binds its source-output digest.
 
-`reverted` uses `evidence_scope: finding_red` and `fix_attempt_id: NOT_APPLICABLE`; its
-`produced_during_fix_attempt_id` is audit provenance, not evidence identity. Only a
-change to its bound red snapshot/fingerprint, reproducer/assertion, adapter, or expected
-signal stales it; an unrelated later current-surface change does not erase historical
-red proof. The other phases use `evidence_scope: attempt_current` and an exact
-`fix_attempt_id`. For `fixed`, `mutant`, `adjacent`, and `preflight`, any
-relevant current surface, attempt snapshot, reproducer, assertion, adapter, mutant,
-check, or manual-evidence digest change stales the receipt. Agent prose and
-self-reported counts are not receipts. Only the orchestrator
-writes verification receipts; preserve blockers instead of converting them to success.
-Fixer candidates are untrusted: resolve runners from repository tooling, validate argv
-against an allowlist, and invoke without a shell or interpolation. Treat repository
-runners and candidate code as untrusted executables. Run each reverted/fixed/mutant or
-executable adjacent/preflight phase in a host-attested OS sandbox over only its
-disposable snapshot and immutable tooling: scrubbed environment/credentials, no
-authoritative-write access, default-deny network, and finite CPU, memory, file, and
-process limits. Recapture authoritative state before and after execution and bind the
-matching `authoritative_recapture_digest`; any mismatch can never prove PASS/COMPLETE
-and must preserve foreign work rather than overwrite it.
-Capture stdout/stderr without logging into protected storage capped by
-`max_output_bytes`; overflow before a decisive signal is `INVALID`. Apply the same no-log
-classification used for source artifacts to command output, manual evidence, and the
-derived decisive signal. Persist only a sensitivity-safe bounded projection plus its
-digest; likely-secret evidence uses an opaque token and may be inspected only by an
-authorized local-only verifier. Never copy raw protected output into the ledger,
-handoff, or agent projection.
-Every executable phase uses an orchestrator-owned finite `timeout_policy_id` and runs in
-a separately terminable process group. A timeout counts as `EXPECTED_FAILURE` only when
-the finding explicitly names that bounded timeout as its defect signal, the configured
-deadline elapsed, and the whole process group was terminated and reaped. Any unrelated
-timeout or incomplete cleanup is `INVALID` or `BLOCKED`, never a pass.
-For an evidence-bound manual adjacent check or preflight, `runner_id`, `argv`, timeout,
-termination, exit, runner-contract, sandbox, duration, and process fields are
-`NOT_APPLICABLE`; the
-orchestrator inspects the current revision-bound artifact and records its digest and
-decisive evidence instead of pretending a command ran. Its `command_display` and
-`exit_code` are also `NOT_APPLICABLE`; executable phases require those fields and set
-manual-evidence fields to `NOT_APPLICABLE`.
+#### Evidence identity
+
+`reverted` uses `evidence_scope: finding_red` and `fix_attempt_id: NOT_APPLICABLE`; its `produced_during_fix_attempt_id` is audit provenance, not evidence identity.
+
+- Only a change to its bound red snapshot/fingerprint, reproducer/assertion, adapter, or expected signal stales it; an unrelated later current-surface change does not erase historical red proof.
+- The other phases use `evidence_scope: attempt_current` and an exact `fix_attempt_id`.
+- For `fixed`, `mutant`, `adjacent`, and `preflight`, any relevant current surface, attempt snapshot, reproducer, assertion, adapter, mutant, check, or manual-evidence digest change stales the receipt.
+- Agent prose and self-reported counts are not receipts.
+- Only the orchestrator writes verification receipts; preserve blockers instead of converting them to success.
+#### Execution isolation
+
+Fixer candidates are untrusted: resolve runners from repository tooling, validate argv against an allowlist, and invoke without a shell or interpolation.
+
+- Treat repository runners and candidate code as untrusted executables.
+- Run each reverted/fixed/mutant or executable adjacent/preflight phase in a host-attested OS sandbox over only its disposable snapshot and immutable tooling: scrubbed environment/credentials, no authoritative-write access, default-deny network, and finite CPU, memory, file, and process limits.
+- Recapture authoritative state before and after execution and bind the matching `authoritative_recapture_digest`; any mismatch can never prove PASS/COMPLETE and must preserve foreign work rather than overwrite it.
+#### Protected output
+
+Capture stdout/stderr without logging into protected storage capped by `max_output_bytes`; overflow before a decisive signal is `INVALID`.
+
+- Apply the same no-log classification used for source artifacts to command output, manual evidence, and the derived decisive signal.
+- Persist only a sensitivity-safe bounded projection plus its digest; likely-secret evidence uses an opaque token and may be inspected only by an authorized local-only verifier.
+- Never copy raw protected output into the ledger, handoff, or agent projection.
+#### Timeout and cleanup
+
+Every executable phase uses an orchestrator-owned finite `timeout_policy_id` and runs in a separately terminable process group.
+
+- A timeout counts as `EXPECTED_FAILURE` only when the finding explicitly names that bounded timeout as its defect signal, the configured deadline elapsed, and the whole process group was terminated and reaped.
+- Any unrelated timeout or incomplete cleanup is `INVALID` or `BLOCKED`, never a pass.
+#### Manual checks
+
+For an evidence-bound manual adjacent check or preflight, `runner_id`, `argv`, timeout, termination, exit, runner-contract, sandbox, duration, and process fields are `NOT_APPLICABLE`; the orchestrator inspects the current revision-bound artifact and records its digest and decisive evidence instead of pretending a command ran.
+
+Its `command_display` and `exit_code` are also `NOT_APPLICABLE`; executable phases require those fields and set manual-evidence fields to `NOT_APPLICABLE`.
 
 ## Bounded attempt projection
 
-Keep the full ledger outside the fixer context. A fixer prompt contains the immutable
-objective/instruction artifacts and digests, exact authorization receipt, current
-surface/adjacent-contract entries, open findings,
-one-line closed finding IDs with evidence digests, active preflights, and accumulated
-reproducer/mutant IDs plus protected artifact locators and digests. Project
-likely-secret entries only as opaque IDs and non-sensitive metadata. Do not paste prior
-review receipts, full diffs, or superseded prose summaries.
+Keep the full ledger outside the fixer context.
+
+- A fixer prompt contains the immutable objective/instruction artifacts and digests, exact authorization receipt, current surface/adjacent-contract entries, open findings, one-line closed finding IDs with evidence digests, active preflights, and accumulated reproducer/mutant IDs plus protected artifact locators and digests.
+- Project likely-secret entries only as opaque IDs and non-sensitive metadata.
+- Do not paste prior review receipts, full diffs, or superseded prose summaries.
 
 Serialize and measure each exact role-specific projection before spawning an agent;
 compute its canonical digest with its own digest field omitted. Never truncate it. If

@@ -19,9 +19,12 @@ flowchart TD
 
 ## Shared setup
 
-Read [escalation-policy.md](escalation-policy.md). Validate the worktree, branch,
-and PR; honor opt-outs. One active consumer per generation. Use the exact supplied
-command; claims are single-use. Renew with fresh validated bindings.
+Read [escalation-policy.md](escalation-policy.md).
+
+- Validate the worktree, branch, and PR; honor opt-outs.
+- One active consumer per generation.
+- Use the exact supplied command; claims are single-use.
+- Renew with fresh validated bindings.
 
 Run `pr-watch-session.sh` beside this document from the validated worktree:
 
@@ -33,10 +36,11 @@ Run `pr-watch-session.sh` beside this document from the validated worktree:
 | Acknowledge an event | `--branch BRANCH --ack EVENT_ID` |
 | Cancel that watch | `--cancel --branch BRANCH` |
 
-Register new watch intent before scheduling. Save targets, PR links, returned
-generation/deadline, and policy path with the task.
-Use `--start` only for new watch requests, never to renew cancellation/deadlines
-during drains. Execution-session IDs are not durable watch authority.
+Register new watch intent before scheduling.
+
+- Save targets, PR links, returned generation/deadline, and policy path with the task.
+- Use `--start` only for new watch requests, never to renew cancellation/deadlines during drains.
+- Execution-session IDs are not durable watch authority.
 
 ## Reporting and acknowledgment
 
@@ -96,17 +100,21 @@ Update older keepalive-only prompts when reusing a schedule; preserve status and
 notification preferences. The command calls `pr_watch_schedule_tick` from
 `../lib/pr-watch-schedule.sh`. Default mode still returns active/stopped counts.
 
-`pr-watch-keepalive.sh --events TARGETS_JSON` reconciles 1–32 targets and emits JSON
-lines containing `target`, `status`, and up to 16 events per target. Each stored
-event is below 16 KiB. Reads never acknowledge. Empty reads exit zero without stdout.
-Exit 75 defers busy reads without alerting or retiring targets. Errors/degraded coverage return nonzero with stderr while
-independent targets still deliver. Report new coverage failures; retain the schedule.
+`pr-watch-keepalive.sh --events TARGETS_JSON` reconciles 1–32 targets and emits JSON lines containing `target`, `status`, and up to 16 events per target.
 
-Report then acknowledge exact IDs with the session CLI. Drain to empty, run the
-same script without `--events` for active/stopped counts, and recheck events before
-pausing the final stopped target. Both reads must exit zero with empty stdout.
-For example, a merged PR returns `status: stopped` with its merge event; report
-and acknowledge it before retirement. Recovery and deadlines retain their existing owner.
+- Each stored event is below 16 KiB.
+- Reads never acknowledge.
+- Empty reads exit zero without stdout.
+- Exit 75 defers busy reads without alerting or retiring targets.
+- Errors/degraded coverage return nonzero with stderr while independent targets still deliver.
+- Report new coverage failures; retain the schedule.
+
+Report then acknowledge exact IDs with the session CLI.
+
+- Drain to empty, run the same script without `--events` for active/stopped counts, and recheck events before pausing the final stopped target.
+- Both reads must exit zero with empty stdout.
+- For example, a merged PR returns `status: stopped` with its merge event; report and acknowledge it before retirement.
+- Recovery and deadlines retain their existing owner.
 
 On empty runs, omit routine status and acknowledgment prose. Follow the host's
 supported quiet-completion contract; a required completion record does not prove

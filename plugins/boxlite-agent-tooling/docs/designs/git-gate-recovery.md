@@ -9,9 +9,10 @@ A matching FAIL without a newer test receipt returns findings without preparing 
 Other exits can report a storage or ownership failure without a concrete recovery procedure.
 
 Baseline: [preflight at 60bd2e5](https://github.com/boxlite-ai/agent-tooling/blob/60bd2e5a420967685beee33d7e8a645380a5cbfe/plugins/boxlite-agent-tooling/.agents/hooks/preflight-commit-push.sh).
-Its `deny`, `deny_with_audit`, `validate_audit`, and final history guards own these exits.
-[PR #232](https://github.com/boxlite-ai/agent-tooling/pull/232) added the receipt exception; [PR #241](https://github.com/boxlite-ai/agent-tooling/pull/241) moved attempt preparation into hooks.
-Neither makes all denials actionable.
+
+- Its `deny`, `deny_with_audit`, `validate_audit`, and final history guards own these exits.
+- [PR #232](https://github.com/boxlite-ai/agent-tooling/pull/232) added the receipt exception; [PR #241](https://github.com/boxlite-ai/agent-tooling/pull/241) moved attempt preparation into hooks.
+- Neither makes all denials actionable.
 
 Example: an unchanged candidate has a FAIL for unavailable evidence; retrieving that evidence should permit another bounded review without a cosmetic code change.
 This changes retry eligibility, not verdict acceptance or test-evidence requirements.
@@ -53,16 +54,18 @@ Research log, 2026-11-05; known items named before searching: Bash exit status, 
 | Repository/upstream | Read preflight, Git-hook consumers, attempt/history/decision code and tests; inspected #232, #241, #361, #362, and design #371 | #371 explicitly excludes retry scheduling; this needs its own design. Existing receipt-only recovery and abandoned open attempts informed the failure cases. |
 
 The final three-query round (the two forward-citation queries plus OpenAlex `bounded retry`) added no mechanism; research stopped after source checks.
-The two 2026 preprints are recent research, not proof of a best production algorithm; adapt their failure cautions only.
-The libraries are implementation examples; current activity and two adoption signals were not established, so no project is claimed as SOTA.
+
+- The two 2026 preprints are recent research, not proof of a best production algorithm; adapt their failure cautions only.
+- The libraries are implementation examples; current activity and two adoption signals were not established, so no project is claimed as SOTA.
 
 ## How it works
 
 Replace reason-only denial calls with one explicit action formatter: action, reason, owner, next step, and completion condition.
-Keep `permissionDecision: deny`; put the action in the existing reason field so both native hosts and Git-hook stderr receive it.
-No undocumented top-level hook fields or executable command strings are added.
-Each reason starts with `Next action: <audit|recover|reflect|wait|stop>`, followed by the responsible actor, required step, and success condition.
-Missing action metadata is a formatting failure, not permission to run Git.
+
+- Keep `permissionDecision: deny`; put the action in the existing reason field so both native hosts and Git-hook stderr receive it.
+- No undocumented top-level hook fields or executable command strings are added.
+- Each reason starts with `Next action: <audit|recover|reflect|wait|stop>`, followed by the responsible actor, required step, and success condition.
+- Missing action metadata is a formatting failure, not permission to run Git.
 
 | Current exit family | Action and owner | Completion condition |
 | --- | --- | --- |
@@ -79,33 +82,39 @@ Missing action metadata is a formatting failure, not permission to run Git.
 | Oversized reason or task instruction | `recover`: preserve action and the bounded existing command-shortening procedure | A bounded equivalent invocation can be rendered; Stop remains Stop even when details are omitted. |
 
 Automatic means the hook performs safe deterministic retries, or the parent follows the supplied recovery instruction without asking whether to continue.
-It does not mean starting a second background controller inside every hook.
-If recovery requires unavailable credentials, filesystem access, or a host restart, return the exact required intervention and wait; never report recovery as completed.
+
+- It does not mean starting a second background controller inside every hook.
+- If recovery requires unavailable credentials, filesystem access, or a host restart, return the exact required intervention and wait; never report recovery as completed.
 
 Recovery instructions name the failing resource and the verification to rerun; a generic instruction to inspect the environment is insufficient.
-The gate performs at most one local reread/reselection per invocation, without recursion, and rechecks the original bindings before accepting its result.
-If that recovery fails, return `wait` with the required intervention; do not tell the parent to retry unchanged conditions indefinitely.
-For an install mismatch, identify both versions and the supported reload/install action; a required session restart becomes explicit host intervention.
-For unreadable history, preserve the record and report its path and read/validation failure; restoration requires verified evidence, never a fresh empty history.
-For a compatibility failure, retain the checker's diagnostic and required check; the parent fixes the evidenced problem before retrying Git.
+
+- The gate performs at most one local reread/reselection per invocation, without recursion, and rechecks the original bindings before accepting its result.
+- If that recovery fails, return `wait` with the required intervention; do not tell the parent to retry unchanged conditions indefinitely.
+- For an install mismatch, identify both versions and the supported reload/install action; a required session restart becomes explicit host intervention.
+- For unreadable history, preserve the record and report its path and read/validation failure; restoration requires verified evidence, never a fresh empty history.
+- For a compatibility failure, retain the checker's diagnostic and required check; the parent fixes the evidenced problem before retrying Git.
 
 Use structured checkpoint outcomes from the existing decision owner; do not infer Stop or waiting from human-readable error substrings.
-The history lock remains the only owner of attempt preparation and the choice checkpoint.
-No lock spans model execution or a human wait; no recursive preflight invocation or arbitrary command evaluation is introduced.
-Remove `test_runs_after` as a retry-eligibility condition, while retaining receipts as audit evidence.
+
+- The history lock remains the only owner of attempt preparation and the choice checkpoint.
+- No lock spans model execution or a human wait; no recursive preflight invocation or arbitrary command evaluation is introduced.
+- Remove `test_runs_after` as a retry-eligibility condition, while retaining receipts as audit evidence.
 
 Race order: select identity → validate bindings/history → perform one identity-checked consume → reselect once on conflict → validate again.
-A changed prompt or candidate invalidates the old action; a prepared attempt is not proof that a worker started.
-The [active-task record](https://github.com/boxlite-ai/agent-tooling/blob/60bd2e5a420967685beee33d7e8a645380a5cbfe/plugins/boxlite-agent-tooling/.agents/hooks/auditor-control.sh#L87-L101) is a scope-level orchestration index, not an attempt-to-worker ownership proof.
-Before canceling an attempt, preparing its replacement, rewriting the task link, or invoking the delegated headless runner, inspect the same-scope auditor state.
-An active auditor blocks those transitions even when the candidate has changed; wait for its terminal lifecycle delivery before replacing the shared link.
-Unknown or invalid active state requires explicit recovery and cannot authorize another launch.
-Recheck that exclusion before returning a launch instruction; preparation alone remains deduplicated by history.
-This ordering protects the [shared task link](https://github.com/boxlite-ai/agent-tooling/blob/60bd2e5a420967685beee33d7e8a645380a5cbfe/plugins/boxlite-agent-tooling/.agents/lib/commit-push-stop.sh#L14-L27) from an old worker's delayed Stop.
-Do not infer that a reported host completion has already finished hook teardown.
-If implementation cannot preserve this ordering, add an explicit generation-bound claim before permitting replacement.
-Preparation deduplication is enforced by history; waiting for a native task also requires the parent to follow the host-specific instruction.
-Do not claim that a hook prevents an independently issued native Agent call; verify cooperative parent behavior separately from hook output.
+
+- A changed prompt or candidate invalidates the old action; a prepared attempt is not proof that a worker started.
+- The [active-task record](https://github.com/boxlite-ai/agent-tooling/blob/60bd2e5a420967685beee33d7e8a645380a5cbfe/plugins/boxlite-agent-tooling/.agents/hooks/auditor-control.sh#L87-L101) is a scope-level orchestration index, not an attempt-to-worker ownership proof.
+- Before canceling an attempt, preparing its replacement, rewriting the task link, or invoking the delegated headless runner, inspect the same-scope auditor state.
+- An active auditor blocks those transitions even when the candidate has changed; wait for its terminal lifecycle delivery before replacing the shared link.
+- Unknown or invalid active state requires explicit recovery and cannot authorize another launch.
+- Recheck that exclusion before returning a launch instruction; preparation alone remains deduplicated by history.
+### Worker teardown and launch limits
+
+- This ordering protects the [shared task link](https://github.com/boxlite-ai/agent-tooling/blob/60bd2e5a420967685beee33d7e8a645380a5cbfe/plugins/boxlite-agent-tooling/.agents/lib/commit-push-stop.sh#L14-L27) from an old worker's delayed Stop.
+- Do not infer that a reported host completion has already finished hook teardown.
+- If implementation cannot preserve this ordering, add an explicit generation-bound claim before permitting replacement.
+- Preparation deduplication is enforced by history; waiting for a native task also requires the parent to follow the host-specific instruction.
+- Do not claim that a hook prevents an independently issued native Agent call; verify cooperative parent behavior separately from hook output.
 
 Intended changes: preflight action handling, its cohesive helper/prompt if needed, checkpoint result adapter, focused tests, architecture and hook documentation.
 Estimate 200–400 production lines; measure the actual diff before any PR operation.
@@ -127,9 +136,10 @@ Planned; implementation and behavioral tests have not run for this design.
 | Host contract | Test Claude/Codex reason delivery, Git stderr propagation, stdin preservation, exit codes, and unscoped invocation | Existing host decisions remain compatible; no unbounded legacy retry path. |
 
 Before the first production edit, add focused tests and run them against the captured pre-change production baseline.
-For each defect claim, fully revert every production change in isolated scratch, leave the tests, and observe the intended assertion fail.
-Restore the complete implementation and rerun; setup or compilation failures do not count as defect proof.
-Keep pre-existing unrelated working changes in that baseline; never revert the shared checkout.
+
+- For each defect claim, fully revert every production change in isolated scratch, leave the tests, and observe the intended assertion fail.
+- Restore the complete implementation and rerun; setup or compilation failures do not count as defect proof.
+- Keep pre-existing unrelated working changes in that baseline; never revert the shared checkout.
 
 Run focused preflight, attempt, history, decision, and Git-hook consumer suites; Bash syntax; ShellCheck; all plugin suites; guidance consistency; `make test:writing test:parity test:architecture`.
 Exercise supported host routes and report macOS/Linux/Windows and live-host gaps separately; fixture success does not establish live agent compliance.

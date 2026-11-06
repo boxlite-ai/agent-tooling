@@ -18,19 +18,22 @@ passing them does not verify live host integration.
 
 ## Selection contract
 
-Preview limits retain their existing order: result/call characters of 768/768,
-512/768, then 512/256. Only then may tools be omitted, newest first. The search
-keeps a fitting prefix and an overflowing upper bound; each midpoint narrows that
-interval. The last fitting candidate supplies the output, including the final LF.
-If claims alone exceed the cap, the existing truncated manifest or failure remains.
+Preview limits retain their existing order: result/call characters of 768/768, 512/768, then 512/256.
 
-For fixed previews, adding a tool adds a record. Existing records are unchanged;
-sorting cannot alter their encoded lengths. Only omission counters can shrink:
-one digit for omitted count, at most the payload size's decimal width for omitted
-bytes. The new record already includes that width in `payload_bytes`, plus its
-keys, hash, and content. Other counters cannot shrink; `true` becoming `false`
-adds a byte. Thus sizes strictly increase. Recheck this proof when the schema or
-preview rules change. See the [design](https://github.com/boxlite-ai/agent-tooling/issues/264).
+- Only then may tools be omitted, newest first.
+- The search keeps a fitting prefix and an overflowing upper bound; each midpoint narrows that interval.
+- The last fitting candidate supplies the output, including the final LF.
+- If claims alone exceed the cap, the existing truncated manifest or failure remains.
+
+For fixed previews, adding a tool adds a record.
+
+- Existing records are unchanged; sorting cannot alter their encoded lengths.
+- Only omission counters can shrink: one digit for omitted count, at most the payload size's decimal width for omitted bytes.
+- The new record already includes that width in `payload_bytes`, plus its keys, hash, and content.
+- Other counters cannot shrink; `true` becoming `false` adds a byte.
+- Thus sizes strictly increase.
+- Recheck this proof when the schema or preview rules change.
+- See the [design](https://github.com/boxlite-ai/agent-tooling/issues/264).
 
 ## Evidence boundaries
 
@@ -60,7 +63,8 @@ preview rules change. See the [design](https://github.com/boxlite-ai/agent-tooli
 | 472 → 236 | 4.098 s | 0.292 s |
 | 515 → 236 | 5.071 s | 0.296 s |
 
-The 515-tool search ranged from 0.289–0.303 s. At a non-dropping 4 MiB cap,
-the same case retained all tools: 0.147 s median for both selectors.
-These are synthetic reader measurements, not timings from live Claude/Codex sessions
-or the original issue's transcript. Linux and Windows timings remain unverified.
+The 515-tool search ranged from 0.289–0.303 s.
+
+- At a non-dropping 4 MiB cap, the same case retained all tools: 0.147 s median for both selectors.
+- These are synthetic reader measurements, not timings from live Claude/Codex sessions or the original issue's transcript.
+- Linux and Windows timings remain unverified.

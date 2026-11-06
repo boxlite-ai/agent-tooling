@@ -39,7 +39,10 @@ class Order:
 
 Before, order logic also knows pricing/configuration details needed to construct the concrete item. After, an injected factory owns those details, while the order still controls creation timing and supplies product/quantity.
 
-**Check:** rejected construction leaves the order unchanged, each accepted request creates one line, and quantity/product arguments survive. If a line is simply a stable value with an obvious constructor, introducing a factory may add no value. Do not hide side effects such as stock reservation behind an innocuous factory name.
+**Check:** rejected construction leaves the order unchanged, each accepted request creates one line, and quantity/product arguments survive.
+
+- If a line is simply a stable value with an obvious constructor, introducing a factory may add no value.
+- Do not hide side effects such as stock reservation behind an innocuous factory name.
 
 ## S03 — Service lookup is different from receiving a dependency
 
@@ -98,7 +101,10 @@ service = AuthorizedAccounts(service, authorization)
 
 Here authorization wraps the transaction boundary; changing that order can change behavior. A dependency-injection configuration can assemble the same graph instead of handwritten setup. A systemic aspect mechanism additionally selects many join points according to a rule; a single proxy around one object is not equivalent to that capability.
 
-**Check:** intended calls cross the policy exactly once, excluded calls remain excluded, exception/cancellation propagation and transaction behavior survive, and authorization cannot be bypassed by another entry point. Verify self-calls and asynchronous calls according to the chosen runtime. Additional weaving tools or reflection machinery must earn their operational and debugging cost; no AOP framework is mandatory.
+**Check:** intended calls cross the policy exactly once, excluded calls remain excluded, exception/cancellation propagation and transaction behavior survive, and authorization cannot be bypassed by another entry point.
+
+- Verify self-calls and asynchronous calls according to the chosen runtime.
+- Additional weaving tools or reflection machinery must earn their operational and debugging cost; no AOP framework is mandatory.
 
 ## S06 — Choose visible mapping metadata or an external map deliberately
 
@@ -148,6 +154,10 @@ policy = {"kind": 2, "limit": 5000, "window": 24}
 policy = TransferLimit(amount=Money("50.00", "USD"), window=hours(24))
 ```
 
-This is an original illustration of domain vocabulary, not a new parser or framework requirement. Here the legacy schema specifies USD cents and hours. The amount and units are explicit, so a reviewer can discuss a transfer limit without decoding implementation tags. Similar clarity can come from named functions, constructors, or a small fluent API.
+This is an original illustration of domain vocabulary, not a new parser or framework requirement.
+
+- Here the legacy schema specifies USD cents and hours.
+- The amount and units are explicit, so a reviewer can discuss a transfer limit without decoding implementation tags.
+- Similar clarity can come from named functions, constructors, or a small fluent API.
 
 **Check:** the adapter preserves amount, currency, and time units and rejects ambiguous input. Domain experts should recognize the rule. Building a standalone language is justified only when its parser, tooling, and maintenance costs serve actual use.

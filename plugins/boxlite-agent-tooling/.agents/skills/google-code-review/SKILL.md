@@ -18,7 +18,7 @@ For example, an optional naming preference is a nit; classify a missing regressi
 
 ## References
 
-The [guide index](references/reviewer/index.md) links the complete copied reviewer guide.
+The [guide index](references/reviewer/index.md) links the condensed reviewer guide.
 
 | Read | When |
 | --- | --- |
@@ -46,7 +46,7 @@ Repository and caller requirements govern where upstream process advice differs.
 
 Adapted by BoxLite from Google's Engineering Practices, [How to do a code review](https://github.com/google/eng-practices/tree/3bb3ec25b3b0199f4940b1aa75f0ac5c5753301c/review/reviewer).
 Source revision: `3bb3ec25b3b0199f4940b1aa75f0ac5c5753301c`.
-This adaptation and the copied guide retain [CC BY 3.0](LICENSE); the complete upstream license is included.
+This adaptation and the condensed guide retain [CC BY 3.0](LICENSE); the complete upstream license is included.
 
-Reviewer prose is unchanged; links outside the copied set now point to the pinned upstream revision.
+Reviewer prose is condensed into checklists and tables; external guide links point to the pinned upstream revision.
 This entrypoint adds reference routing and repository-specific application rules.

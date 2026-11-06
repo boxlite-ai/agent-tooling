@@ -35,7 +35,11 @@ Repository comparisons use inspected revision `15819052960ad81013bd0a524cef054c7
 
 The [state facade](../../.agents/lib/audit-reflection.sh) exposes `prepare`, `record`, `submit`, and `status` through [the CLI](../../scripts/audit-reflection.sh). [Gate adapters](../../.agents/lib/audit-reflection-gate.sh) preserve existing I/O, dossier, receipt, and pre-push bindings.
 
-`prepare` reserves an attempt and freezes history/reflection inputs. `record` validates the bound dossier and reconciles findings. `submit` accepts reflection only between audits. Native and headless auditors share the [prompt](../../.agents/prompts/audit/audit-reflection.md); completion shortcuts cannot bypass reconciliation.
+`prepare` reserves an attempt and freezes history/reflection inputs.
+
+- `record` validates the bound dossier and reconciles findings.
+- `submit` accepts reflection only between audits.
+- Native and headless auditors share the [prompt](../../.agents/prompts/audit/audit-reflection.md); completion shortcuts cannot bypass reconciliation.
 
 - Serialize transitions under one lock, released before model execution. Reuse bounded regular-file reads and atomic writes; recheck epoch, input hashes, and file identity before acceptance. Never execute commands from reflection text.
 - Limits: 8 FAIL/ERROR outcomes, 16 attempts, 64 KiB/dossier, 8 KiB/reflection, 10 MiB/cycle. Reflection failures count. Missing/corrupt evidence blocks; exhaustion requires human direction and reports INCOMPLETE, never PASS.
@@ -45,7 +49,11 @@ The [state facade](../../.agents/lib/audit-reflection.sh) exposes `prepare`, `re
 
 ## Alternatives and validation
 
-Prompt-only reminders lack persistent evidence. Reflecting after every failure adds routine cost; use two. Banning late findings hides defects. A separate reflection reviewer adds another failure loop; use the existing independent auditor.
+Prompt-only reminders lack persistent evidence.
+
+- Reflecting after every failure adds routine cost; use two.
+- Banning late findings hides defects.
+- A separate reflection reviewer adds another failure loop; use the existing independent auditor.
 
 Test duplicate delivery, missing/stale reflection, omitted findings/coverage, reopenings, earlier misses, reversals, false attribution, epochs, cancellation, unsafe snapshots, exhaustion, receipts, and summary shortcuts. Use deterministic barriers and fully reverted-production red/green checks for fixes.
 

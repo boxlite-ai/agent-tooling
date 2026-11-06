@@ -133,6 +133,7 @@ Reply only with verdict and dossier path; honor host delivery overrides.
 ## Read the transcript
 
 Read [Transcript discovery and evidence](references/transcripts.md) before extracting claims.
-Find the full parent transcript yourself; no caller-supplied transcript path or claim format
-is required. The reference covers host hints, unknown hosts, identity, stable boundaries,
-retrieval, and execution linkage. An unavailable reference is a setup failure.
+
+- Discover the full parent transcript; no caller-supplied transcript path or claim format is required.
+- It covers host hints, unknown hosts, identity, stable boundaries, retrieval, and execution linkage.
+- An unavailable reference is a setup failure.
