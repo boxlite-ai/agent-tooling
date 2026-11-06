@@ -24,6 +24,9 @@ after description edits. Post this as a new PR comment:
 /reviewed {{sha}}
 ```
 
-Unacknowledged PRs are converted to draft. After this check passes, click **Ready for review** when you want reviews.
-Only a new, unedited comment from the PR author counts. A new commit requires a new acknowledgment.
-This records the author's acknowledgment of the commit, not an automated judgment of the description; maintainer approval is separate.
+Unacknowledged PRs are converted to draft.
+
+- After this check passes, click **Ready for review** when you want reviews.
+- Only a new, unedited comment from the PR author counts.
+- A new commit requires a new acknowledgment.
+- This records the author's acknowledgment of the commit, not an automated judgment of the description; maintainer approval is separate.

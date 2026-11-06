@@ -4,25 +4,23 @@ For architecture, deployment, topology, overview, or rendered-picture work.
 
 ## Baseline
 
-Hosted cloud: start from
-[`apps/infra/docs/deployment.md#architecture`](../../../../apps/infra/docs/deployment.md#architecture).
-Reuse its layout, but treat its containment as a hypothesis and re-verify every boundary
-against current IaC and source. Never rebuild the system from call paths because more
-source exists. If it predates the palette, keep its composition and add zones and colors.
+Hosted cloud: start from [`apps/infra/docs/deployment.md#architecture`](../../../../apps/infra/docs/deployment.md#architecture).
+
+- Reuse its layout, but treat its containment as a hypothesis and re-verify every boundary against current IaC and source.
+- Never rebuild the system from call paths because more source exists.
+- If it predates the palette, keep its composition and add zones and colors.
 
 ## One altitude
 
-Write the diagram's question in one sentence first — "How public traffic reaches private
-BoxLite services and boxes". Every node must serve it. A deployment overview names
-systems and boundaries, never functions; a call graph names functions, never cloud
-resources. A second altitude is a child topic, not a second diagram at the same level.
+Write the diagram's question in one sentence first — "How public traffic reaches private BoxLite services and boxes".
 
-"Entire deployment" means complete at one altitude, not every resource: user/SDK entry
-points; external identity, DNS, registry, and telemetry on the main path; public ingress;
-the network, host, process, and trust boundaries that explain ownership; compute and the
-box execution boundary; durable state and caches; the main control, data, image, and
-telemetry routes. Merge siblings that share boundary and role when their identity changes
-no route.
+- Every node must serve it.
+- A deployment overview names systems and boundaries, never functions; a call graph names functions, never cloud resources.
+- A second altitude is a child topic, not a second diagram at the same level.
+
+"Entire deployment" means complete at one altitude, not every resource: user/SDK entry points; external identity, DNS, registry, and telemetry on the main path; public ingress; the network, host, process, and trust boundaries that explain ownership; compute and the box execution boundary; durable state and caches; the main control, data, image, and telemetry routes.
+
+Merge siblings that share boundary and role when their identity changes no route.
 
 ## Containment before routes
 
@@ -133,13 +131,13 @@ House lines, copied verbatim when used:
 | `classDef accent_zone fill:#000c11,stroke:#00b0f0,color:#00b0f0,stroke-width:2px` | the subject's boundary, in place of its scope class; its declared scope still holds |
 | `linkStyle default stroke:#8b949e,stroke-width:1.5px` | grey edges |
 
-Assign scopes with `class <zone_id> scope_<name>`. At most two elements carry the cyan
-accent, and only the subject does. Zones are dark cards whose border and title carry the
-role colour, and edges stay grey, so the diagram reads on light/dark hosts; physical
-boundaries stay plain. The hues come from one role palette, validated for colour-blind and
-normal vision, shared with [publication figures](figure-contract.md). Sequence and call
-graphs take no styling. The live Mermaid is the source of truth and the PNG a preview —
-check both themes when contrast matters.
+Assign scopes with `class <zone_id> scope_<name>`.
+
+- At most two elements carry the cyan accent, and only the subject does.
+- Zones are dark cards whose border and title carry the role colour, and edges stay grey, so the diagram reads on light/dark hosts; physical boundaries stay plain.
+- The hues come from one role palette, validated for colour-blind and normal vision, shared with [publication figures](figure-contract.md).
+- Sequence and call graphs take no styling.
+- The live Mermaid is the source of truth and the PNG a preview — check both themes when contrast matters.
 
 ## Visual QA
 

@@ -36,11 +36,11 @@ preserve its host-facing stdin, stdout, stderr, and exit-code contract.
 
 ## Concurrency review
 
-Draw start, escalation, selection, completion, new-prompt, and teardown as interleaved
-timelines. Identify each state-file owner and the lock covering every check/write pair.
-Bound locks, reads, waits, receipt counts, and leases. Test regular files, symlinks,
-FIFOs, directories, stale/malformed records, replacement generations, and replayed
-notifications as distinct inputs.
+Draw start, escalation, selection, completion, new-prompt, and teardown as interleaved timelines.
+
+- Identify each state-file owner and the lock covering every check/write pair.
+- Bound locks, reads, waits, receipt counts, and leases.
+- Test regular files, symlinks, FIFOs, directories, stale/malformed records, replacement generations, and replayed notifications as distinct inputs.
 
 ## Verify
 

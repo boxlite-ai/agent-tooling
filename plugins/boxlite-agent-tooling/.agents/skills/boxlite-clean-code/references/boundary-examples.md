@@ -36,7 +36,10 @@ def test_console_adapter_emits_one_formatted_message(capsys):
     assert output.err == ""
 ```
 
-This is a test of the application's adapter, not a claim about a particular library's defaults. During initial exploration, isolate three questions: what an unconfigured logger does, whether an explicit layout makes a console destination usable, and whether an omitted destination defaults as documented. Change one configuration element per experiment.
+This is a test of the application's adapter, not a claim about a particular library's defaults.
+
+- During initial exploration, isolate three questions: what an unconfigured logger does, whether an explicit layout makes a console destination usable, and whether an omitted destination defaults as documented.
+- Change one configuration element per experiment.
 
 The adapter encodes the chosen behavior. Its compatibility test then runs against supported dependency versions and catches changed defaults or duplicate emission.
 
@@ -64,4 +67,8 @@ class DeviceTransmitter:
 
 The controller can be developed against its frequency/stream contract. A recording fake checks the command it issues; the provider adapter later owns unit conversion, device calls, and lifecycle rules. The shown device contract assumes tuning precedes emission and no separate keyed session is required.
 
-**Check:** a caller test verifies the selected frequency and stream reach `transmit` unchanged. Separate adapter tests verify the real device's units, ordering, failure behavior, and resource release. If the provider needs key/unkey or cancellation, implement and test those explicitly; the fake cannot establish them. Avoid buffering an entire stream merely to make assertions convenient.
+**Check:** a caller test verifies the selected frequency and stream reach `transmit` unchanged.
+
+- Separate adapter tests verify the real device's units, ordering, failure behavior, and resource release.
+- If the provider needs key/unkey or cancellation, implement and test those explicitly; the fake cannot establish them.
+- Avoid buffering an entire stream merely to make assertions convenient.

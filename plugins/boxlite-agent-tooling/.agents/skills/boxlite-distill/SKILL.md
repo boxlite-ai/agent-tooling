@@ -54,7 +54,11 @@ Use these labeled sections or a compact table; omit inapplicable fields and grou
 | Omissions | What was removed and the resulting limits |
 | Verification | What was checked, observed results, and remaining gaps |
 
-Start with purpose, a compact overview and essential roles at one level; follow with one causal example, run commands, and critical conditions/limits. Explain necessary unfamiliar terms once. Link deeper subsystem detail, exact layouts, encodings, extended traces, and raw evidence unless needed for core understanding. Avoid repeating the overview in each section.
+Start with purpose, a compact overview and essential roles at one level; follow with one causal example, run commands, and critical conditions/limits.
+
+- Explain necessary unfamiliar terms once.
+- Link deeper subsystem detail, exact layouts, encodings, extended traces, and raw evidence unless needed for core understanding.
+- Avoid repeating the overview in each section.
 
 ### 5. Verify sufficiency
 

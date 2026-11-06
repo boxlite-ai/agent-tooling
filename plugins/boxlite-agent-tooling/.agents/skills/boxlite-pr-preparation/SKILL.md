@@ -7,10 +7,11 @@ description: Draft or revise PR descriptions with concrete examples and honest v
 
 ## Purpose and scope
 
-Help reviewers understand why the change exists, how it works, and what evidence
-supports it. Apply `boxlite-writing`. For drafts, ready PRs, and description
-revisions, read and apply the [shared workflow](../../../guidance/workflow.md)
-and repository instructions before these steps. Keep review-only requests read-only.
+Help reviewers understand why the change exists, how it works, and what evidence supports it.
+
+- Apply `boxlite-writing`.
+- For drafts, ready PRs, and description revisions, read and apply the [shared workflow](../../../guidance/workflow.md) and repository instructions before these steps.
+- Keep review-only requests read-only.
 
 ## 1. Inspect the inputs
 

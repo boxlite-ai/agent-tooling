@@ -43,14 +43,12 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/design/preflight-design-doc.tes
 bash plugins/boxlite-agent-tooling/.agents/hooks/session/stop-gate.test.sh
 ```
 
-Additional suites cover GitHub writing, PR design/explanations/size, TL;DR checks,
-auditor overrides, and watch delivery. `session/tldr-gates.test.sh fast` checks the
-TL;DR denials in under a minute; its full matrix takes over ten minutes. Set
-`TLDR_GATES_CASES=<label>,…` to run only those cases, for example a fix's new ones
-within a foreground time limit; a label that runs no case fails the suite.
-Managed questions also use
-[`scripts/claude-timed-prompts.test.sh`](../../scripts/claude-timed-prompts.test.sh).
-`pr/fixtures/` holds recorded test inputs.
+Additional suites cover GitHub writing, PR design/explanations/size, TL;DR checks, auditor overrides, and watch delivery.
+
+- `session/tldr-gates.test.sh fast` checks the TL;DR denials in under a minute; its full matrix takes over ten minutes.
+- Set `TLDR_GATES_CASES=<label>,…` to run only those cases, for example a fix's new ones within a foreground time limit; a label that runs no case fails the suite.
+- Managed questions also use [`scripts/claude-timed-prompts.test.sh`](../../scripts/claude-timed-prompts.test.sh).
+- `pr/fixtures/` holds recorded test inputs.
 
 ## How it works
 
@@ -74,10 +72,11 @@ by purpose:
 | `session/` | Stop and standalone-reminder tests |
 | `watch/` | Remote-write watcher tests |
 
-Host manifests keep their existing paths. Scripts resolve grouped helpers and
-shared libraries from the plugin root. Keep fixture copies at the same depth.
-Copy the standalone reminder and its Markdown companion together when installing
-it outside the plugin.
+Host manifests keep their existing paths.
+
+- Scripts resolve grouped helpers and shared libraries from the plugin root.
+- Keep fixture copies at the same depth.
+- Copy the standalone reminder and its Markdown companion together when installing it outside the plugin.
 
 ```mermaid
 flowchart TD

@@ -10,9 +10,10 @@ implementations. Java-like fragments assume the surrounding domain types exist.
 ## N1 — Elapsed time includes its unit
 
 Before: `int d;` needs a comment and oral explanation.
-After: `int elapsedDays;` or `int daysSinceCreation;` states the actual quantity.
-Choose the name from the real origin and unit; renaming milliseconds to days is
-not a conversion. Check callers and serialization names before changing an API.
+
+- After: `int elapsedDays;` or `int daysSinceCreation;` states the actual quantity.
+- Choose the name from the real origin and unit; renaming milliseconds to days is not a conversion.
+- Check callers and serialization names before changing an API.
 
 ## N2 — Minesweeper cells expose their meaning
 
@@ -42,19 +43,19 @@ must not silently reverse the operation or introduce a new allocation.
 
 ## N4 — Noise words do not define a contract
 
-Before: `getActiveAccount()`, `getActiveAccounts()`, and `getActiveAccountInfo()`
-compete without explaining which result is appropriate.
-After, if these are the actual distinctions: `findActiveAccount(id)`,
-`listActiveAccounts()`, and `summarizeActiveAccount(id)`.
-Likewise, `ProductInfo` and `ProductData` need a real distinction or one concept.
-Do not invent distinctions simply to justify keeping redundant APIs.
+Before: `getActiveAccount()`, `getActiveAccounts()`, and `getActiveAccountInfo()` compete without explaining which result is appropriate.
+
+- After, if these are the actual distinctions: `findActiveAccount(id)`, `listActiveAccounts()`, and `summarizeActiveAccount(id)`.
+- Likewise, `ProductInfo` and `ProductData` need a real distinction or one concept.
+- Do not invent distinctions simply to justify keeping redundant APIs.
 
 ## N5 — Pronounceable names support discussion
 
 Before: a record exposes `genymdhms` and `modymdhms`.
-After: `createdAt` and `modifiedAt` express the two timestamps.
-Preserve their precision and timezone; readable names cannot resolve an ambiguous
-time contract. Use the domain's established terminology when it differs.
+
+- After: `createdAt` and `modifiedAt` express the two timestamps.
+- Preserve their precision and timezone; readable names cannot resolve an ambiguous time contract.
+- Use the domain's established terminology when it differs.
 
 ## N6 — Searchable constants identify a rule
 
@@ -72,19 +73,19 @@ index is still reasonable inside a tiny scope.
 
 ## N7 — Type and scope encodings can become stale
 
-Before: `PhoneNumber phoneString` lies after the type changes;
-`m_dsc` requires decoding a field prefix and an abbreviation.
-After: `PhoneNumber phoneNumber` and `description` name the concepts.
-Use repository conventions; do not rename unrelated fields merely to remove a
-prefix. The same caution applies to mandatory `I` prefixes on interface names.
+Before: `PhoneNumber phoneString` lies after the type changes; `m_dsc` requires decoding a field prefix and an abbreviation.
+
+- After: `PhoneNumber phoneNumber` and `description` name the concepts.
+- Use repository conventions; do not rename unrelated fields merely to remove a prefix.
+- The same caution applies to mandatory `I` prefixes on interface names.
 
 ## N8 — Visually ambiguous names cost more than they save
 
 Before: `l`, `O`, and `O1` are hard to distinguish from digits.
-After: `lineCount`, `origin`, and `nextOrigin`, when those are their real meanings.
-Changing editor fonts only transfers the decoding burden to the next reader.
-Long, nearly identical controller names likewise need their distinguishing purpose
-near the front, not hidden in a suffix.
+
+- After: `lineCount`, `origin`, and `nextOrigin`, when those are their real meanings.
+- Changing editor fonts only transfers the decoding burden to the next reader.
+- Long, nearly identical controller names likewise need their distinguishing purpose near the front, not hidden in a suffix.
 
 ## N9 — Creation methods expose the interpretation
 
@@ -107,10 +108,10 @@ Consistency means matching semantics, not forcing every operation to share a ver
 ## N11 — Context belongs to a concept
 
 Before: `state` travels separately from street, city, and postal code.
-After: `address.state` makes the context available at the point of use.
-Avoid replacing this with application prefixes on every class: `PostalAddress`
-communicates a distinction that `GSDAccountAddress` obscures.
-Do not combine independently owned records solely because their fields look alike.
+
+- After: `address.state` makes the context available at the point of use.
+- Avoid replacing this with application prefixes on every class: `PostalAddress` communicates a distinction that `GSDAccountAddress` obscures.
+- Do not combine independently owned records solely because their fields look alike.
 
 ## N12 — Guess statistics own their grammar
 

@@ -8,15 +8,13 @@ The consumer's `./.agent-tooling/install.sh` calls [setup.sh](../scripts/setup.s
 which sets worktree-local `core.hooksPath` to this directory. Inspect it with
 `git config --worktree --get core.hooksPath` from the consumer checkout.
 
-Audit enforcement detects nonempty `CLAUDECODE`, `CODEX_SANDBOX`, or `AGENT_GATED`,
-or a live ancestor recorded by PreToolUse. The shared
-[origin classifier](../.agents/lib/git-agent-origin.sh) checks worktree-local
-PID/start-token records; unrelated human shells stay exempt. Records activate the
-existing audit checks and never substitute for a matching dossier or receipt.
-Reload updated host hooks: markerless delegation requires the retained-launcher
-contract described under [Git gates](../ARCHITECTURE.md#git-gates).
-Installation and guidance checks on commit/push, chained hooks, and watcher setup
-also run for humans. These local hooks are workflow checks, not a security sandbox.
+Audit enforcement detects nonempty `CLAUDECODE`, `CODEX_SANDBOX`, or `AGENT_GATED`, or a live ancestor recorded by PreToolUse.
+
+- The shared [origin classifier](../.agents/lib/git-agent-origin.sh) checks worktree-local PID/start-token records; unrelated human shells stay exempt.
+- Records activate the existing audit checks and never substitute for a matching dossier or receipt.
+- Reload updated host hooks: markerless delegation requires the retained-launcher contract described under [Git gates](../ARCHITECTURE.md#git-gates).
+- Installation and guidance checks on commit/push, chained hooks, and watcher setup also run for humans.
+- These local hooks are workflow checks, not a security sandbox.
 
 ## Hooks
 
@@ -59,11 +57,11 @@ A failed audit blocks the operation; a receipt only covers a push introducing
 exactly the audited commit, matching its parent, tree, and subject. After the
 chained hook succeeds (or is absent), the push may proceed.
 
-`pre-push` starts the watcher before transfer; the watcher waits for the commit
-and PR to appear remotely. Watcher startup is best effort and also applies to
-human pushes. `BOXLITE_PR_WATCH=0` disables startup.
-See [watch delivery](../.agents/watch/consumer-lifecycle.md) and
-[Git audit contracts](../ARCHITECTURE.md#git-gates).
+`pre-push` starts the watcher before transfer; the watcher waits for the commit and PR to appear remotely.
+
+- Watcher startup is best effort and also applies to human pushes.
+- `BOXLITE_PR_WATCH=0` disables startup.
+- See [watch delivery](../.agents/watch/consumer-lifecycle.md) and [Git audit contracts](../ARCHITECTURE.md#git-gates).
 
 ## Tests
 

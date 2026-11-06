@@ -31,11 +31,10 @@ Use $defs.history/reflection:
 
 ## Parent
 
-After two FAIL/ERROR runs, compare failures/misses, diagnose failed fixes, change
-approach, run a discriminating check. Submit stdin JSON:
-scripts/audit-reflection.sh submit STATE_PATH (printed path):
-{context,reflection:{history_hash,failure_ids,diagnosis,previous_fixes_failed_because,
-changed_approach,checks,auditor_gaps}}. Bind current context/hash and all failed IDs.
-Checks: {command,expected,observed,evidence}; gaps: {attempt_id,gap,next_check}.
-Limits: 8 KiB, 1–8 checks, 0–8 gaps; refresh each failure.
-Stop INCOMPLETE at eight failures, sixteen attempts, or <512 KiB preparation reserve.
+After two FAIL/ERROR runs, compare failures/misses, diagnose failed fixes, change approach, run a discriminating check.
+
+- Submit stdin JSON to scripts/audit-reflection.sh submit STATE_PATH (shown): {context,reflection:{history_hash,failure_ids,diagnosis,previous_fixes_failed_because,changed_approach,checks,auditor_gaps}}.
+- Bind current context/hash and all failed IDs.
+- Checks: {command,expected,observed,evidence}; gaps: {attempt_id,gap,next_check}.
+- Limits: 8 KiB, 1–8 checks, 0–8 gaps; refresh each failure.
+- Stop INCOMPLETE at 8 failures, 16 attempts, or <512 KiB preparation reserve.

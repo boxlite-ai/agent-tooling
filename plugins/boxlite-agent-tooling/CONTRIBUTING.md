@@ -36,11 +36,11 @@ submitting Markdown changes; the Writing ownership workflow runs the same gate.
 
 ## Auditor test isolation
 
-The verdict runner suite builds a utility-only PATH and uses an explicit default
-auditor stub. Claude/Codex integration cases supply their own fake executables;
-no-runner cases omit them. An unavailable `CODEX_BIN` disables desktop discovery
-outside PATH, and sentinel commands fail the suite on unintended model calls.
-Add required utilities to the fixture list instead of restoring the host PATH.
+The verdict runner suite builds a utility-only PATH and uses an explicit default auditor stub.
+
+- Claude/Codex integration cases supply their own fake executables; no-runner cases omit them.
+- An unavailable `CODEX_BIN` disables desktop discovery outside PATH, and sentinel commands fail the suite on unintended model calls.
+- Add required utilities to the fixture list instead of restoring the host PATH.
 
 Receipt tests select the path added by each hook invocation. Keep that selection
 state under the fixture's ignored directory: timestamp/PID sorting can choose an
@@ -57,17 +57,17 @@ commit/push gate detects a stale session plugin only by version; an unchanged
 version lets a loaded auditor reject the newer gate's tasks instead of asking
 for `/reload-plugins`.
 
-After the release merges, run each consumer's `.agent-tooling/install.sh`, then
-refresh its host plugin. Verify the recorded revision, worktree hook path, managed
-guidance, and installed plugin version separately. Preserve explicit holds and
-unrelated worktree changes. Existing sessions need a plugin reload or a new task
-to load the updated resources.
+After the release merges, run each consumer's `.agent-tooling/install.sh`, then refresh its host plugin.
 
-Version 0.1.35 moves host reconciliation and subsequent installation into the
-adopted package. Migrate existing consumers once using the [release instructions](../../README.md#migrate-existing-consumers-once).
-Installation never rewrites tracked loaders; preserve customizations and older
-held releases. Verify Claude records by exact `projectPath`: a successful update
-in one linked worktree can leave another stale.
+- Verify the recorded revision, worktree hook path, managed guidance, and installed plugin version separately.
+- Preserve explicit holds and unrelated worktree changes.
+- Existing sessions need a plugin reload or a new task to load the updated resources.
+
+Version 0.1.35 moves host reconciliation and subsequent installation into the adopted package.
+
+- Migrate existing consumers once using the [release instructions](../../README.md#migrate-existing-consumers-once).
+- Installation never rewrites tracked loaders; preserve customizations and older held releases.
+- Verify Claude records by exact `projectPath`: a successful update in one linked worktree can leave another stale.
 
 For Codex packaging changes, run host parity's copy-without-symlinks checks, then
 install with the real CLI in an empty isolated Codex home. Verify fresh
@@ -76,52 +76,50 @@ reinstall without editing the installed cache.
 
 ### Transcript discovery for verdict audits
 
-Version 0.1.37 adds optional user network configuration, bounded execution diagnostics,
-and retention of unchanged verdict work across prompts. New turns still need fresh
-approval. Headless commit reviews reconstruct the staged candidate in private scratch;
-the repository remains read-only. See [audit configuration and runners](.agents/hooks/audit/README.md).
-After adoption, reload the host plugin; native Claude and platform coverage must be
-verified separately from shell fixtures.
+Version 0.1.37 adds optional user network configuration, bounded execution diagnostics, and retention of unchanged verdict work across prompts.
 
-Version 0.1.36 makes auditors discover the full parent transcript from session identity,
-host, repository, and request time. [boxlite-verdict-audit](.agents/skills/boxlite-verdict-audit/SKILL.md)
-owns discovery and the entire audit procedure; the agent definition remains a thin adapter.
-Known hosts have storage hints; unknown hosts investigate available tools and metadata.
-The auditor verifies parent identity and a stable read boundary before certifying claims.
+- New turns still need fresh approval.
+- Headless commit reviews reconstruct the staged candidate in private scratch; the repository remains read-only.
+- See [audit configuration and runners](.agents/hooks/audit/README.md).
+- After adoption, reload the host plugin; native Claude and platform coverage must be verified separately from shell fixtures.
 
-Triage and history keep bounded summaries. The runner's first argument is bookkeeping
-only; use `-` when unavailable. No transcript path reaches the auditor task. For example,
-an auditor given a session ID must reject a newer transcript belonging to another session.
-`full-transcript.test.sh` covers this handoff and complete evidence access through stubs;
-independent skill evaluations are needed to check model behavior. Run the suite with
-`make test:plugin TEST_FILTER=full-transcript`.
-Reload the plugin or start a new task after adoption.
+Version 0.1.36 makes auditors discover the full parent transcript from session identity, host, repository, and request time.
+
+- [boxlite-verdict-audit](.agents/skills/boxlite-verdict-audit/SKILL.md) owns discovery and the entire audit procedure; the agent definition remains a thin adapter.
+- Known hosts have storage hints; unknown hosts investigate available tools and metadata.
+- The auditor verifies parent identity and a stable read boundary before certifying claims.
+
+Triage and history keep bounded summaries.
+
+- The runner's first argument is bookkeeping only; use `-` when unavailable.
+- No transcript path reaches the auditor task.
+- For example, an auditor given a session ID must reject a newer transcript belonging to another session.
+- `full-transcript.test.sh` covers this handoff and complete evidence access through stubs; independent skill evaluations are needed to check model behavior.
+- Run the suite with `make test:plugin TEST_FILTER=full-transcript`.
+- Reload the plugin or start a new task after adoption.
 
 ### Markerless Git audit rollout
 
-Version 0.1.38 ships retained-launcher manifests and worktree-local agent-origin
-records. Update repository tooling and the host plugin, then reload the session.
-The version change triggers host reconciliation and makes older preflight hooks
-request a reload before delegating to the new Git hooks. Custom markerless wiring
-must retain its launcher and pass its PID; see [Git gates](ARCHITECTURE.md#git-gates).
+Version 0.1.38 ships retained-launcher manifests and worktree-local agent-origin records.
+
+- Update repository tooling and the host plugin, then reload the session.
+- The version change triggers host reconciliation and makes older preflight hooks request a reload before delegating to the new Git hooks.
+- Custom markerless wiring must retain its launcher and pass its PID; see [Git gates](ARCHITECTURE.md#git-gates).
 
 ### Design audit rollout
 
-Version 0.1.41 renames `design-research-auditor` to `design-auditor` and its prompts to
-`design-criteria.md` and `design-task.md`. Each audit round runs in full within
-`DESIGN_AUDITOR_TIMEOUT` (900 s); only critical and high gaps FAIL. Findings carry across
-edits, and repeated FAILs stop for a `design-decision:` choice
-([#309](https://github.com/boxlite-ai/agent-tooling/issues/309)). Verdicts in
-`agent-tooling-design-research.json` stay readable, and `design-doc.sh research` remains an
-alias of `verdict`. Update consumer tooling, refresh the host plugin, then reload or start
-a new task.
+Version 0.1.41 renames `design-research-auditor` to `design-auditor` and its prompts to `design-criteria.md` and `design-task.md`.
 
-Version 0.1.44 audits the whole design outline and adds a fresh `design-advisor` run after
-each PASS or FAIL ([#335](https://github.com/boxlite-ai/agent-tooling/issues/335)). Code
-edits wait for its advice, which never changes the verdict; a PASS recorded earlier needs
-one advice run. Design probes carry no personal identifiers or key requests
-([#327](https://github.com/boxlite-ai/agent-tooling/issues/327)), and `audit-privacy.sh`
-denies the obvious cases. Update consumer tooling, refresh the host plugin, then reload.
+- Each audit round runs in full within `DESIGN_AUDITOR_TIMEOUT` (900 s); only critical and high gaps FAIL.
+- Findings carry across edits, and repeated FAILs stop for a `design-decision:` choice ([#309](https://github.com/boxlite-ai/agent-tooling/issues/309)).
+- Verdicts in `agent-tooling-design-research.json` stay readable, and `design-doc.sh research` remains an alias of `verdict`.
+- Update consumer tooling, refresh the host plugin, then reload or start a new task.
+
+Version 0.1.44 audits the whole design outline and adds a fresh `design-advisor` run after each PASS or FAIL ([#335](https://github.com/boxlite-ai/agent-tooling/issues/335)).
+
+- Code edits wait for its advice, which never changes the verdict; a PASS recorded earlier needs one advice run.
+- Design probes carry no personal identifiers or key requests ([#327](https://github.com/boxlite-ai/agent-tooling/issues/327)), and `audit-privacy.sh` denies the obvious cases.
+- Update consumer tooling, refresh the host plugin, then reload.
 
 ### Structured code-review rollout
 
@@ -145,28 +143,28 @@ evaluation.
 
 ### Commit/push retry choices
 
-After three FAIL/ERROR rounds, the audit pauses for **Reflect again (Recommended)**
-or **Stop**. The five-minute deadline selects Reflect again if unanswered.
-Keep the failed history, submit current reflection, fix and test, then run one fresh
-audit. A further failure asks again; eight failures, sixteen attempts, and storage
-limits remain terminal safety bounds. Timeout never approves a commit or push.
+After three FAIL/ERROR rounds, the audit pauses for **Reflect again (Recommended)** or **Stop**.
 
-Use the managed question or its exact standalone
-`commit-audit-decision: <request-id> <Reflect again|Stop>` answer; push uses
-`push-audit-decision:`. The prompt hook retains the failed cycle for a valid choice.
-Extra instructions or stale answers follow ordinary prompt cancellation.
-Stop keeps Git blocked; a later explicit task instruction starts a new prompt context.
-After adopting this change, refresh the whole plugin and start a new session so
-Git gates, prompt handling, and question callbacks use the same implementation.
+- The five-minute deadline selects Reflect again if unanswered.
+- Keep the failed history, submit current reflection, fix and test, then run one fresh audit.
+- A further failure asks again; eight failures, sixteen attempts, and storage limits remain terminal safety bounds.
+- Timeout never approves a commit or push.
+
+Use the managed question or its exact standalone `commit-audit-decision: <request-id> <Reflect again|Stop>` answer; push uses `push-audit-decision:`.
+
+- The prompt hook retains the failed cycle for a valid choice.
+- Extra instructions or stale answers follow ordinary prompt cancellation.
+- Stop keeps Git blocked; a later explicit task instruction starts a new prompt context.
+- After adopting this change, refresh the whole plugin and start a new session so Git gates, prompt handling, and question callbacks use the same implementation.
 
 ### Verification applicability rollout
 
-Version 0.1.39 scopes full-revert defect proof to fixes of existing behavior, including
-fixes reached through new APIs or wrappers. Wholly new contracts require evidence of
-no prior equivalent and implementation tests, with allowed/denied security checks.
-Mixed changes keep both standards. Update consumer tooling, refresh the host plugin,
-then reload or start a new task; see [audit producers](ARCHITECTURE.md#audit-producers).
-New wrappers over unchanged, correct dependencies use new-contract tests.
+Version 0.1.39 scopes full-revert defect proof to fixes of existing behavior, including fixes reached through new APIs or wrappers.
+
+- Wholly new contracts require evidence of no prior equivalent and implementation tests, with allowed/denied security checks.
+- Mixed changes keep both standards.
+- Update consumer tooling, refresh the host plugin, then reload or start a new task; see [audit producers](ARCHITECTURE.md#audit-producers).
+- New wrappers over unchanged, correct dependencies use new-contract tests.
 
 ### PR-size choice rollout
 
@@ -176,11 +174,10 @@ session to replace already-loaded prompts.
 
 ### API compatibility rollout
 
-Version 0.1.30 adds the API compatibility gate and changes the commit/push audit
-criteria for all `*openapi*.yaml` contracts. Explain breaking/default changes and
-recommend GitHub issue discussion; only the user's `api compatibility: skip`
-confirmation bypasses that gate. No Notion link is required;
-reload or start a new session to replace already-loaded prompts.
+Version 0.1.30 adds the API compatibility gate and changes the commit/push audit criteria for all `*openapi*.yaml` contracts.
+
+- Explain breaking/default changes and recommend GitHub issue discussion; only the user's `api compatibility: skip` confirmation bypasses that gate.
+- No Notion link is required; reload or start a new session to replace already-loaded prompts.
 
 ### Research gate and TL;DR rollout
 
@@ -210,10 +207,11 @@ Version 0.1.32 ships two behavior changes:
 Version 0.1.33 packages `boxlite-pr-preparation` and direct skill-directory discovery,
 plus the merged audit, publication, watcher, and instruction-parsing fixes.
 
-After adoption, check the installed version and fresh skill/hook discovery. The
-runtime must discover `boxlite-pr-preparation`; its presence in the source tree
-alone is insufficient. Generated guidance must route PR descriptions to that skill.
-Reload the plugin or start a new task before using the updated instructions.
+After adoption, check the installed version and fresh skill/hook discovery.
+
+- The runtime must discover `boxlite-pr-preparation`; its presence in the source tree alone is insufficient.
+- Generated guidance must route PR descriptions to that skill.
+- Reload the plugin or start a new task before using the updated instructions.
 
 Example: a documentation-only PR selects before/after wording from the skill's
 inline illustration table. Verify the active installation exposes that table.
@@ -221,17 +219,18 @@ inline illustration table. Verify the active installation exposes that table.
 ### Current-host Stop rollout
 
 Version 0.1.34 makes Stop classification and auditing use the declared hook host.
-Host manifests replace inherited identity markers; generic consumers remain unknown.
-After adoption, reload the plugin or start a new session so the host loads the
-updated hook commands. See [audit routing](.agents/hooks/audit/README.md#runners).
+
+- Host manifests replace inherited identity markers; generic consumers remain unknown.
+- After adoption, reload the plugin or start a new session so the host loads the updated hook commands.
+- See [audit routing](.agents/hooks/audit/README.md#runners).
 
 ### Verification boundaries
 
-In lifecycle tests, wait for the observed phase before injecting a signal. A
-watcher must publish `watch_start` before TERM; bounded startup failure is a
-fixture failure. For FIFO request metadata, retain the two-second replacement
-bound and allow the following audit its own completion deadline. Assert its
-published finding, so an auditor launch failure cannot substitute for completion.
+In lifecycle tests, wait for the observed phase before injecting a signal.
+
+- A watcher must publish `watch_start` before TERM; bounded startup failure is a fixture failure.
+- For FIFO request metadata, retain the two-second replacement bound and allow the following audit its own completion deadline.
+- Assert its published finding, so an auditor launch failure cannot substitute for completion.
 
 Prompt budgets cover complete documents, including metadata. Render composed
 messages too: a review recovery notice and its timer can each fit separately yet
@@ -281,30 +280,30 @@ bash <plugin-root>/scripts/design-doc.sh register <URL>
 `bind` remains a compatibility alias; `register` avoids the reported Claude Code
 worktree refusal ([#207](https://github.com/boxlite-ai/agent-tooling/issues/207)).
 
-The first code edit then needs a design-audit PASS for the design's exact content. The
-pre-edit gate names the `design-auditor` route; the auditor records its
-verdict with `design-doc.sh verdict` within `DESIGN_AUDITOR_TIMEOUT` (900 s). Next the
-gate names the `design-advisor` route, which records advice on that verdict with
-`design-doc.sh advice`; show the advice to the human, who decides what to adopt. Editing
-the design needs a new review.
-Only critical and high gaps FAIL. After repeated FAILs, the gate asks for a reflection
-(`design-doc.sh reflect`) or stops for your choice. To answer in text, make your
-prompt's first line `design-decision: <Redesign|Reflect again|Overrule> <reason>`
-([design #309](https://github.com/boxlite-ai/agent-tooling/issues/309)).
+The first code edit then needs a design-audit PASS for the design's exact content.
 
-On Codex, use the gate's exact asynchronous question payload, including the request ID
-in its title. Select an option or enter the directive above as free text.
-A matching reply remains valid after the five-minute wait; silence leaves edits blocked.
-Changed design content or history needs a new question. Older cards without request
-correlation cannot authorize the current request; use a fresh question or a plain-text directive.
-Reload the host plugin after adopting this change; already displayed cards are not rewritten.
+- The pre-edit gate names the `design-auditor` route; the auditor records its verdict with `design-doc.sh verdict` within `DESIGN_AUDITOR_TIMEOUT` (900 s).
+- Next the gate names the `design-advisor` route, which records advice on that verdict with `design-doc.sh advice`; show the advice to the human, who decides what to adopt.
+- Editing the design needs a new review.
+- Only critical and high gaps FAIL.
+- After repeated FAILs, the gate asks for a reflection (`design-doc.sh reflect`) or stops for your choice.
+- To answer in text, make your prompt's first line `design-decision: <Redesign|Reflect again|Overrule> <reason>` ([design #309](https://github.com/boxlite-ai/agent-tooling/issues/309)).
 
-GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs
-`LINEAR_API_KEY`. Keep credentials in the environment, never in the repository.
-Re-register after changing branches.
-Notion designs must keep their text in top-level blocks; unread child blocks are rejected.
-Use the full registered URL in the PR body as plain text or a Markdown link.
-See [design-document enforcement](ARCHITECTURE.md#design-documents) for validation and tool boundaries.
+On Codex, use the gate's exact asynchronous question payload, including the request ID in its title.
+
+- Select an option or enter the directive above as free text.
+- A matching reply remains valid after the five-minute wait; silence leaves edits blocked.
+- Changed design content or history needs a new question.
+- Older cards without request correlation cannot authorize the current request; use a fresh question or a plain-text directive.
+- Reload the host plugin after adopting this change; already displayed cards are not rewritten.
+
+GitHub uses `gh` authentication; Notion needs `NOTION_TOKEN`, Linear needs `LINEAR_API_KEY`.
+
+- Keep credentials in the environment, never in the repository.
+- Re-register after changing branches.
+- Notion designs must keep their text in top-level blocks; unread child blocks are rejected.
+- Use the full registered URL in the PR body as plain text or a Markdown link.
+- See [design-document enforcement](ARCHITECTURE.md#design-documents) for validation and tool boundaries.
 
 Read and apply [boxlite-pr-preparation](.agents/skills/boxlite-pr-preparation/SKILL.md)
 for descriptions, including drafts and revisions. See the [structural checker
@@ -322,15 +321,17 @@ when choosing an example. This anchor remains for existing links.
 
 ### Author review acknowledgment
 
-CI posts an author-review prompt and converts unacknowledged PRs to draft. After
-reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a new,
-unedited comment. Once `Author reviewed the PR` passes, the author can click
-**Ready for review**. A new push or editing/deleting the only acknowledgment
-returns the PR to draft and requires a fresh comment. Forks use the same flow.
-Use the full head SHA from the bot's comment. The local `reviewed:` flow is separate;
-follow its [timed-confirmation instructions](ARCHITECTURE.md#timed-confirmations).
-Acknowledgments bind to the commit SHA, so a description edit alone does not revoke
-one. Description quality is a human review criterion. Maintainer approval remains separate.
+CI posts an author-review prompt and converts unacknowledged PRs to draft.
+
+- After reading the current diff, the PR author posts `/reviewed <full-head-SHA>` as a new, unedited comment.
+- Once `Author reviewed the PR` passes, the author can click **Ready for review**.
+- A new push or editing/deleting the only acknowledgment returns the PR to draft and requires a fresh comment.
+- Forks use the same flow.
+- Use the full head SHA from the bot's comment.
+- The local `reviewed:` flow is separate; follow its [timed-confirmation instructions](ARCHITECTURE.md#timed-confirmations).
+- Acknowledgments bind to the commit SHA, so a description edit alone does not revoke one.
+- Description quality is a human review criterion.
+- Maintainer approval remains separate.
 
 ### Example PR description
 
