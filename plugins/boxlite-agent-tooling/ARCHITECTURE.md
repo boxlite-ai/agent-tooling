@@ -468,6 +468,7 @@ All `.agents/state/` artifacts are ignored and session-scoped where checkouts ca
 - Tasks load `.agents/prompts/audit/dossier-validation.md` with JSON-encoded validator paths; correct candidates before delivery; read-only hosts return the same validated JSON.
 - Validation reports `scope:history` for captured input or `scope:shape` for shape; neither replaces live binding/freshness/lease/publication acceptance.
 - Headless prompts preview four changed paths within 6 KiB; full sanitized diff stays readable; design agents use their recorder.
+- The runner suite measures the complete composed prompt, including metadata, deadline rules, and validation instructions; formatting changes consume this same budget.
 
 Runtime derives `outcome.deadline_review = {deadline, recorded_at}` only after captured `attempt.input.deadline`; auditor-supplied markers reject.
 
@@ -813,6 +814,7 @@ Claude/Copilot use `skills`/`agents` aliases; Codex uses canonical directories, 
 | `boxlite-visualize` | Source-grounded `diagram.md`/`evidence.json`; render/fit/trace validation in `validation.json`, then visual inspection. |
 
 - Share whole skill directories, including references; standalone Clean Code needs no plugin scripts and retains repository permissions/workflow.
+- Adversarial fixer handoffs name each finding's failure class; cross-finding patterns remain optional and require evidence.
 - Shell `references/sources.json` records revisions/bytes/hashes/licenses; UNSW/Wooledge remain links without established blanket redistribution permission.
 - Distill guides separate whole-system coverage, selective depth, source/ownership/lifecycle, and complete minimal paths; isolated evaluations live in `tests/boxlite_distill/`.
 - Skill discovery adds no publication authority; [instruction owners](CONTRIBUTING.md#instruction-ownership) retain policies/checkers; runtime/model/host evidence require separate verification.
