@@ -77,9 +77,9 @@ else
 fi
 # Line 1 is the managed-by notice and legitimately names the tooling repo; every
 # other line must be free of repo-, path-, and toolchain-specific residue.
-# These exact shared skill identifiers are portable across consumer repositories.
+# Shared skill identifiers and the upstream issue destination apply to every consumer.
 # shellcheck disable=SC2016 # Match literal Markdown backticks.
-leaks="$(tail -n +2 "$CANON" | sed -e 's/`boxlite-writing`//g' -e 's/`boxlite-clean-code`//g' -e 's/`boxlite-design-doc`//g' -e 's/`boxlite-pr-preparation`//g' | grep -inE 'boxlite|imagemanager|jailer' || true)"
+leaks="$(tail -n +2 "$CANON" | sed -e 's/`boxlite-writing`//g' -e 's/`boxlite-clean-code`//g' -e 's/`boxlite-design-doc`//g' -e 's/`boxlite-pr-preparation`//g' -e 's|(https://github\.com/boxlite-ai/agent-tooling/issues)||g' | grep -inE 'boxlite|imagemanager|jailer' || true)"
 [[ -z "$leaks" ]] && ok "no domain names leak past the notice line" \
                   || bad "domain names leak past the notice line: $leaks"
 leaks="$(tail -n +2 "$CANON" | grep -nE '\]\(\./|/codex:|src/|`make [a-z]' || true)"
@@ -103,6 +103,8 @@ require_semantic_rule "guidance pins source-first understanding" \
   'README/CONTRIBUTING.*actual source before editing'
 require_semantic_rule "guidance pins focused scope" \
   'Stay inside the ask: do and discuss only what the request needs'
+require_semantic_rule "every consumer must file tooling issues upstream" \
+  '^MANDATORY: File all agent-tooling issues from any consumer in \[upstream GitHub Issues\]\(https://github\.com/boxlite-ai/agent-tooling/issues\)\.$'
 require_semantic_rule "guidance delegates coding decisions to the shared skill" \
   'Apply the .*boxlite-clean-code.* skill for design, implementation, refactoring, and maintainability review'
 if [[ -r "$PLUGIN_ROOT/.agents/skills/boxlite-clean-code/SKILL.md" ]]; then
