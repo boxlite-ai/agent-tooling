@@ -84,7 +84,7 @@ sequenceDiagram
 ```
 
 - **Validated:** main `d694bbd`, `.agents/skills/boxlite-visualize/scripts/validate_diagrams.py`; inputs in the adding PR.
-- **Revalidate this sequence on changes to:** `.claude/agents/commit-push-auditor.md`, `../preflight-commit-push.sh`, `run-commit-push-audit.sh`, `../auditor-control.sh`, `../audit-deadline.sh`, `.agents/lib/` `commit-push-stop.sh`, `audit-reflection.sh`, `audit-reflection-gate.sh`, `subagent-identity.sh`, `auditor-control-state.sh`, or `hooks/{hooks,codex-hooks,generic-hooks}.json`.
+- **Revalidate this sequence on changes to** (paths from the plugin root): `.claude/agents/commit-push-auditor.md`, `.agents/hooks/{preflight-commit-push,auditor-control,audit-deadline}.sh`, `.agents/hooks/audit/run-commit-push-audit.sh`, `.agents/lib/{commit-push-stop,audit-reflection,audit-reflection-gate,subagent-identity,auditor-control-state}.sh`, or `hooks/{hooks,codex-hooks,generic-hooks}.json`.
 
 | Gate state | Outcome |
 | --- | --- |
