@@ -48,81 +48,111 @@ flowchart TB
 ```
 
 1. **Turn end.** When the final turn asks the reader to trust a conclusion, the verdict gate runs `run-verdict-audit.sh` inside the same Stop. It then re-enters itself to validate the new dossier: PASS allows silently; FAIL blocks with findings.
-2. **Commit or push.** `preflight-commit-push.sh` denies with an explicit next action; an `audit` action prepares an attempt and supplies the route. Native Start binds the worker; its matching Stop closes the attempt. Git runs only on a fresh, matching PASS, consumed once.
+2. **Commit or push.** `preflight-commit-push.sh` denies with an explicit next action; an `audit` action prepares an attempt and supplies the route.
+   - Native Start binds the worker; its matching Stop closes the attempt.
+   - Git runs only on a fresh, matching PASS, consumed once.
 
-For example, an unchanged FAIL can request a bounded review without a newer test receipt.
+### Native commit/push audit
 
-- An active worker produces `wait`; user Stop or exhausted history produces `stop` without another launch.
-- Recovery instructions repair named prerequisites before retrying; persistent state errors preserve evidence and require intervention.
-- See the [action and lifecycle contract](../../../ARCHITECTURE.md#commitpush-attempts).
+Native Claude Code or Codex route; the flowchart above shows the headless and delegated Codex push routes.
 
-Each dossier is bound to what it judged.
+```mermaid
+sequenceDiagram
+  autonumber
+  participant parent_agent as Parent agent
+  participant preflight as Commit/push gate
+  participant history as Audit history
+  participant task_link as Task link
+  participant auditor_control as Lifecycle hooks
+  participant auditor as commit-push-auditor
+  participant dossier as Dossier
+  parent_agent->>preflight: git commit / push
+  Note over preflight: no matching PASS dossier
+  preflight->>history: open attempt
+  preflight->>task_link: write task link
+  preflight-->>parent_agent: deny + auditor task
+  parent_agent->>auditor: spawn
+  auditor->>auditor_control: SubagentStart
+  auditor_control->>task_link: bind agent id
+  auditor->>dossier: write verdict
+  auditor->>auditor_control: SubagentStop
+  auditor_control-->>auditor: resume: no dossier/unchecked
+  auditor_control->>history: record or ERROR
+  parent_agent->>preflight: retry git commit / push
+  preflight->>dossier: check + consume PASS
+  preflight-->>parent_agent: PASS: allow · FAIL: deny
+```
 
-- A stale turn dossier is discarded; a stale commit/push dossier denies until a fresh audit.
-- Auditor tasks supply a read-only [candidate validator](../../../scripts/validate-audit-dossier.sh) to catch output errors before delivery; its success never replaces these parent checks.
-- See [bindings](../../../ARCHITECTURE.md#boundaries), [Stop decisions](../../../ARCHITECTURE.md#stop-gate-decisions), and [state files](../../../ARCHITECTURE.md#state-files).
+- **Validated:** main `d694bbd`, `.agents/skills/boxlite-visualize/scripts/validate_diagrams.py`; inputs in the adding PR.
+- **Revalidate this sequence on changes to:** `.claude/agents/commit-push-auditor.md`, `../preflight-commit-push.sh`, `run-commit-push-audit.sh`, `../auditor-control.sh`, `../audit-deadline.sh`, `.agents/lib/` `commit-push-stop.sh`, `audit-reflection.sh`, `audit-reflection-gate.sh`, `subagent-identity.sh`, `auditor-control-state.sh`, or `hooks/{hooks,codex-hooks,generic-hooks}.json`.
+
+| Gate state | Outcome |
+| --- | --- |
+| Unchanged FAIL | Can request a bounded review without a newer test receipt. |
+| Active worker | `wait`. |
+| User Stop or exhausted history | `stop`, without another launch. |
+| Named prerequisite missing | Recovery instructions repair it before retrying. |
+| Persistent state error | Evidence is preserved; intervention is required. |
+
+- **Bindings:** each dossier is bound to what it judged. A stale turn dossier is discarded; a stale commit/push dossier denies until a fresh audit.
+- **Validator:** auditor tasks supply a read-only [candidate validator](../../../scripts/validate-audit-dossier.sh) to catch output errors before delivery. Its success never replaces these parent checks.
+- **Contracts:** [action and lifecycle](../../../ARCHITECTURE.md#commitpush-attempts), [bindings](../../../ARCHITECTURE.md#boundaries), [Stop decisions](../../../ARCHITECTURE.md#stop-gate-decisions), and [state files](../../../ARCHITECTURE.md#state-files).
 
 ## Runners
+
+### Verdict runner
 
 `run-verdict-audit.sh` selects the invoking host's auditor, with the
 [boxlite-verdict-audit](../../skills/boxlite-verdict-audit/SKILL.md) as its complete procedure:
 
 1. `VERDICT_AUDITOR_CMD`
-2. `hook_host_kind`, shared with native subagent dispatch: Claude Code uses
-   `claude -p --safe-mode`; Codex uses read-only `codex exec` with hooks disabled.
-   The Claude route grants its auditor tools with `--allowedTools` and not only
-   `--tools`: safe mode ignores user/project permission settings and print mode has no
-   approver, so an ungranted `Write` leaves the auditor without a dossier.
+2. `hook_host_kind`, shared with native subagent dispatch:
+   - Claude Code uses `claude -p --safe-mode`; Codex uses read-only `codex exec` with hooks disabled.
+   - The Claude route grants its auditor tools with `--allowedTools`, not only `--tools`.
+   - Why: safe mode ignores user/project permission settings and print mode has no approver, so an ungranted `Write` leaves the auditor without a dossier.
 3. Unknown hosts retain availability order: Claude, then Codex.
 4. No matching CLI: exit 2. A known host never falls through to another provider.
 
-The model task supplies parent session ID, host, repository, request time, and dossier bindings.
+- **Task:** supplies parent session ID, host, repository, request time, and dossier bindings.
+- **Transcript:** the auditor discovers it using the skill's host hints or its own investigation, verifies parent identity, and revalidates a fixed evidence boundary.
+- **Bookkeeping:** the first runner argument supplies bounded bookkeeping only; `-` marks it unavailable. For example, a native auditor can receive a parent session ID without any transcript path.
+- **Unknown hosts:** discovery does not change how the independent auditor is launched.
 
-- The auditor discovers the transcript using the skill's host hints or its own investigation, verifies parent identity, and revalidates a fixed evidence boundary.
-- The first runner argument supplies bounded bookkeeping only; `-` marks it unavailable.
-- For example, a native auditor can receive a parent session ID without any transcript path.
-- Unknown-host discovery does not change how the independent auditor is launched.
+### Host routing
 
-Hook manifests set `BOXLITE_HOOK_HOST` per invocation, overriding inherited values.
-
-- This distinguishes Codex's root aliases from nested hosts.
+- Manifests set `BOXLITE_HOOK_HOST` ([variables](#configuration)) per invocation, overriding inherited values. This distinguishes Codex's root aliases from nested hosts.
 - Generic hooks set `unknown`; unmarked legacy callers retain single-root inference.
 - Claude commands prefer their own plugin root when both roots identify different installations.
 
-The classifier uses the same host detector: Claude Haiku on Claude Code, the default Codex model on Codex.
+### Classifier
 
-- Unknown hosts retain Claude-or-regex behavior.
-- Explicit `VERDICT_CLASSIFIER_CMD` overrides selection.
-- Missing or failed classifiers use the existing regex fallback; a failed auditor remains an audit failure.
+The classifier uses the same host detector: Claude Haiku on Claude Code, the default Codex model on Codex. Unknown hosts retain Claude-or-regex behavior.
 
-Codex classification runs in a private scratch directory, read-only and ephemeral, with hooks, shell tools, subagents, user config, and project instructions disabled.
+- **Fallback:** missing or failed classifiers use the existing regex fallback; a failed auditor remains an audit failure.
+- **Codex sandbox:** classification runs in a private scratch directory, read-only and ephemeral, with hooks, shell tools, subagents, user config, and project instructions disabled. Global Codex instructions can still load.
+- **Limits:** binary discovery and execution share the existing 20-second capture deadline and 4096-byte output limit.
+- **Lookup:** both Stop stages use the inert [Codex lookup helper](../../lib/codex-cli.sh), including `CODEX_BIN` and desktop discovery. For example, installing Claude alongside Codex no longer changes which provider handles Codex Stop checks.
 
-- Global Codex instructions can still load.
-- Binary discovery and execution share the existing 20-second capture deadline and 4096-byte output limit.
-- Both Stop stages use the inert [Codex lookup helper](../../lib/codex-cli.sh), including `CODEX_BIN` and desktop discovery.
-- For example, installing Claude alongside Codex no longer changes which provider handles Codex Stop checks.
+### Commit/push runner
 
-`run-commit-push-audit.sh` gives `codex exec` a private writable scratch directory; the repository and audit inputs remain read-only.
+`run-commit-push-audit.sh` runs `codex exec` under these rules:
 
-- General temporary-directory grants are disabled, and `TMPDIR` stays inside scratch.
-- Hooks and user configuration are disabled; network access supports the authenticated design reader.
-- Commit tests must reconstruct the captured index tree, even when working files differ; push tests use the validated context's new commit trees.
-- The runner rechecks the index tree before publication and removes scratch on exit.
-- It rejects an answer that is malformed or bound to another branch, HEAD, diff, command, or subject.
-### Scratch commands
+| Concern | Rule | Reason |
+| --- | --- | --- |
+| Scratch | A private writable scratch directory; `TMPDIR` stays inside it; removed on exit. | — |
+| Repository and inputs | Read-only; general temporary-directory grants are disabled. | — |
+| Hooks and user config | Disabled. | — |
+| Network | Allowed. | Supports the authenticated design reader. |
+| Commit tests | Reconstruct the captured index tree, even when working files differ. | — |
+| Push tests | Use the validated context's new commit trees. | — |
+| Publication | Rechecks the index tree first; rejects an answer that is malformed or bound to another branch, HEAD, diff, command, or subject. | — |
+| `mktemp` | Default calls use a private adapter with an explicit scratch template. Explicit templates/options retain host behavior. The adapter is removed with scratch. | Darwin can ignore `TMPDIR`. |
+| `PATH` | The reviewer prepends the private bin directory inside each shell command. | Login-shell `PATH` ordering cannot silently select the system default. |
+| Design reader | Run `design-doc.sh show <repo-root>` from scratch. The explicit target still checks the original worktree and branch binding. | macOS Bash can use the current directory for here-strings when system temp paths are unavailable. |
+| Test evidence | Reviewers may verify tests from host receipts, complete native execution records, or safe reruns. Each route must establish the tested candidate tree and command completion; restricted process inspection is not a test failure. | — |
+| Parent identity | Hints support independent transcript discovery; missing execution proof still blocks approval. | — |
 
-- Default `mktemp` calls use a private adapter with an explicit scratch template, because Darwin can ignore `TMPDIR`.
-- Explicit templates/options retain host behavior.
-- The reviewer prepends the private bin directory inside each shell command; login-shell PATH ordering cannot silently select the system default.
-- The adapter is removed with scratch.
-- Run `design-doc.sh show <repo-root>` from scratch: macOS Bash can use the current directory for here-strings when system temp paths are unavailable.
-- The explicit target still checks the original worktree and branch binding.
-### Candidate test evidence
-
-- Reviewers may verify tests from host receipts, complete native execution records, or safe reruns.
-- Each route must establish the tested candidate tree and command completion; restricted process inspection is not a test failure.
-- Parent identity hints support independent transcript discovery; missing execution proof still blocks approval.
-- The commit/push gate prints this command for hosts it cannot identify:
+The commit/push gate prints this command for hosts it cannot identify:
 
 ```sh
 AUDITOR_SESSION_SCOPE=<scope> AUDITOR_PROMPT_EPOCH=<epoch> CODEX_COMMIT_PUSH_AUDIT_MODE=agentic \
@@ -130,6 +160,8 @@ AUDITOR_SESSION_SCOPE=<scope> AUDITOR_PROMPT_EPOCH=<epoch> CODEX_COMMIT_PUSH_AUD
 ```
 
 It prints `codex audit commit: PASS` or `FAIL`; findings go to stderr.
+
+### Exit codes
 
 | Exit | `run-verdict-audit.sh` | `run-commit-push-audit.sh` |
 | --- | --- | --- |
@@ -148,18 +180,12 @@ Headless classification and both runners read the optional user file
 {"HTTPS_PROXY":"http://proxy.example.com:8080","NO_PROXY":"localhost,127.0.0.1"}
 ```
 
-The file must be user-owned, regular, at most 8 KiB, and not group/world writable.
-
-- Only standard proxy keys are accepted.
-- Inherited routing settings, including empty values, take precedence.
-- Configure the user file when a GUI or background host does not inherit shell exports.
-- Repository files and PAC programs are never evaluated.
-
-Each runner records route, child/runner exit status, elapsed seconds, outcome, and a credential-masked stderr tail in the session's `audit-diagnostics.jsonl`.
-
-- Each tail is at most 4 KiB; the shared log rotates at its existing 1 MiB bound.
-- Stop errors name this local file.
-- Diagnostics never grant dossier authority.
+- **File:** user-owned, regular, at most 8 KiB, and not group/world writable.
+- **Keys:** only standard proxy keys are accepted. Inherited routing settings, including empty values, take precedence.
+- **When:** configure the user file when a GUI or background host does not inherit shell exports.
+- **Never evaluated:** repository files and PAC programs.
+- **Diagnostics:** each runner records route, child/runner exit status, elapsed seconds, outcome, and a credential-masked stderr tail in the session's `audit-diagnostics.jsonl`.
+- **Diagnostic limits:** each tail is at most 4 KiB; the shared log rotates at its existing 1 MiB bound. Stop errors name this local file. Diagnostics never grant dossier authority.
 
 | Variable | Read by | Default | Effect |
 | --- | --- | --- | --- |
