@@ -63,6 +63,26 @@ expect missing_hyphen '4 4 0' $'a | b\n--- | :\n1 | 2'
 expect inner_space    '4 4 0' $'a | b\n: --- | ---\n1 | 2'
 expect extra_colon    '4 4 0' $'a | b\n::--- | ---\n1 | 2'
 
+echo 'Density and short-text thresholds are independent'
+expect_status() { # name, expected status, function, Markdown
+  local status=0
+  "$3" "$4" || status=$?
+  if [[ "$status" == "$2" ]]; then
+    ok "$1"
+  else
+    bad "$1 (got exit $status; want $2)"
+  fi
+}
+forty="$(printf 'word %.0s' {1..40})"
+forty_one="${forty}word"
+eighty="$forty"$'\n\n'"$forty"
+expect_status paragraph_40 1 reply_summary_is_dense "$forty"
+expect_status paragraph_41 0 reply_summary_is_dense "$forty_one"
+expect_status item_40 1 reply_summary_is_dense "- $forty"
+expect_status item_41 0 reply_summary_is_dense "- $forty_one"
+expect_status short_80 0 reply_summary_is_short "$eighty"
+expect_status long_81 1 reply_summary_is_short "$eighty"$'\n\nword'
+
 echo 'Linear delimiter recognition: exercise the counter with a piped header'
 spaces="$(perl -e 'print " " x 200000')"
 timed suffix_spaces    '3 3 0' $'a | b\n---'"${spaces}x"

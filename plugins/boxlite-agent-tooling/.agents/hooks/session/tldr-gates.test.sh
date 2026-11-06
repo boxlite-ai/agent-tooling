@@ -136,7 +136,8 @@ check_short() { # label, text, design denial
 }
 check_short short_missing 'A concise answer.' 'TL;DR heading missing'
 check_short short_bold_label '**TL;DR:** A concise answer.' '`## TL;DR`, one short sentence'
-check_short short_80_words "$(printf 'word %.0s' {1..80})" 'TL;DR heading missing'
+forty="$(printf 'word %.0s' {1..40})"
+check_short short_80_words "$forty"$'\n\n'"$forty" 'TL;DR heading missing'
 
 for host in claude codex; do
   jq -nc '{type:"assistant",message:{content:[{type:"text",text:"Earlier progress."}]}}' > "$scratch/turn.jsonl"
@@ -174,7 +175,9 @@ facade_failure() { # label, expected diagnostic, Markdown, optional fault, skill
     printf 'FAIL %s: exit=%s hint=%s: %.300s\n' "$label" "$status" "$hint" "$output"; fail=$((fail+1))
   fi
 }
-facade_failure oversized 'text over 262144 characters; shorten it' "$(printf '%262145s' '')"
+facade_failure large_missing_summary 'TL;DR heading missing' "$(printf '%262145s' '')" '' yes
+facade_failure large_overlong_summary 'has 40 words (limit 39)' \
+  $'## TL;DR\n\n'"$details"$'\n\n## Details\n\n'"$(printf '%262145s' '')" '' yes
 facade_failure empty_counter 'word counter failed' $'## TL;DR\n\nA concise answer.' empty
 facade_failure failed_counter 'word counter failed' $'## TL;DR\n\nA concise answer.' failed
 facade_failure missing_parser 'parser (perl) failed' $'## TL;DR\n\nA concise answer.' no_parser

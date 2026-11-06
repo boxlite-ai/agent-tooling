@@ -139,6 +139,13 @@ heading run_before_text       deny  "## a$(long ' ' 200000)b"$'\n\nShort.'
 heading tab_run_before_text   deny  "## a$(long $'\t' 200000)b"$'\n\nShort.'
 heading run_before_closing    allow "## TL;DR$(long ' ' 200000)#"$'\n\nShort.'
 
+echo "Complete documents have no character ceiling"
+large_prefix=$'## TL;DR\n\nA concise answer.\n\n## Details\n\n'
+for characters in 262144 262145; do
+  heading "document_${characters}_characters" allow \
+    "$large_prefix$(long x "$((characters - ${#large_prefix}))")"
+done
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

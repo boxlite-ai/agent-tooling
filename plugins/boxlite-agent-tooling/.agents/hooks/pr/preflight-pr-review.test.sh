@@ -669,9 +669,9 @@ TABLE_BODY=$'| Trigger | Matrix |\n| --- | --- |\n| PR | Focused |\n| Weekly | F
 LEGACY_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
 LONG_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
 LONG_UNSPACED_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
-LIMIT_WORDS_BODY="$(printf 'x %.0s' {1..60})"$'\n\n'"$(printf 'x %.0s' {1..50})"
-LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<80; i++) printf "字"}')"
-OVER_WORDS_BODY="$LIMIT_WORDS_BODY x"
+LIMIT_WORDS_BODY="$(printf 'x %.0s' {1..40})"$'\n\n'"$(printf 'x %.0s' {1..40})"$'\n\n'"$(printf 'x %.0s' {1..40})"
+LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<40; i++) printf "字"}')"
+OVER_WORDS_BODY="$LIMIT_WORDS_BODY"$'\n\nx'
 OVER_CHARS_BODY="${LIMIT_CHARS_BODY}字"
 EMOJI_BODY="$(awk 'BEGIN {for (i=0; i<2000; i++) printf "😀"}')"
 HUGE_BODY="$(awk 'BEGIN {for (i=0; i<8001; i++) printf "x"}')"
@@ -708,8 +708,8 @@ run_body "unspaced text cannot evade the size limit → deny" "gh pr create $FEA
 run_body "120 words in short paragraphs → allow" "gh pr create $FEAT --body '$LIMIT_WORDS_BODY'" "passthrough"
 run_body "121 words in short paragraphs → allow" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
 run_body "long structured body edit → allow" "gh pr edit 42 $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
-run_body "80 Chinese characters at the paragraph boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
-run_body "81 Chinese characters → deny" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "deny"
+run_body "40 Chinese characters at the paragraph boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
+run_body "41 Chinese characters → deny" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "deny"
 run_body "2000 four-byte characters plus summary → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
 run_body "body over 8,000 characters plus summary → allow" "gh pr create $FEAT --body '$HUGE_BODY'" "passthrough"
 run_body "long body edit → deny" "gh pr edit 42 $FEAT --body '$LONG_BODY'" "deny"
