@@ -1274,7 +1274,7 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         boxlite-design-doc, boxlite-clean-code, google-code-review, boxlite-pr-preparation, shell-engineering, boxlite-visualize, boxlite-examples, boxlite-distill, adversarial-iteration, boxlite-writing
+.agents/skills/         boxlite-design-doc, boxlite-clean-code, google-code-review, boxlite-pr-preparation, boxlite-shell-engineering, boxlite-visualize, boxlite-examples, boxlite-distill, adversarial-iteration, boxlite-writing
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
@@ -1294,6 +1294,16 @@ cache installation without symlinks. Its auditor routes already use
 `.claude/agents/` directly; Claude and Copilot keep the `agents/` alias.
 `host-parity.test.sh` checks both source resolution and a copy containing only
 regular files, including each skill's resources and canonical auditor paths.
+
+`boxlite-shell-engineering` owns Bash/POSIX interpreter selection, shell style,
+hook I/O, failure propagation, state ownership, bounded concurrency, and verification guidance.
+Its reference index routes to complete licensed guides and tool documentation only when relevant;
+repository contracts govern upstream differences.
+Snapshots remain byte-identical; per-file revisions, byte counts, and SHA-256 hashes
+live in `references/sources.json`, with original license terms beside the copies.
+UNSW and Wooledge remain linked because blanket redistribution permission was not established.
+The shared skill paths expose the complete renamed directory without manifest changes.
+Existing sessions need a refresh or reload to discover the new name and references.
 
 The `boxlite-clean-code` skill keeps essential coding decisions, a reversible
 refactoring loop, and verification guidance in a compact `SKILL.md`. Its example
