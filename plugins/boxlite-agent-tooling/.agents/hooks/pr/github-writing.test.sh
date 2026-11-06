@@ -43,7 +43,8 @@ check() {
   last_check_output="$output"
 }
 
-dense="$(printf 'word %.0s' {1..81})"
+forty="$(printf 'word %.0s' {1..40})"
+dense="${forty}word"
 long="$(printf 'word %.0s' {1..121})"
 bullet="- $(printf 'word %.0s' {1..41})"
 structured="## TL;DR
@@ -67,9 +68,14 @@ Keep complete details after the summary.
 $dense
 
 https://github.com/example/repo/issues/123"
+density_tail=$'\n\n## TL;DR\n\nShort summary.\n\n## How it works\n\nRetry a failed call once.\n\nhttps://github.com/example/repo/issues/123'
 for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
   'issue create --title Bug' 'issue edit 7' 'issue comment 7' 'discussion create --title Topic'; do
   check "$operation rejects dense prose" "gh $operation --body '$dense'" deny
+  check "$operation accepts a 40-word paragraph before its summary" \
+    "gh $operation --body '$forty$density_tail'" allow
+  check "$operation rejects a 41-word paragraph before its summary" \
+    "gh $operation --body '$dense$density_tail'" deny 'paragraph over 40 words'
   check "$operation accepts a structured document over 120 words" \
     "gh $operation --body '$structured'" allow
   check "$operation accepts dense details after a leading TL;DR" \
@@ -96,6 +102,8 @@ check 'attached short body' "gh issue comment 7 -b'## TL;DR
 Fixed.'" allow
 check 'attached long body' "gh issue comment 7 --body='$dense'" deny
 check 'paragraph limit' "gh issue comment 7 --body '$dense'" deny 'start with `## TL;DR`'
+check '40-word paragraph' "gh issue comment 7 --body '$forty'" allow
+check '40-word bullet' "gh issue comment 7 --body '- $forty'" allow
 check 'bullet limit' "gh issue comment 7 --body '$bullet'" deny
 check 'a later TL;DR keeps the paragraph limit' "gh issue comment 7 --body '$dense
 
@@ -111,7 +119,8 @@ Explain the example.
 ~~~
 $long
 ~~~'" allow
-check 'Chinese counts per character' "gh issue comment 7 --body '$(printf '字%.0s' {1..81})'" deny
+check '40 Chinese characters fit a paragraph' "gh issue comment 7 --body '$(printf '字%.0s' {1..40})'" allow
+check '41 Chinese characters exceed a paragraph' "gh issue comment 7 --body '$(printf '字%.0s' {1..41})'" deny
 check '39-word summary' "gh issue create --title Bug --body '## TL;DR
 
 $(printf 'word %.0s' {1..39})'" allow
@@ -120,9 +129,12 @@ check '40-word summary' "gh issue create --title Bug --body '## TL;DR
 $(printf 'word %.0s' {1..40})'" deny 'TL;DR has 40 words (limit 39)'
 # A comment of 80 words or fewer reads whole, so it needs no TL;DR once its blocks fit
 # the density limits; documents and longer comments keep the summary (#265).
-eighty="$(printf 'word %.0s' {1..80})"
+eighty="$forty"$'\n\n'"$forty"
 check 'short comment needs no summary' "gh issue comment 7 --body 'Fixed in #263.'" allow
 check '80-word comment needs no summary' "gh pr comment 7 --body '$eighty'" allow
+check '81-word comment needs a summary' "gh issue comment 7 --body '$eighty
+
+word'" deny 'TL;DR'
 check 'short review body needs no summary' "gh pr review 7 --comment --body 'Looks right.'" allow
 check 'short close comment needs no summary' "gh issue close 7 --comment 'Fixed by #263.'" allow
 check 'short REST comment needs no summary' "gh api repos/o/r/issues/7/comments -f body='Thanks.'" allow
@@ -146,7 +158,7 @@ See /Users/me/notes.'" deny 'private context'
 # The checks after the shell scan stay fast at the largest body GitHub accepts, 125,000
 # characters of release notes, including whitespace runs in the privacy scan and in a
 # heading. Time them directly; the shell scan's cost grows with the whole command.
-timed_writing_check() { # name, check function, text, expected status
+timed_writing_check() { # name, check function, text, expected status, optional size
   local timed status elapsed
   timed="$(
     source "$PLUGIN/.agents/lib/reply-summary.sh"
@@ -158,7 +170,7 @@ timed_writing_check() { # name, check function, text, expected status
     perl -MTime::HiRes=time -e 'printf "%s %.3f", $ARGV[0], time - $ARGV[1]' -- "$status" "$start"
   )"
   read -r status elapsed <<< "$timed"
-  if (( ${#3} == 125000 )) && [[ "$status" == "$4" ]] \
+  if (( ${#3} == ${5:-125000} )) && [[ "$status" == "$4" ]] \
      && perl -e 'exit($ARGV[0] < 2 ? 0 : 1)' -- "$elapsed"; then
     pass=$((pass + 1))
   else
@@ -175,6 +187,12 @@ timed_writing_check 'privacy scan of "<" before a whitespace run' github_writing
 heading_tail=$'\n\nShort.'
 timed_writing_check 'heading holding a whitespace run' github_writing_check_body \
   "## a$(perl -e 'print " " x shift' $((125000 - 5 - ${#heading_tail})))b$heading_tail" 1
+large_document="$max_prefix$(perl -e 'print "x" x shift' $((262145 - ${#max_prefix} - 4)))"$'\n~~~'
+timed_writing_check 'document above the former character ceiling' \
+  github_writing_check_body "$large_document" 0 262145
+private_tail=$'\n\nSee /home/test/notes.'
+timed_writing_check 'privacy still applies above the former ceiling' \
+  github_writing_check_body "$large_document$private_tail" 1 "$((262145 + ${#private_tail}))"
 check 'release notes' "gh release create v1 --notes '$dense'" deny
 check 'short release notes' "gh release create v1 --notes '## TL;DR
 

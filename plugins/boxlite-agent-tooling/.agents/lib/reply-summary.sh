@@ -6,8 +6,9 @@
 # those checks and all reporting.
 
 # Readability thresholds are independent of the shared prompt's prose budget.
-reply_summary_paragraph_max_words=80
+reply_summary_paragraph_max_words=40
 reply_summary_item_max_words=40
+reply_summary_short_max_words=80
 # The same snapshot bound the verdict check puts on the transcript it reads.
 reply_summary_snapshot_max_bytes=262144
 
@@ -123,17 +124,16 @@ reply_summary_is_dense() {  # text
   return 1
 }
 
-# A text within one paragraph's word budget reads whole, so it needs no summary.
+# Short-text exemptions are independent of the paragraph and list-item limits.
 # 0 when short, 1 when longer, 2 when the text could not be counted.
 reply_summary_is_short() {  # text
   local text="${1-}" counts total
-  # Text over 8000 characters is never short, which bounds the counter's work before
-  # the TL;DR check applies its own limit.
+  # Text over 8000 characters is never short; longer text needs a TL;DR.
   (( ${#text} <= 8000 )) || return 1
   counts="$(reply_summary_word_counts "$text")" || return 2
   read -r total _ <<< "$counts"
   [[ "$total" =~ ^[0-9]+$ ]] || return 2
-  (( total <= reply_summary_paragraph_max_words ))
+  (( total <= reply_summary_short_max_words ))
 }
 
 # The transcript's final turn, read by the verdict check's own bounded snapshot

@@ -191,11 +191,12 @@ Commit-push auditors read the bound design through `design-doc.sh show`, which r
 
 The PR-review hook checks PR bodies (including drafts), issue/discussion bodies, comments, reviews, close/reopen comments, release notes, and REST body/description fields.
 
-- `.agents/lib/github-writing.sh` reuses `.agents/lib/reply-summary.sh`'s block limits: paragraphs at most 80 words and list items at most 40.
+- `.agents/lib/github-writing.sh` reuses `.agents/lib/reply-summary.sh`'s block limits: paragraphs and list items at most 40 words.
 - Text that starts with a valid TL;DR skips them, since readers already have the short version; complete documents have no total-word cap.
 - Fences and tables are excluded from block limits; Chinese/Japanese characters count individually.
 - Empty text fails closed.
-- The hook sets no length limit: GitHub enforces its own, and the checks after the shell scan stay linear ([#310](https://github.com/boxlite-ai/agent-tooling/issues/310)).
+- Neither the GitHub writing check nor its shared TL;DR validator sets a character ceiling; GitHub enforces its own limits.
+- Transcript snapshot and PR-render bounds remain separate; checks after the shell scan stay linear ([#310](https://github.com/boxlite-ai/agent-tooling/issues/310)).
 #### Word counting
 
 - The shared word counter recognizes table delimiters in linear time: each optional outer pipe is grouped with its following whitespace, so an absent pipe cannot make two runs compete for the same spaces.
@@ -1160,7 +1161,7 @@ Stop checks the final reply after generation; it cannot retract streamed comment
 
 - Workflow, Stop TL;DR denials, GitHub reminders, PR guidance, and the optional prompt hook reference it by name.
 - `concise_writing_reminder` supplies the shortening request the PR gate appends to GitHub writing denials, without reading skill files.
-- Paragraphs over 80 words or list items over 40 trigger it only in GitHub text that does not start with a valid TL;DR; Stop never asks to shorten a reply.
+- Paragraphs or list items over 40 words trigger it only in GitHub text that does not start with a valid TL;DR; Stop never asks to shorten a reply.
 
 ### Consumer to tooling
 

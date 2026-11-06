@@ -53,8 +53,8 @@ github_writing_check_body() { # body [comment]
   reply_summary_is_dense "$body" || density=$?
   # shellcheck disable=SC2016 # Render literal Markdown headings, never shell expansion.
   case "$density" in
-    # The PR gate appends the shared skill reminder to every writing denial. A comment
-    # within one paragraph's budget reads whole; documents keep their summary.
+    # The PR gate appends the shared skill reminder to every writing denial. Short
+    # comments need no summary once their blocks fit; documents keep their summary.
     1) [[ "$kind" == comment ]] && reply_summary_is_short "$body" && return 0
        concise_writing_check_summary "$body" anywhere 39 no-hint; return $? ;;
     0) printf 'GitHub text has a paragraph over %s words or a list item over %s words: shorten them, or start with `## TL;DR` and one short sentence.' \

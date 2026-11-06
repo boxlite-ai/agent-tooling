@@ -8,10 +8,6 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
   # Name the skill unless the caller appends its own reminder, as the PR gate does for
   # GitHub writing denials.
   [[ "${4:-}" != no-hint ]] || skill_hint=''
-  if (( ${#1} > 262144 )); then
-    printf 'TL;DR not checked: text over 262144 characters; shorten it\n'
-    return 1
-  fi
   # Accept an ATX heading and prose, never an example or a hidden comment.
   # Parser exits distinguish missing heading (3), misplaced heading (4), and missing prose (5).
   summary="$(printf '%s' "$1" | perl -CSD -0777 -e '
