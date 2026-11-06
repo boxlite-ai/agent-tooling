@@ -878,6 +878,7 @@ All runner tasks include `.agents/prompts/audit/dossier-validation.md` with an a
 - Neither replaces the parent's live binding, freshness, lease, publication, or final history checks.
 - Design auditors retain their validating recorder.
 - Headless Git prompts preview four changed paths to keep validation and deadline instructions within the existing 6 KiB budget; the complete sanitized diff remains available on demand.
+- The runner suite measures the complete composed prompt, including metadata, deadline rules, and validation instructions; formatting changes consume this same budget.
 
 The runtime captures optional `attempt.input.deadline`.
 
