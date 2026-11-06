@@ -151,7 +151,7 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 | Draw a diagram grounded in source | [boxlite-visualize](plugins/boxlite-agent-tooling/.agents/skills/boxlite-visualize/SKILL.md) |
 | Highlight essential phrases while preserving meaning | [boxlite-reading-highlights](plugins/boxlite-agent-tooling/.agents/skills/boxlite-reading-highlights/SKILL.md) |
 | Extract essential knowledge or a minimal working example | [boxlite-distill](plugins/boxlite-agent-tooling/.agents/skills/boxlite-distill/SKILL.md) |
-| Implement a Bash hook or gate | [shell-engineering](plugins/boxlite-agent-tooling/.agents/skills/shell-engineering/SKILL.md) |
+| Write or review shell scripts, hooks, and gates | [boxlite-shell-engineering](plugins/boxlite-agent-tooling/.agents/skills/boxlite-shell-engineering/SKILL.md) |
 | Iterate on design-review findings | [adversarial-iteration](plugins/boxlite-agent-tooling/.agents/skills/adversarial-iteration/SKILL.md) |
 | Register a design before implementation | [Design registration](plugins/boxlite-agent-tooling/CONTRIBUTING.md#pull-request-descriptions) |
 | Prepare or revise a PR description | [boxlite-pr-preparation](plugins/boxlite-agent-tooling/.agents/skills/boxlite-pr-preparation/SKILL.md) |
@@ -180,6 +180,21 @@ Monitoring intent and pending events survive execution-session replacement.
 - Full pending storage stops polling until drained; host and OS settings still control desktop notifications.
 
 For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh) retries recorded transient failures within bounded budgets. It requires `claude`, `jq`, `curl`, the failure-recording hook, and a matching `CLAUDE_PROJECT_DIR`.
+
+### Shell engineering
+
+Use `boxlite-shell-engineering` to establish the interpreter, supported platforms,
+I/O, and failure contracts before writing or reviewing Bash or POSIX shell.
+It retains hook state, concurrency, cleanup, and verification requirements.
+
+The [source index](plugins/boxlite-agent-tooling/.agents/skills/boxlite-shell-engineering/references/index.md)
+routes to complete licensed Google, Git, bash-completion, and ChromiumOS guides,
+plus ShellCheck and shfmt documentation; each snapshot includes provenance and license notices.
+UNSW and Wooledge remain external because blanket copying permission was not established.
+Load sources by topic; repository requirements govern incompatible upstream conventions.
+
+For example: "Use boxlite-shell-engineering to review this installer for POSIX portability."
+Share the complete skill directory, including references and licenses.
 
 ### Google Code Review skill
 

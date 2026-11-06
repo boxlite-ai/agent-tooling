@@ -1363,7 +1363,7 @@ hooks/                  the twin host hook manifests
 .agents/lib/            shared state, receipt, host, wake and rendering libraries; sourced, never run
 .agents/prompts/        editable Markdown prompt templates, read when a request is built
 .agents/watch/          the pr-watch producer and its stream and attach consumers
-.agents/skills/         boxlite-design-doc, boxlite-clean-code, google-code-review, boxlite-pr-preparation, shell-engineering, boxlite-visualize, boxlite-examples, boxlite-distill, adversarial-iteration, boxlite-writing
+.agents/skills/         boxlite-design-doc, boxlite-clean-code, google-code-review, boxlite-pr-preparation, boxlite-shell-engineering, boxlite-visualize, boxlite-examples, boxlite-distill, adversarial-iteration, boxlite-writing
 .claude/agents/         the two auditor specs
 .githooks/              the universal Git gates
 scripts/                profile validation, installation verify/sync/refresh, setup, guidance splice, unattended-run supervisor, author review acknowledgment
@@ -1389,11 +1389,19 @@ Host discovery exposes each complete skill directory; Codex metadata uses the co
 
 | Skill | Owns | Loading and boundaries |
 | --- | --- | --- |
+| [boxlite-shell-engineering](.agents/skills/boxlite-shell-engineering/SKILL.md) | Bash/POSIX contracts, shell style, state ownership and verification | Load complete licensed references through the topic index; repository contracts govern upstream differences. |
 | [boxlite-clean-code](.agents/skills/boxlite-clean-code/SKILL.md) | Coding decisions, reversible refactoring, verification, and topic examples | Load relevant addons through its index; read comment guidance for non-obvious algorithms, layouts, protocols, ownership, or concurrency. |
 | [boxlite-reading-highlights](.agents/skills/boxlite-reading-highlights/SKILL.md) | Exact phrase selection and meaning review; optional reversible browser highlighting | Text selection needs no browser tool/runtime; authorized text workers share one destination owner. |
 | [boxlite-distill](.agents/skills/boxlite-distill/SKILL.md) | Scope, removal test, outputs, and sufficiency review for knowledge or minimal implementations | Load knowledge/implementation guides as needed; code explanations also load the code-design guide. |
 | [boxlite-design-doc](.agents/skills/boxlite-design-doc/SKILL.md) | Research, option selection, and design outline | Frame → Search protocol → Analyze → Write → Gate; complex sources use distill knowledge mode without dropping evidence or outline requirements. |
 | [boxlite-pr-preparation](.agents/skills/boxlite-pr-preparation/SKILL.md) | Inspect inputs → choose illustration → write → verify delivery | Core input, illustration, and description tables stay inline; read shared workflow, repository rules, and contributor publication procedures. |
+
+#### Shell references
+
+- Complete licensed guides and tool manuals use `references/index.md` for topic routing and caveats.
+- File revisions, byte counts and SHA-256 hashes live in `references/sources.json`; original license terms remain beside the copies.
+- UNSW and Wooledge remain linked because blanket redistribution permission was not established.
+- Host discovery exposes the renamed directory without manifest changes; existing sessions need a refresh or reload.
 
 #### Coding and highlighting
 

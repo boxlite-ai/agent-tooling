@@ -25,7 +25,7 @@ Prompts, skills, and all agent-facing docs MUST use minimum prose per `boxlite-w
 ## Change safely
 
 - Edits, renames, moves, or deletions of `boxlite-writing` or supporting files require a specific, explicit user request. Skill use, output revisions, or check fixes grant none.
-- Non-trivial Bash: load `shell-engineering`; preserve stdin/stdout/stderr/exit behavior.
+- Non-trivial Bash: load `boxlite-shell-engineering`; preserve stdin/stdout/stderr/exit behavior.
 - Claude Code: plan mode before touching `.githooks/`.
 - Consumer manifests: declarative, secret-free; invalid profiles/missing dependencies fail closed with clear stderr.
 - Align `ARCHITECTURE.md` with code.
