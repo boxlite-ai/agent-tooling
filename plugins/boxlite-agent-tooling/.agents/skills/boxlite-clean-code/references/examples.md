@@ -5,9 +5,10 @@ Choose the example topic matching the current code, then compare the transformat
 ## How it works
 
 Choose the topic matching the current code; do not load every addon by default.
-Examples are compact adaptations. Fragments assume surrounding domain types and
-are illustrative unless stated otherwise. Preserve the receiving project's
-contracts instead of copying a historical mechanism mechanically.
+
+- Examples are compact adaptations.
+- Fragments assume surrounding domain types and are illustrative unless stated otherwise.
+- Preserve the receiving project's contracts instead of copying a historical mechanism mechanically.
 
 | Concern | Examples |
 | --- | --- |
@@ -35,8 +36,8 @@ contracts instead of copying a historical mechanism mechanically.
 | Producers/consumers, readers/writers, philosophers, and deadlocks | [Execution models](concurrency-execution-models.md) |
 | Reproducers, controlled interleavings, stress, and instrumentation | [Concurrency testing](concurrency-testing.md) |
 
-For each example, compare the original difficulty, the changed structure, and the
-behavior that must survive. A shorter method is not automatically an improvement.
-Repeated principles use different domain cases; read the refactoring addons when
-the sequence of intermediate changes matters. The checks are verification ideas,
-not claims that every illustrative fragment is a runnable standalone program.
+For each example, compare the original difficulty, the changed structure, and the behavior that must survive.
+
+- A shorter method is not automatically an improvement.
+- Repeated principles use different domain cases; read the refactoring addons when the sequence of intermediate changes matters.
+- The checks are verification ideas, not claims that every illustrative fragment is a runnable standalone program.

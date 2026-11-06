@@ -26,9 +26,11 @@ Choose the simplest useful form; UML is optional:
 | Where does each part fit? | ASCII layout with ranges, contents, mappings |
 | What value changes? | Before/after table or calculation |
 
-Do not require diagrams per step. Keep prose brief; omit repeated structures and
-facts already visible. Inspect and cite sources; label illustrative values and
-assumptions. Never invent measurements, balances, or implemented behavior.
+Do not require diagrams per step.
+
+- Keep prose brief; omit repeated structures and facts already visible.
+- Inspect and cite sources; label illustrative values and assumptions.
+- Never invent measurements, balances, or implemented behavior.
 
 Read only the relevant example; these are models, not fixed templates:
 

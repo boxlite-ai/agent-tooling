@@ -54,7 +54,10 @@ def render_document(source, margins, typeface, output):
     layout.write_to(output)
 ```
 
-Before, extracting steps from a long function tempts you to move its locals into a long-lived service's fields. After, a per-call object can own a cohesive layout calculation, or the helpers can simply keep explicit arguments. The new object earns its place only if its operations and state form a useful whole.
+Before, extracting steps from a long function tempts you to move its locals into a long-lived service's fields.
+
+- After, a per-call object can own a cohesive layout calculation, or the helpers can simply keep explicit arguments.
+- The new object earns its place only if its operations and state form a useful whole.
 
 **Check:** successive calls cannot reuse the previous document's state; nested calls remain valid; resource ownership and output order are unchanged. Do not add a helper object merely because a function has four parameters.
 

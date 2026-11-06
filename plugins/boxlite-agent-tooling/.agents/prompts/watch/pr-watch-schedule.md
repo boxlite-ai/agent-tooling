@@ -7,9 +7,11 @@ placeholders: KEEPALIVE_PATH_JSON, TARGETS_JSON
 
 ## Setup
 
-Create/reuse one 10-minute heartbeat per chat. Preserve opt-outs, pauses, and mutes.
-Verify saved destination, targets, cadence, and status through the app.
-Update old saved prompts; preserve status and notification preferences.
+Create/reuse one 10-minute heartbeat per chat.
+
+- Preserve opt-outs, pauses, and mutes.
+- Verify saved destination, targets, cadence, and status through the app.
+- Update old saved prompts; preserve status and notification preferences.
 
 Render only the block below:
 - `KEEPALIVE_PATH_JSON`: JSON-quoted absolute path to ../../watch/pr-watch-keepalive.sh.

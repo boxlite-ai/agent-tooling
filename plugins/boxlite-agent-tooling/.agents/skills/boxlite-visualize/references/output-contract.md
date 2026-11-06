@@ -30,11 +30,11 @@ levels maximum:
 ]
 ```
 
-Declare topics in the order the document nests them - each topic followed by its own
-children, siblings in the order they appear. Every node, edge, boundary, and member then carries
-`"topics": [...]` beside `views`. One ID per element across the whole tree. A member's
-topics sit inside its container's, and every topic a container claims has at least one
-member there — otherwise the element would be projected into a topic nothing checks.
+Declare topics in the order the document nests them - each topic followed by its own children, siblings in the order they appear.
+
+- Every node, edge, boundary, and member then carries `"topics": [...]` beside `views`.
+- One ID per element across the whole tree.
+- A member's topics sit inside its container's, and every topic a container claims has at least one member there — otherwise the element would be projected into a topic nothing checks.
 
 Each topic is a collapsed `<details>` whose `<summary>` is `<code>id</code> — question`.
 A child nests inside its parent; siblings follow manifest order; one fence per
@@ -107,13 +107,11 @@ sequenceDiagram
   runtime->>box: create box<br/>File: src/boxlite/src/runtime/core.rs<br/>Namespace: boxlite::runtime::core<br/>Class: BoxliteRuntime<br/>Function: create<br/>LOC: L291-L300
 ```
 
-Participants are node IDs; each message follows its `%% edge:<id>` comment; notes and
-groups are untracked. A message is a short action plus every field: `File` repo path ·
-`Namespace` full native chain (`—` if none) · `Class` owner (`—` for a free function) ·
-`Function` bare name · `LOC` inclusive range. All fields or none — none only for external
-or proposed behavior — and never an invented value. The node's evidence `symbol` is the
-full chain (`boxlite::runtime::core::BoxliteRuntime::create`), which is how the validator
-derives the fields.
+Participants are node IDs; each message follows its `%% edge:<id>` comment; notes and groups are untracked.
+
+- A message is a short action plus every field: `File` repo path · `Namespace` full native chain (`—` if none) · `Class` owner (`—` for a free function) · `Function` bare name · `LOC` inclusive range.
+- All fields or none — none only for external or proposed behavior — and never an invented value.
+- The node's evidence `symbol` is the full chain (`boxlite::runtime::core::BoxliteRuntime::create`), which is how the validator derives the fields.
 
 ## Call graph
 
@@ -144,10 +142,9 @@ substrings of the issue title/body. Every item has evidence for every state it c
 
 ## Membership and annotations
 
-Every drawn node, edge, subgraph, participant, message, and hop maps to exactly one
-manifest item, in the states, views, and topics that item declares. Annotations target
-`node:<id>` or `edge:<id>` with one state and a kind from `ISSUE BUG FIX PROPOSED ADDED
-CHANGED REMOVED`; a diff annotation's target must intersect the base/head hunk.
+Every drawn node, edge, subgraph, participant, message, and hop maps to exactly one manifest item, in the states, views, and topics that item declares.
+
+Annotations target `node:<id>` or `edge:<id>` with one state and a kind from `ISSUE BUG FIX PROPOSED ADDED CHANGED REMOVED`; a diff annotation's target must intersect the base/head hunk.
 
 ```json
 {"kind": "BUG", "target": "edge:signal_pid", "state": "before", "text": "a recycled PID can identify another process"}
@@ -155,9 +152,8 @@ CHANGED REMOVED`; a diff annotation's target must intersect the base/head hunk.
 
 ## Artifacts
 
-`.mmd`, `.svg`, `.png` per block; the SVG is measured against 1600×900. A pass proves
-syntax, fit, and traceability — not composition; inspect the PNG. The house palette —
-`scope_*` zone classes plus `default`, `accent`, `accent_zone`, and one `linkStyle default`
-— is the only permitted styling and stays legible on light/dark hosts; `style`, other
-`linkStyle`s, themes, and other `classDef`s are rejected. Publication figures for blogs,
-slides, or social posts follow [figure-contract.md](figure-contract.md).
+`.mmd`, `.svg`, `.png` per block; the SVG is measured against 1600×900.
+
+- A pass proves syntax, fit, and traceability — not composition; inspect the PNG.
+- The house palette — `scope_*` zone classes plus `default`, `accent`, `accent_zone`, and one `linkStyle default` — is the only permitted styling and stays legible on light/dark hosts; `style`, other `linkStyle`s, themes, and other `classDef`s are rejected.
+- Publication figures for blogs, slides, or social posts follow [figure-contract.md](figure-contract.md).

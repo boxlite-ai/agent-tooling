@@ -88,7 +88,9 @@ figure must also pass `check_figure.py`; see [figure-contract.md](references/fig
 
 ## Respond
 
-Lead with the picture (topic tree: overview, then its outline). `Before`/`After`
-adjacent when comparing revisions. A call graph is optional; use it only when it
-makes the code path easier to understand. Keep any explanation short. End with the evidence summary,
-the visual-QA statement, and the report path when files were requested.
+Lead with the picture (topic tree: overview, then its outline).
+
+- `Before`/`After` adjacent when comparing revisions.
+- A call graph is optional; use it only when it makes the code path easier to understand.
+- Keep any explanation short.
+- End with the evidence summary, the visual-QA statement, and the report path when files were requested.

@@ -18,10 +18,10 @@ python3 .agents/skills/boxlite-visualize/scripts/render_figure.py \
 ```
 
 `check_figure.py` exits `0` clean, `1` with findings, `2` on unusable input.
-`render_figure.py --pair` writes the light (`editorial`) and dark (`blueprint`) images and a
-`<picture>` snippet with the alt text; `--preset <name>` renders one preset. Both scripts
-exit `2` before drawing when a number, ID, role, shape or label has the wrong type.
-`figure.json` is copied beside the output as the editable source.
+
+- `render_figure.py --pair` writes the light (`editorial`) and dark (`blueprint`) images and a `<picture>` snippet with the alt text; `--preset <name>` renders one preset.
+- Both scripts exit `2` before drawing when a number, ID, role, shape or label has the wrong type.
+- `figure.json` is copied beside the output as the editable source.
 
 `--png` needs Chrome (`BOXLITE_FIGURE_CHROME` overrides the path) and network access:
 pages load Inter, IBM Plex Mono and Kalam from Google Fonts. Offline, Chrome substitutes

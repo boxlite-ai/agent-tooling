@@ -16,10 +16,12 @@ Reconcile history; absent history means null assessments. Never execute the targ
 command or print evidence, paths, environment, or secrets. Check command/subject/design
 bindings first; apply shared criteria/test policy.
 
-Write only scratch. Run the design reader there with `repo_root`. Reconstruct commits
-from `index_tree`, pushes from validated new trees; verify trees, never copy working
-files. Bind tests to those objects and, for defect proof, the fully reverted baseline.
-Start shell commands with `export PATH="$TMPDIR/../bin:$PATH"`; check mktemp resolves there.
+Write only scratch.
+
+- Run the design reader there with `repo_root`.
+- Reconstruct commits from `index_tree`, pushes from validated new trees; verify trees, never copy working files.
+- Bind tests to those objects and, for defect proof, the fully reverted baseline.
+- Start shell commands with `export PATH="$TMPDIR/../bin:$PATH"`; check mktemp resolves there.
 
 Work alone; ≤1 specialist for security/concurrency/migration/test-infrastructure beyond your judgment.
 

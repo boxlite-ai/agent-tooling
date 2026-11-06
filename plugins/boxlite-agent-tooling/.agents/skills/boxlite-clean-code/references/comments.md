@@ -42,18 +42,21 @@ alignment, overlapping ranges, or another meaningful boundary.
 ## Verify the explanation
 
 Check values, arrows, ranges, ownership, and ordering against implementation.
-Mark illustrative values and schematic omissions. Examples illustrate behavior;
-they do not prove correctness or complexity. Use existing documentation-test
-facilities for runnable examples. Update explanations when behavior changes.
+
+- Mark illustrative values and schematic omissions.
+- Examples illustrate behavior; they do not prove correctness or complexity.
+- Use existing documentation-test facilities for runnable examples.
+- Update explanations when behavior changes.
 
 The examples below illustrate review decisions, not complete implementations.
 
 ## C1 — Benefits eligibility becomes a named predicate
 
 Before: a comment explains an employee flag check combined with an age threshold.
-After: `employee.isEligibleForFullBenefits()` names that domain decision.
-Preserve the exact flag and threshold semantics, especially the equality boundary.
-Do not copy an illustrative age or benefits rule into a real policy.
+
+- After: `employee.isEligibleForFullBenefits()` names that domain decision.
+- Preserve the exact flag and threshold semantics, especially the equality boundary.
+- Do not copy an illustrative age or benefits rule into a real policy.
 
 ## C2 — A date-pattern example stays beside its pattern
 
@@ -79,9 +82,10 @@ for a known race; a stress comment and a green run do not prove race freedom.
 ## C5 — Comparison comments must match the library contract
 
 Before: `assertTrue(a.compareTo(b) == -1); // a < b`.
-After: `assertTrue(a.compareTo(b) < 0)` when only the result's sign is specified.
-Prefer an expressive assertion to a comment translating a magic return value.
-Retain an exact-value check only if that value itself belongs to the contract.
+
+- After: `assertTrue(a.compareTo(b) < 0)` when only the result's sign is specified.
+- Prefer an expressive assertion to a comment translating a magic return value.
+- Retain an exact-value check only if that value itself belongs to the contract.
 
 ## C6 — A formatter warning preserves isolation
 
@@ -107,9 +111,10 @@ a future-work comment cannot make a missing implementation correct.
 ## C9 — Trimming can be part of a parser's semantics
 
 Before: `matchedItem.trim()` looks like cosmetic whitespace cleanup.
-After: explain that retained leading spaces could create another nested list item.
-Test indented input and intended content. Do not delete the explanation until a
-name or parser abstraction communicates that non-obvious consequence equally well.
+
+- After: explain that retained leading spaces could create another nested list item.
+- Test indented input and intended content.
+- Do not delete the explanation until a name or parser abstraction communicates that non-obvious consequence equally well.
 
 ## C10 — Missing properties are not every I/O failure
 
@@ -125,27 +130,26 @@ when the old implementation swallowed failures, not merely a comment cleanup.
 ## C11 — A wait comment cannot promise a wakeup protocol
 
 Before: a method that waits once claims to return immediately when a flag changes.
-After: describe what the actual wait/check code guarantees, or deliberately fix
-the notification and deadline loop with a regression test.
-Verify timeout, notification, interruption, and spurious-wakeup behavior; changing
-the prose alone does not repair a missing synchronization protocol.
+
+- After: describe what the actual wait/check code guarantees, or deliberately fix the notification and deadline loop with a regression test.
+- Verify timeout, notification, interruption, and spurious-wakeup behavior; changing the prose alone does not repair a missing synchronization protocol.
 
 ## C12 — Mechanical documentation creates false confidence
 
-Before: a getter repeats its name in three documentation lines; copied field
-comments label both a version and an unrelated information field as a version.
-After: delete redundant private narration and correct real public contracts.
-Likewise, `responderInstance()` can become `responderBeingTested()` when that is
-the fact its comment repeats. Retain units, ranges, ownership, and legal notices.
-Do not impose a blanket ban on API documentation or a quota for every private member.
+Before: a getter repeats its name in three documentation lines; copied field comments label both a version and an unrelated information field as a version.
+
+- After: delete redundant private narration and correct real public contracts.
+- Likewise, `responderInstance()` can become `responderBeingTested()` when that is the fact its comment repeats.
+- Retain units, ranges, ownership, and legal notices.
+- Do not impose a blanket ban on API documentation or a quota for every private member.
 
 ## C13 — Error-response extraction still needs failure semantics
 
 Before: sending code nests another try/catch to report an error and close a response.
-After: a named `reportFailureAndClose` operation owns that policy.
-An empty catch inside the helper still loses evidence. Decide how secondary errors
-are reported and ensure resources close even if reporting fails; distinguish those
-behavior changes from merely moving the existing block.
+
+- After: a named `reportFailureAndClose` operation owns that policy.
+- An empty catch inside the helper still loses evidence.
+- Decide how secondary errors are reported and ensure resources close even if reporting fails; distinguish those behavior changes from merely moving the existing block.
 
 ## C14 — Name both sides of a dependency question
 
@@ -199,11 +203,10 @@ expose the behavior it verifies, including malformed or boundary input.
 
 ## C20 — Allocation arithmetic needs units
 
-Before: a PNG buffer formula combines width, height, channel bytes, filters, and
-header allowance while its comment does not identify which term represents which.
-After: derive capacity through a layout operation with explicit units and bounds.
-Do not guess that renaming constants preserves the formula: verify dimensions,
-row overhead, arithmetic overflow, and the encoder's actual space requirements.
+Before: a PNG buffer formula combines width, height, channel bytes, filters, and header allowance while its comment does not identify which term represents which.
+
+- After: derive capacity through a layout operation with explicit units and bounds.
+- Do not guess that renaming constants preserves the formula: verify dimensions, row overhead, arithmetic overflow, and the encoder's actual space requirements.
 
 ## C21 — The prime sieve keeps its mathematical rationale
 
@@ -213,10 +216,10 @@ int upperFactor = (int) Math.sqrt(maximum);
 crossOutMultiplesThrough(upperFactor);
 ```
 
-Replace narration such as “increment count” with meaningful names and stages,
-but retain the reason for the square-root bound. Check 0, 1, 2, and perfect squares.
-Adaptation: keep scratch arrays local to an invocation instead of copying static
-mutable fields from an example; repeated and concurrent calls must stay isolated.
+Replace narration such as “increment count” with meaningful names and stages, but retain the reason for the square-root bound.
+
+- Check 0, 1, 2, and perfect squares.
+- Adaptation: keep scratch arrays local to an invocation instead of copying static mutable fields from an example; repeated and concurrent calls must stay isolated.
 
 ## C22 — Position banners can hide a missing boundary
 
@@ -228,11 +231,10 @@ banners until readers ignore them adds neither cohesion nor a usable navigation 
 ## C23 — A pattern comment can explain an external format
 
 Before: a time/date regular expression has no explanation of its intended format.
-After: show its expected shape, such as hours, minutes, seconds, weekday, month,
-day, and year, alongside the pattern or within a dedicated date-format abstraction.
-This differs from C2's detached HTTP-date example: the concern here is explaining
-syntax that a name alone does not reveal. Check the actual formatter/parser pair;
-a sample shape does not establish range validation or a timezone contract.
+
+- After: show its expected shape, such as hours, minutes, seconds, weekday, month, day, and year, alongside the pattern or within a dedicated date-format abstraction.
+- This differs from C2's detached HTTP-date example: the concern here is explaining syntax that a name alone does not reveal.
+- Check the actual formatter/parser pair; a sample shape does not establish range validation or a timezone contract.
 
 ## C24 — Show the layout before constructing it
 

@@ -41,7 +41,11 @@ class EditableImage:
         self._image = replacement
 ```
 
-Before, scaling and rotation each create a result, release the previous image, and update ownership. After, one helper names the transition. This adaptation assumes transforms return a distinct owned image and `close()` cannot fail. It preserves transform-before-release and release-before-install ordering; a different required failure guarantee needs a separately designed ownership protocol.
+Before, scaling and rotation each create a result, release the previous image, and update ownership.
+
+- After, one helper names the transition.
+- This adaptation assumes transforms return a distinct owned image and `close()` cannot fail.
+- It preserves transform-before-release and release-before-install ordering; a different required failure guarantee needs a separately designed ownership protocol.
 
 **Check:** successful transformation releases exactly the previous image; transformation failure leaves it usable; no-op transforms do not return the same object into this helper. If close can fail or operations are concurrent, define failure state and synchronization explicitly. Forced garbage collection is not part of the ownership policy.
 
@@ -56,7 +60,11 @@ def accrue_vacation(employee, minimum_policy, payroll):
 
 Before, two jurisdiction-specific methods repeat base calculation and payroll update, differing only in adjustment. After, the shared sequence owns those steps and receives the varying policy. An inheritance template with a policy hook can also work; this example uses composition.
 
-**Check:** each supported policy receives the same earned-hours basis and the correct employee context; each successful accrual writes once. Verify behavior against the actual business specification. No numeric legal minimum is implied here, and a failed or repeated payroll call requires explicit transaction/idempotency rules. Similar workflows with different sequencing should remain distinct.
+**Check:** each supported policy receives the same earned-hours basis and the correct employee context; each successful accrual writes once.
+
+- Verify behavior against the actual business specification.
+- No numeric legal minimum is implied here, and a failed or repeated payroll call requires explicit transaction/idempotency rules.
+- Similar workflows with different sequencing should remain distinct.
 
 ## R04 — Use recognizable names without manufacturing a class graph
 

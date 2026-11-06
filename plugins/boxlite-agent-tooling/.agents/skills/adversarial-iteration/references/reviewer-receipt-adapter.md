@@ -39,12 +39,10 @@ failure_class_registry_digest: <canonical digest of the complete registry>
 next_failure_class_sequence: <next unused K for stable slug fc-K>
 ```
 
-This is a sanitized projection produced only after local label/path/type, binary,
-hardlink, and no-log content classification. Likely-secret paths and artifact locators become
-redacted opaque entries containing only `review_item_id`, `redacted_token`,
-lifecycle, and non-sensitive digests. Never send their names, locators, or content to
-`/codex:adversarial-review`; they must remain `unread` unless an explicitly authorized
-local-only reviewer receives the private artifact.
+This is a sanitized projection produced only after local label/path/type, binary, hardlink, and no-log content classification.
+
+- Likely-secret paths and artifact locators become redacted opaque entries containing only `review_item_id`, `redacted_token`, lifecycle, and non-sensitive digests.
+- Never send their names, locators, or content to `/codex:adversarial-review`; they must remain `unread` unless an explicitly authorized local-only reviewer receives the private artifact.
 
 Apply that same sensitivity boundary to the objective/instruction artifacts. The
 reviewer assesses the supplied surface against them and may not redefine their scope or
@@ -55,19 +53,15 @@ Do not invoke `/codex:adversarial-review` when any review item is opaque. Route 
 whole receipt to an explicitly authorized local-only reviewer, or return `INPUT_ERROR`;
 the command's automatic diff collection would bypass focus-text redaction.
 
-Require the reviewer to validate each artifact digest and read each present entry, or
-the deletion/rename patch plus its prior blob for non-present entries. Mode and
-file-kind transitions are review material even when content is unchanged. For a
-symlink, inspect only the inert link-object artifact and raw target text; never
-dereference it. For a submodule/gitlink, inspect only its commit OID and patch; never
-traverse or initialize it. It must
-return `reviewed_full`,
-`reviewed_partial`, and `unread` by `review_item_id` for both surface entries and
-adjacent contracts. It must reuse a matching stable
-finding ID or mark a new one `[NEW]`, and cite file/hunk/contract evidence.
-For every finding it must reuse the registry slug whose invariant matches, or emit the
-exact marker `[NEW_CLASS]` plus a new canonical invariant. Renaming a matching class is
-invalid; a new class marker is not permission to bypass an installed preflight.
+Require the reviewer to validate each artifact digest and read each present entry, or the deletion/rename patch plus its prior blob for non-present entries.
+
+- Mode and file-kind transitions are review material even when content is unchanged.
+- For a symlink, inspect only the inert link-object artifact and raw target text; never dereference it.
+- For a submodule/gitlink, inspect only its commit OID and patch; never traverse or initialize it.
+- It must return `reviewed_full`, `reviewed_partial`, and `unread` by `review_item_id` for both surface entries and adjacent contracts.
+- It must reuse a matching stable finding ID or mark a new one `[NEW]`, and cite file/hunk/contract evidence.
+- For every finding it must reuse the registry slug whose invariant matches, or emit the exact marker `[NEW_CLASS]` plus a new canonical invariant.
+- Renaming a matching class is invalid; a new class marker is not permission to bypass an installed preflight.
 
 ## Codex command compatibility
 
@@ -80,66 +74,55 @@ this single-line embedded envelope:
 REVIEW_RECEIPT_V1 review_round=R<N>; reviewed_after_attempt=<loop_start|R<n>-A<m>>; review_invocation_generation=<value>; review_request_id=<value>; base_revision=<value>; surface_fingerprint=<value>; sanitized_baseline_digest=<value>; review_target_digest=<value>; reviewer_projection_digest=<value>; context_discovery_digest=<value>; change_objective_digest=<value>; applicable_instructions_digest=<value>; reviewed_full=[item IDs]; reviewed_partial=[item IDs]; unread=[item IDs]; dispositions=[finding ID:resolved|still_open|not_assessed]; remaining_risk=[existing finding IDs or NEW#k]
 ```
 
-Never expose the actual checkout, Git object database, or unrelated base-tree files to
-the public command. Build a disposable synthetic Git repository whose baseline and
-worktree contain only supplied ordinary review-item, adjacent, and change-contract
-artifacts, bound by
-`sanitized_baseline_digest` to their actual-base digests. Replace every symlink and
-gitlink with inert metadata containing kind, mode, raw link text or OID, and patch
-digest. Validate the sanitized status/diff and item artifacts against
-`review_target_digest`, then pass `--scope working-tree`; `--base` would omit dirty fixes.
+Never expose the actual checkout, Git object database, or unrelated base-tree files to the public command.
 
-Run the public reviewer behind an OS-enforced data-read allowlist containing only the
-synthetic repository and supplied artifacts; deny direct network and broker only the
-model transport. Scrub inherited environment variables and use isolated HOME/temp,
-disabled system/global Git config and credentials, an empty hooks path, no init
-templates, and deterministic dummy author/committer metadata. The reviewer runtime may
-read only its immutable executables/libraries in addition to the allowlisted data. If
-this confinement is unavailable, do not invoke the public command; use an authorized
-local-only reviewer or return `INPUT_ERROR`.
+- Build a disposable synthetic Git repository whose baseline and worktree contain only supplied ordinary review-item, adjacent, and change-contract artifacts, bound by `sanitized_baseline_digest` to their actual-base digests.
+- Replace every symlink and gitlink with inert metadata containing kind, mode, raw link text or OID, and patch digest.
+- Validate the sanitized status/diff and item artifacts against `review_target_digest`, then pass `--scope working-tree`; `--base` would omit dirty fixes.
 
-Run the command in the foreground with `--wait --json`. Require process exit zero, a
-null `parseError`, and an object at `.result`; normalize that object, never the rendered
-Markdown. Never accept its rendered output directly. If the installed command rejects
-this transport or changes the payload shape, return `INPUT_ERROR` or use a fresh
-read-only reviewer that emits the loop receipt directly.
+Run the public reviewer behind an OS-enforced data-read allowlist containing only the synthetic repository and supplied artifacts; deny direct network and broker only the model transport.
+
+- Scrub inherited environment variables and use isolated HOME/temp, disabled system/global Git config and credentials, an empty hooks path, no init templates, and deterministic dummy author/committer metadata.
+- The reviewer runtime may read only its immutable executables/libraries in addition to the allowlisted data.
+- If this confinement is unavailable, do not invoke the public command; use an authorized local-only reviewer or return `INPUT_ERROR`.
+
+Run the command in the foreground with `--wait --json`.
+
+- Require process exit zero, a null `parseError`, and an object at `.result`; normalize that object, never the rendered Markdown.
+- Never accept its rendered output directly.
+- If the installed command rejects this transport or changes the payload shape, return `INPUT_ERROR` or use a fresh read-only reviewer that emits the loop receipt directly.
 
 Every public-review and class-adjudication request uses a fresh ID, host-owned finite deadline,
 bounded input/result, and cancellation policy. Timeout/overflow consumes and
 rejects that ID, kills/reaps the process group or cancels the task, discards late output,
 and rejects its parent. Retry requires capped fresh parent/subordinate IDs.
 
-Require each finding title to start with either an existing stable `[R<N>-F<M>]` ID or
-the exact marker `[NEW]`. Existing IDs in the invocation envelope must be reused for the
-same invariant, including a recurrence of a closed finding. In original
-`.result.findings` order, mechanically replace each `[NEW]`
-with the next unused round-local sequence in a provisional normalization transaction.
-In `remaining_risk`, `NEW#1`, `NEW#2`, and so on refer to new findings in their original
-result order. Require exact, gap-free correspondence, then rewrite those tokens to the
-same allocated stable IDs. Existing still-open/not-assessed IDs and every new finding
-must appear; resolved IDs must not.
-Require each finding body to start with this JSON metadata line:
+Require each finding title to start with either an existing stable `[R<N>-F<M>]` ID or the exact marker `[NEW]`.
+
+- Existing IDs in the invocation envelope must be reused for the same invariant, including a recurrence of a closed finding.
+- In original `.result.findings` order, mechanically replace each `[NEW]` with the next unused round-local sequence in a provisional normalization transaction.
+- In `remaining_risk`, `NEW#1`, `NEW#2`, and so on refer to new findings in their original result order.
+- Require exact, gap-free correspondence, then rewrite those tokens to the same allocated stable IDs.
+- Existing still-open/not-assessed IDs and every new finding must appear; resolved IDs must not.
+- Require each finding body to start with this JSON metadata line:
 
 ```text
 REVIEW_FINDING_V1 {"materiality":"material","finding_invariant":"canonical specific defect invariant","detection_review_item_id":"ID","detection_review_item_digest":"digest","detection_evidence_ref":"mapped hunk/line evidence","introduced_by":"original|R-n-A-m|unknown","introduction_evidence":"entry ID:lifecycle/mode/type/path/patch evidence digest|unknown","parent":"stable ID|null","failure_class":"existing slug|[NEW_CLASS]","failure_class_invariant":"canonical class invariant","affected_contracts":["IDs"]}
 ```
 
-The public result's `.file`, `line_start`, and `line_end` plus the detection fields must
-resolve exactly through the orchestrator-owned `public_location_map`. Ordinary present
-blobs map synthetic lines to the supplied blob/hunk. Deleted, renamed, symlink, and
-gitlink items map lines in synthetic inert prior-blob/patch/metadata artifacts; those
-coordinates never authorize an actual-tree path by inference. Every affected contract
-must be supplied and evidence-bound. An existing finding ID requires its exact
-canonical finding invariant; otherwise use `[NEW]` or fail validation.
+The public result's `.file`, `line_start`, and `line_end` plus the detection fields must resolve exactly through the orchestrator-owned `public_location_map`.
 
-An introduced `fix_attempt_id` must be present in `known_fix_attempts` with matching
-attempt-delta evidence; otherwise `introduced_by` is `unknown`. Normalize findings in original
-order and maintain an effective registry containing both stored and earlier
-provisionally accepted classes. Existing classes carry their exact registry invariant.
-Whenever that effective registry is non-empty, pause every finding's normalization and
-give a separate fresh read-only class adjudicator the finding candidate, its digest,
-and the complete registry. This applies whether the reviewer claimed an existing slug
-or `[NEW_CLASS]`; require this bound result:
+- Ordinary present blobs map synthetic lines to the supplied blob/hunk.
+- Deleted, renamed, symlink, and gitlink items map lines in synthetic inert prior-blob/patch/metadata artifacts; those coordinates never authorize an actual-tree path by inference.
+- Every affected contract must be supplied and evidence-bound.
+- An existing finding ID requires its exact canonical finding invariant; otherwise use `[NEW]` or fail validation.
+
+An introduced `fix_attempt_id` must be present in `known_fix_attempts` with matching attempt-delta evidence; otherwise `introduced_by` is `unknown`.
+
+- Normalize findings in original order and maintain an effective registry containing both stored and earlier provisionally accepted classes.
+- Existing classes carry their exact registry invariant.
+- Whenever that effective registry is non-empty, pause every finding's normalization and give a separate fresh read-only class adjudicator the finding candidate, its digest, and the complete registry.
+- This applies whether the reviewer claimed an existing slug or `[NEW_CLASS]`; require this bound result:
 
 ```text
 CLASS_DECISION_V1 {"class_adjudication_request_id":"...","review_request_id":"...","finding_candidate_digest":"...","effective_failure_class_registry_digest":"...","decision":"existing slug|NEW","compared_classes":["every effective-registry slug"],"observation":"semantic invariant comparison"}
@@ -151,15 +134,14 @@ projection bound to the private `finding_candidate_digest`; if that projection i
 enough for a semantic decision, return `INPUT_ERROR` rather than disclose the candidate
 or guess.
 
-The compared list must cover the effective registry exactly. Its decision must equal
-the reviewer-claimed slug or `NEW` for `[NEW_CLASS]`; disagreement rejects the receipt.
-`NEW` authorizes the next deterministic `fc-K` allocation and adds that provisional
-class before the following finding. Only the first new class may allocate directly
-when both stored and provisional registries are empty.
-Thus two paraphrased findings in one response cannot silently allocate two classes.
-Persist every adjudication with the reviewer receipt. The adapter copies bound
-decisions and sets `detected_in` from `review_round`; it never derives lineage or
-semantic class equivalence from prose.
+The compared list must cover the effective registry exactly.
+
+- Its decision must equal the reviewer-claimed slug or `NEW` for `[NEW_CLASS]`; disagreement rejects the receipt.
+- `NEW` authorizes the next deterministic `fc-K` allocation and adds that provisional class before the following finding.
+- Only the first new class may allocate directly when both stored and provisional registries are empty.
+- Thus two paraphrased findings in one response cannot silently allocate two classes.
+- Persist every adjudication with the reviewer receipt.
+- The adapter copies bound decisions and sets `detected_in` from `review_round`; it never derives lineage or semantic class equivalence from prose.
 
 After the receipt line, require one JSON record in `summary` for every item claimed
 full or partial:
@@ -179,12 +161,10 @@ The orchestrator resolves `check_ref` only through repository tooling or already
 validated review evidence, then creates and digests the protected check artifact during
 local expansion. Never accept an absolute/arbitrary locator or reviewer-supplied command.
 
-The adapter validates unique item IDs, matching complete review-item digests, a concrete evidence
-reference, and a non-empty item-specific observation. The summary grammar is exhaustive:
-after its first receipt line, it contains exactly the evidence records followed by zero
-or more ordered `ADJACENT_PROPOSAL_V1` records and no other summary lines. A receipt
-line echoed without required evidence, extra prose, blank records, or an unrecognized
-trailing line is not review evidence.
+The adapter validates unique item IDs, matching complete review-item digests, a concrete evidence reference, and a non-empty item-specific observation.
+
+- The summary grammar is exhaustive: after its first receipt line, it contains exactly the evidence records followed by zero or more ordered `ADJACENT_PROPOSAL_V1` records and no other summary lines.
+- A receipt line echoed without required evidence, extra prose, blank records, or an unrecognized trailing line is not review evidence.
 
 ## Validation and mapping
 
@@ -225,12 +205,11 @@ Fail with `INPUT_ERROR` without starting a fixer when any check fails:
     normalized path/no-follow identity already exists in the surface/adjacent registry
     or duplicates another proposal after hardlink classification.
 
-When a valid adjacent proposal exists, do not map the response to `FINDINGS` or
-`ZERO_FINDINGS`. The orchestrator locally validates and classifies the proposed entry,
-allocates its stable adjacent/check state, atomically consumes the request into
-`review_request_rejections` with reason `surface_expanded`, and issues a fresh review
-over the expanded target. Findings in the rejected response receive no stable IDs.
-Existing/duplicate identities are schema `INPUT_ERROR`, never `surface_expanded`.
+When a valid adjacent proposal exists, do not map the response to `FINDINGS` or `ZERO_FINDINGS`.
+
+- The orchestrator locally validates and classifies the proposed entry, allocates its stable adjacent/check state, atomically consumes the request into `review_request_rejections` with reason `surface_expanded`, and issues a fresh review over the expanded target.
+- Findings in the rejected response receive no stable IDs.
+- Existing/duplicate identities are schema `INPUT_ERROR`, never `surface_expanded`.
 
 Map only these combinations:
 

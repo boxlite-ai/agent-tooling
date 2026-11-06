@@ -7,9 +7,11 @@ description: Bind executions and source.
 # Test evidence
 
 Use host receipts, complete native records, or safe reruns; Bash suites count.
-Check command/subject/design bindings first. Inventory evidence; probe sandbox.
-Denials need authentic records, not claimed failures; preserve lifecycle checks/permissions.
-Missing proof: `high: unchecked` FAIL before deadline; then apply deadline-policy.md.
+
+- Check command/subject/design bindings first.
+- Inventory evidence; probe sandbox.
+- Denials need authentic records, not claimed failures; preserve lifecycle checks/permissions.
+- Missing proof: `high: unchecked` FAIL before deadline; then apply deadline-policy.md.
 
 ## Bind execution
 
@@ -20,23 +22,23 @@ dossier: `command`, `status`, `exit_code`, `head`, `tree`.
 
 ## Native records
 
-Use optional `parent_session_id`, `parent_host`, `audit_started_at` hints and discovery,
-boundary/envelope/execution-linkage rules in
-`../../skills/boxlite-verdict-audit/references/transcripts.md`, relative to this file.
-Verify parent/repository identity, link invocation/completion, revalidate before
-delivery. No transcript path; missing context needs verified host linkage, never your
-session. Standalone: receipts or safe reruns suffice.
+Use optional `parent_session_id`, `parent_host`, `audit_started_at` hints; follow discovery, boundary/envelope/execution-linkage rules in `../../skills/boxlite-verdict-audit/references/transcripts.md` (relative).
+
+- Verify parent/repo identity, link invocation/completion, revalidate before delivery.
+- No transcript path; missing context needs verified host linkage, never your session.
+- Standalone: receipts or safe reruns.
 
 ## Choose proof by contract
 
-Follow repository rules per claim. For fixes to existing behavior, including
-new APIs/wrappers: isolated detached baseline, every production change removed,
-regression tests retained. Observe defect assertions fail; restore complete fix/pass.
-Bind both executions to source; obey compatibility-adapter restrictions.
+Follow repository rules per claim.
+
+- Fixes to existing behavior, including new APIs/wrappers: isolated detached baseline, every production change removed, regression tests retained.
+- Observe defect assertions fail; restore complete fix/pass.
+- Bind both runs to source; obey compatibility-adapter restrictions.
 
 New entry points over unchanged, correct dependencies use new-contract proof.
-Wholly new contracts: base/source evidence of no equivalent prior contract;
-positive, negative, and boundary tests against implementation; security:
-allowed/denied at real security boundaries. Defect proof: not applicable, with reason.
-Mixed changes: both standards per claim.
-Missing APIs, compile/setup errors never reproduce a defect.
+
+- Wholly new contracts: base/source proof of no equivalent prior contract; positive, negative, and boundary tests against implementation; security: allowed/denied at real security boundaries.
+- Defect proof: not applicable, with reason.
+- Mixed changes: both standards per claim.
+- Missing APIs, compile/setup errors never reproduce a defect.

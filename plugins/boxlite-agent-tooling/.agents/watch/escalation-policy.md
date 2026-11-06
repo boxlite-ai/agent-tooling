@@ -36,6 +36,8 @@ Otherwise fix, push, and report what changed and why.
 
 ## Review findings
 
-Compare against the merge base. Fix this PR's introduced findings; report
-pre-existing findings in the PR, unchanged. Explain why before resolving unfixed
-findings. Reproduce bot claims before fixing or dismissing them.
+Compare against the merge base.
+
+- Fix this PR's introduced findings; report pre-existing findings in the PR, unchanged.
+- Explain why before resolving unfixed findings.
+- Reproduce bot claims before fixing or dismissing them.

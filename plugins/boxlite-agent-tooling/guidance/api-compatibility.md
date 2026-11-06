@@ -20,9 +20,17 @@ The checker uses pinned oasdiff 1.33.0 and its JSON parser. Inherited oasdiff co
 
 ## Request tests
 
-Run `bash "<plugin>/scripts/api-compatibility.sh" inspect <repo-root>` for commits; use `inspect-push` for pushes to read the checked-out commit. For every entry in `specifications`, read its `path` and `artifacts`: native `changelog`, `breaking`, and `diff` JSON reports, plus exact `before` and `after` snapshots. Use bounded reads within the auditor's evidence budget; missing, truncated, or unresolved evidence blocks PASS.
+Run `bash "<plugin>/scripts/api-compatibility.sh" inspect <repo-root>` for commits; use `inspect-push` for pushes to read the checked-out commit.
 
-Use native findings and the detailed diff to locate changes; verify request relevance, defaults, and nullability against the snapshots and SDK code. Include parameter `content` schemas, references, composed schemas, and ancestor `readOnly` context. Native classifications can overreport request additions beneath a read-only parent. Response-only fields do not require request tests; shared writable fields need coverage for each affected operation. Python does not infer request-test obligations.
+- For every entry in `specifications`, read its `path` and `artifacts`: native `changelog`, `breaking`, and `diff` JSON reports, plus exact `before` and `after` snapshots.
+- Use bounded reads within the auditor's evidence budget; missing, truncated, or unresolved evidence blocks PASS.
+
+Use native findings and the detailed diff to locate changes; verify request relevance, defaults, and nullability against the snapshots and SDK code.
+
+- Include parameter `content` schemas, references, composed schemas, and ancestor `readOnly` context.
+- Native classifications can overreport request additions beneath a read-only parent.
+- Response-only fields do not require request tests; shared writable fields need coverage for each affected operation.
+- Python does not infer request-test obligations.
 
 For each new optional request field, the auditor requires repository tests that exercise production request code and assert:
 
@@ -39,7 +47,13 @@ A missed request field, missing case, or test without a passing `make test...` r
 
 ## Human confirmation
 
-Tell the user which files contain breaking or existing-default changes and explain their impact. Recommend discussing them in a GitHub issue. Ask once whether to discuss or skip the compatibility gate, and do not wait for a reply. Until the user replies, keep the gate, continue authorized work that needs no skip, and report the blocked commit or push. Discussion is recommended, not required; no issue/link or Notion token is required. Creating an issue needs separate authorization.
+Tell the user which files contain breaking or existing-default changes and explain their impact.
+
+- Recommend discussing them in a GitHub issue.
+- Ask once whether to discuss or skip the compatibility gate, and do not wait for a reply.
+- Until the user replies, keep the gate, continue authorized work that needs no skip, and report the blocked commit or push.
+- Discussion is recommended, not required; no issue/link or Notion token is required.
+- Creating an issue needs separate authorization.
 
 To confirm skipping, the user submits exactly:
 

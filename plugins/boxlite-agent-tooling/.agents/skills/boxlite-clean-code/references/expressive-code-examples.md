@@ -12,7 +12,11 @@ These original adaptations show concrete before/after decisions. The fragments i
 attempts += 1  # Increase attempts by one.
 ```
 
-The comment repeats the statement. Delete it. Similarly, empty generated parameter/return tags add no information. Useful documentation instead explains an actual boundary, such as whether the attempt count includes the initial call or only retries.
+The comment repeats the statement.
+
+- Delete it.
+- Similarly, empty generated parameter/return tags add no information.
+- Useful documentation instead explains an actual boundary, such as whether the attempt count includes the initial call or only retries.
 
 **Check:** comments describe the current counting and retry contract. Preserve required public API documentation, legal notices, and explanations the code cannot express.
 
