@@ -6,6 +6,8 @@ Every change goes: understand → research → design → implement → test →
 
 Apply the `boxlite-clean-code` skill for design, implementation, refactoring, and maintainability review.
 
+MANDATORY: File all agent-tooling issues from any consumer in [upstream GitHub Issues](https://github.com/boxlite-ai/agent-tooling/issues).
+
 ### Understand
 
 - Read this file, the nearest README/CONTRIBUTING, relevant docs, and the actual source before editing.
