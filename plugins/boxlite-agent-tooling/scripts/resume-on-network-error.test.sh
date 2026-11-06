@@ -17,13 +17,14 @@ subject="$script_dir/resume-on-network-error.sh"
 work="$(mktemp -d "${TMPDIR:-/tmp}/resume-test.XXXXXX")" || exit 2
 trap 'rm -rf "$work"' EXIT
 stub_dir="$work/bin"
-mkdir -p "$stub_dir" "$work/project/.agents/state"
+mkdir -p "$stub_dir" "$work/project/.agents/state" "$work/subject-tmp"
 
 # ── Stubs ────────────────────────────────────────────────────────────────────
 cat > "$stub_dir/claude" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_ARGV"
 index="$(cat "$STUB_COUNT" 2>/dev/null || echo 0)"
+printf '%s\0' "$@" > "$STUB_ARGV0.$index"
 printf '%s' "$(( index + 1 ))" > "$STUB_COUNT"
 outcome="$(sed -n "$(( index + 1 ))p" "$STUB_PLAN")"
 [[ -n "$outcome" ]] || outcome=crash
@@ -47,7 +48,7 @@ printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$1" >> "$STUB_SLEEPS"\nexit 0\n' >
 chmod +x "$stub_dir/claude" "$stub_dir/curl" "$stub_dir/sleep"
 
 export STUB_PLAN="$work/plan" STUB_COUNT="$work/count" STUB_ARGV="$work/argv" STUB_NET="$work/net"
-export STUB_SLEEPS="$work/sleeps"
+export STUB_SLEEPS="$work/sleeps" STUB_ARGV0="$work/argv0"
 export CLAUDE_PROJECT_DIR="$work/project"
 export PATH="$stub_dir:$PATH"
 failure_record="$CLAUDE_PROJECT_DIR/.agents/state/last-api-failure.json"
@@ -79,10 +80,16 @@ record_failure_kind() {  # $1 = kind (empty removes it), $2 = session id, $3 = r
 run_subject() {  # plan-lines... ; sets rc, calls, stdout_file
   printf '%s\n' "$@" > "$STUB_PLAN"
   printf 0 > "$STUB_COUNT"; : > "$STUB_ARGV"; : > "$STUB_SLEEPS"
-  bash "$subject" --max-restarts 3 --max-wait 200 'do the task' \
+  TMPDIR="$work/subject-tmp" bash "$subject" --max-restarts 3 --max-wait 200 'do the task' \
     >"$work/stdout" 2>"$work/stderr"
   rc=$?
   calls="$(cat "$STUB_COUNT" 2>/dev/null || echo 0)"
+}
+
+check_cleanup() {
+  local remaining
+  remaining="$(find "$work/subject-tmp" -name 'resume-on-network-error.*' -print)"
+  check "$1" "" "$remaining"
 }
 
 # ── Cases ────────────────────────────────────────────────────────────────────
@@ -92,6 +99,7 @@ printf up > "$STUB_NET"
 record_failure_kind ""
 run_subject success
 check "clean success exits 0 after one run" "0 1" "$rc $calls"
+check_cleanup "success removes its result directory"
 if jq -e '.subtype == "success"' "$work/stdout" >/dev/null 2>&1; then
   ok "the final result JSON reaches stdout"
 else
@@ -120,23 +128,54 @@ else
   ok "restart never uses --continue"
 fi
 
-record_failure_kind rate_limit
-run_subject api_error success
-check "retryable kind (rate_limit) restarts" "0 2" "$rc $calls"
+for retryable_kind in rate_limit server_error; do
+  record_failure_kind "$retryable_kind"
+  run_subject api_error success
+  check "retryable kind ($retryable_kind) restarts" "0 2" "$rc $calls"
+done
+
+# Capture real argv at the stub boundary, including empty and multiline values.
+argument_prompt=$'task with spaces\nliteral $(not_executed)'
+printf '%s\n' api_error success > "$STUB_PLAN"
+printf 0 > "$STUB_COUNT"; : > "$STUB_ARGV"; : > "$STUB_SLEEPS"
+record_failure_kind overloaded
+TMPDIR="$work/subject-tmp" bash "$subject" --max-restarts 3 --max-wait 200 -- \
+  "$argument_prompt" --allowedTools 'Read Bash' '' '*' --leading-dash \
+  >"$work/stdout" 2>"$work/stderr"
+check "argument-preserving run completes after resuming" "0 2" "$? $(cat "$STUB_COUNT")"
+if jq -Rse --arg prompt "$argument_prompt" '
+  split("\u0000")[:-1] == ["-p", $prompt, "--allowedTools", "Read Bash", "", "*",
+    "--leading-dash", "--output-format", "json"]
+' "$STUB_ARGV0.0" >/dev/null; then
+  ok "initial call preserves argument bytes and output-format precedence"
+else
+  bad "initial call preserves argument bytes and output-format precedence"
+fi
+if jq -Rse '
+  split("\u0000")[:-1] | .[0] == "-p" and (.[1] | length > 0)
+    and .[2:] == ["--resume", "sess-1", "--allowedTools", "Read Bash", "", "*",
+      "--leading-dash", "--output-format", "json"]
+' "$STUB_ARGV0.1" >/dev/null; then
+  ok "resumed call preserves empty, whitespace, glob and leading-dash arguments"
+else
+  bad "resumed call preserves empty, whitespace, glob and leading-dash arguments"
+fi
+check_cleanup "resumed success removes its result directory"
 
 # The defect this suite exists to catch: a permanent fault must not spend the budget.
-record_failure_kind authentication_failed
-run_subject api_error api_error api_error api_error
-check "authentication_failed is fatal, no restart" "1 1" "$rc $calls"
-
-record_failure_kind billing_error
-run_subject api_error api_error
-check "billing_error is fatal, no restart" "1 1" "$rc $calls"
+for fatal_kind in authentication_failed oauth_org_not_allowed account_on_hold billing_error \
+    invalid_request model_not_found max_output_tokens; do
+  record_failure_kind "$fatal_kind"
+  run_subject api_error api_error api_error api_error
+  check "$fatal_kind is fatal, no restart" "1 1" "$rc $calls"
+done
+check_cleanup "fatal exit removes its result directory"
 
 # No StopFailure record: the kind is unknowable, so guess briefly and stop.
 record_failure_kind ""
 run_subject api_error api_error api_error api_error
 check "unrecorded kind stops after the small guess budget" "5 3" "$rc $calls"
+check_cleanup "unknown-kind exhaustion removes its result directory"
 
 # A record older than the freshness bound belongs to an earlier run of this session.
 record_failure_kind overloaded sess-1 1
@@ -216,6 +255,7 @@ check "max_turns is fatal, no restart" "1 1" "$rc $calls"
 record_failure_kind overloaded
 run_subject api_error api_error api_error api_error api_error
 check "restart budget is enforced" "3 4" "$rc $calls"
+check_cleanup "restart exhaustion removes its result directory"
 
 # A crash with the API reachable is not a network problem; looping cannot fix it.
 printf up > "$STUB_NET"
@@ -226,6 +266,7 @@ check "crash while API is reachable is fatal" "1 1" "$rc $calls"
 printf down > "$STUB_NET"
 run_subject crash crash
 check "crash while API is unreachable stops on the wait deadline" "4 1" "$rc $calls"
+check_cleanup "wait exhaustion removes its result directory"
 
 # --max-wait is a deadline, so the opening 5s backoff must be clipped when the whole
 # budget is smaller than it. Measured from the stub's recorded sleep arguments; the

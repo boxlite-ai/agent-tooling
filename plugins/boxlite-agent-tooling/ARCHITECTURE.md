@@ -36,6 +36,17 @@ helpers from the plugin root. The standalone reminder keeps its companion beside
 | Loses a turn to an API error, Claude Code only | `StopFailure` | `.agents/hooks/record-api-failure.sh` | Nothing. `scripts/resume-on-network-error.sh` reads the record to decide whether to restart. |
 | Loses a turn to a dropped stream or an overloaded API in an interactive session, Claude Code only | `StopFailure`, wired with `asyncRewake` | `.agents/hooks/resume-after-api-failure.sh` | The turn resumes where it stopped, at most three times per session in ten minutes. |
 
+### Unattended network recovery
+
+`scripts/resume-on-network-error.sh` has one `main` entrypoint owning configuration,
+argument validation, learned session, restart count, next delay, and total wait.
+Helpers receive probe and record inputs explicitly; the wait helper returns the
+updated shared total on both success and exhaustion.
+The sole shell-lifetime handle names the private result directory because Bash 3.2
+EXIT traps cannot read a departed function's locals; `main` is its only writer.
+Initial and resumed CLI calls use one argument-array path, with forced JSON output last.
+See [recovery usage](scripts/README.md#confirmations-and-recovery) for budgets and exit behavior.
+
 ### Runtime prompts
 
 Templates live one directory below `.agents/prompts/`, grouped by purpose.

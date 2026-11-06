@@ -125,6 +125,15 @@ total waiting; unknown failure kinds get a smaller budget. Run it with `--help`
 for exit codes. Interactive recovery uses a separate
 [StopFailure hook](../.agents/hooks/resume-after-api-failure.sh).
 
+The executable keeps setup, argument validation, and supervision in `main`;
+helpers receive record and retry inputs explicitly. The wait helper returns its
+updated run-wide total on success and exhaustion, so retries cannot reset the budget.
+Only the private scratch-directory handle has shell lifetime: Bash 3.2 EXIT traps
+cannot rely on `main`'s locals after exit. Tests check cleanup on every terminal outcome.
+
+For example, `overloaded → wait 5s → resume the learned session → success` emits
+only the final result JSON on stdout; retry diagnostics remain on stderr.
+
 See [timed confirmations](../ARCHITECTURE.md#timed-confirmations) for supported
 host modes and response rules.
 
