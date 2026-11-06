@@ -1408,6 +1408,7 @@ Host discovery exposes each complete skill directory; Codex metadata uses the co
 
 - Standalone Clean Code sharing copies the entire directory, including references; it needs no plugin scripts and preserves repository workflow and permissions.
 - Workflow, shell guidance, fixer prompts, and audits reference Clean Code by name while retaining their own gates, Bash contracts, receipts, and evidence requirements.
+- Adversarial fixer handoffs name each finding's failure class; cross-finding patterns remain optional and require evidence.
 - Highlight cache reuse requires matching live text, sentence fingerprints, scope, and selection settings; cached data never restores marks automatically after reload.
 
 #### Distill contracts

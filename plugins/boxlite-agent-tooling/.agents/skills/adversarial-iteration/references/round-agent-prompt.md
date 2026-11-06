@@ -146,7 +146,7 @@ Return no more than ten compact lines in this order; the ledger carries full det
 - Remaining risk: [open risk first; none only with evidence]
 - Input review coverage: [reviewed fingerprint; full/partial/unread counts; not the post-fix fingerprint]
 - Findings: [authorized stable IDs and proposed states; no fixer-created IDs]
-- Root-cause classes: [per-finding classes; optional supported cross-finding pattern]
+- Root-cause classes: [per-finding failure class; optional cross-finding pattern supported by evidence]
 - Fix delta: [paths and invariant restored]
 - Reproducers/mutants: [prepared counts; provisional results clearly labeled]
 - Verification candidates: [count by phase and any provisional blocker]
