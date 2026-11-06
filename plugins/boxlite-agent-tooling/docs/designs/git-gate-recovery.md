@@ -23,9 +23,11 @@ This changes retry eligibility, not verdict acceptance or test-evidence requirem
 - Automatically perform bounded deterministic recovery; otherwise instruct the parent to perform the specific recovery and resume without another permission question.
 - Preserve reflection, pending human choices, explicit Stop, and exhausted audit budgets; never reset history to obtain another attempt.
 - Keep receipt production, deadline-verdict policy, final-response/design gates, Git-hook installation, and unrelated working changes outside this change.
-- Add no runtime dependency; preserve Bash 3.2 compatibility and report unverified host/OS combinations.
+- Add no runtime dependency; preserve Bash 3.2 compatibility.
 
 ## Related work and lessons
+
+Searched arXiv, OpenAlex, Semantic Scholar, GitHub, the Go package registry, and the web on 2026-11-05, plus this repository’s history; research stopped when a final three-query round added no mechanism. The full search log is in [this file’s history](https://github.com/boxlite-ai/agent-tooling/blob/d694bbd8eff16905a85448470fb10f88bb7e73c0/plugins/boxlite-agent-tooling/docs/designs/git-gate-recovery.md?plain=1#L42-L57).
 
 | Evidence | Lesson and disposition |
 | --- | --- |
@@ -38,23 +40,6 @@ This changes retry eligibility, not verdict acceptance or test-evidence requirem
 
 Alternatives: keeping only messages preserves the dead ends; unconditional re-auditing violates stop semantics; a new scheduler duplicates lifecycle ownership.
 Use an explicit action contract with the existing lifecycle instead.
-
-Research log, 2026-11-05; known items named before searching: Bash exit status, jq argument encoding, client-go workqueue, cenkalti/backoff, AWS retry guidance.
-
-| Source | Tool and exact queries | Result and stop |
-| --- | --- | --- |
-| arXiv | Web, 2: `site:arxiv.org retry policies bounded retries permanent failures idempotent`; `site:arxiv.org "Retry Amplification" "Agent Mesh" retry idempotence` | Opened both recent papers and their original HTML; retained limitations, not performance claims. |
-| OpenAlex | Web, 3: `site:openalex.org retry fault tolerance idempotent failures`; `site:openalex.org "Reliable Actors with Retry Orchestration"`; `site:openalex.org "bounded retry"`; API, 1: `search=failure retry orchestration idempotent&per-page=5` | No useful web results; API returned HTTP 429. Limitation recorded, not treated as a negative literature result. |
-| Semantic Scholar | Web, 1: `site:semanticscholar.org "Reliable Actors with Retry Orchestration"` | No useful result; no additional mechanism retained. |
-| GitHub projects | Web, 2: `site:github.com cenkalti backoff Permanent WithMaxTries Retry`; `site:github.com/cenkalti/backoff "Retry" "Permanent"` | Known implementation found; opened pinned source. Other wrappers added no needed mechanism. |
-| Go package registry | Web, 2: `site:pkg.go.dev k8s.io client-go util workqueue AddRateLimited Forget NumRequeues`; `site:pkg.go.dev "cenkalti/backoff" "Permanent"` | Opened first-party API references; pinned workqueue page failed, so no version-specific claim is based on it. |
-| Web and specifications | Opened AWS retry guidance and [jq 1.7 invocation rules](https://jqlang.org/manual/v1.7/#invoking-jq); GNU Bash manual requests timed out | jq 1.7.1 and Bash 3.2 are the validation baseline; use installed Bash help for the unavailable manual sections. |
-| Citation chase | Opened Agent Mesh reference [17], [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657); searched `"2608.26225" "cites"` and `"2608.25403" "cites"` | Backward source opened; forward searches found no results. These searches do not prove absence of citations. |
-| Repository/upstream | Read preflight, Git-hook consumers, attempt/history/decision code and tests; inspected #232, #241, #361, #362, and design #371 | #371 explicitly excludes retry scheduling; this needs its own design. Existing receipt-only recovery and abandoned open attempts informed the failure cases. |
-
-The final three-query round (the two forward-citation queries plus OpenAlex `bounded retry`) added no mechanism; research stopped after source checks.
-The two 2026 preprints are recent research, not proof of a best production algorithm; adapt their failure cautions only.
-The libraries are implementation examples; current activity and two adoption signals were not established, so no project is claimed as SOTA.
 
 ## How it works
 
@@ -102,14 +87,12 @@ An active auditor blocks those transitions even when the candidate has changed; 
 Unknown or invalid active state requires explicit recovery and cannot authorize another launch.
 Recheck that exclusion before returning a launch instruction; preparation alone remains deduplicated by history.
 This ordering protects the [shared task link](https://github.com/boxlite-ai/agent-tooling/blob/60bd2e5a420967685beee33d7e8a645380a5cbfe/plugins/boxlite-agent-tooling/.agents/lib/commit-push-stop.sh#L14-L27) from an old worker's delayed Stop.
-Do not infer that a reported host completion has already finished hook teardown.
-If implementation cannot preserve this ordering, add an explicit generation-bound claim before permitting replacement.
+A reported host completion does not mean hook teardown has finished.
+If this ordering cannot hold, an explicit generation-bound claim gates replacement instead.
 Preparation deduplication is enforced by history; waiting for a native task also requires the parent to follow the host-specific instruction.
-Do not claim that a hook prevents an independently issued native Agent call; verify cooperative parent behavior separately from hook output.
+A hook cannot prevent an independently issued native Agent call, so cooperative parent behavior is checked apart from hook output.
 
-Intended changes: preflight action handling, its cohesive helper/prompt if needed, checkpoint result adapter, focused tests, architecture and hook documentation.
-Estimate 200–400 production lines; measure the actual diff before any PR operation.
-No release or PR publication is included in this implementation request.
+Changed components: preflight action handling, its cohesive helper/prompt if needed, checkpoint result adapter, focused tests, architecture and hook documentation.
 
 ## Validation
 
@@ -125,11 +108,3 @@ Planned; implementation and behavioral tests have not run for this design.
 | Automatic recovery | Inject a recoverable selection race; separately inject persistent storage, version, and binding failures | Transient case revalidates and completes once; persistent cases give the exact recovery procedure without weakening guards. |
 | No destructive reset | Use malformed JSON, checksum mismatch, symlink, FIFO, directory, stale generation, and unreadable history | Preserve evidence and limits; never fabricate a clean history or PASS. |
 | Host contract | Test Claude/Codex reason delivery, Git stderr propagation, stdin preservation, exit codes, and unscoped invocation | Existing host decisions remain compatible; no unbounded legacy retry path. |
-
-Before the first production edit, add focused tests and run them against the captured pre-change production baseline.
-For each defect claim, fully revert every production change in isolated scratch, leave the tests, and observe the intended assertion fail.
-Restore the complete implementation and rerun; setup or compilation failures do not count as defect proof.
-Keep pre-existing unrelated working changes in that baseline; never revert the shared checkout.
-
-Run focused preflight, attempt, history, decision, and Git-hook consumer suites; Bash syntax; ShellCheck; all plugin suites; guidance consistency; `make test:writing test:parity test:architecture`.
-Exercise supported host routes and report macOS/Linux/Windows and live-host gaps separately; fixture success does not establish live agent compliance.

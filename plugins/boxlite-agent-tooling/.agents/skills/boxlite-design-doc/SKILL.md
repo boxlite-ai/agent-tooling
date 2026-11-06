@@ -24,7 +24,7 @@ Every design follows these steps:
 2. Sources: search each one in the sources table.
 3. Chase: follow citations both ways.
 4. Stop: when a round or 3 queries add nothing; record why.
-5. Log: per source, as in the log table.
+5. Log: per source, as in the log table; after registering, store it with `design-doc.sh log < log.md`, never in the doc; empty input deletes it.
 6. SOTA: apply the SOTA table.
 7. Disposition: adopt, adapt, or reject each relevant SOTA item with a reason; "none found" with a complete log passes.
 
@@ -85,14 +85,17 @@ Outline:
 | TL;DR | Problem → outcome |
 | Problem | Current behavior or unmet need, concrete evidence, and impact |
 | Scope | Constraints, non-goals, acceptance |
-| Related work and lessons | Research above; alternatives include reuse, simplify, and no change; comparison and recommendation using the option-selection principles |
+| Related work and lessons | One method sentence: sources, date, stop reason, "full log in a comment on this page"; research above; alternatives include reuse, simplify, and no change; comparison and recommendation using the option-selection principles |
 | How it works | Approach or mechanism → outcome; trade-offs |
-| Validation | Claim or risk → check → expected result; observed versus planned |
+| Validation | Claim or risk → check → expected result; observed versus planned; design-specific checks only |
 
+- Audience: human reviewers. Omit the log, evidence limits that do not change the decision, instructions to the coding agent, repository workflow, and PR or task bookkeeping.
 - Form: 1–3 pages before coding; prefer a GitHub issue, then Notion, then a Linear issue; a tracking issue may hold it.
 - Stance: challenge assumptions.
 - Lifecycle: keep it matching the final scope.
 
 ### 5. Gate
 
-Gate: [register](../../../CONTRIBUTING.md#pull-request-descriptions) it, then pass `design-auditor` and record `design-advisor` advice before the first code edit; registering is not research.
+Gate: [register](../../../CONTRIBUTING.md#pull-request-descriptions) it, store the log, then pass `design-auditor` and record `design-advisor` advice before the first code edit; registering is not research.
+
+After the PASS, post the log as a comment on the design page once the human approves its exact text; its first line is the log's `sha256:` line from `design-doc.sh show`.

@@ -10,7 +10,7 @@ Example: run 1 finds missing lock F1; run 2 closes F1 but discovers an older cle
 
 ## Related work and lessons
 
-Repository comparisons use inspected revision `15819052960ad81013bd0a524cef054c79af8576`.
+Compared this repository’s audit gates and read Reflexion, Google SRE postmortem guidance, and the Claude and Codex Stop-hook contracts; this design predates search logs, so none was kept.
 
 | Source | Observed approach and proposed use |
 | --- | --- |
@@ -47,8 +47,6 @@ The [state facade](../../.agents/lib/audit-reflection.sh) exposes `prepare`, `re
 
 Prompt-only reminders lack persistent evidence. Reflecting after every failure adds routine cost; use two. Banning late findings hides defects. A separate reflection reviewer adds another failure loop; use the existing independent auditor.
 
-Test duplicate delivery, missing/stale reflection, omitted findings/coverage, reopenings, earlier misses, reversals, false attribution, epochs, cancellation, unsafe snapshots, exhaustion, receipts, and summary shortcuts. Use deterministic barriers and fully reverted-production red/green checks for fixes.
+Test duplicate delivery, missing/stale reflection, omitted findings/coverage, reopenings, earlier misses, reversals, false attribution, epochs, cancellation, unsafe snapshots, exhaustion, receipts, and summary shortcuts, with deterministic barriers for races.
 
-Scripted producers verify contracts; real-model judgment and Claude/Codex smoke runs remain separate. Copilot is unverified. Run focused suites, architecture/host parity, shell checks, and broader plugin tests as applicable.
-
-Delivery and acceptance: [issue #123](https://github.com/boxlite-ai/agent-tooling/issues/123), one combined PR. Release and consumer adoption remain pending.
+Scripted producers verify contracts; real-model judgment and Claude/Codex smoke runs remain separate. Acceptance criteria: [issue #123](https://github.com/boxlite-ai/agent-tooling/issues/123).

@@ -21,7 +21,7 @@ before filling in this outline. Example: https://github.com/boxlite-ai/agent-too
 
 ## Related work and lessons
 
-<!-- Research evidence, search log, alternatives, and recommendation using boxlite-design-doc's option-selection principles; identify the deciding trade-off. -->
+<!-- One method sentence (sources, date, stop reason, "full log in a comment on this page"), research evidence, alternatives, and recommendation using boxlite-design-doc's option-selection principles; identify the deciding trade-off. Store the search log with `design-doc.sh log`, not here. -->
 
 ## How it works
 

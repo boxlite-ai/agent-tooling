@@ -81,6 +81,21 @@ Notion child blocks fail closed; list items and code keep their block structure,
 literal text inside a block cannot forge a TL;DR.
 Workflow and tracking issues invoke `boxlite-design-doc` by name.
 
+The research log stays out of the design, which is for human reviewers
+([design #388](https://github.com/boxlite-ai/agent-tooling/issues/388)):
+
+- `design-doc.sh log` stores stdin, at most 32,000 characters, as `{url, log}` in
+  `agent-tooling-design-log/<sha256 of URL>.json` beside the binding, so each design URL
+  keeps its own log across re-registration. Empty input is the tombstone of a deleted log;
+  records are replaced atomically, never removed, and read only as bounded regular files.
+- The content SHA-256 that verdicts, advice, and deadlines bind is the provider body's
+  hash when no log was ever stored. Otherwise it is the SHA-256 of
+  `agent-tooling-design-log-v1`, the body hash, and the log hash, one per line, so editing
+  or deleting the log needs a new audit and never matches a no-log verdict.
+- `design-doc.sh show` prints the design, then `## Research log (local)`, the log's
+  `sha256:` line, and the log. Advice anchors resolve against that same text. After the
+  PASS, the author posts the log as a design-page comment led by that `sha256:` line.
+
 Designs are audited before code, not at commit or PR time
 ([design #253](https://github.com/boxlite-ai/agent-tooling/issues/253)):
 

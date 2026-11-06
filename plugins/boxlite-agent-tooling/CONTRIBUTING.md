@@ -123,6 +123,12 @@ one advice run. Design probes carry no personal identifiers or key requests
 ([#327](https://github.com/boxlite-ai/agent-tooling/issues/327)), and `audit-privacy.sh`
 denies the obvious cases. Update consumer tooling, refresh the host plugin, then reload.
 
+Version 0.1.49 moves the research log out of design docs
+([#388](https://github.com/boxlite-ai/agent-tooling/issues/388)): `design-doc.sh log`
+stores it beside the binding and binds it into the audit hash. Designs that still keep
+an inline log should store it and remove it before their next audit, which otherwise
+reports it as high. Update consumer tooling, refresh the host plugin, then reload.
+
 ### Structured code-review rollout
 
 Version 0.1.45 gives repository rules highest priority throughout commit/push review.
@@ -272,11 +278,17 @@ For GitHub designs, start from the [design issue template](../../.github/ISSUE_T
 It keeps `Problem` between `TL;DR` and `Scope`, following [#309](https://github.com/boxlite-ai/agent-tooling/issues/309).
 When changing the skill's outline, update the template's sections too.
 
-Apply `boxlite-design-doc`, then register it before coding:
+Apply `boxlite-design-doc`, then register it and store its research log before coding:
 
 ```sh
 bash <plugin-root>/scripts/design-doc.sh register <URL>
+bash <plugin-root>/scripts/design-doc.sh log < research-log.md
 ```
+
+The design itself is for human reviewers; the log lives in the worktree, bound to the
+design's audit, until you post it as a design-page comment after the PASS
+([#388](https://github.com/boxlite-ai/agent-tooling/issues/388)). Storing an empty log
+deletes it, and any change to the log needs a new audit.
 
 `bind` remains a compatibility alias; `register` avoids the reported Claude Code
 worktree refusal ([#207](https://github.com/boxlite-ai/agent-tooling/issues/207)).
