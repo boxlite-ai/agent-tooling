@@ -381,6 +381,15 @@ Native auditors do not prepare/record history themselves; deadline hooks enforce
 
 Every Git denial includes next action, owner, step, and completion condition in `permissionDecisionReason`.
 
+The audit task and a FAIL's findings travel by claim check ([design #407](https://github.com/boxlite-ai/agent-tooling/issues/407)), keeping the reason under its 8,192-byte cap:
+
+| Part | Behavior |
+| --- | --- |
+| Store | `.agents/lib/audit-task-file.sh` writes `.agents/state/audit-tasks/<sha256>.md` (mode 600) per request, refreshing its age; prunes files older than 5 hours; needs no session or attempt. |
+| Pointer | The reason carries `AUDIT_TASK_FILE_JSON` (path, SHA-256, size) and a `scripts/read-audit-task.sh` command. |
+| Read | The script prints only a regular, non-symlinked file of that exact size and hash; otherwise the auditor writes no dossier. |
+| FAIL | The reason gives finding/advisory counts and the saved copy's path, since a relaunch replaces `last-audit.json`; the headless runner builds its own prompt. |
+
 | Action | Parent responsibility |
 | --- | --- |
 | `audit` | Launch bound review, then retry; unchanged FAIL needs no cosmetic change/new receipt. |

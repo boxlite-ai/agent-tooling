@@ -1321,9 +1321,14 @@ echo "## delegated pre-commit names the command the agent actually ran"
 # `git commit`. The re-audit instruction must still name the real command — the
 # one the PreToolUse layer saw — or the auditor binds sha256("git commit") with no
 # subject and commit-msg rejects even a PASS.
-deny_target_command() {  # deny-json -> target_command named in the Claude route
-  printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecisionReason' \
+deny_target_command() {  # deny-json -> target_command in the claim-checked task (#407)
+  local pointer
+  pointer="$(printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecisionReason' \
     | sed -n 's/^ *prompt=\(".*"\))$/\1/p' | head -1 | jq -r . \
+    | sed -n '/^AUDIT_TASK_FILE_JSON:$/ { n; p; q; }')"
+  [[ -n "$pointer" ]] || return 0
+  bash "$REPO_ROOT/scripts/read-audit-task.sh" "$(jq -r .path <<<"$pointer")" \
+    "$(jq -r .sha256 <<<"$pointer")" "$(jq -r .bytes <<<"$pointer")" 2>/dev/null \
     | sed -n '/^{"operation_kind"/p' | jq -r '.target_command'
 }
 deny_has_placeholder_note() {  # deny-json -> yes|no

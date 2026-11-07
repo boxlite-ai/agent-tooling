@@ -552,6 +552,9 @@ if [[ ! -r "$subagent_lib" ]]; then
 fi
 # shellcheck source=../lib/subagent.sh
 source "$subagent_lib" || infrastructure_failure "$subagent_lib could not load" 'Restore the installed library and run its Bash syntax check.'
+# shellcheck source=../lib/audit-task-file.sh
+source "$tooling_root/.agents/lib/audit-task-file.sh" \
+  || infrastructure_failure 'Audit task file library could not load' 'Restore .agents/lib/audit-task-file.sh from the installed plugin and verify its Bash syntax.'
 
 # One instruction, naming the calling host's route — or every route when that host
 # cannot be named. The choice comes from the plugin root the host injects into this
@@ -666,6 +669,14 @@ audit_instruction() {
     "audit_criteria=${audit_criteria}" "task_input_json=${input}")" || return 2
   task+=$'\n\n'"$(subagent_prompt audit/dossier-validation "$tooling_root" \
     "validator_json=$(jq -nc --arg path "$tooling_root/scripts/validate-audit-dossier.sh" '{path:$path}')")" || return 2
+  # Claim check (design #407): the deny reason carries a pointer, never the task text,
+  # so findings, session paths, and routes cannot push it past the safety cap.
+  local pointer read_command
+  pointer="$(audit_task_file_write "$project_dir/.agents/state" "$task")" || return 2
+  printf -v read_command 'bash %q %q %q %q' "$tooling_root/scripts/read-audit-task.sh" \
+    "$(jq -r .path <<<"$pointer")" "$(jq -r .sha256 <<<"$pointer")" "$(jq -r .bytes <<<"$pointer")"
+  task="$(subagent_prompt audit/commit-push-task-file "$tooling_root" \
+    "task_file_json=$pointer" "read_command=$read_command")" || return 2
   instruction="$(subagent_instruction \
     --agent commit-push-auditor \
     --root "$tooling_root" \
@@ -768,6 +779,7 @@ validate_audit() {
   local audit_commit_subject_hash audit_verdict audit_mtime now_epoch age advisories findings
   local additional_context additional_context_bytes audit_snapshot audit_json audit_document
   local audit_selection selected_identity consume_status=0 handoff_consume_status=0
+  local finding_count advisory_count saved_findings findings_summary
   audit_selection="${audit_file}.inspect-$$-${RANDOM:-0}"
   selected_identity="$(verdict_audit_link_no_clobber_identity \
     "$audit_file" "$audit_selection" 2>/dev/null)" || selected_identity=""
@@ -871,23 +883,26 @@ Re-audit is required."
     findings="$(printf '%s' "$audit_document" \
       | jq -r '.findings[]? | "  - " + .' 2>/dev/null || echo '')"
     rm -f "$audit_selection"
-    if [[ -z "$reflection_context" ]]; then
-      block_git recover "A matching FAIL requires a session-bound retry lifecycle.
-Findings:
-$findings
+    # Claim check (design #407): findings have no count limit, so the reason names a
+    # saved copy instead of pasting them; the relaunched auditor replaces the dossier.
+    finding_count="$(jq '.findings | length' <<<"$audit_document" 2>/dev/null || echo '?')"
+    advisory_count="$(jq '.advisories // [] | length' <<<"$audit_document" 2>/dev/null || echo '?')"
+    if saved_findings="$(audit_task_file_write "$project_dir/.agents/state" "Findings:
+${findings}
 ${advisories:+Advisories (NOT blocking — do not re-audit for these alone):
-$advisories}" \
+${advisories}
+}")"; then
+      findings_summary="${finding_count} finding(s) and ${advisory_count} advisory(ies), saved in $(jq -r .path <<<"$saved_findings")"
+    else
+      findings_summary="${finding_count} finding(s) and ${advisory_count} advisory(ies), in $audit_file"
+    fi
+    if [[ -z "$reflection_context" ]]; then
+      block_git recover "A matching FAIL requires a session-bound retry lifecycle: ${findings_summary}." \
         'Retry through the current Claude Code or Codex hook route with its real session and prompt epoch; preserve the FAIL and test receipts.' \
         'The existing history owner can enforce reflection, Stop, and the retry budget.'
     fi
-    deny_with_audit "CLAUDE.md audit FAILED on branch '${branch}':
-
-${findings}
-${advisories:+
-Advisories (NOT blocking — do not re-audit for these alone):
-${advisories}
-}
-Reassess each finding with current evidence; a code change or newer test receipt is not required merely to request review."
+    deny_with_audit "CLAUDE.md audit FAILED on branch '${branch}': ${findings_summary}.
+Read them, then reassess each finding with current evidence; a code change or newer test receipt is not required merely to request review."
   fi
 
   gate_checkpoint
