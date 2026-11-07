@@ -70,6 +70,7 @@ Use [one-time migration instructions](../../README.md#migrate-existing-consumers
 | Earlier design verdicts | Legacy record/`research` alias remain readable; PASS now needs fresh advice; refresh/reload, including displayed async cards. |
 | Review/retry updates | Refresh whole plugin and start a new session so prompts, Git gates, and callbacks agree. |
 | Before 0.1.50 | Auditors cannot read the commit/push claim-check pointer ([#407](https://github.com/boxlite-ai/agent-tooling/issues/407)); refresh the host plugin, then reload. |
+| Before 0.1.51 | Designs with an inline research log: store it with `design-doc.sh log` and remove it before the next audit, which otherwise reports it as high ([#388](https://github.com/boxlite-ai/agent-tooling/issues/388)); refresh/reload. |
 
 Check Claude installation by exact `projectPath`; updating one linked worktree can leave another stale.
 
@@ -100,11 +101,14 @@ This disables Remote Control for the session; [timed confirmations](ARCHITECTURE
 ### Pull request descriptions
 
 1. Apply `boxlite-design-doc`; use the design issue template, keeping its outline aligned with the skill, including `Problem` before `Scope`.
-2. Register before code; `bind` remains an alias:
+2. Register and store the research log before code; `bind` remains an alias:
 
    ```sh
    bash <plugin-root>/scripts/design-doc.sh register <URL>
+   bash <plugin-root>/scripts/design-doc.sh log < research-log.md
    ```
+
+   The design is for human reviewers; the log stays in the clone, bound to the audit, and is never published ([#388](https://github.com/boxlite-ai/agent-tooling/issues/388)). An empty log deletes it; any log change needs a new audit.
 
 3. Follow the gate's auditor route, then advisor route; show advice to the human, who selects what to adopt.
 4. Read/apply `boxlite-pr-preparation` for drafts/revisions; include the registered full URL and substantive project-documentation link.

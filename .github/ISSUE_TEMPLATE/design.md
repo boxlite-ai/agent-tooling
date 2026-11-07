@@ -3,30 +3,26 @@ name: Design proposal
 about: Describe a problem, researched approach, and validation plan.
 ---
 
-<!-- Read and apply
-[boxlite-design-doc](https://github.com/boxlite-ai/agent-tooling/blob/main/plugins/boxlite-agent-tooling/.agents/skills/boxlite-design-doc/SKILL.md)
-before filling in this outline. Example: https://github.com/boxlite-ai/agent-tooling/issues/309 -->
-
 ## TL;DR
 
-<!-- Problem and intended outcome. -->
+<!-- What problem does this solve, and what changes as a result? -->
 
 ## Problem
 
-<!-- Current behavior or unmet need, concrete evidence (links or commit + file:line), and impact. -->
+<!-- What happens today, what evidence shows it, and who is affected? -->
 
 ## Scope
 
-<!-- Constraints, non-goals, and acceptance criteria. -->
+<!-- What constraints apply, what is out of scope, and how will we know it is done? -->
 
 ## Related work and lessons
 
-<!-- Research evidence, search log, alternatives, and recommendation using boxlite-design-doc's option-selection principles; identify the deciding trade-off. -->
+<!-- What prior art did you find, and what did you adopt, adapt, or reject? What alternatives, including doing nothing, did you consider, and which trade-off decided it? If there is no prior art, say so. -->
 
 ## How it works
 
-<!-- Approach, mechanism, and trade-offs. -->
+<!-- How does the approach work, and what does it cost? -->
 
 ## Validation
 
-<!-- Claims and risks → checks → expected results; distinguish observed from planned. -->
+<!-- Which checks show each claim holds, and what results do you expect? Mark what has already been observed. -->

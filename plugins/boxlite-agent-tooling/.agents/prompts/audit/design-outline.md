@@ -17,3 +17,4 @@ Check every row of the skill’s outline; record gaps as Entries.
 | Related work and lessons | Alternatives include reuse, simplify and no change; comparison and recommendation follow boxlite-design-doc's option-selection principles |
 | How it works | Mechanism → outcome; trade-offs; the simplest approach that meets acceptance |
 | Validation | Each claim or risk has a check and an expected result; observed apart from planned |
+| Audience | The skill’s Audience rule; a log inside, or none stored, is high |

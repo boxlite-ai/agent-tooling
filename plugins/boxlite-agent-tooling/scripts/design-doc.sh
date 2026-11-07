@@ -25,7 +25,8 @@ case "${1:-}:$#" in
   verdict:1|research:1) design_doc_audit_record "$PWD" ;;
   reflect:1) design_doc_audit_reflect "$PWD" ;;
   advice:1) design_doc_advice_record "$PWD" ;;
+  log:1) design_doc_log_store "$PWD" ;;
   show:1) design_doc_show "$PWD" ;;
   show:2) design_doc_show "$2" ;;
-  *) printf 'usage: design-doc.sh register <URL> | check | verdict < verdict.json | advice < advice.json | reflect < reflection.json | show [repo-root]\n' >&2; exit 2 ;;
+  *) printf 'usage: design-doc.sh register <URL> | check | log < research-log.md | verdict < verdict.json | advice < advice.json | reflect < reflection.json | show [repo-root]\n' >&2; exit 2 ;;
 esac
