@@ -12,7 +12,7 @@ See [host wiring](../../hooks/README.md) for events and host differences,
 | --- | --- | --- |
 | [cancel-verdict-audit.sh](cancel-verdict-audit.sh) | `UserPromptSubmit` JSON | Revoke this session's abandoned audit; its runner owns process cancellation. |
 | [auditor-control.sh](auditor-control.sh) | `SubagentStart` / `SubagentStop` JSON | Track auditor escalation, completion, and prompt-scoped user overrides; close hook-prepared commit/push attempts. |
-| [preflight-design-doc.sh](preflight-design-doc.sh) | Editor/patch `PreToolUse` JSON | Require a readable, current design binding and a `design-auditor` PASS for its exact content, with `design-advisor` advice on that PASS, before repository edits. |
+| [preflight-design-doc.sh](preflight-design-doc.sh) | Editor/patch `PreToolUse` JSON | Require a current design, audit PASS, and advice before repository edits; exempt an active auditor's exact task-bound report write. |
 | [preflight-commit-push.sh](preflight-commit-push.sh) | Shell `PreToolUse` or delegated Git payload | Require matching commit/push evidence; delegate to installed Git gates. |
 | [preflight-pr-review.sh](preflight-pr-review.sh) | Shell `PreToolUse` JSON | Inspect GitHub writing and PR design, explanation, size, and review acknowledgment. |
 | [claude-timed-question.sh](claude-timed-question.sh) | Claude `AskUserQuestion` pre/post JSON | Validate a managed question and capture the user's timely typed response. |

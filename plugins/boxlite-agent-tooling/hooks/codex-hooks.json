@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env BOXLITE_HOOK_HOST=codex bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=codex bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\" monitor-start",
             "async": true,
             "timeout": 3600
           }

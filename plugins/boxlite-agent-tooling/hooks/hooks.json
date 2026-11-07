@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\"",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/auditor-control.sh\" monitor-start",
             "asyncRewake": true,
             "timeout": 3600
           }

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# PreToolUse and SubagentStop: the timed-subagent deadline for native auditors (#309, #328)
+# SubagentStart publishes dossier-worker ownership before tools; PreToolUse and
+# SubagentStop enforce the timed-subagent deadline for native auditors (#309, #328)
 # and the design advisor (#335). Past its deadline, every tool call except the agent's record
 # step is answered "record your verdict now". This hook blocks one record-less design-auditor
 # or design-advisor stop; auditor-control.sh closes commit/push stops with the same rule
@@ -9,6 +10,14 @@ payload="$(head -c 1048577)"
 [[ "$payload" == *auditor* || "$payload" == *advisor* || "$payload" == *'"default"'* ]] || exit 0
 lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd -P)" || exit 0
 plugin_root="${lib%/.agents/lib}"
+publish_start() { # repository; the existing lifecycle owner serializes this transition
+  if ! CLAUDE_PROJECT_DIR="$1" bash "$plugin_root/.agents/hooks/auditor-control.sh" \
+      publish-start <<< "$payload"; then
+    printf 'audit-deadline: native auditor ownership could not be published\n' >&2
+    exit 2
+  fi
+  exit 0
+}
 for name in subagent subagent-identity verdict-audit-state auditor-override-state commit-push-stop; do
   # shellcheck source=/dev/null
   source "$lib/$name.sh" || exit 0
@@ -38,13 +47,14 @@ case "$auditor" in
     state_path="$git_dir/agent-tooling-design-advice.json"
     record="Pipe {content_sha256, advice} to bash \"$plugin_root/scripts/design-doc.sh\" advice; zero items is valid." ;;
   commit-push-auditor)
-    [[ "$event" == PreToolUse ]] || exit 0
+    [[ "$event" == PreToolUse || "$event" == SubagentStart ]] || exit 0
     repo="$(git -C "${cwd:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
     scope="$(verdict_audit_scope_from_hook_payload "$payload" "$repo" 2>/dev/null)" || exit 0
     task="$(verdict_audit_read_single_record \
       "$(auditor_override_control_dir "$repo")/audit-task.$scope.commit-push-auditor.json" 2>/dev/null \
       | jq -ce 'select((.deadline | type) == "number" and (.dossier_path | type) == "string"
                        and (.attempt_id | type) == "string")' 2>/dev/null)" || exit 0
+    [[ "$event" != SubagentStart ]] || publish_start "$repo"
     allow_command=""
     allow_path="$(jq -r .dossier_path <<<"$task")"
     record="$(audit_attempt_stop_record "$(jq -r .attempt_id <<<"$task")" "$allow_path")" ;;
@@ -68,7 +78,7 @@ case "$auditor" in
       "$(jq -r '.agent_id // ""' <<<"$payload")" "$event")" || status=$?
     (( status != 1 )) || exit 0  # No live request grants no deadline authority.
     (( status == 0 )) || { printf 'audit-deadline: native verdict task could not be prepared\n' >&2; exit 2; }
-    [[ "$event" != SubagentStart ]] || exit 0
+    [[ "$event" != SubagentStart ]] || publish_start "$repo"
     allow_command=""
     allow_path="$(jq -r .dossier_path <<<"$task")"
     record="$(audit_attempt_stop_record "$(jq -r .attempt_id <<<"$task")" "$allow_path")" ;;

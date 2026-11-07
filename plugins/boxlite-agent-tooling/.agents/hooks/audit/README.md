@@ -95,6 +95,9 @@ sequenceDiagram
 | Persistent state error | Evidence is preserved; intervention is required. |
 
 - **Bindings:** each dossier is bound to what it judged. A stale turn dossier is discarded; a stale commit/push dossier denies until a fresh audit.
+- **Report writes:** the design gate exempts only the matching active auditor's assigned report; other writes retain their design checks ([scope](../../../ARCHITECTURE.md#auditor-report-writes)).
+- **Recording:** allowing the write does not approve its contents; the stop handler still validates and records the decision or execution error.
+- **Startup:** deadline Start publishes worker ownership synchronously; the asynchronous lifecycle callback monitors the existing record without reopening a stopped worker.
 - **Validator:** auditor tasks supply a read-only [candidate validator](../../../scripts/validate-audit-dossier.sh) to catch output errors before delivery. Its success never replaces these parent checks.
 - **Contracts:** [action and lifecycle](../../../ARCHITECTURE.md#commitpush-attempts), [bindings](../../../ARCHITECTURE.md#boundaries), [Stop decisions](../../../ARCHITECTURE.md#stop-gate-decisions), and [state files](../../../ARCHITECTURE.md#state-files).
 

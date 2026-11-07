@@ -15,7 +15,12 @@ Implementations live in [`.agents/hooks/`](../.agents/hooks/README.md);
 
 ## How it works
 
-For an explicit editor or patch call targeting repository files:
+Active auditors' exact task-bound report writes bypass the design check; their deadline and lifecycle hooks still run.
+
+The deadline Start callback publishes ownership synchronously through `auditor-control.sh publish-start`.
+The asynchronous `monitor-start` callback monitors that record and cannot reopen it after Stop.
+
+Other editor or patch calls targeting repository files follow this path:
 
 ```mermaid
 flowchart LR
