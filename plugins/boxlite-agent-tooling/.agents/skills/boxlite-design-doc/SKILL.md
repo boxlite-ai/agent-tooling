@@ -84,7 +84,7 @@ Outline:
 | TL;DR | Problem → outcome |
 | Problem | Current behavior or unmet need, concrete evidence, and impact |
 | Scope | Constraints, non-goals, acceptance |
-| Related work and lessons | Research conclusions; alternatives include reuse, simplify, and no change; comparison and recommendation using the option-selection principles |
+| Related work and lessons | Best-practice line first: sourced established practice and whether the design adopts, adapts, or departs, or none established, with evidence; then one approach table: users, trade-offs, stance, including reuse, simplify, and no change; then Lessons: failures, constraints, and counterevidence, each with its citation and effect on the design; the design’s pick row is marked Pick; comparison and recommendation using the option-selection principles |
 | How it works | Overview line, concrete example, and defined terms first; then approach or mechanism → outcome and trade-offs; secondary changes in their own subsections. Undefined term: a project-specific name used before any definition, link, or plain explanation |
 | Validation | Claim or risk → check → expected result; observed versus planned; design-specific checks only |
 

@@ -15,7 +15,7 @@ State the problem, scope, and acceptance criteria for closing this issue.
 
 ## Related work and lessons
 
-Apply `boxlite-design-doc`; include its research findings here, not just a link.
+Apply `boxlite-design-doc`: open with the best-practice line, then the approach table and lessons, not just a link.
 
 ## Design
 

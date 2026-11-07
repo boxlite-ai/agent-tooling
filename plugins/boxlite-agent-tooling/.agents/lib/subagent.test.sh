@@ -405,13 +405,14 @@ echo "## Model-visible prompts and specs have explicit size ceilings"
 # Design #357 adds explicit rule, bug, performance, and taste review categories;
 # raise only its shared criteria ceiling, keeping both routes on the same policy.
 # Design #418 adds How it works ordering and severity to the outline (140 → 150 words).
+# Design #424 adds the Related work best-practice line, approaches and lessons (150 → 190 words).
 for budget in \
   '.agents/prompts/audit/commit-push-criteria.md:260:2048' \
   '.agents/prompts/audit/commit-push-runner.md:280:1900' \
   '.agents/prompts/audit/commit-push-task.md:140:1100' \
   '.agents/prompts/audit/dossier-validation.md:180:1500' \
   '.agents/prompts/audit/design-criteria.md:380:3000' \
-  '.agents/prompts/audit/design-outline.md:150:1100' \
+  '.agents/prompts/audit/design-outline.md:190:1250' \
   '.agents/prompts/audit/probe-privacy.md:70:550' \
   '.agents/prompts/audit/design-advice-task.md:240:1900' \
   '.claude/agents/design-advisor.md:300:2400' \
