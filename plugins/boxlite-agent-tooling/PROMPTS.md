@@ -33,3 +33,12 @@ Keep error/status diagnostics, usage help, protocol markers, commands, and user-
 - Preserve output limits and test runtime edits through callers.
 - The optional standalone reminder stays best effort.
 - Do not modify the protected writing skill without explicit authorization.
+
+## Runtime contracts
+
+Lookup has no basename search, implicit Markdown inlining, or embedded Bash fallback. Callers explicitly require skill loading.
+
+- Missing, empty, or unresolved templates block partial dispatch, acknowledgment consumption, and publication.
+- Watch variants retain 1400-byte bounds and exact claim commands. Failure leaves authority with the lease owner. Acknowledgment recovery stays within 1200 bytes.
+- Resume prompts load before wake-budget recording. `.agents/prompts/questions/interactive-question.md` renders validated questions with option commands kept as generated JSON.
+- Standalone reminders copy `.agents/hooks/rule-recency.sh` and `.agents/hooks/rule-recency.md` together without plugin libraries.

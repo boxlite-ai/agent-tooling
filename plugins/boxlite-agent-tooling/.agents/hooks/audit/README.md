@@ -4,7 +4,7 @@ This directory holds the Stop-stage verdict gate, both headless audit runners, t
 
 ## Files
 
-Gates read dossiers; auditors write them. Full contracts: [audit producers](../../../ARCHITECTURE.md#audit-producers).
+Gates read dossiers; auditors write them. Full contracts: [audit producers](architecture.md#audit-producers).
 
 | File | Called by, with | Result |
 | --- | --- | --- |
@@ -95,11 +95,11 @@ sequenceDiagram
 | Persistent state error | Evidence is preserved; intervention is required. |
 
 - **Bindings:** each dossier is bound to what it judged. A stale turn dossier is discarded; a stale commit/push dossier denies until a fresh audit.
-- **Report writes:** the design gate exempts only the matching active auditor's assigned report; other writes retain their design checks ([scope](../../../ARCHITECTURE.md#auditor-report-writes)).
+- **Report writes:** the design gate exempts only the matching active auditor's assigned report; other writes retain their design checks ([scope](../../../docs/design-and-pr-gates.md#auditor-report-writes)).
 - **Recording:** allowing the write does not approve its contents; the stop handler still validates and records the decision or execution error.
 - **Startup:** deadline Start publishes worker ownership synchronously; the asynchronous lifecycle callback monitors the existing record without reopening a stopped worker.
 - **Validator:** auditor tasks supply a read-only [candidate validator](../../../scripts/validate-audit-dossier.sh) to catch output errors before delivery. Its success never replaces these parent checks.
-- **Contracts:** [action and lifecycle](../../../ARCHITECTURE.md#commitpush-attempts), [bindings](../../../ARCHITECTURE.md#boundaries), [Stop decisions](../../../ARCHITECTURE.md#stop-gate-decisions), and [state files](../../../ARCHITECTURE.md#state-files).
+- **Contracts:** [action and lifecycle](architecture.md#commitpush-attempts), [bindings](../../../ARCHITECTURE.md#boundaries), [Stop decisions](architecture.md#stop-gate-decisions), and [state files](state.md#state-files).
 
 ## Runners
 
@@ -205,6 +205,14 @@ Headless classification and both runners read the optional user file
 | `VERDICT_EXTRACTOR_CMD` | `preflight-verdict-check.sh` | unset | Reads an unsupported transcript format: `$1` is the path; stdout is the turn text. |
 | `VERDICT_GATE_HARD_BLOCK` | `preflight-verdict-check.sh` | `1` | `0` turns blocks into human-only notes, for rollback only. |
 
+## Commit/push retry choices
+
+After three FAIL/ERROR rounds, choose **Reflect again (Recommended)** or **Stop**; five-minute silence selects reflection, never approval.
+
+- Retain history, submit current reflection, fix/test, then obtain a fresh audit; further failures ask again within eight-failure/sixteen-attempt/storage limits.
+- Use the managed question or standalone `commit-audit-decision: <request-id> <Reflect again|Stop>`; push uses `push-audit-decision:`.
+- Stale/mixed answers follow ordinary cancellation; Stop keeps Git blocked; later explicit task instructions start a new prompt context.
+
 ## Tests
 
 Run from the repository root, for example:
@@ -230,4 +238,10 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.tes
 | [auditor-override.test.sh](auditor-override.test.sh) | [../auditor-control.sh](../auditor-control.sh): auditor escalation and prompt-scoped overrides. |
 | [record-test-run.test.sh](record-test-run.test.sh) | [../record-test-run.sh](../record-test-run.sh): which commands leave test-run receipts. |
 
-The runner suites stub model CLIs; see [auditor test isolation](../../../CONTRIBUTING.md#auditor-test-isolation).
+### Auditor test isolation
+
+- Use utility-only fixture PATH and explicit auditor stubs; add utilities individually, never restore host PATH.
+- Integration cases provide fake CLIs; absent-runner cases omit them; unavailable `CODEX_BIN` disables desktop discovery, and sentinels catch unintended model calls.
+- Select each newly created receipt by invocation; keep selection state ignored, because timestamp/PID sorting can choose old receipts or tracked helpers alter bindings.
+- Wait for `watch_start` before TERM; preserve FIFO's two-second replacement bound and give the next audit its own deadline/published-finding assertion.
+- Render complete composed prompts within budgets; run `subagent.test.sh` and `claude-timed-prompts.test.sh` when changing shared prompt composition.

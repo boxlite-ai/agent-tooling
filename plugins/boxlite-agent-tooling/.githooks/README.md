@@ -8,24 +8,30 @@ The consumer's `./.agent-tooling/install.sh` calls [setup.sh](../scripts/setup.s
 which sets worktree-local `core.hooksPath` to this directory. Inspect it with
 `git config --worktree --get core.hooksPath` from the consumer checkout.
 
-Audit enforcement detects nonempty `CLAUDECODE`, `CODEX_SANDBOX`, or `AGENT_GATED`, or a live ancestor recorded by PreToolUse.
+Installation and guidance checks on commit/push, chained hooks, and watcher setup also run for humans.
+These local hooks are workflow checks, not a security sandbox.
 
-- The shared [origin classifier](../.agents/lib/git-agent-origin.sh) checks worktree-local PID/start-token records; unrelated human shells stay exempt.
-- Records activate the existing audit checks and never substitute for a matching dossier or receipt.
-- Reload updated host hooks: markerless delegation requires the retained-launcher contract described under [Git gates](../ARCHITECTURE.md#git-gates).
-- Installation and guidance checks on commit/push, chained hooks, and watcher setup also run for humans.
-- These local hooks are workflow checks, not a security sandbox.
+## Git gates
+
+[`.agents/lib/git-agent-origin.sh`](../.agents/lib/git-agent-origin.sh) activates audits for nonempty `CLAUDECODE`, `CODEX_SANDBOX`, or `AGENT_GATED`, or for a recorded live ancestor. Unrelated human terminals remain exempt.
+
+Markerless manifests retain `; exit $?` and `--launcher-pid "$$"`; PreToolUse validates its parent, then records launcher-parent PID/start token in `agent-tooling-agent-shells/<PID>`.
+
+- Missing metadata/lookups/writes or stale installed hooks block delegation; custom wiring must preserve the launcher.
+- Check at most 64 ancestors; malformed/unreadable consulted records deny; owners cannot overwrite each other or match reused PIDs.
+- Records activate audits and still require a matching dossier or receipt. Records survive consumption and stop matching after owner exit.
+- Reload updated host hooks to pick up markerless launcher wiring.
 
 ## Hooks
 
 | Hook | Input | Behavior |
 | --- | --- | --- |
-| [pre-commit](pre-commit) | Git invokes without arguments. | Verify installation/guidance, run the existing hook, then validate the final staged index against the agent's audit. |
-| [commit-msg](commit-msg) | Commit-message file path. | Run the existing hook; validate the audited subject and staged content, publish a commit receipt, and consume audit state. |
-| [pre-push](pre-push) | Remote name/URL; ref updates on stdin. | Verify installation/guidance; audit pushed content or consume a matching receipt, start watchers, then replay input to the existing hook. |
-| [post-checkout](post-checkout) | Previous/new HEAD and checkout flag. | Synchronize installation, then forward arguments to the existing hook. |
-| [post-merge](post-merge) | Squash flag. | Synchronize installation, then forward arguments to the existing hook. |
-| [post-rewrite](post-rewrite) | Rewrite command; old/new commit pairs on stdin. | Preserve stdin, synchronize installation, then replay the pairs and arguments to the existing hook. |
+| [`.githooks/pre-commit`](pre-commit) | Git invokes without arguments. | Run `scripts/verify-installation.sh`, verify guidance, run the existing hook, then validate the final staged index against the agent's audit. |
+| [`.githooks/commit-msg`](commit-msg) | Commit-message file path. | Run the existing hook; validate the audited subject and staged content, publish a commit receipt, and consume audit state. |
+| [`.githooks/pre-push`](pre-push) | Remote name/URL; ref updates on stdin. | Verify installation/guidance; audit pushed content or consume a matching receipt, start watchers, then replay input to the existing hook. |
+| [`.githooks/post-checkout`](post-checkout) | Previous/new HEAD and checkout flag. | Run `scripts/sync-installation.sh`, then forward arguments to the existing hook. |
+| [`.githooks/post-merge`](post-merge) | Squash flag. | Run `scripts/sync-installation.sh`, then forward arguments to the existing hook. |
+| [`.githooks/post-rewrite`](post-rewrite) | Rewrite command; old/new commit pairs on stdin. | Preserve stdin, synchronize installation, then replay the pairs and arguments to the existing hook. |
 
 Existing hooks are resolved beneath `git rev-parse --git-common-dir` in `hooks/`;
 this avoids resolving `core.hooksPath` back to the same hook. A chained hook's
@@ -61,7 +67,11 @@ chained hook succeeds (or is absent), the push may proceed.
 
 - Watcher startup is best effort and also applies to human pushes.
 - `BOXLITE_PR_WATCH=0` disables startup.
-- See [watch delivery](../.agents/watch/consumer-lifecycle.md) and [Git audit contracts](../ARCHITECTURE.md#git-gates).
+- See [watch delivery](../.agents/watch/consumer-lifecycle.md) and [Git audit attempts](../.agents/hooks/audit/architecture.md#commitpush-attempts).
+
+Existing refs use advertised old SHA; new refs choose the nearest merge-base among destination remote-tracking refs by outgoing commit distance.
+
+For `main → stack-1 → stack-2`, pushed `stack-1` becomes the base; no ancestor means full history/empty-tree diff; stale refs/merges limit precision.
 
 ## Tests
 

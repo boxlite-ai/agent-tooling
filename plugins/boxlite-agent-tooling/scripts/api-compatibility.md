@@ -2,6 +2,14 @@
 
 Check every `*openapi*.yaml` contract with oasdiff; breaking/default changes need explicit user confirmation to skip commit/push enforcement.
 
+## API compatibility
+
+`scripts/api-compatibility.sh` runs before commit and push verdicts, including overrides. Stop skips the check. The checker uses `.agents/lib/api_contract.py` to compare the selected snapshots.
+
+The auditor traces optional request fields, parameter content, ancestor `readOnly`, and SDK code. Each writable operation needs tests. Response-only fields do not.
+
+Python exports evidence without inferring request-test requirements. The plugin leaves consumer SDK builds to the consumer.
+
 ## Setup
 
 Install Python 3.9+ and [oasdiff 1.33.0](https://github.com/oasdiff/oasdiff/releases/tag/v1.33.0).
