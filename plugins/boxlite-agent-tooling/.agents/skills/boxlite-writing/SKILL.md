@@ -31,5 +31,5 @@ description: Write or shorten human-facing replies, docs, PRs, issues, and comme
 ## Limits
 
 - Sentences: at most 25 words; reasoning keeps its because or so.
-- Lists: 2–7 flat items, one sentence each; tables: 2–5 columns, one-line cells.
+- Lists: 2–7 items, one sentence each, or up to three for connected reasoning; sub-lists of 2–3 items, at most 3 levels; tables: 2–5 columns, one-line cells.
 - Order by importance; risks and uncertainty get their own items.

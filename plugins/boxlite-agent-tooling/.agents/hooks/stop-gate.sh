@@ -3,8 +3,8 @@
 # never race as separate Stop hooks would:
 #   1. On the initial Stop, a nonempty last reply over 80 words must start with a
 #      short TL;DR; shorter replies read whole, and explicit empty replies stay empty.
-#      A reply that leads with one already gives its short version, so the gate never
-#      asks for another.
+#      Every nonempty reply must also keep boxlite-writing's structure limits. One
+#      block lists every correction; the retry is never checked again.
 #   2. A pending timed confirmation resumes the agent; expiry selects its fallback.
 #   3. preflight-verdict-check.sh replaces this process and judges the turn. Its
 #      block, error or allow is the answer.
@@ -32,7 +32,7 @@ run_verdict_check() {
 for required_command in jq perl; do
   command -v "$required_command" >/dev/null 2>&1 || { printf 'stop-gate: missing %s\n' "$required_command" >&2; exit 2; }
 done
-for library in verdict-audit-state.sh reply-summary.sh concise-writing.sh; do
+for library in verdict-audit-state.sh reply-summary.sh reply-summary.pl concise-writing.sh; do
   [[ -r "$tooling_root/.agents/lib/$library" ]] || { printf 'stop-gate: missing %s\n' "$library" >&2; exit 2; }
 done
 # shellcheck source=../lib/verdict-audit-state.sh
@@ -62,11 +62,27 @@ if [[ "$reply_is_supplied" != true && -n "$transcript_path" ]]; then
   rm -f "$scratch/final-turn.json"; rmdir "$scratch" 2>/dev/null
   trap - EXIT
 fi
-if [[ "$stop_hook_active" != true && -n "$last_assistant_message" ]] \
-   && ! reply_summary_is_short "$last_assistant_message" \
-   && ! summary_error="$(concise_writing_check_summary "$last_assistant_message" first 39)"; then
-  jq -nc --arg reason "$summary_error" '{decision:"block",reason:$reason}'
-  exit 0
+if [[ "$stop_hook_active" != true && -n "$last_assistant_message" ]]; then
+  corrections=() structure_hint=''
+  if ! reply_summary_is_short "$last_assistant_message" \
+     && ! summary_error="$(concise_writing_check_summary "$last_assistant_message" first 39)"; then
+    corrections+=("$summary_error")
+    structure_hint=no-hint  # The TL;DR correction already names the skill.
+  fi
+  # Structure applies at any length; a checker failure fails closed.
+  structure_status=0
+  structure_error="$(concise_writing_check_structure "$last_assistant_message" "$structure_hint")" \
+    || structure_status=$?
+  if (( structure_status == 2 )); then
+    printf 'stop-gate: %s\n' "$structure_error" >&2
+    exit 2
+  fi
+  (( structure_status == 0 )) || corrections+=("$structure_error")
+  if (( ${#corrections[@]} )); then
+    reason="$(printf '%s\n' "${corrections[@]}")"
+    jq -nc --arg reason "$reason" '{decision:"block",reason:$reason}'
+    exit 0
+  fi
 fi
 timed_continuation="$tooling_root/scripts/continue-timed-prompts.sh"
 [[ -r "$timed_continuation" ]] || { printf "stop-gate: timed continuation missing\n" >&2; exit 2; }

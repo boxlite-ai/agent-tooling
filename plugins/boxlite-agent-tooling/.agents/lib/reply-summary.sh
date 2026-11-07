@@ -1,138 +1,55 @@
 #!/usr/bin/env bash
-# Shared reply measurements: the Markdown word counter behind the TL;DR limit and the
-# GitHub paragraph and item limits, and the bounded reader that recovers the Stop
+# Shared reply measurements: the Markdown word counter behind the TL;DR limit, the
+# structure limits of boxlite-writing, and the bounded reader that recovers the Stop
 # gate's last reply from the transcript. Source this file; it performs no work on
-# load. Requires sourced verdict-audit-state.sh, and perl and jq on PATH; callers own
-# those checks and all reporting.
+# load. Requires sourced verdict-audit-state.sh, reply-summary.pl beside this file,
+# and perl 5.22+ and jq on PATH; callers own those checks and all reporting.
 
-# Readability thresholds are independent of the shared prompt's prose budget.
-reply_summary_paragraph_max_words=40
-reply_summary_item_max_words=40
+# The structure limits of boxlite-writing's Limits section; reply-summary.test.sh
+# fails when that text and these values drift apart.
+reply_summary_max_sentences=3
+reply_summary_max_sentence_words=25
+reply_summary_min_list_items=2
+reply_summary_max_list_items=7
+reply_summary_min_sublist_items=2
+reply_summary_max_sublist_items=3
+reply_summary_max_list_depth=3
+reply_summary_min_table_columns=2
+reply_summary_max_table_columns=5
 reply_summary_short_max_words=80
 # The same snapshot bound the verdict check puts on the transcript it reads.
 reply_summary_snapshot_max_bytes=262144
 
-# A word is a whitespace-separated token holding a letter or digit, so table pipes,
-# list markers and box-drawing lines do not count. Chinese and Japanese, written
-# without spaces, count one word per character, the usual convention for them; Korean
-# spaces its words and counts like English. Readability is a Markdown heuristic:
-# blank lines delimit paragraphs, list markers delimit items, and indented item
-# continuations stay together across blank lines. Soft wraps do not split blocks.
-# Fenced blocks, headings and tables with a delimiter row are excluded from the
-# block maxima only.
-reply_summary_word_counts() {  # text -> total largest-paragraph largest-item
-  local counts
-  counts="$(printf '%s\n' "${1-}" | perl -CSD -0777 -ne '
-    use strict;
-    use warnings;
-    sub count_words {
-      my $count = 0;
-      for my $token (split " ", $_[0]) {
-        my $unspaced = () = $token =~ /[\p{Han}\p{Hiragana}\p{Katakana}]/g;
-        (my $rest = $token) =~ s/[\p{Han}\p{Hiragana}\p{Katakana}]/ /g;
-        $count += $unspaced + grep { /[\p{L}\p{N}]/ } split " ", $rest;
-      }
-      return $count;
-    }
-    sub table_cells {
-      my ($row) = @_;
-      $row =~ s/^\s*\|//;
-      $row =~ s/(?<!\\)\|\s*$//;
-      return scalar split /(?<!\\)\|/, $row, -1;
-    }
-    my $total = count_words($_);
-    my @lines = split /\n/;
-    my @quoted = map { /^\s*>/ ? 1 : 0 } @lines;
-    s/^\s*(?:>\s*)+// for @lines;
-    my ($block_words, $is_item, $paragraph_max, $item_max) = (0, 0, 0, 0);
-    my ($item_indent, $after_blank) = (0, 0);
-    my ($fence, $table) = ("", 0);
-    my $finish_block = sub {
-      if ($is_item) {
-        $item_max = $block_words if $block_words > $item_max;
-      } else {
-        $paragraph_max = $block_words if $block_words > $paragraph_max;
-      }
-      ($block_words, $is_item) = (0, 0);
-      ($item_indent, $after_blank) = (0, 0);
-    };
-    for my $index (0 .. $#lines) {
-      my $line = $lines[$index];
-      if (length $fence) {
-        my $marker = substr $fence, 0, 1;
-        $fence = "" if $line =~ /^\s*\Q$fence\E\Q$marker\E*\s*$/;
-        next;
-      }
-      if ($line =~ /^\s*$/) {
-        $is_item ? ($after_blank = 1) : $finish_block->();
-        $table = 0;
-        next;
-      }
-      if ($after_blank) {
-        my ($indent) = $line =~ /^(\s*)/;
-        $indent =~ s/\t/    /g;
-        $finish_block->() if length($indent) < $item_indent;
-        $after_blank = 0;
-      }
-      if ($line =~ /^\s*(`{3,}|~{3,})/) {
-        $fence = $1;
-        $finish_block->() unless $is_item;
-        $table = 0;
-        next;
-      }
-      if ($line =~ /^\s*\#{1,6}(?:\s|$)/) {
-        $finish_block->();
-        $table = 0;
-        next;
-      }
-      $table = 0 if $index && $quoted[$index] != $quoted[$index - 1];
-      if ($line =~ s/^(\s*(?:[-+*]|[0-9]+[.)])\s+)//) {
-        my $prefix = $1;
-        $prefix =~ s/\t/    /g;
-        $finish_block->();
-        $is_item = 1;
-        $item_indent = length $prefix;
-        $table = 0;
-      }
-      # Group each optional outer pipe with its whitespace: without a pipe,
-      # adjacent whitespace runs would retry every split on a failing match.
-      if ($line =~ /\|/ && $index < $#lines &&
-          $lines[$index + 1] =~ /^\s*(?:\|\s*)?:?-+:?\s*(?:\|\s*:?-+:?\s*)*(?:\|\s*)?$/ &&
-          table_cells($line) == table_cells($lines[$index + 1])) {
-        $finish_block->() unless $is_item;
-        $table = 1;
-        next;
-      }
-      next if $table;
-      $block_words += count_words($line);
-    }
-    $finish_block->();
-    print "$total $paragraph_max $item_max";
-  ' 2>/dev/null)" || return 1
-  [[ "$counts" =~ ^[0-9]+[[:space:]][0-9]+[[:space:]][0-9]+$ ]] || return 1
-  printf '%s' "$counts"
+_reply_summary_measure() {  # mode [limits...]; text on stdin
+  perl "$(dirname "${BASH_SOURCE[0]}")/reply-summary.pl" "$@"
 }
 
-# 0 when a paragraph or list item is over its limit, 1 when none is, 2 when the text
-# could not be counted.
-reply_summary_is_dense() {  # text
-  local counts _total paragraph_words item_words
-  counts="$(reply_summary_word_counts "${1-}")" || return 2
-  read -r _total paragraph_words item_words <<< "$counts"
-  (( paragraph_words > reply_summary_paragraph_max_words \
-     || item_words > reply_summary_item_max_words )) && return 0
-  return 1
+# Words in the whole text, as reply-summary.pl counts them.
+reply_summary_word_count() {  # text -> total
+  local total
+  total="$(printf '%s\n' "${1-}" | _reply_summary_measure total 2>/dev/null)" || return 1
+  [[ "$total" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$total"
 }
 
-# Short-text exemptions are independent of the paragraph and list-item limits.
+# One line per broken structure limit: rule, count, limit, excerpt, tab-separated.
+# Empty output means every limit holds; status 1 means the text could not be measured.
+reply_summary_structure() {  # text -> report
+  local report
+  report="$(printf '%s\n' "${1-}" | _reply_summary_measure structure \
+    "$reply_summary_max_sentences" "$reply_summary_max_sentence_words" \
+    "$reply_summary_min_list_items" "$reply_summary_max_list_items" \
+    "$reply_summary_min_sublist_items" "$reply_summary_max_sublist_items" \
+    "$reply_summary_max_list_depth" "$reply_summary_min_table_columns" "$reply_summary_max_table_columns" 2>/dev/null)" || return 1
+  printf '%s' "$report"
+}
+
 # 0 when short, 1 when longer, 2 when the text could not be counted.
 reply_summary_is_short() {  # text
-  local text="${1-}" counts total
+  local text="${1-}" total
   # Text over 8000 characters is never short; longer text needs a TL;DR.
   (( ${#text} <= 8000 )) || return 1
-  counts="$(reply_summary_word_counts "$text")" || return 2
-  read -r total _ <<< "$counts"
-  [[ "$total" =~ ^[0-9]+$ ]] || return 2
+  total="$(reply_summary_word_count "$text")" || return 2
   (( total <= reply_summary_short_max_words ))
 }
 

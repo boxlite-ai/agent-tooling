@@ -146,6 +146,29 @@ for characters in 262144 262145; do
     "$large_prefix$(long x "$((characters - ${#large_prefix}))")"
 done
 
+echo "Structure corrections (#419)"
+structure() { # name expected-status expected-text Markdown [no-hint] [fault]
+  local output status=0
+  output="$(
+    # shellcheck disable=SC2329 # Inject a checker failure into the sourced validator.
+    [[ "${6:-}" != failed ]] || _reply_summary_measure() { return 1; }
+    concise_writing_check_structure "$4" "${5:-}"
+  )" || status=$?
+  if [[ "$status" == "$2" && "$output" == *"$3"* ]]; then ok "$1"; else bad "$1 (exit $status: $output)"; fi
+  structure_output="$output"
+}
+structure fits 0 '' 'One sentence.'
+structure names_skill 1 'Structure limits broken; apply boxlite-writing:' 'One. Two. Three. Four.'
+structure no_hint 1 'Structure limits broken:' 'One. Two. Three. Four.' no-hint
+[[ "$structure_output" != *boxlite-writing* ]] && ok no_hint_omits_skill || bad "no_hint_omits_skill ($structure_output)"
+ten_long="$(for _ in {1..10}; do printf '%s.\n\n' "$(long 'word ' 26)"; done)"
+structure caps_list 1 '- 5 more not shown' "$ten_long"
+[[ "$structure_output" == *$'\nRewrite in place: keep every fact, number, caveat'* ]] \
+  && ok keeps_content || bad "keeps_content ($structure_output)"
+listed="$(grep -c '^- A sentence has 26 words; keep 25 or fewer' <<<"$structure_output")"
+[[ "$listed" == 5 ]] && ok lists_five || bad "lists_five (listed $listed)"
+structure fails_closed 2 'Structure checker (perl) failed' 'One sentence.' '' failed
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 exit $(( fail > 0 ? 1 : 0 ))

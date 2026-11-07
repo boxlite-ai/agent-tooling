@@ -43,22 +43,21 @@ check() {
   last_check_output="$output"
 }
 
-forty="$(printf 'word %.0s' {1..40})"
-dense="${forty}word"
+# One 41-word sentence: past the 25-word sentence limit (#419).
+dense="$(printf 'word %.0s' {1..41})"
 long="$(printf 'word %.0s' {1..121})"
 bullet="- $(printf 'word %.0s' {1..41})"
+ten_word_paragraphs="$(printf 'Ten words keep each paragraph of this body short enough.\n\n%.0s' {1..6})"
 structured="## TL;DR
 
 Allow complete structured documents.
 
 ## How it works
 
-$(printf 'word %.0s' {1..60})
-
-$(printf 'word %.0s' {1..60})
+$ten_word_paragraphs
 
 https://github.com/example/repo/issues/123"
-# A leading TL;DR already gives readers the short version, so the details may be dense.
+# A leading TL;DR no longer exempts the details from the structure limits (#419).
 summary_first="## TL;DR
 
 Keep complete details after the summary.
@@ -68,18 +67,16 @@ Keep complete details after the summary.
 $dense
 
 https://github.com/example/repo/issues/123"
-density_tail=$'\n\n## TL;DR\n\nShort summary.\n\n## How it works\n\nRetry a failed call once.\n\nhttps://github.com/example/repo/issues/123'
+summary_tail=$'\n\n## TL;DR\n\nShort summary.\n\n## How it works\n\nRetry a failed call once.\n\nhttps://github.com/example/repo/issues/123'
 for operation in 'pr create --draft' 'pr comment 7' 'pr review 7 --comment' \
   'issue create --title Bug' 'issue edit 7' 'issue comment 7' 'discussion create --title Topic'; do
-  check "$operation rejects dense prose" "gh $operation --body '$dense'" deny
-  check "$operation accepts a 40-word paragraph before its summary" \
-    "gh $operation --body '$forty$density_tail'" allow
-  check "$operation rejects a 41-word paragraph before its summary" \
-    "gh $operation --body '$dense$density_tail'" deny 'paragraph over 40 words'
-  check "$operation accepts a structured document over 120 words" \
+  check "$operation rejects a long sentence" "gh $operation --body '$dense'" deny 'A sentence has 41 words'
+  check "$operation rejects a long sentence before its summary" \
+    "gh $operation --body '$dense$summary_tail'" deny 'A sentence has 41 words; keep 25 or fewer'
+  check "$operation accepts a structured document over 60 words" \
     "gh $operation --body '$structured'" allow
-  check "$operation accepts dense details after a leading TL;DR" \
-    "gh $operation --body '$summary_first'" allow
+  check "$operation rejects a long sentence after a leading TL;DR" \
+    "gh $operation --body '$summary_first'" deny 'A sentence has 41 words'
   check "$operation accepts a summary" "gh $operation --body '## TL;DR
 
 Retry only failed requests.
@@ -101,15 +98,38 @@ check 'attached short body' "gh issue comment 7 -b'## TL;DR
 
 Fixed.'" allow
 check 'attached long body' "gh issue comment 7 --body='$dense'" deny
-check 'paragraph limit' "gh issue comment 7 --body '$dense'" deny 'start with `## TL;DR`'
-check '40-word paragraph' "gh issue comment 7 --body '$forty'" allow
-check '40-word bullet' "gh issue comment 7 --body '- $forty'" allow
-check 'bullet limit' "gh issue comment 7 --body '$bullet'" deny
-check 'a later TL;DR keeps the paragraph limit' "gh issue comment 7 --body '$dense
+check 'sentence limit' "gh issue comment 7 --body '$dense'" deny 'A sentence has 41 words; keep 25 or fewer'
+check 'no denial suggests a TL;DR for structure' "gh issue comment 7 --body '$dense'" deny 'Structure limits broken'
+[[ "$last_check_output" != *'TL;DR'* ]] && pass=$((pass + 1)) \
+  || { fail=$((fail + 1)); printf 'FAIL structure denial mentions a TL;DR: %s\n' "$last_check_output"; }
+check '25-word sentence' "gh issue comment 7 --body '$(printf 'word %.0s' {1..24})word.'" allow
+check '26-word sentence' "gh issue comment 7 --body '$(printf 'word %.0s' {1..25})word.'" deny 'A sentence has 26 words'
+check 'two-item list' "gh issue comment 7 --body '- One.
+- Two.'" allow
+check 'bullet limit' "gh issue comment 7 --body '$bullet'" deny 'A list has 1 items; keep 2–7'
+check 'two-level list' "gh issue comment 7 --body '- One.
+  - A.
+  - B.
+- Two.'" allow
+check 'one-item sub-list' "gh issue comment 7 --body '- One.
+  - Inner.
+- Two.'" deny 'A sub-list has 1 items; keep 2–3'
+check 'four-level list' "gh issue comment 7 --body '- One.
+  - A.
+    - x.
+      - deep.
+      - deeper.
+    - y.
+  - B.
+- Two.'" deny 'A list nests 4 levels; keep 3 or fewer'
+check 'a later TL;DR leaves the sentence limit' "gh issue comment 7 --body '$dense
 
 ## TL;DR
 
-Summary last.'" deny 'start with `## TL;DR`'
+Summary last.'" deny 'A sentence has 41 words'
+check 'one denial lists both corrections' "gh issue create --title Bug --body '$(printf 'word %.0s' {1..25})word.'" deny 'TL;DR heading missing'
+[[ "$last_check_output" == *'A sentence has 26 words'* ]] && pass=$((pass + 1)) \
+  || { fail=$((fail + 1)); printf 'FAIL one denial lists both corrections: %s\n' "$last_check_output"; }
 check 'long code example keeps its summary' "gh issue comment 7 --body '## TL;DR
 
 Explain the example.
@@ -119,17 +139,17 @@ Explain the example.
 ~~~
 $long
 ~~~'" allow
-check '40 Chinese characters fit a paragraph' "gh issue comment 7 --body '$(printf '字%.0s' {1..40})'" allow
-check '41 Chinese characters exceed a paragraph' "gh issue comment 7 --body '$(printf '字%.0s' {1..41})'" deny
+check '41 Chinese characters skip the word limit' "gh issue comment 7 --body '$(printf '字%.0s' {1..41})。'" allow
+check '4 Chinese sentences exceed a block' "gh issue comment 7 --body '它失败了。然后重试。再来一次。最后一次。'" deny 'A prose block has 4 sentences'
 check '39-word summary' "gh issue create --title Bug --body '## TL;DR
 
 $(printf 'word %.0s' {1..39})'" allow
 check '40-word summary' "gh issue create --title Bug --body '## TL;DR
 
 $(printf 'word %.0s' {1..40})'" deny 'TL;DR has 40 words (limit 39)'
-# A comment of 80 words or fewer reads whole, so it needs no TL;DR once its blocks fit
-# the density limits; documents and longer comments keep the summary (#265).
-eighty="$forty"$'\n\n'"$forty"
+# A comment of 80 words or fewer reads whole, so it needs no TL;DR; documents and
+# longer comments keep the summary (#265). Structure limits apply at any length (#419).
+eighty="$(printf 'Ten more words keep this comment body under the exemption.\n\n%.0s' {1..8})"
 check 'short comment needs no summary' "gh issue comment 7 --body 'Fixed in #263.'" allow
 check '80-word comment needs no summary' "gh pr comment 7 --body '$eighty'" allow
 check '81-word comment needs a summary' "gh issue comment 7 --body '$eighty
@@ -142,7 +162,7 @@ check 'short issue body keeps the summary' "gh issue create --title Bug --body '
 check 'short REST issue body keeps the summary' "gh api repos/o/r/issues -f title=Bug -f body='Short.'" deny 'TL;DR'
 check 'REST owner named comments keeps the summary' "gh api repos/comments/r/issues -f title=Bug -f body='Short.'" deny 'TL;DR'
 check 'short comment keeps the privacy check' "gh issue comment 7 --body 'See /Users/me/notes.'" deny 'private context'
-check 'short comment keeps the item limit' "gh issue comment 7 --body '- $(printf 'word %.0s' {1..50})'" deny 'list item over 40 words'
+check 'short comment keeps the structure limits' "gh issue comment 7 --body '- $(printf 'word %.0s' {1..50})'" deny 'A sentence has 50 words'
 # GitHub enforces its own body limit, so the hook adds none (#310).
 long_document="$structured
 

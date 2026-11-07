@@ -40,6 +40,7 @@ run_hook() { # host, event, script basename; stdin is the native hook payload
 # TL;DR rules. check_short covers the exempt text itself.
 matrix_padding="$(printf 'Ten more words keep this matrix body past the exemption.\n\n%.0s' {1..9})"
 matrix_short=
+design_expected=  # Overrides the design gate's expectation; registration checks no structure.
 check() { # label, text, expected allow|deny, optional reply/design expectation, denial text
   local label="$1" body="$2" expected="$3" reply_expected="${4:-$3}" reason="${5:-TL;DR}"
   local output actual gate active wanted host mentions
@@ -62,7 +63,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
             | run_hook "$host" PreToolUse preflight-pr-review.sh)"
           [[ "$(jq -r '.hookSpecificOutput.permissionDecision // "allow"' <<<"$output")" != deny ]] || actual=deny ;;
         design)
-          wanted="$reply_expected"
+          wanted="${design_expected:-$reply_expected}"
           jq -nc --arg body "$body" '{html_url:"https://github.com/example/repo/issues/1",body:$body}' > "$DOC_FIXTURE"
           output="$(bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 2>&1)" || actual=deny ;;
         stop-*)
@@ -83,7 +84,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
       # in the denial itself, or in the reminder the GitHub gate appends.
       mentions="$(grep -o boxlite-writing <<<"$output" | wc -l | tr -d ' ')" || true
       if [[ "$actual" == "$wanted" && ( "$wanted" == allow ||
-            ( "$output" == *"TL;DR"* && "$output" == *"$reason"* && "$mentions" == 1 ) ) ]]; then
+            ( "$output" == *"$reason"* && "$mentions" == 1 ) ) ]]; then
         pass=$((pass+1))
       else
         printf 'FAIL %s %s active=%s: wanted %s, got %s: %s\n' "$label" "$gate" "$active" "$wanted" "$actual" "$output"
@@ -116,18 +117,20 @@ check words_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..40})" deny deny 'has 40 
 check paragraphs_40 $'## TL;DR\n\n'"$(printf 'word %.0s' {1..20})"$'\n\n'"$(printf 'word %.0s' {1..20})" deny deny 'has 40 words (limit 39)'
 check chinese_40 $'## TL;DR\n\n'"$(printf '字%.0s' {1..40})" deny deny 'has 40 words (limit 39)'
 # Follow the denial literally: keep the summary, move supporting text under a peer heading.
-details="$(printf 'word %.0s' {1..40})"
+details="$(printf 'Ten more words keep each paragraph of the details short.\n\n%.0s' {1..4})"
 check explanation_counted $'## TL;DR\n\nRetry failed requests once.\n\n'"$details" deny deny 'has 44 words (limit 39)'
 check corrected_explanation $'## TL;DR\n\nRetry failed requests once.\n\n## Details\n\n'"$details" allow
 check nested_heading $'## TL;DR\n\nRetry failed requests once.\n\n### Details\n\n'"$details" \
   deny deny 'same-level heading like `## Details`'
 check table_after $'## TL;DR\n\nA concise answer.\n\n| Gate | Result |\n|---|---|\n'"$(printf '| stop gate | denied the reply |\n%.0s' {1..10})" \
   deny deny 'keep one short sentence, then a same-level heading'
-# A leading TL;DR already gives readers the short version, so dense details may follow;
-# GitHub text whose TL;DR comes later keeps the paragraph and item limits.
+# A leading TL;DR no longer exempts the details: replies and GitHub text keep the
+# structure limits, while design registration checks only the summary (#419).
 dense="$(printf 'word %.0s' {1..81})"
-check dense_after_summary $'## TL;DR\n\nA concise answer.\n\n## Details\n\n'"$dense" allow
-check dense_before_summary "$dense"$'\n\n## TL;DR\n\nA concise answer.' deny deny 'TL;DR'
+design_expected=allow
+check long_sentence_after_summary $'## TL;DR\n\nA concise answer.\n\n## Details\n\n'"$dense" \
+  deny deny 'A sentence has 81 words; keep 25 or fewer'
+design_expected=
 # Unpadded text of 80 words or fewer: comment and Stop gates allow it, design docs do not.
 check_short() { # label, text, design denial
   matrix_short=yes
@@ -136,8 +139,8 @@ check_short() { # label, text, design denial
 }
 check_short short_missing 'A concise answer.' 'TL;DR heading missing'
 check_short short_bold_label '**TL;DR:** A concise answer.' '`## TL;DR`, one short sentence'
-forty="$(printf 'word %.0s' {1..40})"
-check_short short_80_words "$forty"$'\n\n'"$forty" 'TL;DR heading missing'
+check_short short_80_words "$(printf 'Ten more words keep this short reply under the exemption.\n\n%.0s' {1..8})" \
+  'TL;DR heading missing'
 
 for host in claude codex; do
   jq -nc '{type:"assistant",message:{content:[{type:"text",text:"Earlier progress."}]}}' > "$scratch/turn.jsonl"
@@ -160,8 +163,8 @@ facade_failure() { # label, expected diagnostic, Markdown, optional fault, skill
     # shellcheck source=../../lib/concise-writing.sh
     source "$plugin/.agents/lib/concise-writing.sh"
     # shellcheck disable=SC2329 # Inject counter and parser failures into the sourced validator.
-    if [[ "$fault" == empty ]]; then reply_summary_word_counts() { return 0; }
-    elif [[ "$fault" == failed ]]; then reply_summary_word_counts() { return 1; }
+    if [[ "$fault" == empty ]]; then reply_summary_word_count() { return 0; }
+    elif [[ "$fault" == failed ]]; then reply_summary_word_count() { return 1; }
     elif [[ "$fault" == no_parser ]]; then PATH="$scratch/bin"; exec 2>/dev/null; fi
     concise_writing_check_summary "$body" first 39
   )" || status=$?

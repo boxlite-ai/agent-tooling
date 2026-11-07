@@ -3,7 +3,9 @@
 # TL;DR before preflight-verdict-check.sh judges the turn.
 #
 #   - a nonempty reply over 80 words, no TL;DR  -> one correction on the initial Stop
-#   - anything else, dense TL;DR-led replies    -> the verdict check's own output, exit
+#   - a reply of any length over a structure     -> one correction on the initial Stop
+#     limit
+#   - anything else, long TL;DR-led replies     -> the verdict check's own output, exit
 #     included                                     status and stderr, unchanged
 # Each case builds a throwaway git repo with a fake transcript, runs the gate there
 # (cwd + CLAUDE_PROJECT_DIR pointed at it), and asserts on its output.
@@ -136,9 +138,10 @@ no_request() { [[ "$1" != *"$shortening_request"* && -z "$(field "$1" '.hookSpec
 keeps_triage_note() { [[ "$(field "$1" '.systemMessage')" == *"triage: NO"* ]]; }
 audit_ran() { [[ -e "$1/.agents/state/SYNC_AUDIT_RAN" ]]; }
 
-long_reply="$(printf 'word%.0s ' {1..81})"
+# Long fixtures keep the structure limits, so only the TL;DR rule applies to them.
+long_reply="$(printf 'Nine words in each short sentence keep this compliant.\n\n%.0s' {1..9})"
 short_reply="Done: the gate checks the summary. Say go to commit."
-long_claim="$(printf 'more%.0s ' {1..121})and the root cause is the stale index."
+long_claim="$(printf 'More context words fill this reply past the limit.\n\n%.0s' {1..14})The root cause is the stale index."
 
 check_writing_continuations() {
   local host S R payload out
@@ -167,13 +170,13 @@ if [[ "${1:-}" == writing-continuations ]]; then
   exit $(( fail > 0 ? 1 : 0 ))
 fi
 
-printf '## A TL;DR-led reply, dense or short, gets exactly the verdict check'"'"'s output\n'
+printf '## A TL;DR-led reply, long or short, gets exactly the verdict check'"'"'s output\n'
 # Twin repos in the same state: the verdict check records what it judged, so a second
 # run in one repo would see an already-judged message.
 for host in claude codex; do
-  for size in dense short; do
+  for size in long short; do
     reply="$long_reply"
-    [[ "$size" == dense ]] || reply="$short_reply"
+    [[ "$size" == long ]] || reply="$short_reply"
     S="$size-$host"; R="$(new_repo "$S")"; T="$(new_repo "$S")"
     append_assistant "$R" "$reply"
     append_assistant "$T" "$reply"
@@ -393,6 +396,36 @@ rm -rf "$R"
 HOOK="$original_hook"
 unset HOOK_STDERR
 rm -rf "$prompt_fixture"
+
+printf '\n## Structure limits apply at any length, with one correction per turn (#419)\n'
+long_sentence="$(printf 'word %.0s' {1..25})word."
+for host in claude codex; do
+  S="structure-$host"; R="$(new_repo "$S")"
+  out="$(gate_stop "$R" "$S" false "$long_sentence" NO "$host")"
+  reason="$(field "$out" '.reason')"
+  [[ "$(decision_of "$out")" == block && "$reason" == *'A sentence has 26 words; keep 25 or fewer'* \
+     && "$reason" != *'TL;DR'* && "$(grep -o boxlite-writing <<<"$reason" | wc -l | tr -d ' ')" == 1 ]]
+  expect "$host: a TL;DR-led reply over a sentence limit gets one correction" "$?" "out=$out"
+  append_assistant "$R" "$long_sentence"
+  out="$(gate_stop "$R" "$S" true "$long_sentence" NO "$host")"
+  [[ "$(decision_of "$out")" == allow && "$(classifier_ran "$R")" == yes ]]
+  expect "$host: the retry is judged, never corrected again" "$?" "out=$out"
+  rm -rf "$R"
+done
+saved_summary_prefix="$summary_prefix"; summary_prefix=""
+S="structure-short"; R="$(new_repo "$S")"
+out="$(gate_stop "$R" "$S" false 'One. Two. Three. Four.' NO claude)"
+[[ "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *'A prose block has 4 sentences'* ]]
+expect "a short reply over the sentence limit gets a correction" "$?" "out=$out"
+rm -rf "$R"
+S="structure-and-summary"; R="$(new_repo "$S")"
+out="$(gate_stop "$R" "$S" false "$long_reply"$'\n\n'"$long_sentence" NO claude)"
+reason="$(field "$out" '.reason')"
+[[ "$(decision_of "$out")" == block && "$reason" == *'TL;DR heading missing'* \
+   && "$reason" == *'A sentence has 26 words'* && "$(grep -o boxlite-writing <<<"$reason" | wc -l | tr -d ' ')" == 1 ]]
+expect "one correction lists the TL;DR and structure fixes and names the skill once" "$?" "out=$out"
+rm -rf "$R"
+summary_prefix="$saved_summary_prefix"
 
 S="empty-reply-audit"; R="$(new_repo "$S")"
 append_assistant "$R" "The root cause is the stale index."
