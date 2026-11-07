@@ -76,6 +76,75 @@ Network commands have 30-second limits within a 30-second refresh or 120-second 
 - The standalone first-install fallback still relies on its caller's deadline.
 - Native CLI failures are visible; an updated repository and a host installation are separate transactions.
 
+## Installation runtime
+
+### Consumer to tooling
+
+Consumers float on `tooling.ref`, run recorded `.git/agent-tooling/current`, and access network only through bootstrap/refresh; `.agent-tooling/hold` freezes adoption at a valid lowercase full SHA.
+
+`.git/agent-tooling/.refresh.lock` serializes refresh; busy skips; hour-old abandoned locks warn through verification without automatic removal.
+
+### Lifecycle environment
+
+`.agents/lib/git-environment.sh` clears repository-local Git variables and `GIT_NAMESPACE` after capturing consumer root, before sync/refresh enters it.
+
+Discovery/cleanup failure prevents installation; lifecycle sync stays nonblocking; chained hooks retain parent environment, global Git/transport settings remain available.
+
+### Offline installation repair
+
+`templates/install.sh` validates recorded cache under installation lock, runs revision check/setup, then verifier; invalid cache/profile denies.
+
+Repair restores worktree hooks without changing adoption/history/check timestamp; host bootstraps suppress initial probes but surface repair/refresh failures.
+
+### Linked-worktree plugin repair
+
+Claude project update can leave the current linked-worktree record stale; bootstrap uninstalls with `--keep-data`, reinstalls, and restores tracked settings byte-for-byte.
+
+Restoration is armed before uninstall; persistent staleness/error keeps session blocked; restoration failure retains/names backup.
+
+### Startup updates
+
+Consumer templates select host implementation by recorded SHA; installer delegates to `scripts/install.sh`, with standalone empty-cache fallback.
+
+| Owner | Contract |
+| --- | --- |
+| Released templates | Migration requires tooling 0.1.35 and all three loaders; automatic runs never overwrite tracked files. |
+| `.agents/lib/plugin-bootstrap.sh` | Shared release/adopted-runtime lookup; initialize failure state, refresh, then transfer original input to adopted implementation. |
+| Host reconciliation | Reconcile equal-old/ahead versions; opt-out mismatch needs explicit repair; Claude `--check` reads session state only. |
+| `scripts/refresh-installation.sh --if-due` | Shared locked polling stamp includes failures; retain old download fallback only after profile/install validation. |
+| `.agents/lib/tooling-command.sh` | Process-group TERM/KILL/reap; 30-second poll/adoption, 120-second host reconciliation including repair. |
+
+Shell owners release locks on EXIT/INT/TERM; SIGKILL may prevent cleanup; no hot replacement of loaded sessions or automatic stale-lock recovery is claimed.
+
+## Release maintenance
+
+| Change | Required action |
+| --- | --- |
+| Release | Bump generic/Claude/Codex manifests and both version fields in Claude/Copilot marketplaces; Codex marketplace follows `main`. |
+| Auditor task/dossier format | Bump version so stale sessions request reload instead of receiving incompatible tasks. |
+| Host packaging | Run parity, including symlink-free copies; install/reinstall using real CLI in empty isolated Codex home, checking fresh `skills/list` and `hooks/list`. |
+| Consumer adoption | Run `.agent-tooling/install.sh`, refresh host plugin, then reload/start a new task. |
+| Verification | Separately check recorded revision, worktree hook path, managed guidance, and installed version; preserve holds/unrelated edits. |
+
+Use [one-time migration instructions](../../../README.md#migrate-existing-consumers-once) for adopted-package loaders; installers never rewrite tracked loaders.
+
+| Older installation | Migration caution |
+| --- | --- |
+| 0.1.29–0.1.34 | Refresh both runtime/plugin for size, API, research, summary, skill discovery, and declared-host routing. |
+| Code begun under 0.1.30 | Attempt an editor edit before next commit/push to trigger missing design review; merged work remains accepted risk. |
+| Before 0.1.35 | Migrate all three consumer loaders once; preserve customizations/held releases. |
+| Markerless Git wiring | Retain launcher/PID contract; see [Git gates](../.githooks/README.md#git-gates). |
+| Earlier design verdicts | Legacy record/`research` alias remain readable; PASS now needs fresh advice; refresh/reload, including displayed async cards. |
+| Review/retry updates | Refresh whole plugin and start a new session so prompts, Git gates, and callbacks agree. |
+| Before 0.1.50 | Auditors cannot read the commit/push claim-check pointer ([#407](https://github.com/boxlite-ai/agent-tooling/issues/407)); refresh the host plugin, then reload. |
+| Before 0.1.51 | Designs with an inline research log: store it with `design-doc.sh log` and remove it before the next audit, which otherwise reports it as high ([#388](https://github.com/boxlite-ai/agent-tooling/issues/388)); refresh/reload. |
+
+Check Claude installation by exact `projectPath`; updating one linked worktree can leave another stale.
+
+Transcript discovery and runner contracts: [audit configuration](../.agents/hooks/audit/README.md), [proof/routing](../.agents/hooks/audit/architecture.md#audit-producers), [review criteria](../.agents/hooks/audit/architecture.md#commitpush-review-criteria).
+
+`full-transcript` fixtures prove handoff/access, not live model behavior; verify native hosts/platforms separately after adoption.
+
 ## Design, review, and audit history
 
 | Script / arguments | Responsibility and effects |
@@ -105,7 +174,7 @@ documented in [Contributing](../CONTRIBUTING.md#pull-request-descriptions).
 Native auditors use the [audit-history procedure](../.agents/prompts/audit/git-audit-history.md).
 History CLI context is JSON containing `repo_root`, `session`, `epoch`, `branch`,
 and `gate`; use the prescribed operations instead of editing state files.
-See [state contracts](../ARCHITECTURE.md#state-files) and the
+See [state contracts](../.agents/hooks/audit/state.md#state-files) and the
 [author-review workflow](../../../.github/workflows/author-review.yml).
 
 ## Confirmations and recovery
@@ -121,7 +190,7 @@ Git preparation checks the three-failure decision under the history lock.
 
 - `checkpoint` checks the same decision without creating an attempt; it returns exit 2 while waiting or stopped.
 - Five-minute expiry permits one reflected retry, preserving failed outcomes.
-- See [retry choices](../CONTRIBUTING.md#commitpush-retry-choices).
+- See [retry choices](../.agents/hooks/audit/README.md#commitpush-retry-choices).
 
 The recovery wrapper needs [record-api-failure.sh](../.agents/hooks/record-api-failure.sh) and a matching `CLAUDE_PROJECT_DIR`.
 
@@ -129,7 +198,7 @@ The recovery wrapper needs [record-api-failure.sh](../.agents/hooks/record-api-f
 - Run it with `--help` for exit codes.
 - Interactive recovery uses a separate [StopFailure hook](../.agents/hooks/resume-after-api-failure.sh).
 
-See [timed confirmations](../ARCHITECTURE.md#timed-confirmations) for supported
+See [timed confirmations](../docs/timed-confirmations.md#timed-confirmations) for supported
 host modes and response rules.
 
 ## Tests
@@ -146,5 +215,5 @@ make test:bootstrap
 Most commands have adjacent `*.test.sh` suites.
 
 - Installation also uses [template tests](../../../templates/install.test.sh) and [Git lifecycle tests](../.githooks/lifecycle.test.sh).
-- `audit-history-*.test.sh`, `audit-reconciliation.test.sh`, and `audit-reflection-*.test.sh` cover shared history behavior; `claude-timed-*.test.sh` cover launcher and question integration.
+- `audit-history-*.test.sh`, [the audit reconciliation suite](audit-reconciliation.test.sh), and `audit-reflection-*.test.sh` cover shared history. `claude-timed-*.test.sh` cover launcher and question integration.
 - `fixtures/` contains test helpers, not operator commands.

@@ -143,3 +143,41 @@ Record the host/version and OS; mark unavailable or untested combinations.
 Reuse [#196](https://github.com/boxlite-ai/agent-tooling/issues/196)'s schedule-reuse,
 recovery, opt-out, and retirement evidence. Local shell and prompt tests do not prove live delivery;
 follow the [scheduled-task testing guidance](https://learn.chatgpt.com/docs/automations#test-scheduled-tasks).
+
+## Producer and delivery contracts
+
+### Pending delivery
+
+`.agents/lib/pr-watch-pending.sh` retains 128 events outside generation journals; IDs derive from content, excluding time/generation.
+
+Publish before deduplication, acknowledge exact IDs; full capacity stops polling; interrupted acknowledgment may replay, so delivery is at least once.
+
+### Producer launch
+
+`pr_watch_start` in `.agents/lib/pr-watch-state.sh` starts the complete supervisor in a new POSIX session before children.
+
+`.githooks/pre-push` and `.agents/watch/pr-watch-start.sh` await bounded readiness; repeated starts reuse live generations; caller cleanup cannot kill them, but reboot persistence is absent.
+
+### PR delivery
+
+`.agents/hooks/post-remote-write-watch.sh` requests one ten-minute schedule/chat using `.agents/prompts/watch/pr-watch-schedule.md`; the agent verifies saved bindings.
+
+| Component | Contract |
+| --- | --- |
+| `.agents/watch/pr-watch-keepalive.sh`, `.agents/lib/pr-watch-schedule.sh` | Validate/reconcile targets; default status counts; `--events` returns ≤16 events for each of ≤32 targets. |
+| Empty/error/busy read | Empty stdout on no events; degraded/error returns nonzero/stderr while others deliver; busy returns 75 without alert. |
+| `.agents/watch/pr-watch-session.sh` | Durable branch intent/deadline/recovery under target lease; healthy polling resets failure count; cancellation/deadline prevents resurrection. |
+| Session `--keepalive` | Status-only recovery; reject start/cancel/ack combinations. |
+| Hook result | Accept `command`/`stdout` or `cmd`/`output`; supplied null/nonzero exit cannot arm. |
+
+- Report before acknowledging exact IDs; drain terminal events and recheck final status before pausing stopped schedules.
+- Reuse only confirmed task-local schedules; preserve unrelated automations, pauses, mutes, cancellations, deadlines, and notification preferences.
+- Pending delivery survives restarts; reconcile unexpected endings, report degraded coverage, and continue bounded retries.
+- Missing scheduling retains foreground reconciliation; Claude uses Monitor without hook-health checks; [consumer lifecycle](../../.agents/watch/consumer-lifecycle.md) owns cleanup.
+- Omit routine status on empty reads; script silence/storage/registration and text tests do not prove host delivery or rendered silence; scheduled inputs remain visible.
+
+### Watcher to commands
+
+`.agents/watch/pr-watch.sh` owns command groups and timeout/output monitors: commands use TERM then KILL; observers use KILL/wait.
+
+Launch-cleanup tests keep independent deadlines, report owned processes before teardown, and retain original cleanup assertions.
