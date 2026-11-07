@@ -102,6 +102,8 @@ source "$tooling_root/.agents/lib/audit-network.sh" || exit 2
 audit_network_load || exit 2
 # shellcheck source=../../lib/audit-diagnostics.sh
 source "$tooling_root/.agents/lib/audit-diagnostics.sh" || exit 2
+# shellcheck source=../../lib/audit-process-group.sh
+source "$tooling_root/.agents/lib/audit-process-group.sh" || exit 2
 # shellcheck source=../../lib/audit-reflection.sh
 source "$tooling_root/.agents/lib/audit-reflection.sh"
 # shellcheck source=../../lib/audit-reflection-gate.sh
@@ -548,14 +550,22 @@ cleanup_audit_lock() {
 finish_audit_diagnostic() {
   local status="$1" outcome=ERROR
   exec 4>&-
-  if (( audit_stderr_pid > 0 )); then wait "$audit_stderr_pid" 2>/dev/null || true; fi
+  if (( audit_stderr_pid > 0 )); then
+    if [[ "${audit_group_cleanup_unverified:-false}" != true ]] ||
+       : > "$audit_stderr_dir/abort"; then
+      wait "$audit_stderr_pid" 2>/dev/null || true
+    fi
+  fi
   if (( status == 130 || status == 143 )); then outcome=CANCELED
   elif (( status == 0 )); then outcome="${audit_verdict:-ERROR}"; fi
   audit_diagnostic_record "$project_dir" "$session_scope" verdict "$audit_generation" \
     "$audit_token" "$audit_route" "$audit_started_at" "$audit_process_status" "$status" \
     "$outcome" "$audit_stderr_file" || true
   [[ -z "$audit_stderr_file" ]] || rm -f "$audit_stderr_file"
-  [[ -z "$audit_stderr_dir" ]] || rmdir "$audit_stderr_dir" 2>/dev/null || true
+  if [[ -n "$audit_stderr_dir" ]]; then
+    rm -f "$audit_stderr_dir/abort" "$audit_stderr_dir/group-ready" "$audit_stderr_dir/group-kill"
+    rmdir "$audit_stderr_dir" 2>/dev/null || true
+  fi
 }
 
 # A session-scoped runner is authorized by the request the Stop gate wrote before
@@ -716,30 +726,30 @@ audit_group_has_residual_members() {  # leader-pid / pgid
       '
 }
 
-# The auditor runs in its own process group. Its leader is a runner-owned sentinel that
-# stays alive until teardown, so every negative-PGID signal is backed by a live identity
-# the runner still owns. Signal the group, give residual tools two bounded seconds for
-# cooperative cleanup, then KILL the still-anchored group. Normal completion usually has
-# only the sentinel left and therefore takes the immediate path.
 quiesce_audit_group() {
-  local i=0 owned_pgid="$audit_pgid"
+  local i=0 owned_pgid="$audit_pgid" cleanup_status=0
   if [[ "$owned_pgid" =~ ^[1-9][0-9]*$ \
-     && "$audit_group_identity_owned" == true ]] \
-     && kill -0 "$owned_pgid" 2>/dev/null; then
-    kill -TERM -- "-$owned_pgid" 2>/dev/null || true
-    while (( i < 40 )) && audit_group_has_residual_members "$owned_pgid"; do
-      sleep 0.05
-      (( i += 1 ))
-    done
-    # The sentinel ignores TERM and remains the group identity through escalation.
-    kill -KILL -- "-$owned_pgid" 2>/dev/null || true
-  fi
-  if [[ "$owned_pgid" =~ ^[1-9][0-9]*$ ]]; then
-    wait "$owned_pgid" 2>/dev/null || true
+     && "$audit_group_identity_owned" == true ]]; then
+    if audit_group_uses_controller; then
+      if ! audit_group_stop_controller "$audit_stderr_dir" 2 "$owned_pgid"; then
+        audit_group_cleanup_unverified=true
+        cleanup_status=1
+        printf 'run-verdict-audit.sh: could not verify audit group cleanup.\n' >&2
+      fi
+    elif kill -0 "$owned_pgid" 2>/dev/null; then
+      kill -TERM -- "-$owned_pgid" 2>/dev/null || true
+      while (( i < 40 )) && audit_group_has_residual_members "$owned_pgid"; do
+        sleep 0.05
+        (( i += 1 ))
+      done
+      kill -KILL -- "-$owned_pgid" 2>/dev/null || true
+    fi
+    if (( cleanup_status == 0 )); then wait "$owned_pgid" 2>/dev/null || true; fi
   fi
   stop_audit_group_event_monitor >/dev/null 2>&1 || true
   audit_group_identity_owned=false
   audit_pgid=0
+  return "$cleanup_status"
 }
 
 # Called indirectly by the signal traps installed in take_audit_lock().
@@ -1067,7 +1077,7 @@ start_request_monitor() {
       }
       select(undef, undef, undef, 0.05);
     }
-  ' "$audit_request_file" "$audit_request_body" "$runner_pid" 7>&- 8>&- 9>&- &
+  ' "$audit_request_file" "$audit_request_body" "$runner_pid" 7>&- 8>&- 9>&- 13>&- 14<&- &
   request_monitor_pid=$!
 }
 
@@ -1130,12 +1140,14 @@ publish_audit_group_completion() {  # command-status
 
 run_in_audit_group() {
   local command_prompt="$1" runner_pid="$$" command_status="" monitor_status=0
+  local diagnostic_abort=""
   shift
   audit_stderr_dir="$(mktemp -d "${TMPDIR:-/tmp}/boxlite-audit-stderr.XXXXXX")" || return 1
   audit_stderr_file="$audit_stderr_dir/tail"
   chmod 700 "$audit_stderr_dir" || return 1
   mkfifo "$audit_stderr_dir/pipe" || return 1
-  (exec 7>&-; audit_diagnostic_tail < "$audit_stderr_dir/pipe" > "$audit_stderr_file") &
+  if audit_group_uses_controller; then diagnostic_abort="$audit_stderr_dir/abort"; fi
+  (exec 7>&-; audit_diagnostic_tail "$diagnostic_abort" < "$audit_stderr_dir/pipe" > "$audit_stderr_file") &
   audit_stderr_pid=$!
   exec 4>"$audit_stderr_dir/pipe"
   rm -f "$audit_stderr_dir/pipe"
@@ -1144,6 +1156,10 @@ run_in_audit_group() {
   # publishes completion over a parent-owned unlinked FIFO, then remains alive so
   # audit_pgid is still an owned group identity during teardown.
   start_audit_group_event_channel || return 1
+  if audit_group_uses_controller && ! audit_group_open_controller "$audit_stderr_dir"; then
+    stop_audit_group_event_monitor >/dev/null 2>&1 || true
+    return 1
+  fi
   audit_launching=true
   set -m
   if [[ -n "$pending_cancel_code" ]]; then
@@ -1151,9 +1167,8 @@ run_in_audit_group() {
     audit_launching=false
     cancel_audit "$pending_cancel_code" "$pending_cancel_reason" "$pending_cancel_tombstone"
   fi
-  # The separate holder owns the kernel lease; model/tool descendants inherit none of it.
-  # TERM reaches the work but the sentinel deliberately survives it until KILL, retaining
-  # the kernel identity that makes a negative-PGID escalation safe.
+  # The lease holder is separate. The leader survives TERM, and on POSIX the
+  # controller can still signal the group if the leader dies before cleanup.
   (
     # Only the runner owns the lease-control writer. The audit group cannot keep that
     # channel open after parent cleanup, and model/tool descendants never receive either
@@ -1164,6 +1179,9 @@ run_in_audit_group() {
     # A dead event reader must make printf return failure, not terminate this PGID
     # anchor with SIGPIPE before its parent-notification fallback can run.
     trap '' PIPE
+    if audit_group_uses_controller && ! audit_group_start_controller "$audit_stderr_dir" 2; then
+      exit 125
+    fi
     if ! cd "$project_dir"; then
       command_status=125
     else
@@ -1194,6 +1212,7 @@ run_in_audit_group() {
   ) &
   audit_pgid=$!
   audit_group_identity_owned=true
+  if audit_group_uses_controller; then exec 12<&- 15>&-; fi
   exec 4>&-
   exec 9>&-
   audit_group_event_write_open=false
@@ -1211,7 +1230,6 @@ run_in_audit_group() {
     return 1
   fi
   quiesce_audit_group
-  return 0
 }
 
 fail_audit_publication() {  # diagnostic

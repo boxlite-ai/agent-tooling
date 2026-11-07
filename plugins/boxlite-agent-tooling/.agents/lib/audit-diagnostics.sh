@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 # Bounded local execution diagnostics; no dossier authority. Source without effects.
-audit_diagnostic_tail() {
+audit_diagnostic_tail() {  # [abort indicator]
   # Drain the stream even after the retained tail fills, so logging cannot block a child.
-  perl -e '
+  perl -MIO::Select -e '
+    my ($abort) = @ARGV;
+    my $input = length($abort) ? IO::Select->new(\*STDIN) : undef;
+    binmode(STDIN, ":raw") if $input;
     my $tail="";
-    while (read(STDIN,my $chunk,4096)) { $tail.=$chunk; $tail=substr($tail,-8192); }
+    while (1) {
+      my $stopping = $input && -e $abort;
+      if ($input && !$input->can_read($stopping ? 0 : 0.05)) {
+        last if $stopping;
+        next;
+      }
+      my $chunk;
+      my $count = $input ? sysread(STDIN, $chunk, 4096) : read(STDIN, $chunk, 4096);
+      last unless $count;
+      $tail .= $chunk;
+      $tail = substr($tail,-8192) if length($tail) > 8192;
+      last if $stopping;
+    }
     $tail =~ s/\e\[[0-?]*[ -\/]*[@-~]//g;
     $tail =~ s{([a-z][a-z0-9+.-]*://)[^\s/]+\@}{$1<redacted>\@}gi;
     $tail =~ s{((?:authorization\s*:\s*)?(?:bearer|basic)\s+)\S+}{$1<redacted>}gi;
@@ -16,7 +31,7 @@ audit_diagnostic_tail() {
     }
     $tail =~ s{[A-Za-z0-9_+=/.-]{24,}}{<redacted-token>}g;
     print substr($tail,-4096);
-  '
+  ' "${1:-}"
 }
 
 audit_diagnostic_record() { # root scope gate generation attempt route start process-exit runner-exit outcome stderr-file
@@ -24,7 +39,7 @@ audit_diagnostic_record() { # root scope gate generation attempt route start pro
   local started="$7" process_exit="$8" runner_exit="$9" outcome="${10}" stderr_file="${11}"
   local tail="" elapsed record path
   elapsed="$(( $(date +%s) - started ))"; (( elapsed >= 0 )) || elapsed=0
-  [[ -z "$stderr_file" || ! -f "$stderr_file" ]] || tail="$(audit_diagnostic_tail < "$stderr_file")"
+  [[ -z "$stderr_file" || ! -f "$stderr_file" ]] || tail="$(audit_diagnostic_tail '' < "$stderr_file")"
   record="$(jq -nc --arg gate "$gate" --arg generation "$generation" --arg attempt "$attempt" \
     --arg route "$route" --arg outcome "$outcome" --arg tail "$tail" \
     --argjson elapsed "$elapsed" --argjson process "$process_exit" --argjson runner "$runner_exit" \

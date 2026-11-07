@@ -81,6 +81,8 @@ fi
 source "$verdict_state_lib" || exit 2
 # shellcheck source=../../lib/audit-diagnostics.sh
 source "$tooling_root/.agents/lib/audit-diagnostics.sh" || exit 2
+# shellcheck source=../../lib/audit-process-group.sh
+source "$tooling_root/.agents/lib/audit-process-group.sh" || exit 2
 
 # Without subagent.sh, a check below fails the audit and names the file before the
 # timeout is first used.
@@ -936,26 +938,27 @@ stop_codex_monitors() {
 }
 
 quiesce_codex_group() {
-  local pgid="$active_audit_pgid" grace=20
+  local pgid="$active_audit_pgid" grace=20 cleanup_status=0
   stop_codex_monitors
   if [[ "$pgid" =~ ^[1-9][0-9]*$ \
-     && "$active_audit_group_owned" == true ]] \
-     && kill -0 "$pgid" 2>/dev/null; then
-    kill -TERM -- "-$pgid" 2>/dev/null || true
-    kill -TERM "$pgid" 2>/dev/null || true
-    while (( grace > 0 )) && audit_group_has_residual_members "$pgid"; do
-      perl -e 'select undef, undef, undef, 0.05'
-      grace=$(( grace - 1 ))
-    done
-    # The sentinel ignores TERM, preserving the owned PGID through escalation.
-    kill -KILL -- "-$pgid" 2>/dev/null || true
-    kill -KILL "$pgid" 2>/dev/null || true
-  fi
-  if [[ "$pgid" =~ ^[1-9][0-9]*$ ]]; then
-    wait "$pgid" 2>/dev/null || true
+     && "$active_audit_group_owned" == true ]]; then
+    if audit_group_uses_controller; then
+      audit_group_stop_controller "$audit_tmp_dir" 1 "$pgid" || cleanup_status=1
+    elif kill -0 "$pgid" 2>/dev/null; then
+      kill -TERM -- "-$pgid" 2>/dev/null || true
+      kill -TERM "$pgid" 2>/dev/null || true
+      while (( grace > 0 )) && audit_group_has_residual_members "$pgid"; do
+        perl -e 'select undef, undef, undef, 0.05'
+        grace=$(( grace - 1 ))
+      done
+      kill -KILL -- "-$pgid" 2>/dev/null || true
+      kill -KILL "$pgid" 2>/dev/null || true
+    fi
+    if (( cleanup_status == 0 )); then wait "$pgid" 2>/dev/null || true; fi
   fi
   active_audit_group_owned=false
   active_audit_pgid=0
+  return "$cleanup_status"
 }
 
 start_codex_monitors() {  # status reason raw-output stderr-log
@@ -974,7 +977,7 @@ start_codex_monitors() {  # status reason raw-output stderr-log
     print {$reason} "timeout\n" or exit 125;
     close($reason) or exit 125;
   ' "$audit_stop_seconds" "$runner_pid" "$status_file" "$reason_file" \
-    >/dev/null 2>&1 &
+    >/dev/null 2>&1 13>&- 14<&- &
   active_audit_timeout_pid=$!
   finish_audit_group_launch
 
@@ -1016,7 +1019,7 @@ start_codex_monitors() {  # status reason raw-output stderr-log
     }
   ' "$runner_pid" "$status_file" "$reason_file" \
     "$agent_output_max_bytes" "$raw_file" \
-    "$agent_stderr_max_bytes" "$log_file" >/dev/null 2>&1 &
+    "$agent_stderr_max_bytes" "$log_file" >/dev/null 2>&1 13>&- 14<&- &
   active_audit_limit_pid=$!
   finish_audit_group_launch
 }
@@ -1049,12 +1052,19 @@ MKTEMP
   : > "$log_file" || return 125
   chmod 600 "$raw_file" "$log_file" || return 125
 
+  if audit_group_uses_controller && ! audit_group_open_controller "$audit_tmp_dir"; then
+    codex_group_reason=process-failure
+    return 125
+  fi
   set -m
   audit_group_launch_in_progress=1
   (
     trap - EXIT
     trap ':' INT TERM
     trap '' PIPE
+    if audit_group_uses_controller && ! audit_group_start_controller "$audit_tmp_dir" 1; then
+      exit 125
+    fi
     printf '%s' "$prompt_text" | (
       local current_soft_limit current_hard_limit
       current_soft_limit="$(ulimit -S -f)" || exit 125
@@ -1100,8 +1110,8 @@ MKTEMP
         --output-last-message "$raw_file" \
         -
     ) >/dev/null 2> "$log_file"
-    # A monitor that trips kills this group mid-pipeline, and PIPESTATUS is then unset
-    # rather than zero — under `set -u` reading it aborted the subshell before it could
+    # Monitor-triggered teardown can interrupt this pipeline, leaving PIPESTATUS unset.
+    # Under `set -u` reading it aborted the subshell before it could
     # record any status, so the runner saw a missing status file and blamed the process
     # instead of the limit that actually fired. 125 keeps the "no usable status" shape
     # the caller already handles.
@@ -1117,6 +1127,7 @@ MKTEMP
   ) &
   active_audit_pgid=$!
   active_audit_group_owned=true
+  if audit_group_uses_controller; then exec 12<&- 15>&-; fi
   finish_audit_group_launch
   set +m
   start_codex_monitors "$status_file" "$reason_file" "$raw_file" "$log_file"
@@ -1128,7 +1139,10 @@ MKTEMP
   stop_codex_monitors
   reason_record="$(verdict_audit_read_single_record "$reason_file" 2>/dev/null || true)"
   status_record="$(verdict_audit_read_single_record "$status_file" 2>/dev/null || true)"
-  quiesce_codex_group
+  if ! quiesce_codex_group; then
+    codex_group_reason=process-failure
+    return 125
+  fi
 
   # Measured once the group is reaped, because the live monitor stops the moment a
   # status record exists and so never sees an auditor that crosses a ceiling and exits
