@@ -138,6 +138,7 @@ Use [one-time migration instructions](../../../README.md#migrate-existing-consum
 | Review/retry updates | Refresh whole plugin and start a new session so prompts, Git gates, and callbacks agree. |
 | Before 0.1.50 | Auditors cannot read the commit/push claim-check pointer ([#407](https://github.com/boxlite-ai/agent-tooling/issues/407)); refresh the host plugin, then reload. |
 | Before 0.1.51 | Designs with an inline research log: store it with `design-doc.sh log` and remove it before the next audit, which otherwise reports it as high ([#388](https://github.com/boxlite-ai/agent-tooling/issues/388)); refresh/reload. |
+| Before 0.1.52 | A recorded design PASS stays valid until its text changes; the next audit applies the How it works overview ([#421](https://github.com/boxlite-ai/agent-tooling/pull/421)) and best-practice line ([#430](https://github.com/boxlite-ai/agent-tooling/pull/430)) as high; Stop and GitHub gates enforce structure limits ([#423](https://github.com/boxlite-ai/agent-tooling/pull/423)); refresh/reload. |
 
 Check Claude installation by exact `projectPath`; updating one linked worktree can leave another stale.
 
