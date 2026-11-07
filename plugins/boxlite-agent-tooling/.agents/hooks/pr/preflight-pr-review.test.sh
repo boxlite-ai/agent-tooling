@@ -669,7 +669,8 @@ TABLE_BODY=$'| Trigger | Matrix |\n| --- | --- |\n| PR | Focused |\n| Weekly | F
 LEGACY_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
 LONG_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
 LONG_UNSPACED_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
-LIMIT_WORDS_BODY="$(printf 'x %.0s' {1..40})"$'\n\n'"$(printf 'x %.0s' {1..40})"$'\n\n'"$(printf 'x %.0s' {1..40})"
+# Short sentences keep these long bodies inside the structure limits (#419).
+LIMIT_WORDS_BODY="$(printf 'Ten short words keep each paragraph of this body compliant.\n\n%.0s' {1..12})"
 LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<40; i++) printf "字"}')"
 OVER_WORDS_BODY="$LIMIT_WORDS_BODY"$'\n\nx'
 OVER_CHARS_BODY="${LIMIT_CHARS_BODY}字"
@@ -709,7 +710,8 @@ run_body "120 words in short paragraphs → allow" "gh pr create $FEAT --body '$
 run_body "121 words in short paragraphs → allow" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
 run_body "long structured body edit → allow" "gh pr edit 42 $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
 run_body "40 Chinese characters at the paragraph boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
-run_body "41 Chinese characters → deny" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "deny"
+# The 40-word density cap is gone, and Chinese sentences skip the word limit (#419).
+run_body "41 Chinese characters → allow" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "passthrough"
 run_body "2000 four-byte characters plus summary → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
 run_body "body over 8,000 characters plus summary → allow" "gh pr create $FEAT --body '$HUGE_BODY'" "passthrough"
 run_body "long body edit → deny" "gh pr edit 42 $FEAT --body '$LONG_BODY'" "deny"
@@ -928,7 +930,7 @@ fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks/pr" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
 cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-target,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
-cp "$REPO_ROOT/.agents/lib/pr-size.jq" "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{pr-size.jq,reply-summary.pl} "$fixture_plugin/.agents/lib/"
 mkdir -p "$fixture_plugin/.agents/skills/boxlite-writing"
 cp "$REPO_ROOT/.agents/skills/boxlite-writing/SKILL.md" "$fixture_plugin/.agents/skills/boxlite-writing/"
 cp -R "$REPO_ROOT/.agents/prompts/." "$fixture_plugin/.agents/prompts/"
