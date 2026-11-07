@@ -107,9 +107,21 @@ check '26-word sentence' "gh issue comment 7 --body '$(printf 'word %.0s' {1..25
 check 'two-item list' "gh issue comment 7 --body '- One.
 - Two.'" allow
 check 'bullet limit' "gh issue comment 7 --body '$bullet'" deny 'A list has 1 items; keep 2–7'
-check 'nested list' "gh issue comment 7 --body '- One.
+check 'two-level list' "gh issue comment 7 --body '- One.
+  - A.
+  - B.
+- Two.'" allow
+check 'one-item sub-list' "gh issue comment 7 --body '- One.
   - Inner.
-- Two.'" deny 'A list is nested'
+- Two.'" deny 'A sub-list has 1 items; keep 2–3'
+check 'four-level list' "gh issue comment 7 --body '- One.
+  - A.
+    - x.
+      - deep.
+      - deeper.
+    - y.
+  - B.
+- Two.'" deny 'A list nests 4 levels; keep 3 or fewer'
 check 'a later TL;DR leaves the sentence limit' "gh issue comment 7 --body '$dense
 
 ## TL;DR

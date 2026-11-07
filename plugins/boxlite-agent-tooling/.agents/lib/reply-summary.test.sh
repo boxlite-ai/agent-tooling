@@ -83,7 +83,14 @@ expect_structure loose_items  '' $'1. One.\n\n2. Two.'
 expect_structure columns_1    'table 1' $'| a |\n| --- |\n| 1 |'
 expect_structure columns_5    '' $'| a | b | c | d | e |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |'
 expect_structure columns_6    'table 6' $'| a | b | c | d | e | f |\n|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 |'
-expect_structure nested       'nested 1' $'- One.\n  - Inner.\n- Two.'
+expect_structure sub_items_2  '' $'- One.\n  - A.\n  - B.\n- Two.'
+expect_structure sub_items_3  '' $'- One.\n  - A.\n  - B.\n  - C.\n- Two.'
+expect_structure sub_items_1  'sublist 1' $'- One.\n  - Inner.\n- Two.'
+expect_structure sub_items_4  'sublist 4' $'- One.\n  - A.\n  - B.\n  - C.\n  - D.\n- Two.'
+expect_structure depth_3      '' $'- One.\n  - A.\n    - x.\n    - y.\n  - B.\n- Two.'
+expect_structure depth_4      'depth 4' $'- One.\n  - A.\n    - x.\n      - deep.\n      - deeper.\n    - y.\n  - B.\n- Two.'
+expect_structure sibling_back '' $'1. One.\n   - A.\n   - B.\n2. Two.\n   - C.\n   - D.'
+expect_structure top_items_7  '' $'- One.\n  - A.\n  - B.\n- 2.\n- 3.\n- 4.\n- 5.\n- 6.\n- 7.'
 expect_structure list_then_prose '' $'- One.\n- Two.\n\nAfter the list.'
 
 echo 'Table recognition: tables are skipped, malformed delimiters remain prose'
@@ -134,7 +141,9 @@ fi
 echo 'Limits match the boxlite-writing skill'
 skill="$LIB_DIR/../skills/boxlite-writing/SKILL.md"
 for phrase in "at most ${reply_summary_max_sentence_words} words" \
-  "${reply_summary_min_list_items}–${reply_summary_max_list_items} flat items" \
+  "${reply_summary_min_list_items}–${reply_summary_max_list_items} items" \
+  "sub-lists of ${reply_summary_min_sublist_items}–${reply_summary_max_sublist_items} items" \
+  "at most ${reply_summary_max_list_depth} levels" \
   "${reply_summary_min_table_columns}–${reply_summary_max_table_columns} columns" \
   "up to three for connected reasoning" "or three for connected reasoning"; do
   if grep -qF -- "$phrase" "$skill"; then ok "skill says: $phrase"; else bad "skill lacks: $phrase"; fi

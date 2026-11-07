@@ -685,7 +685,7 @@ Internal instructions/tool payloads need no summary; Stop does not shorten prose
 
 | Check | Contract |
 | --- | --- |
-| Limits | ≤3 sentences per prose block or list item; ≤25 words per sentence; lists of 2–7 flat items; tables of 2–5 columns. |
+| Limits | ≤3 sentences per prose block or list item; ≤25 words per sentence; lists of 2–7 items, sub-lists of 2–3, at most 3 levels; tables of 2–5 columns. |
 | Splitting | Perl 5.22+ `\b{sb}` (UAX #29) after masking code spans, URLs, link targets, and abbreviations; a forced break before `#`, a digit, or inline code after terminal punctuation. |
 | Skipped | Fences, HTML comments, headings, table cells, blockquotes; the TL;DR and Chinese/Japanese sentences skip the word limit. |
 | Scope | Stop replies of any length and every inspected GitHub body; design registration checks only the summary. |

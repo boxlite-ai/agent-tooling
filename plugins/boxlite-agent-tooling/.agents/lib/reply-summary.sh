@@ -11,6 +11,9 @@ reply_summary_max_sentences=3
 reply_summary_max_sentence_words=25
 reply_summary_min_list_items=2
 reply_summary_max_list_items=7
+reply_summary_min_sublist_items=2
+reply_summary_max_sublist_items=3
+reply_summary_max_list_depth=3
 reply_summary_min_table_columns=2
 reply_summary_max_table_columns=5
 reply_summary_short_max_words=80
@@ -36,7 +39,8 @@ reply_summary_structure() {  # text -> report
   report="$(printf '%s\n' "${1-}" | _reply_summary_measure structure \
     "$reply_summary_max_sentences" "$reply_summary_max_sentence_words" \
     "$reply_summary_min_list_items" "$reply_summary_max_list_items" \
-    "$reply_summary_min_table_columns" "$reply_summary_max_table_columns" 2>/dev/null)" || return 1
+    "$reply_summary_min_sublist_items" "$reply_summary_max_sublist_items" \
+    "$reply_summary_max_list_depth" "$reply_summary_min_table_columns" "$reply_summary_max_table_columns" 2>/dev/null)" || return 1
   printf '%s' "$report"
 }
 

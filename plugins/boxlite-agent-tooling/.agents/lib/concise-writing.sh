@@ -113,7 +113,8 @@ concise_writing_check_structure() { # Markdown, optional no-hint
       item) printf -- '- A list item has %s sentences; keep %s or fewer: "%s"\n' "$count" "$limit" "$excerpt" ;;
       sentence) printf -- '- A sentence has %s words; keep %s or fewer: "%s"\n' "$count" "$limit" "$excerpt" ;;
       list) printf -- '- A list has %s items; keep %s: "%s"\n' "$count" "$limit" "$excerpt" ;;
-      nested) printf -- '- A list is nested; keep lists flat: "%s"\n' "$excerpt" ;;
+      sublist) printf -- '- A sub-list has %s items; keep %s: "%s"\n' "$count" "$limit" "$excerpt" ;;
+      depth) printf -- '- A list nests %s levels; keep %s or fewer: "%s"\n' "$count" "$limit" "$excerpt" ;;
       table) printf -- '- A table has %s columns; keep %s: "%s"\n' "$count" "$limit" "$excerpt" ;;
     esac
   done <<< "$report"
