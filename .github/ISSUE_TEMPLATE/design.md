@@ -21,7 +21,7 @@ about: Describe a problem, researched approach, and validation plan.
 
 ## How it works
 
-<!-- How does the approach work, and what does it cost? -->
+<!-- In one line, what changes? Show one concrete example, then explain the mechanism and its cost. Define project-specific terms. -->
 
 ## Validation
 
