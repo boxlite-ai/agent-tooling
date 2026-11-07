@@ -88,7 +88,8 @@ check 'code example is not a link' "$draft '${SUMMARY_PREFIX}\`$DESIGN_TEST_URL\
 fenced_body=$'```text\n'"$DESIGN_TEST_URL"
 check 'unclosed code fence is not a link' "$draft '${SUMMARY_PREFIX}$fenced_body'" 'link the registered design doc'
 # shellcheck disable=SC2016 # Literal Markdown backticks, never shell substitution.
-for fenced_body in $'> ```\n> '"$DESIGN_TEST_URL"$'\n> ```' $'- ```\n  '"$DESIGN_TEST_URL"$'\n  ```' '``example` '"$DESIGN_TEST_URL"' `example``'; do
+# The fenced list item has a sibling: one-item lists break the structure limits (#419).
+for fenced_body in $'> ```\n> '"$DESIGN_TEST_URL"$'\n> ```' $'- ```\n  '"$DESIGN_TEST_URL"$'\n  ```\n- Second item.' '``example` '"$DESIGN_TEST_URL"' `example``'; do
   check 'nested and multi-backtick examples are not links' "$draft '${SUMMARY_PREFIX}$fenced_body'" 'link the registered design doc'
 done
 check 'URL inside another URL is not a link' "$draft '${SUMMARY_PREFIX}https://example.invalid/($DESIGN_TEST_URL)'" 'link the registered design doc'

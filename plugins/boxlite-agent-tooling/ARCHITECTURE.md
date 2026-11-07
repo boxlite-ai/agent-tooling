@@ -159,8 +159,8 @@ Hidden source URLs do not count; direct API/browser writes bypass this CLI bound
 
 | Check | Contract |
 | --- | --- |
-| Density | Reuse `.agents/lib/reply-summary.sh`: paragraphs/items ≤40 words unless a valid opening TL;DR exists; fences/tables excluded. |
-| Summary | Inspected bodies need ≤39-word TL;DR; comments, reviews, and close/reopen text ≤80 words are exempt when density fits. |
+| Structure | Every inspected body keeps the [structure limits](#structure-limits), TL;DR or not; one denial lists summary and structure fixes. |
+| Summary | Inspected bodies need ≤39-word TL;DR; comments, reviews, and close/reopen text ≤80 words are exempt. |
 | Counting | Unicode-aware; Chinese/Japanese characters count individually; table words contribute to totals. |
 | Bounds | Empty text fails; no document word cap or shared character ceiling; snapshot/render limits remain separate. |
 | Privacy | Scan titles and bodies of any length, including fences/comments; errors deny without echoing private text. |
@@ -662,7 +662,7 @@ Monotonic fixed-preview growth supports logarithmic selection; byte/UTF-8 behavi
 
 ### Stop gate to verdict check
 
-After confirmations and TL;DR, `.agents/hooks/stop-gate.sh` executes `.agents/hooks/audit/preflight-verdict-check.sh` with unchanged payload, preserving output/status/signals; missing dependencies deny.
+After TL;DR, structure, and confirmation checks, `.agents/hooks/stop-gate.sh` executes `.agents/hooks/audit/preflight-verdict-check.sh` with unchanged payload, preserving output/status/signals; missing dependencies deny.
 
 ### Mandatory summary
 
@@ -677,7 +677,20 @@ After confirmations and TL;DR, `.agents/hooks/stop-gate.sh` executes `.agents/ho
 | Stop continuation | Check only when `stop_hook_active` is false; one correction maximum, then continue other gates. |
 | Missing/empty text | Missing uses bounded transcript; unreadable/truncated denies even on continuation; explicit empty never replays prior text. |
 
-Internal instructions/tool payloads need no summary; Stop does not shorten prose or enforce sentence/form/list limits and cannot retract streamed commentary.
+Internal instructions/tool payloads need no summary; Stop does not shorten prose or judge form choice and cannot retract streamed commentary.
+
+### Structure limits
+
+`.agents/lib/reply-summary.pl` measures the [writing skill](.agents/skills/boxlite-writing/SKILL.md) limits; `.agents/lib/reply-summary.sh` owns the numbers, and its test ties them to the skill text; `.agents/lib/concise-writing.sh` words the correction ([#419](https://github.com/boxlite-ai/agent-tooling/issues/419)).
+
+| Check | Contract |
+| --- | --- |
+| Limits | ≤3 sentences per prose block or list item; ≤25 words per sentence; lists of 2–7 flat items; tables of 2–5 columns. |
+| Splitting | Perl 5.22+ `\b{sb}` (UAX #29) after masking code spans, URLs, link targets, and abbreviations; a forced break before `#`, a digit, or inline code after terminal punctuation. |
+| Skipped | Fences, HTML comments, headings, table cells, blockquotes; the TL;DR and Chinese/Japanese sentences skip the word limit. |
+| Scope | Stop replies of any length and every inspected GitHub body; design registration checks only the summary. |
+| Correction | One message lists up to five violations and counts the rest; Stop names the skill once; a checker failure fails closed, and Stop exits 2. |
+| Bounds | Whitespace and long punctuation runs collapse before splitting, so parsing stays linear. |
 
 GitHub CLI and fetched design content keep independent mandatory checks; shared guidance applies across unsupported surfaces too.
 

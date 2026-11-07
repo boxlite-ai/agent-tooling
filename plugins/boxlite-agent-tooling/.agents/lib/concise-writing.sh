@@ -3,7 +3,7 @@
 # Source only; callers own dependency checks, host delivery and failure policy.
 
 concise_writing_check_summary() { # Markdown, anywhere|first, optional word limit, optional no-hint
-  local location="${2:-anywhere}" max_words="${3:-0}" summary counts status=0 verb=add
+  local location="${2:-anywhere}" max_words="${3:-0}" summary words status=0 verb=add
   local skill_hint='; apply boxlite-writing'
   # Name the skill unless the caller appends its own reminder, as the PR gate does for
   # GitHub writing denials.
@@ -69,16 +69,16 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
     print $summary;
   ' "$location")" || status=$?
   if (( status == 0 )); then
-    counts="$(reply_summary_word_counts "$summary")" || status=6
-    [[ -n "$counts" ]] || status=6
+    words="$(reply_summary_word_count "$summary")" || status=6
+    [[ -n "$words" ]] || status=6
   fi
   # One line each: the failed condition, then a literal fix that passes when followed.
   # Checker failures omit the skill hint: rewording cannot repair them.
   # shellcheck disable=SC2016 # Render literal Markdown headings, never shell expansion.
   case "$status" in
-    0) (( max_words == 0 || ${counts%% *} <= max_words )) && return 0
+    0) (( max_words == 0 || words <= max_words )) && return 0
        printf 'TL;DR has %s words (limit %s): keep one short sentence, then a same-level heading like `## Details`%s\n' \
-         "${counts%% *}" "$max_words" "$skill_hint" ;;
+         "$words" "$max_words" "$skill_hint" ;;
     3) [[ "$location" != first ]] || verb='start with'
        printf 'TL;DR heading missing: %s `## TL;DR`, one short sentence, then `## Details` before more text%s\n' \
          "$verb" "$skill_hint" ;;
@@ -88,6 +88,39 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
     6) printf 'TL;DR word counter failed: fix the counter; rewording will not help\n' ;;
     *) printf 'TL;DR parser (perl) failed: fix it; rewording will not help\n' ;;
   esac
+  return 1
+}
+
+concise_writing_max_listed_violations=5
+
+# One correction listing up to five broken structure limits, each with a positive,
+# numeric fix (#419). Returns 0 when every limit holds, 1 with the list, and 2 when
+# the checker failed, so callers fail closed.
+concise_writing_check_structure() { # Markdown, optional no-hint
+  local report rule count limit excerpt total=0 skill_hint='; apply boxlite-writing'
+  [[ "${2:-}" != no-hint ]] || skill_hint=''
+  report="$(reply_summary_structure "$1")" || {
+    printf 'Structure checker (perl) failed: fix it; rewording will not help\n'
+    return 2
+  }
+  [[ -n "$report" ]] || return 0
+  printf 'Structure limits broken%s:\n' "$skill_hint"
+  while IFS=$'\t' read -r rule count limit excerpt; do
+    total=$((total + 1))
+    (( total <= concise_writing_max_listed_violations )) || continue
+    case "$rule" in
+      prose) printf -- '- A prose block has %s sentences; keep %s or fewer: "%s"\n' "$count" "$limit" "$excerpt" ;;
+      item) printf -- '- A list item has %s sentences; keep %s or fewer: "%s"\n' "$count" "$limit" "$excerpt" ;;
+      sentence) printf -- '- A sentence has %s words; keep %s or fewer: "%s"\n' "$count" "$limit" "$excerpt" ;;
+      list) printf -- '- A list has %s items; keep %s: "%s"\n' "$count" "$limit" "$excerpt" ;;
+      nested) printf -- '- A list is nested; keep lists flat: "%s"\n' "$excerpt" ;;
+      table) printf -- '- A table has %s columns; keep %s: "%s"\n' "$count" "$limit" "$excerpt" ;;
+    esac
+  done <<< "$report"
+  (( total <= concise_writing_max_listed_violations )) \
+    || printf -- '- %s more not shown\n' "$((total - concise_writing_max_listed_violations))"
+  # One-correction replays lost facts when splits detached plans or merged items (#419).
+  printf 'Rewrite in place: keep every fact, number, caveat and plan-versus-done wording; split sentences only at complete thoughts.\n'
   return 1
 }
 

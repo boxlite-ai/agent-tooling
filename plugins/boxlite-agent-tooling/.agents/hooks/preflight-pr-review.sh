@@ -53,7 +53,7 @@ load_writing_policy() {
       exit 2
     }
   done
-  for library in reply-summary.sh github-writing.sh concise-writing.sh; do
+  for library in reply-summary.sh reply-summary.pl github-writing.sh concise-writing.sh; do
     [[ -r "$tooling_root/.agents/lib/$library" ]] || {
       printf 'preflight-pr-review: writing library unavailable: %s\n' "$library" >&2
       exit 2

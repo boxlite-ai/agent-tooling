@@ -40,27 +40,27 @@ github_writing_check_privacy() { # literal published text; no transcript access
 }
 
 github_writing_check_body() { # body [comment]
-  local body="$1" kind="${2-}" density=0
+  local body="$1" kind="${2-}" summary_error="" structure_error=""
   if [[ "$body" != *[![:space:]]* ]]; then
     printf 'GitHub text is empty.'
     return 1
   fi
   # No length limit: GitHub enforces its own, and these checks stay linear (#310).
   github_writing_check_privacy "$body" || return 1
-  # Complete artifacts need room for evidence, so no total word cap applies. A leading
-  # TL;DR already gives readers the short version, so its details may also be dense.
-  concise_writing_check_summary "$body" first 39 no-hint >/dev/null && return 0
-  reply_summary_is_dense "$body" || density=$?
-  # shellcheck disable=SC2016 # Render literal Markdown headings, never shell expansion.
-  case "$density" in
-    # The PR gate appends the shared skill reminder to every writing denial. Short
-    # comments need no summary once their blocks fit; documents keep their summary.
-    1) [[ "$kind" == comment ]] && reply_summary_is_short "$body" && return 0
-       concise_writing_check_summary "$body" anywhere 39 no-hint; return $? ;;
-    0) printf 'GitHub text has a paragraph over %s words or a list item over %s words: shorten them, or start with `## TL;DR` and one short sentence.' \
-         "$reply_summary_paragraph_max_words" "$reply_summary_item_max_words" ;;
-    *) printf 'GitHub text could not be counted.' ;;
-  esac
+  # Complete artifacts need room for evidence, so no total word cap applies. The PR
+  # gate appends the shared skill reminder to every writing denial. Short comments
+  # need no summary; documents keep theirs. Structure limits apply to every body, and
+  # one denial lists both kinds of correction (#419).
+  if ! { [[ "$kind" == comment ]] && reply_summary_is_short "$body"; }; then
+    summary_error="$(concise_writing_check_summary "$body" anywhere 39 no-hint)"
+  fi
+  structure_error="$(concise_writing_check_structure "$body" no-hint)"
+  [[ -n "$summary_error$structure_error" ]] || return 0
+  if [[ -n "$summary_error" && -n "$structure_error" ]]; then
+    printf '%s\n%s' "$summary_error" "$structure_error"
+  else
+    printf '%s' "$summary_error$structure_error"
+  fi
   return 1
 }
 

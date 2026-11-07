@@ -20,7 +20,7 @@
 {"body": "`https://github.com/example/repo/issues/1`", "html": "<p><code class=\"notranslate\">https://github.com/example/repo/issues/1</code></p>"}
 {"body": "```text\nhttps://github.com/example/repo/issues/1", "html": "<pre lang=\"text\" class=\"notranslate\"><code class=\"notranslate\">https://github.com/example/repo/issues/1\n</code></pre>"}
 {"body": "> ```\n> https://github.com/example/repo/issues/1\n> ```", "html": "<blockquote>\n<pre class=\"notranslate\"><code class=\"notranslate\">https://github.com/example/repo/issues/1\n</code></pre>\n</blockquote>"}
-{"body": "- ```\n  https://github.com/example/repo/issues/1\n  ```", "html": "<ul>\n<li>\n<pre class=\"notranslate\"><code class=\"notranslate\">https://github.com/example/repo/issues/1\n</code></pre>\n</li>\n</ul>"}
+{"body": "- ```\n  https://github.com/example/repo/issues/1\n  ```\n- Second item.", "html": "<ul>\n<li>\n<pre class=\"notranslate\"><code class=\"notranslate\">https://github.com/example/repo/issues/1\n</code></pre>\n</li>\n<li>Second item.</li>\n</ul>"}
 {"body": "``example` https://github.com/example/repo/issues/1 `example``", "html": "<p><code class=\"notranslate\">example` https://github.com/example/repo/issues/1 `example</code></p>"}
 {"body": "https://example.invalid/(https://github.com/example/repo/issues/1)", "html": "<p><a href=\"https://example.invalid/(https://github.com/example/repo/issues/1)\" rel=\"nofollow\">https://example.invalid/(https://github.com/example/repo/issues/1)</a></p>"}
 {"body": "[https://github.com/example/repo/issues/1](https://example.invalid)", "html": "<p><a href=\"https://example.invalid\" rel=\"nofollow\">https://github.com/example/repo/issues/1</a></p>"}
