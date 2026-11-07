@@ -90,6 +90,87 @@ design_doc_verify() { # URL -> SHA-256 of the verified content, only after a liv
   printf '%s' "$body" | perl -MDigest::SHA=sha256_hex -0777 -e 'print sha256_hex(scalar(<STDIN>) // "")'
 }
 
+_design_doc_sha256() { # stdin -> SHA-256 hex of its exact bytes
+  perl -MDigest::SHA=sha256_hex -0777 -e 'print sha256_hex(scalar(<STDIN>) // "")'
+}
+
+# A design's identity apart from its URL spelling: a Notion title slug, a `www` host, or a
+# dashed page ID names the same page, so they share one research log (design #388).
+_design_doc_id() { # canonical provider URL -> design ID
+  if [[ "$1" =~ ^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)$ ]]; then
+    printf 'github:%s#%s' "$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')" \
+      "${BASH_REMATCH[2]}"
+  elif [[ "$1" =~ ^https://linear\.app/[A-Za-z0-9_-]+/issue/([A-Za-z0-9]+-[1-9][0-9]*)(/[A-Za-z0-9_-]+)?$ ]]; then
+    printf 'linear:%s' "$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')"
+  elif [[ "$1" =~ ^https://(www\.)?notion\.so/([A-Za-z0-9_-]+/)?([A-Za-z0-9_-]*-)?([0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$ ]]; then
+    printf 'notion:%s' "$(printf '%s' "${BASH_REMATCH[4]//-/}" | tr '[:upper:]' '[:lower:]')"
+  else
+    _design_doc_error 'use a canonical GitHub issue, notion.so page, or Linear issue URL'
+  fi
+}
+
+# Logs live in the clone's common directory, so every worktree of the clone sees one store
+# and removing a worktree keeps them; one file per design ID (design #388).
+_design_doc_log_dir() { # repository root -> research log directory
+  local common
+  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  printf '%s/agent-tooling-design-log' "$common"
+}
+
+_design_doc_log_path() { # repository root, URL -> that design's log record path
+  local directory id
+  directory="$(_design_doc_log_dir "$1")" || return 1
+  id="$(_design_doc_id "$2")" || return 1
+  printf '%s/%s.json' "$directory" "$(printf '%s' "$id" | _design_doc_sha256)"
+}
+
+# Prints the validated {id, log} record; status 2 means no log was ever stored. A record
+# for another design, or anything but a bounded regular file, fails closed.
+_design_doc_log_record() { # repository root, URL -> record JSON
+  local path snapshot id
+  path="$(_design_doc_log_path "$1" "$2")" || return 1
+  id="$(_design_doc_id "$2")" || return 1
+  [[ -e "$path" || -L "$path" ]] || return 2
+  if snapshot="$(verdict_audit_read_json_snapshot "$path" 2>/dev/null)" &&
+     jq -ce --arg id "$id" 'select(type == "object" and keys == ["id","log"]
+       and .id == $id and (.log | type == "string"))' <<<"${snapshot#*$'\n'}" 2>/dev/null; then
+    return 0
+  fi
+  _design_doc_error "research log record is unreadable or malformed: $path"
+  return 1
+}
+
+# The hash every verdict, advice, and deadline record binds. A design that never stored a
+# log keeps its plain hash; a stored log, even the empty tombstone of a deleted one, is
+# bound under a version label, so the result never equals a plain hash.
+_design_doc_digest() { # repository root, URL -> content SHA-256
+  local digest record status=0
+  digest="$(design_doc_verify "$2")" || return 1
+  record="$(_design_doc_log_record "$1" "$2")" || status=$?
+  case "$status" in
+    0) printf 'agent-tooling-design-log-v1\n%s\n%s\n' "$digest" \
+         "$(jq -j .log <<<"$record" | _design_doc_sha256)" | _design_doc_sha256 ;;
+    2) printf '%s' "$digest" ;;
+    *) return 1 ;;
+  esac
+}
+
+# What the auditor and advisor read: the design, then its stored log and that log's hash.
+_design_doc_show_text() { # repository root, URL -> text
+  local body record status=0 note=''
+  body="$(_design_doc_content "$2")" || return 1
+  record="$(_design_doc_log_record "$1" "$2")" || status=$?
+  case "$status" in
+    2) printf '%s\n' "$body"; return 0 ;;
+    0) ;;
+    *) return 1 ;;
+  esac
+  [[ -n "$(jq -r .log <<<"$record")" ]] || note=' (deleted)'
+  printf '%s\n\n## Research log (local)\n\nsha256: %s%s\n\n' "$body" \
+    "$(jq -j .log <<<"$record" | _design_doc_sha256)" "$note"
+  jq -j .log <<<"$record"
+}
+
 _design_doc_jq() { # jq arguments -> jq with this library's modules on its path
   jq -L "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" "$@"
 }
@@ -250,7 +331,8 @@ _design_doc_advice_write() { # verdict path, root, branch, URL, live SHA-256, ad
   [[ -n "$verdict_id" ]] || {
     _design_doc_error 'no PASS or FAIL matches the live design; advice follows a recorded verdict'; return 1;
   }
-  body="$(_design_doc_content "$4")" || {
+  # Advice may quote the stored log too, since the advisor reads both (design #388).
+  body="$(_design_doc_show_text "$2" "$4")" || {
     _design_doc_error 'cannot read the design to check advice anchors'; return 1;
   }
   kept="$(_design_doc_advice_anchor "$2" "$body" "$(jq '.findings | length' <<<"$state")" "$6")" \
@@ -384,7 +466,7 @@ design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working 
          .url | strings' <<<"$record")" || {
         _design_doc_error 'document binding does not match this worktree and branch'; return 1;
       }
-      digest="$(design_doc_verify "$url")" || return 1
+      digest="$(_design_doc_digest "$root" "$url")" || return 1
       [[ "$branch" == "$(_design_doc_context "$root")" ]] || return 1
       case "$operation" in
         edit) _design_doc_audit_passed "$audit_path" "$root" "$branch" "$url" "$digest" || return 3 ;;
@@ -411,11 +493,31 @@ design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working 
   printf '%s\n' "$url"
 }
 
-design_doc_show() { # working directory -> content of the verified binding
+design_doc_show() { # working directory -> content of the verified binding and its log
   local url
   # Auditors read through the binder's authenticated reader; provider pages need a login.
   url="$(design_doc_binding check "$1")" || return 1
-  _design_doc_content "$url" || {
+  _design_doc_show_text "$1" "$url" || {
     _design_doc_error 'cannot read document (check URL, provider access, and credentials)'; return 1;
   }
+}
+
+# Stores the bound design's research log from stdin (design #388). Empty input is the
+# tombstone of a deleted log; the record is replaced atomically and never removed.
+design_doc_log_store() { # working directory -> verified URL
+  local input url directory id
+  input="$(head -c 128001; printf x)" || return 1
+  input="${input%x}"
+  (( ${#input} <= 32000 )) || { _design_doc_error 'research log exceeds 32,000 characters'; return 1; }
+  url="$(design_doc_binding check "$1")" || return 1
+  directory="$(_design_doc_log_dir "$1")" || return 1
+  id="$(_design_doc_id "$url")" || return 1
+  [[ -L "$directory" ]] && { _design_doc_error "research log directory is a symlink: $directory"; return 1; }
+  mkdir -p "$directory" || return 1
+  jq -nc --arg id "$id" --arg log "$input" '{id:$id, log:$log}' |
+    verdict_audit_write_atomic "$(_design_doc_log_path "$1" "$url")" || {
+    _design_doc_error "cannot store the research log under $directory; the stored log is unchanged"
+    return 1
+  }
+  printf '%s\n' "$url"
 }

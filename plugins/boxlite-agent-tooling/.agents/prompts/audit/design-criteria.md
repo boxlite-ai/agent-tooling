@@ -13,7 +13,7 @@ description: Design audit rules before any code edit.
 
 1. Probe before reading the design's sources: 3–5 queries, one for counterevidence; stop after 3 empty; cap 12.
 2. Probe ≥2 paper indexes (arXiv, OpenAlex, Europe PMC; one the log lacks) and ≥2 project engines (GitHub, registries); chase one hop.
-3. Search: check the per-source log (tool, date, queries, stop status), known items, dispositions, query terms; re-run 1–2 logged queries.
+3. Search: check the stored log (tool, date, queries, stop status), known items, dispositions, query terms; re-run 1–2 logged queries.
 4. Search gaps: a missing protocol element; a missed probe item changing the approach, scope or alternatives.
 5. Claims: split load-bearing claims into atomic sub-claims; check fidelity (originals; quotes and `file:line` at HEAD).
 6. Also check source of truth, failure modes, transfer, local fit, unknowns, alternatives (best SOTA option, reuse, simplify, nothing).

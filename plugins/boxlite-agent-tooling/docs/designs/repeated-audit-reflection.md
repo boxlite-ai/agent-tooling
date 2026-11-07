@@ -10,8 +10,6 @@ Example: run 1 finds missing lock F1; run 2 closes F1 but discovers an older cle
 
 ## Related work and lessons
 
-Repository comparisons use inspected revision `15819052960ad81013bd0a524cef054c79af8576`.
-
 | Source | Observed approach and proposed use |
 | --- | --- |
 | [Verdict retry, lines 1972–1993](https://github.com/boxlite-ai/agent-tooling/blob/15819052960ad81013bd0a524cef054c79af8576/plugins/boxlite-agent-tooling/.agents/hooks/audit/preflight-verdict-check.sh#L1972-L1993); [prior snapshot, lines 750–776](https://github.com/boxlite-ai/agent-tooling/blob/15819052960ad81013bd0a524cef054c79af8576/plugins/boxlite-agent-tooling/.agents/hooks/audit/run-verdict-audit.sh#L750-L776) | Retains a FAIL and supplies one prior dossier. Preserve retry deduplication; add complete bounded cycle history. |
@@ -55,8 +53,6 @@ Prompt-only reminders lack persistent evidence.
 - Banning late findings hides defects.
 - A separate reflection reviewer adds another failure loop; use the existing independent auditor.
 
-Test duplicate delivery, missing/stale reflection, omitted findings/coverage, reopenings, earlier misses, reversals, false attribution, epochs, cancellation, unsafe snapshots, exhaustion, receipts, and summary shortcuts. Use deterministic barriers and fully reverted-production red/green checks for fixes.
+Test duplicate delivery, missing/stale reflection, omitted findings/coverage, reopenings, earlier misses, reversals, false attribution, epochs, cancellation, unsafe snapshots, exhaustion, receipts, and summary shortcuts, with deterministic barriers for races.
 
-Scripted producers verify contracts; real-model judgment and Claude/Codex smoke runs remain separate. Copilot is unverified. Run focused suites, architecture/host parity, shell checks, and broader plugin tests as applicable.
-
-Delivery and acceptance: [issue #123](https://github.com/boxlite-ai/agent-tooling/issues/123), one combined PR. Release and consumer adoption remain pending.
+Scripted producers verify contracts; real-model judgment and Claude/Codex smoke runs remain separate. Acceptance criteria: [issue #123](https://github.com/boxlite-ai/agent-tooling/issues/123).

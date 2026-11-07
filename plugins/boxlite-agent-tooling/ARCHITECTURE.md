@@ -72,6 +72,16 @@ Policy: `boxlite-design-doc`; commands: [Contributing](CONTRIBUTING.md#pull-requ
 - The auditor reads through `show`, then records one live `{content_sha256, verdict, findings, advisories}` object.
 - Critical/high gaps FAIL; low/nit gaps remain advisory; every round checks the complete design skill and outline.
 
+The research log stays out of the design, which is for human reviewers ([design #388](https://github.com/boxlite-ai/agent-tooling/issues/388)):
+
+| Part | Behavior |
+| --- | --- |
+| Store | `design-doc.sh log` stores stdin (≤32,000 characters) as `{id, log}` in `agent-tooling-design-log/<sha256 of design ID>.json` under the clone's common directory (Git 2.31+). Normalized IDs (GitHub `owner/repo#N` lowercase, Linear uppercase, Notion lowercase without dashes) let URL spellings, worktrees, and re-registration share one log; removing a worktree keeps it. |
+| Write | Empty input tombstones the log; records are replaced atomically, never removed, and read only as bounded regular files; a failed write keeps the stored log. |
+| Hash | With no log ever stored, the bound SHA-256 is the provider body's; otherwise it hashes `agent-tooling-design-log-v1`, the body hash, and the log hash, one per line, so any log change needs a new audit in every bound worktree. |
+| Show | `design-doc.sh show` appends `## Research log (local)`, the log's `sha256:` line, and the log; advice anchors resolve against that text. The log is never published; deleting the clone loses it. |
+| Template | The design and [issue template](../../.github/ISSUE_TEMPLATE/design.md) stay tool-free; the skill and audit prompts own the research protocol. |
+
 #### Audit rule ownership
 
 Specs own input/output; `design-criteria.md` owns steps/entry format (2048-byte cap); `design-outline.md` owns whole-design checks; tasks own deadlines and untrusted-record framing.
