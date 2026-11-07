@@ -272,6 +272,7 @@ exec perl -MIO::Handle -e '
   $SIG{TERM} = sub {
     open(my $term_file, ">>", $term_path) or return;
     print {$term_file} "parent\n"; close($term_file);
+    exit 0 if ($ENV{CODEX_RESOURCE_EXIT_ON_TERM} // "") eq "yes";
   };
   $SIG{INT} = "IGNORE";
   my $bytes = $mode eq "timeout" ? 128 : 32768;
@@ -296,6 +297,7 @@ STUB
 set -u
 cd "$CASE_REPO" || exit 125
 exec env PATH="$CASE_REPO/bin:$PATH" \
+  BASH_ENV="${AUDIT_LEADER_LOSS_ENV:-${BASH_ENV:-}}" \
   TMPDIR="$CASE_REPO/audit-tmp" \
   CLAUDE_PROJECT_DIR="$CASE_REPO" FAKE_DIR="$CASE_REPO" \
   CODEX_BIN="$CASE_REPO/bin/codex" CODEX_RESOURCE_MODE="$CASE_MODE" \
@@ -562,6 +564,40 @@ else
   bad "the result ceiling alone stops an auditor whose stderr stays quiet ($result_cap_state finding=$resource_case_finding)"
 fi
 rm -rf "$R_RESOURCE_RESULT"
+
+case "$OSTYPE" in
+  darwin*|linux*)
+    for exit_on_term in yes no; do
+      R_LEADER_LOSS="$(setup)"; install_resource_stub "$R_LEADER_LOSS"
+      AUDIT_LEADER_LOSS_ENV="$REPO_ROOT/scripts/fixtures/audit-leader-loss.sh" \
+        AUDIT_TEST_LEADER_LOSS_BOUNDARY=quiesce_codex_group \
+        CODEX_RESOURCE_EXIT_ON_TERM="$exit_on_term" \
+        run_resource_case "$R_LEADER_LOSS" capresult 30 40
+      leader_loss="$(cat "$R_LEADER_LOSS/leader-loss" 2>/dev/null || true)"
+      leader_loss_state="barrier=$leader_loss rc=$resource_case_rc verdict=$resource_case_verdict gone=$resource_case_processes_gone term=$resource_case_term"
+      if [[ "$leader_loss_state" == 'barrier=confirmed rc=1 verdict=FAIL gone=yes term=parent,' \
+          && "$resource_case_finding" == *'active limit'* ]]; then
+        ok "result-limit teardown after leader loss (exit on TERM=$exit_on_term)"
+      else
+        bad "result-limit teardown after leader loss (exit on TERM=$exit_on_term, $leader_loss_state finding=$resource_case_finding)"
+      fi
+      rm -rf "$R_LEADER_LOSS"
+    done
+
+    R_CONTROLLER_SETUP="$(setup)"; install_resource_stub "$R_CONTROLLER_SETUP"
+    printf '#!/bin/sh\nexit 1\n' > "$R_CONTROLLER_SETUP/bin/mkfifo"
+    chmod +x "$R_CONTROLLER_SETUP/bin/mkfifo"
+    run_resource_case "$R_CONTROLLER_SETUP" capresult 30 40
+    if [[ "$resource_case_rc" == 1 && "$resource_case_verdict" == FAIL \
+        && "$resource_case_finding" == *'process supervision failed'* \
+        && ! -e "$R_CONTROLLER_SETUP/resource-parent.pid" ]]; then
+      ok 'controller setup failure blocks auditor launch'
+    else
+      bad "controller setup failure blocks auditor launch (rc=$resource_case_rc finding=$resource_case_finding)"
+    fi
+    rm -rf "$R_CONTROLLER_SETUP"
+    ;;
+esac
 
 # ...and the mirror: the result held still, leaving the stderr ceiling as the only
 # limit that can stop the auditor.

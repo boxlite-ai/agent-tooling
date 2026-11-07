@@ -16,6 +16,8 @@ See [runner usage](README.md), [state files](state.md), and the [system map](../
 
 Headless commit reconstruction uses captured index tree; push uses verified outgoing trees; verify reconstruction before tests and recheck tree/diff/subject before publication.
 
+- On macOS and Linux, a controller sends TERM and KILL to its own audit group, even after the leader exits.
+- On these platforms, unverified cleanup blocks accepting the auditor's dossier. Stop ends its diagnostic read even when a surviving process holds stderr open.
 - Scratch owns `TMPDIR`; exclude generic temp/additional write roots; network permits design retrieval.
 - Scratch `bin/mktemp` adapts default invocations only; prepend after shell initialization; explicit options/templates pass through.
 - `commit-push-tests.md` requires candidate-bound receipts, complete native execution records, or safe reruns; sandbox denial needs another route or unchecked finding.

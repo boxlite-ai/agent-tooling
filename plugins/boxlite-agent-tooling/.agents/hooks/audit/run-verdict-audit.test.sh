@@ -2176,9 +2176,80 @@ check_eq "normal completion closes residual audit descendants before accepting o
 kill_test_pids KILL "$orphan_child_pid"
 rm -rf "$R"
 
-# Negative-PGID teardown is safe only while the runner still owns a live member whose
-# PID equals that group id. Pause at the call boundary and inspect the leader directly:
-# the pre-fix runner had already waited/reaped it, leaving a reusable integer behind.
+case "$OSTYPE" in
+  darwin*|linux*)
+    LEADER_LOSS_STUB="$DOSSIER_STUB"$'\n''
+      perl -e '\''
+        my ($dir, $exit_on_term, $hold_stderr) = @ARGV;
+        $SIG{TERM} = sub {
+          open my $marker, ">", "$dir/resource-term.log" or die $!;
+          print {$marker} "worker\n";
+          close $marker;
+          exit 0 if $exit_on_term eq "yes";
+        };
+        if ($hold_stderr eq "yes") {
+          print STDERR "audit-tail-marker password=fixture-value\n";
+        } else {
+          close STDERR;
+        }
+        open my $ready, ">", "$dir/resource-parent.pid" or die $!;
+        print {$ready} "$$\n";
+        close $ready;
+        while (1) { select undef, undef, undef, 0.1; }
+      '\'' "$CLAUDE_PROJECT_DIR" "$LEADER_LOSS_EXIT_ON_TERM" "${LEADER_LOSS_HOLD_STDERR:-no}" </dev/null >/dev/null &
+      for (( i=0; i<150; i++ )); do
+        [[ ! -s "$CLAUDE_PROJECT_DIR/resource-parent.pid" ]] || exit 0
+        sleep 0.02
+      done
+      exit 125'
+    for exit_on_term in yes no; do
+      R="$(setup)"
+      ( cd "$R" && exec env CLAUDE_PROJECT_DIR="$R" \
+          BASH_ENV="$REPO_ROOT/scripts/fixtures/audit-leader-loss.sh" \
+          AUDIT_TEST_LEADER_LOSS_BOUNDARY=quiesce_audit_group \
+          LEADER_LOSS_EXIT_ON_TERM="$exit_on_term" VERDICT_AUDITOR_CMD="$LEADER_LOSS_STUB" \
+          bash "$RUNNER" "$R/transcript.jsonl" >"$R/leader-loss.out" 2>"$R/leader-loss.err" ) &
+      leader_loss_job=$!
+      ( sleep 10; kill_test_pids KILL "$leader_loss_job" ) & watchdog=$!
+      wait "$leader_loss_job" 2>/dev/null; leader_loss_rc=$?
+      kill "$watchdog" 2>/dev/null || true; wait "$watchdog" 2>/dev/null || true
+      leader_loss_pid="$(cat "$R/resource-parent.pid" 2>/dev/null || true)"
+      leader_loss_state="rc=$leader_loss_rc barrier=$(cat "$R/leader-loss" 2>/dev/null || true)"
+      leader_loss_state="$leader_loss_state worker=$(process_state "$leader_loss_pid") term=$(cat "$R/resource-term.log" 2>/dev/null || true)"
+      [[ ! -s "$R/.agents/state/last-verdict.json" ]] || leader_loss_state="$leader_loss_state dossier=present"
+      check_eq "Stop completion after leader loss (exit on TERM=$exit_on_term)" \
+        "$leader_loss_state" "rc=0 barrier=confirmed worker=gone term=worker dossier=present"
+      kill_test_pids KILL "$leader_loss_pid"
+      rm -rf "$R"
+    done
+
+    R="$(setup)"
+    ( cd "$R" && exec env CLAUDE_PROJECT_DIR="$R" \
+        BASH_ENV="$REPO_ROOT/scripts/fixtures/audit-leader-loss.sh" \
+        AUDIT_TEST_LEADER_LOSS_BOUNDARY=quiesce_audit_group AUDIT_TEST_LOSS_TARGET=controller \
+        LEADER_LOSS_EXIT_ON_TERM=no LEADER_LOSS_HOLD_STDERR=yes VERDICT_AUDITOR_CMD="$LEADER_LOSS_STUB" \
+        bash "$RUNNER" "$R/transcript.jsonl" >"$R/controller-loss.out" 2>"$R/controller-loss.err" ) &
+    controller_loss_job=$!
+    ( sleep 10; kill_test_pids KILL "$controller_loss_job" ) & watchdog=$!
+    wait "$controller_loss_job" 2>/dev/null; controller_loss_rc=$?
+    kill "$watchdog" 2>/dev/null || true; wait "$watchdog" 2>/dev/null || true
+    leader_loss_pid="$(cat "$R/resource-parent.pid" 2>/dev/null || true)"
+    controller_loss_state="rc=$controller_loss_rc barrier=$(cat "$R/leader-loss" 2>/dev/null || true) worker=$(process_state "$leader_loss_pid")"
+    [[ -e "$R/.agents/state/last-verdict.json" ]] || controller_loss_state="$controller_loss_state dossier=absent"
+    if grep -Fq 'could not verify audit group cleanup' "$R/controller-loss.err"; then
+      controller_loss_state="$controller_loss_state error=reported"
+    fi
+    controller_loss_tail="$(jq -r '.stderr_tail' "$R/.agents/state/audit-diagnostics.jsonl" 2>/dev/null || true)"
+    [[ "$controller_loss_tail" != 'audit-tail-marker password=<redacted>' ]] || controller_loss_state="$controller_loss_state tail=redacted"
+    check_eq 'Stop bounds diagnostics when controller loss leaves stderr open' \
+      "$controller_loss_state" 'rc=1 barrier=controller worker=alive dossier=absent error=reported tail=redacted'
+    kill_test_pids KILL "$leader_loss_pid" "$(cat "$R/fixture-group-leader.pid" 2>/dev/null || true)"
+    rm -rf "$R"
+    ;;
+esac
+
+# Normal completion leaves the leader alive until teardown. The earlier runner
+# reaped it before this boundary, leaving a reusable group ID on the legacy path.
 R="$(setup)"
 cat > "$R/pgid-anchor-env.sh" <<'PGID_ANCHOR_ENV'
 if [[ -z "${VERDICT_PGID_ANCHOR_OWNER_PID:-}" ]]; then
@@ -2214,13 +2285,12 @@ touch "$R/pgid-anchor-release"
 ( sleep 3; kill_test_pids KILL "$pgid_anchor_job" ) & watchdog=$!
 wait "$pgid_anchor_job" 2>/dev/null; pgid_anchor_rc=$?
 kill "$watchdog" 2>/dev/null || true; wait "$watchdog" 2>/dev/null || true
-check_eq "process-group identity stays anchored until negative-PGID teardown" \
+check_eq "normal completion retains the group leader until teardown" \
   "rc=$pgid_anchor_rc leader=$pgid_anchor_state" "rc=0 leader=live"
 rm -rf "$R"
 
-# Once wait has reaped the audit leader, its numeric process-group id is no longer owned.
-# Retaining that global through validation lets a later signal target a rapidly reused,
-# unrelated PGID. Observe the production variable at the first post-quiescence statement.
+# Teardown retires group ownership before dossier validation. Otherwise a later
+# signal could target a reused ID on the legacy path.
 R="$(setup)"
 cat > "$R/pgid-reset-env.sh" <<'PGID_RESET_ENV'
 if [[ -z "${VERDICT_PGID_RESET_OWNER_PID:-}" ]]; then
