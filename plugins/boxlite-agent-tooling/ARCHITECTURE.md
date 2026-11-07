@@ -88,6 +88,8 @@ Specs own input/output; `design-criteria.md` owns steps/entry format (2048-byte 
 
 How it works must open with a one-line overview and a concrete example before the mechanism ([design #418](https://github.com/boxlite-ai/agent-tooling/issues/418)). No overview, or no example before the mechanism, is high; other readability gaps, such as an undefined project-specific term, are low; mechanism and trade-off gaps keep their usual severity.
 
+Related work must open with a best-practice line, sourced or “none established” with evidence, then group cited approaches in one table with the design’s pick row marked Pick, and list failures, constraints and counterevidence under Lessons ([design #424](https://github.com/boxlite-ai/agent-tooling/issues/424)). A missing line or approach grouping is high.
+
 `probe-privacy.md` repeats deliberately in both specs; privacy hooks detect addresses/key requests, with address-only WebSearch checks.
 
 Expansion, encoding, file-backed payloads, and Codex-hosted WebSearch bypass the heuristic; [probe policy](.agents/prompts/audit/probe-privacy.md) remains mandatory.

@@ -17,7 +17,7 @@ about: Describe a problem, researched approach, and validation plan.
 
 ## Related work and lessons
 
-<!-- What prior art did you find, and what did you adopt, adapt, or reject? What alternatives, including doing nothing, did you consider, and which trade-off decided it? If there is no prior art, say so. -->
+<!-- Start with one line: what is the established best practice for this problem (with sources), or is none established? If there is no prior art, say so. Does the design adopt, adapt, or depart from it, and why? Then group prior work by approach in a table: who uses each, its trade-offs, and whether you adopt, adapt, or reject it. Mark the approach you choose as Pick. Include reusing what exists, simplifying, doing nothing, and any other alternative you considered, and say which trade-off decided it. List failures, constraints, and counterevidence as lessons below the table, each with its citation and effect on the design. -->
 
 ## How it works
 
