@@ -407,8 +407,26 @@ fi
 write_audit "FAIL" '["Test: missing"]' "commit" "" '["Implement: comment wraps awkwardly"]'
 run "FAIL + advisories → still deny"    "$GC -m foo"                  "deny"
 deny_out="$(hook_raw "$GC -m foo")"
-check_raw "deny reason marks advisories non-blocking" \
-  "$(printf '%s' "$deny_out" | jq -r '.hookSpecificOutput.permissionDecisionReason | test("NOT blocking")')" "true"
+# Findings are claim-checked (#407): the reason counts them and names the saved copy.
+deny_reason="$(printf '%s' "$deny_out" | jq -r '.hookSpecificOutput.permissionDecisionReason')"
+saved_findings="$(printf '%s\n' "$deny_reason" | sed -n 's/.*saved in \([^ ]*\.md\)\..*/\1/p' | head -1)"
+check_raw "deny reason counts findings and advisories" \
+  "$([[ "$deny_reason" == *"1 finding(s) and 1 advisory(ies), saved in "* ]] && echo yes)" "yes"
+check_raw "saved findings mark advisories non-blocking" \
+  "$([[ -f "$saved_findings" ]] && grep -q 'NOT blocking' "$saved_findings" \
+     && grep -q 'comment wraps awkwardly' "$saved_findings" && echo yes)" "yes"
+
+# Issue #393: findings have no count limit, so pasting them overflowed the 8,192-byte
+# cap and replaced the reason with a generic message. The dossier's own maximum, 32
+# findings and 32 advisories of 1,000 bytes each, must still yield a small reason that
+# counts them (#407); without a session this is the recover path.
+many_lines() { jq -nc --arg kind "$1" '[range(32) | $kind + ": check \(.): " + ("e" * 980)]'; }
+write_audit "FAIL" "$(many_lines high)" "commit" "" "$(many_lines nit)"
+many_reason="$(hook_raw "$GC -m foo" | jq -r '.hookSpecificOutput.permissionDecisionReason')"
+many_bytes="$(LC_ALL=C printf '%s' "$many_reason" | wc -c | tr -d ' ')"
+check_raw "a maximal FAIL dossier yields a counted reason under 4 KB" \
+  "$( (( many_bytes < 4096 )) && [[ "$many_reason" == *"32 finding(s) and 32 advisory(ies)"* \
+      && "$many_reason" != *"safety limit"* ]] && echo yes)" "yes"
 
 # Backward compatibility: a dossier from a producer that predates the split has no
 # `advisories` key at all. It must allow exactly as before — silently, no stdout.
@@ -1268,11 +1286,18 @@ both_reason() {  # $1 = value for CODEX_SANDBOX ("" = unset)
   reason_for_repo "$BOTH_REPO" "git commit -m 'test: x'" "$1"
 }
 
-task_text_from_reason() {
-  local encoded
+task_text_from_reason() { # deny reason -> the task, loaded through its claim check (#407)
+  local encoded prompt pointer
   encoded="$(printf '%s\n' "$1" \
     | sed -n 's/^[[:space:]]*prompt=\(.*\))$/\1/p' | head -1)"
-  printf '%s' "$encoded" | jq -r . 2>/dev/null || true
+  prompt="$(printf '%s' "$encoded" | jq -r . 2>/dev/null || true)"
+  pointer="$(printf '%s\n' "$prompt" | sed -n '/^AUDIT_TASK_FILE_JSON:$/ { n; p; q; }')"
+  if [[ -z "$pointer" ]]; then
+    printf '%s' "$prompt"
+    return
+  fi
+  bash "$REPO_ROOT/scripts/read-audit-task.sh" "$(jq -r .path <<<"$pointer")" \
+    "$(jq -r .sha256 <<<"$pointer")" "$(jq -r .bytes <<<"$pointer")" 2>/dev/null || true
 }
 
 task_record_from_text() {
@@ -1282,6 +1307,9 @@ task_record_from_text() {
 }
 
 reason="$(both_reason "")"
+# With no known host the reason lists every route; the claim check keeps it small (#407).
+check_raw "an all-routes first commit reason stays under 4 KB" \
+  "$( (( $(LC_ALL=C printf '%s' "$reason" | wc -c) < 4096 )) && echo yes)" "yes"
 case "$reason" in
   *'Task(subagent_type="boxlite-agent-tooling:commit-push-auditor"'*) ok_claude=1 ;; *) ok_claude=0 ;;
 esac
@@ -1438,19 +1466,19 @@ else
 fi
 
 # Static prompt-file budgets do not constrain substituted command text. Exercise the
-# public hook response with an oversized exact command: it must stay blocked, bounded,
-# omit the attacker-controlled tail, and give a compact recovery route.
+# public hook response with an oversized exact command: it must stay blocked and bounded,
+# keep the attacker-controlled tail out of the reason, and still hand the auditor the
+# exact command through the claim-checked task file (#407).
 long_tail="$(awk 'BEGIN { for (i=0; i<16000; i++) printf "x"; printf "END_UNBOUNDED_COMMAND" }')"
 long_reason="$(reason_for_repo "$BOTH_REPO" "git commit -m 'test: $long_tail'")"
 long_reason_bytes="$(LC_ALL=C printf '%s' "$long_reason" | wc -c | tr -d ' ')"
+long_task="$(task_text_from_reason "$long_reason")"
 if (( long_reason_bytes <= 8192 )) \
    && [[ "$long_reason" != *"END_UNBOUNDED_COMMAND"* ]] \
-   && [[ "$long_reason" == *"8192-byte safety limit"* ]] \
-   && [[ "$long_reason" == *"git commit -F"* ]] \
+   && [[ "$long_reason" == *"AUDIT_TASK_FILE_JSON"* ]] \
    && [[ "$long_reason" == *"commit-push-auditor"* ]] \
-   && [[ "$long_reason" == *".agents/state/last-audit.json"* ]] \
-   && [[ "$long_reason" == *"remains blocked"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  rendered denial is bounded with usable fail-closed recovery (%s bytes)\n' "$long_reason_bytes"
+   && [[ "$(task_record_from_text "$long_task" | jq -r .target_command)" == *"END_UNBOUNDED_COMMAND"* ]]; then
+  pass=$((pass + 1)); printf '  PASS  rendered denial is bounded and claim-checks the exact command (%s bytes)\n' "$long_reason_bytes"
 else
   fail=$((fail + 1)); printf '  FAIL  rendered denial is not safely bounded (%s bytes)\n' "$long_reason_bytes"
 fi

@@ -142,7 +142,10 @@ out="$(preflight)"
 first="$(attempts)"
 check_eq "deny prepares one open attempt" "$(awk '{print NF}' <<<"$first"):${first##*:}" "1:open"
 id="${first%%:*}"
-if [[ -n "$id" && "$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")" == *"$id"* ]]; then
+# The reason names the claim-checked task file (#407); the attempt id travels inside it.
+task_files="$(grep -l -- "$id" "$R/.agents/state/audit-tasks/"*.md 2>/dev/null || true)"
+if [[ -n "$id" && -n "$task_files" \
+      && "$(jq -r .hookSpecificOutput.permissionDecisionReason <<<"$out")" == *"${task_files##*/}"* ]]; then
   ok "the auditor instruction carries the attempt id"
 else
   bad "the auditor instruction omits the attempt id"

@@ -69,6 +69,7 @@ Use [one-time migration instructions](../../README.md#migrate-existing-consumers
 | Markerless Git wiring | Retain launcher/PID contract; see [Git gates](ARCHITECTURE.md#git-gates). |
 | Earlier design verdicts | Legacy record/`research` alias remain readable; PASS now needs fresh advice; refresh/reload, including displayed async cards. |
 | Review/retry updates | Refresh whole plugin and start a new session so prompts, Git gates, and callbacks agree. |
+| Before 0.1.50 | Auditors cannot read the commit/push claim-check pointer ([#407](https://github.com/boxlite-ai/agent-tooling/issues/407)); refresh the host plugin, then reload. |
 
 Check Claude installation by exact `projectPath`; updating one linked worktree can leave another stale.
 
