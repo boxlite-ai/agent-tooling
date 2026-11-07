@@ -23,9 +23,9 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 | `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Revoke old authority; unchanged audit work may finish as prior evidence. |
 | Opt-in `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Reference workflow and writing skill; absent from plugin manifests. |
 | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | Track workers, escalation, completion, overrides, and Git attempt closure. |
-| Auditor/advisor start, tool, stop | `.agents/hooks/audit-deadline.sh` | Initialize native verdict timing; enforce recording and owned-task cleanup after deadline. |
+| Auditor/advisor start, tool, stop | `.agents/hooks/audit-deadline.sh` | Publish native dossier-worker ownership, enforce deadlines, and clean up owned tasks. |
 | Design auditor/advisor tools | `.agents/hooks/audit-privacy.sh` | Reject recognizable personal identifiers and key requests; see limits below. |
-| Editor, notebook, patch `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Require current design authority unless all targets resolve outside repositories. |
+| Editor, notebook, patch `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Require current design authority, with exceptions for outside targets and [owned auditor reports](#auditor-report-writes). |
 | Commit/push `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | Delegate to installed Git gates; deny with an explicit next action. |
 | GitHub/PR shell `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Check writing, privacy, design, description, size, and human review acknowledgment. |
 | Claude question pre/post tool | `.agents/hooks/claude-timed-question.sh` | Validate managed presentation and timely answers; expiry grants no authority. |
@@ -128,6 +128,15 @@ Commit/push criteria compare the diff with authenticated `design-doc.sh show` ou
 - A directory without `.git` counts as outside; relative cwd, `~`, dot segments, dangling links, or unparseable targets retain the gate.
 - Shell commands, other clients, and arbitrary MCP writers remain outside this hook; workflow design requirements still apply.
 - Shell execution retains host permissions and independent Git/PR checks; no research-command allowlist applies.
+
+##### Auditor report writes
+
+The design gate allows a native commit/push or verdict auditor to save its assigned report through `Write` or a single-file add/update patch. [Design #406](https://github.com/boxlite-ai/agent-tooling/issues/406)
+
+- `.agents/lib/audit-report-scope.sh` checks the repository, session, worker, open attempt, and current prompt epoch or verdict request before allowing the exact report path.
+- Aliases, links, special files, other reports, and unrelated agents still require design authority, as do deletes, moves, and mixed patches.
+- The synchronous deadline Start publishes ownership through `auditor-control.sh publish-start`; asynchronous `monitor-start` only observes that ownership.
+- The deadline still ends investigation, and Stop validates and records the report as PASS, FAIL, or an execution error.
 
 #### PR description structure
 

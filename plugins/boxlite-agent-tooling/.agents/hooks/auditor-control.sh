@@ -845,8 +845,12 @@ epoch="$(auditor_control_prompt_epoch_for "$repo" "$scope" 2>/dev/null)" || exit
 
 case "$event" in
   SubagentStart)
-    auditor_control_state_dispatch start "$scope" "$auditor" "$generation" "$epoch" native \
-      || exit $?
+    # Synchronous publication owns Start; asynchronous monitoring cannot reopen Stop.
+    if [[ "${1:-}" != monitor-start ]]; then
+      auditor_control_state_dispatch start "$scope" "$auditor" "$generation" "$epoch" native \
+        || exit $?
+    fi
+    [[ "${1:-}" != publish-start ]] || exit 0
     threshold="${AUDITOR_PROMPT_AFTER_SECONDS:-30}"
     [[ "$threshold" =~ ^[0-9]+$ && ${#threshold} -le 4 ]] || threshold=30
     perl -e 'select(undef,undef,undef,$ARGV[0])' "$threshold"

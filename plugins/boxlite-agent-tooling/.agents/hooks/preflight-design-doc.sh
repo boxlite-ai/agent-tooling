@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse: verify the current design, an independent audit verdict for its exact
-# content, and advice on that verdict (design #335), before explicit edits inside a repository.
+# content, and advice on that verdict (design #335), before repository edits except
+# active auditors writing their assigned reports (#403).
 # Native tool names/denials: openai/codex codex-rs/hooks/src/events/pre_tool_use.rs:30-44.
 set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -44,6 +45,11 @@ fi
 
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$plugin_root/.agents/lib/verdict-audit-state.sh" || deny 'state library unavailable'
+# shellcheck source=../lib/audit-report-scope.sh
+source "$plugin_root/.agents/lib/audit-report-scope.sh" || deny 'audit report scope unavailable'
+if audit_report_write_allowed "$payload" "$cwd" "$targets" >/dev/null 2>&1; then
+  exit 0
+fi
 # shellcheck source=../lib/reply-summary.sh
 source "$plugin_root/.agents/lib/reply-summary.sh" || deny 'writing checks unavailable'
 # shellcheck source=../lib/concise-writing.sh
