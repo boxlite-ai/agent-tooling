@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { runManagedFollowups } from '../.agents/lib/followup-claude.mjs';
 import { drainFollowups } from '../.agents/lib/followup-publisher.mjs';
 import { QUEUE_TOOL } from '../.agents/lib/followup-session.mjs';
@@ -34,6 +36,7 @@ function sendModelResponse(res, model, turn, block) {
   res.end();
 }
 
+/** Drive the pinned Claude executable with a loopback model and controlled launcher exit. */
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'boxlite-native-followups-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -92,14 +95,22 @@ async function fixture(t) {
     server.close();
     assert.ifError(modelFailure);
   });
-  const run = (github, exitCode) => runManagedFollowups(queue, cwd, [], sdk, claude, 'Check for missed follow-ups.', {
-    github,
+  const run = (github, exitCode, closeTimeout) => runManagedFollowups(queue, cwd, [], sdk, claude, 'Check for missed follow-ups.', {
+    github, closeTimeout,
     launch: ({ command, args, env, signal }) => {
       const options = { cwd, signal: signal ? AbortSignal.any([signal, t.signal]) : t.signal,
         stdio: ['pipe', 'pipe', 'inherit'], env: { ...env, CLAUDE_CONFIG_DIR: join(root, 'claude'),
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', VERDICT_CLASSIFIER_CMD: 'false', VERDICT_AUDITOR_CMD: 'false',
           ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.address().port}`,
           ANTHROPIC_API_KEY: 'fixture-token', ANTHROPIC_AUTH_TOKEN: '' } };
+      if (closeTimeout) {
+        return spawn(process.execPath, ['-e', `
+          const { spawnSync } = require('node:child_process');
+          const [command, ...args] = process.argv.slice(1);
+          spawnSync(command, args, { stdio: 'inherit' });
+          setInterval(() => {}, 1000);
+        `, command, ...args], options);
+      }
       return exitCode === undefined ? spawn(command, args, options)
         : spawn('/bin/sh', ['-c', 'code=$1; shift; "$@"; exit "$code"', 'fixture', String(exitCode), command, ...args], options);
     },
@@ -145,4 +156,70 @@ test('native completed result with a failed launcher exit leaves approved drafts
   assert.equal(requests, 0);
   assert.deepEqual(queue.status().map(draft => [draft.approved, draft.released]),
     [[true, false], [true, false], [false, false]]);
+});
+
+
+test('native final result with an open process holds approved drafts', native, async t => {
+  const { queue, run } = await fixture(t);
+  let requests = 0;
+  await assert.rejects(run(async () => { requests += 1; }, undefined, 1000), /did not close within the deadline/);
+  assert.equal(requests, 0);
+  assert.deepEqual(queue.status().map(draft => [draft.approved, draft.released]),
+    [[true, false], [true, false], [false, false]]);
+});
+
+const cliRoot = process.env.BOXLITE_FOLLOWUP_CLI_ROOT;
+const cliAgent = process.env.BOXLITE_FOLLOWUP_CLI_AGENT;
+test('legacy journal recovery through the CLI after a checkout rename', {
+  skip: process.platform !== 'darwin' || !cliRoot || !cliAgent, timeout: 30_000,
+}, t => {
+  const root = mkdtempSync(join(cliRoot, 'legacy-cli-'));
+  chmodSync(root, 0o755);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repo = join(root, 'repo');
+  const relocated = join(root, 'relocated');
+  const state = join(root, 'state');
+  const registryRoot = join(userInfo().homedir, '.boxlite-followups');
+  const cli = fileURLToPath(new URL('../scripts/followups.mjs', import.meta.url));
+  execFileSync('git', ['init', '-q', repo]);
+  const oldCommon = realpathSync(join(repo, '.git'));
+  const oldClone = cloneIdentity(repo, { legacy: true });
+  const stableClone = cloneIdentity(repo);
+  const legacy = openFollowupQueue(state, oldClone, { initialize: true, registryRoot });
+  legacy.enroll('tooling', { id: 'R_legacy', name: 'boxlite-ai/agent-tooling' });
+  const caller = { root: true, clone: oldClone, native: 'legacy', instance: 'legacy', prompt: 'legacy', cursor: 0 };
+  const handle = legacy.start(caller);
+  const draft = legacy.capture(caller, { action: 'record', handle, repository: 'example/project', route: 'tooling',
+    operation: 'load', failure: 'lost default', title: 'Legacy CLI draft', body: 'Fixture body.', evidence: 'Fixture evidence.' });
+  legacy.approve(draft.id, legacy.review(draft.id).digest, true);
+  legacy.finish(caller, handle);
+
+  const registryFile = join(registryRoot, 'roots.sqlite');
+  const registry = new DatabaseSync(registryFile);
+  try { registry.prepare('DELETE FROM journal_keys WHERE clone = ?').run(oldClone); }
+  finally { registry.close(); }
+  t.after(() => {
+    const db = new DatabaseSync(registryFile);
+    try {
+      db.prepare('DELETE FROM journal_keys WHERE clone IN (?, ?)').run(oldClone, stableClone);
+      db.prepare('DELETE FROM roots WHERE clone IN (?, ?)').run(oldClone, stableClone);
+    } finally { db.close(); }
+  });
+
+  renameSync(repo, relocated);
+  const invoke = (...args) => spawnSync(process.execPath, [cli, state, cliAgent, ...args],
+    { cwd: relocated, encoding: 'utf8', timeout: 20_000 });
+  const missing = invoke('init');
+  assert.equal(missing.status, 1, missing.stderr);
+  assert.match(missing.stderr, /previous Git common directory/);
+  const wrong = invoke('init', join(root, 'wrong', '.git'));
+  assert.equal(wrong.status, 1, wrong.stderr);
+  assert.match(wrong.stderr, /Legacy follow-up journal was not found/);
+  const recovered = invoke('init', oldCommon);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  const [stored] = JSON.parse(recovered.stdout);
+  assert.deepEqual([stored.id, stored.approved, stored.released], [draft.id, true, true]);
+  const status = invoke('status');
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(JSON.parse(status.stdout)[0].id, draft.id);
 });

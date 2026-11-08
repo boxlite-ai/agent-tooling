@@ -66,7 +66,7 @@ The queue lock covers the version upgrade and archive writes. The upgrade fences
 
 The operator checks the private SDK installation before loading any of its code. Startup reclaims abandoned handles when their recorded owner process has exited. The active draft size limit leaves room for approvals, close evidence, and retry state.
 
-The qualified macOS one-shot launcher requires an allowed final Stop, a completed root result, SDK stream exhaustion, and clean child exit. If Claude omits SessionEnd, the launcher records the close after observing those signals. A child close timeout forces teardown and holds the drafts.
+The qualified macOS one-shot launcher requires an allowed final Stop, a completed root result, SDK stream exhaustion, and clean child exit. If Claude omits SessionEnd, the launcher records the close after observing those signals. The root result starts one deadline for SDK exhaustion and child closure. A timeout forces teardown and holds the drafts.
 
 Enrollment pins a GitHub repository ID. The operator grants public disclosure for the exact revision and destination, including the embedded marker. A clone lock spans the durable attempt and the single create request.
 

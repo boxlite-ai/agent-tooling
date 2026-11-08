@@ -83,6 +83,7 @@ export async function githubRepository(client, name) {
   return { id: repository.id, name: repository.nameWithOwner };
 }
 
+/** Keep remote metadata within the journal reserve, including JSON escapes. */
 function boundedField(value, bytes) {
   return typeof value === 'string' && value.length > 0 && Buffer.byteLength(JSON.stringify(value)) <= bytes;
 }

@@ -447,8 +447,7 @@ test('the SDK trust policy rejects unsafe installations before evaluation', { sk
   await assert.rejects(run(), /outside other npm trees/);
 });
 
-test('an unfinished child that ignores TERM is killed before the supervisor returns', async t => {
-  const { repo, queue } = fixture(t);
+function fixtureSdk(repo, queryBody) {
   const root = dirname(repo);
   const sdk = join(root, 'sdk.mjs');
   mkdirSync(join(root, 'node_modules', 'zod'), { recursive: true });
@@ -463,11 +462,19 @@ test('an unfinished child that ignores TERM is killed before the supervisor retu
     export const tool = () => {};
     export const createSdkMcpServer = () => {};
     export async function* query({ options }) {
-      const abort = new AbortController();
-      const child = options.spawnClaudeCodeProcess({ signal: abort.signal });
-      await new Promise(resolve => child.stdout.once('data', resolve));
-      abort.abort();
+      ${queryBody}
     }
+  `);
+  return sdk;
+}
+
+test('an unfinished child that ignores TERM is killed before the supervisor returns', async t => {
+  const { repo, queue } = fixture(t);
+  const sdk = fixtureSdk(repo, `
+    const abort = new AbortController();
+    const child = options.spawnClaudeCodeProcess({ signal: abort.signal });
+    await new Promise(resolve => child.stdout.once('data', resolve));
+    abort.abort();
   `);
   let child;
   const run = runManagedFollowups(queue, repo, [], sdk, process.execPath, 'Fixture', {
@@ -483,6 +490,39 @@ test('an unfinished child that ignores TERM is killed before the supervisor retu
   assert.equal(child.signalCode, 'SIGKILL');
 });
 
+
+test('a final root result starts the deadline while the SDK still waits for stdout', async t => {
+  const { repo, queue } = fixture(t);
+  const sdk = fixtureSdk(repo, `
+    const child = options.spawnClaudeCodeProcess({});
+    await new Promise(resolve => child.stdout.once('data', resolve));
+    yield { type: 'result', session_id: options.sessionId, subtype: 'success', terminal_reason: 'completed' };
+    await new Promise(resolve => child.stdout.once('close', resolve));
+  `);
+  let child;
+  let limit;
+  let githubCalls = 0;
+  const run = runManagedFollowups(queue, repo, [], sdk, process.execPath, 'Fixture', {
+    launch() {
+      child = spawn(process.execPath, ['-e',
+        "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000);"]);
+      t.after(() => child.kill('SIGKILL'));
+      return child;
+    },
+    github() { githubCalls += 1; },
+    closeTimeout: 250,
+  });
+  try {
+    const fixtureLimit = new Promise((_, reject) => {
+      limit = setTimeout(() => reject(new Error('Fixture stdout stayed open after the result')), 1500);
+    });
+    await assert.rejects(Promise.race([run, fixtureLimit]), /did not close within the deadline/);
+    assert.equal(child.signalCode, 'SIGKILL');
+    assert.equal(githubCalls, 0);
+  } finally {
+    clearTimeout(limit);
+  }
+});
 
 test('a missing nested state path under an alias to the checkout is rejected before initialization', { skip: process.platform === 'win32' }, t => {
   const { repo } = fixture(t);

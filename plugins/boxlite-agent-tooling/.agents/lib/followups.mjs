@@ -50,6 +50,7 @@ export function git(cwd, ...args) {
   }).trim();
 }
 
+/** Compare canonical paths by component so sibling names cannot match as descendants. */
 export function containsPath(root, path) {
   const difference = relative(root, path);
   return !difference || (!isAbsolute(difference) && difference !== '..' && !difference.startsWith(`..${sep}`));
@@ -72,6 +73,7 @@ function privateDirectory(path, create) {
     (info.uid === process.getuid() && (info.mode & 0o077) === 0)), 'Follow-up state directory must be private');
 }
 
+/** Bind a handle to the native root, prompt, and clone before using the session. */
 function binding(state, caller, handle, clone) {
   const session = state.sessions[handle];
   requireValue(caller?.root === true && caller.clone === clone && session?.phase === 'open' &&
@@ -96,6 +98,7 @@ export function eligibleFollowup(state, draft) {
     state.enrollment[draft.route] && state.grants[draft.id] === grantDigest(state, draft);
 }
 
+/** Recheck stored grants against the current enrollment when reporting status. */
 function draftStatus(state, { draft, grant, release, attempt }) {
   return {
     ...draft, enrolled: state.enrollment[draft.route] ?? null,
@@ -436,6 +439,7 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
   };
 }
 
+/** Publish both initialized databases together by renaming the staging directory. */
 function initializeQueue(root, directory, clone) {
   const staging = mkdtempSync(join(root, '.init-'));
   try {

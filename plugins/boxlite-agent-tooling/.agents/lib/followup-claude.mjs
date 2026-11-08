@@ -11,6 +11,7 @@ import { containsPath } from './followups.mjs';
 export const PLUGIN = realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
 export const SDK_VERSION = '0.3.319';
 export const SUDO = '/usr/bin/sudo';
+const CLOSE_TIMEOUT_MESSAGE = 'Managed Claude did not close within the deadline';
 export const AGENT_ENV = { PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin' };
 
 /** Validate the installation before any SDK module runs as the operator. */
@@ -88,16 +89,17 @@ async function waitForClose(exit, timeout) {
   }
 }
 
+/** Give the isolated process its own group and omit the operator environment. */
 function launchAgent(prefix, { command, args, cwd, signal }) {
-  // Use a fresh group and keep operator credentials out of the agent environment.
   return spawn(SUDO, [...prefix, '/usr/bin/env', 'CLAUDE_CODE_ENTRYPOINT=sdk-ts', command, ...args],
     { cwd, signal, detached: true, env: AGENT_ENV, stdio: ['pipe', 'pipe', 'inherit'] });
 }
 
 /** Force teardown on timeout and withhold release even if teardown succeeds. */
-async function closeAgent(child, exit, stop, timeout) {
+async function closeAgent(child, exit, stop, timeout, closeBy) {
   if (!exit) return;
-  const status = await waitForClose(exit, timeout);
+  const remaining = closeBy === undefined ? timeout : Math.max(0, closeBy - performance.now());
+  const status = await waitForClose(exit, remaining);
   if (status) return status;
 
   try {
@@ -108,7 +110,7 @@ async function closeAgent(child, exit, stop, timeout) {
     child.stderr?.destroy();
     if (!await waitForClose(exit, timeout)) child.unref();
   }
-  throw new Error('Managed Claude did not close within the deadline');
+  throw new Error(CLOSE_TIMEOUT_MESSAGE);
 }
 
 /** Publish only after the managed session and native child both close cleanly. */
@@ -130,10 +132,15 @@ export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFil
   const session = createFollowupSession(queue, { sessionId });
   let child;
   let exit;
+  let stream;
+  let deadline;
+  let closeBy;
+  let timer;
+  let expired = false;
   let streamComplete = false;
   let released = 0;
   try {
-    const stream = query({
+    stream = query({
       prompt,
       options: {
         cwd, sessionId, pathToClaudeCodeExecutable: claudeFile,
@@ -142,26 +149,40 @@ export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFil
         includeHookEvents: true, includePartialMessages: true, allowedTools: [QUEUE_TOOL],
         mcpServers: { boxlite_followups: createSdkMcpServer({ name: 'boxlite_followups', tools: [queueToolFor(session, tool, z)] }) },
         hooks: sessionHooks(session),
+        /** Track the single child through pipe closure, even if it emits an abort error first. */
         spawnClaudeCodeProcess: options => {
           if (exit) throw new Error('Expected one supervised Claude process');
           child = launch ? launch(options) : launchAgent(prefix, options);
           exit = new Promise(done => {
             child.once('close', (code, exitSignal) => done({ code, signal: exitSignal }));
-            // Abort can emit an error before the process and pipes have closed.
             child.on('error', () => {});
           });
           return child;
         },
       },
     });
-    for await (const message of stream) {
+    const messages = stream[Symbol.asyncIterator]();
+    while (true) {
+      const next = messages.next();
+      const { done, value: message } = deadline ? await Promise.race([next, deadline]) : await next;
+      if (done) break;
       session.observe(message);
+      if (!deadline && message.type === 'result' && message.session_id === sessionId) {
+        closeBy = performance.now() + closeTimeout;
+        deadline = new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            expired = true;
+            reject(new Error(CLOSE_TIMEOUT_MESSAGE));
+          }, closeTimeout);
+        });
+      }
       if (message.type === 'assistant' && message.parent_tool_use_id === null) {
         for (const part of message.message.content) if (part.type === 'text') process.stdout.write(`${part.text}\n`);
       }
     }
     streamComplete = true;
   } finally {
+    clearTimeout(timer);
     let status;
     try {
       status = await closeAgent(child, exit, process => {
@@ -173,11 +194,15 @@ export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFil
             process.kill('SIGKILL');
           }
         } else process.kill('SIGKILL');
-      }, closeTimeout);
+      }, closeTimeout, closeBy);
     } finally {
-      released = session.finish({
-        ...(status ?? { code: null, signal: null }), streamComplete, platform: process.platform,
-      });
+      try {
+        if (expired) stream.close?.();
+      } finally {
+        released = session.finish({
+          ...(status ?? { code: null, signal: null }), streamComplete, platform: process.platform,
+        });
+      }
     }
   }
   return released ? { released, ...await drainFollowups(queue, github) } : { released };
