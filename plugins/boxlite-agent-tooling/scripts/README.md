@@ -84,6 +84,14 @@ Consumers float on `tooling.ref`, run recorded `.git/agent-tooling/current`, and
 
 `.git/agent-tooling/.refresh.lock` serializes refresh; busy skips; hour-old abandoned locks warn through verification without automatic removal.
 
+### Interrupted installation
+
+On supported local macOS and Linux filesystems, setup inherits the installation lock. A retry can recover after the last writer exits.
+
+- Keep `.install.guard` in place. The installer uses `.install.lock` as a hard link to the guard so older installers see an occupied path.
+- Windows, network mounts, and unidentified filesystems use the directory lock. Before moving a stale legacy directory aside, verify the installer and any setup children have stopped.
+- The bootstrap delegates to the cached runtime when present, preserving its update deadline.
+
 ### Lifecycle environment
 
 `.agents/lib/git-environment.sh` clears repository-local Git variables and `GIT_NAMESPACE` after capturing consumer root, before sync/refresh enters it.
