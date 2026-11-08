@@ -1347,6 +1347,25 @@ consume_current_verdict_request() {
   prompt_epoch_is_current
 }
 
+record_last_verdict_index() {  # selected history, while holding the Stop decision lease
+  [[ "$session_scope" != "-" ]] || return 0
+  local index_path index_body
+  index_path="$(verdict_audit_state_path "$state_dir/last-verdict-index.json" "$session_scope")"
+  index_body="$(printf '%s\n%s\n' "$payload" "${1:-null}" |
+    jq -cs --arg generation "$audit_generation" --arg message_id "$FINAL_ID" '
+      ((.[0].turn_id | strings | select(test("\\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\z"))) // null) as $turn_id
+      | ((.[1].state.attempts[-1] |
+          select(.input.binding.generation == $generation) |
+          .input.snapshot.transcript[0].native_range) // null) as $range
+      | {version:1, generation:$generation, message_id:$message_id}
+        + (if $turn_id == null then {} else {turn_id:$turn_id} end)
+        + (if $range == null then {} else {native_range:$range} end)
+    ')" || return 1
+  [[ -n "$index_body" ]] || return 1
+  prompt_epoch_is_current || return 1
+  printf '%s\n' "$index_body" | verdict_audit_write_atomic "$index_path" 2>/dev/null
+}
+
 current_verdict_request_matches() {
   [[ "$session_scope" != "-" ]] || return 0
   [[ -n "$verdict_request_body" ]] || return 1
@@ -2021,6 +2040,7 @@ if [[ "$request_is_current" == true && -n "$dossier_observed_identity" ]] \
         [[ "$session_scope" == "-" ]] || request_is_current=false
       fi
     else
+      history_state=""
       if [[ -n "$reflection_context" ]]; then
         history_state="$(inspect_audit_history)" || block "Audit history is unreadable; verification remains incomplete."
         if [[ "$(jq '.state.attempts | length' <<<"$history_state")" != 0 ]]; then
@@ -2037,6 +2057,9 @@ if [[ "$request_is_current" == true && -n "$dossier_observed_identity" ]] \
             | jq -r '.advisories[]? | "  ~ " + .' 2>/dev/null || echo '')"
           if consume_current_verdict_request; then
             log_decision dossier PASS-allow
+            if ! record_last_verdict_index "$history_state"; then
+              printf 'preflight-verdict-check: could not save the last verdict index.\n' >&2
+            fi
             retire_selected_dossier || true
             discard_path_for_current_epoch "$prev_verdict_file" >/dev/null 2>&1 || true
             discard_path_for_current_epoch "$payload_transcript_file" >/dev/null 2>&1 || true

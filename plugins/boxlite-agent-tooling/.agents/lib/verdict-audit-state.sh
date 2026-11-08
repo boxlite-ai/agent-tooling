@@ -93,10 +93,10 @@ verdict_audit_read_json_snapshot() {  # dossier-path
 # verdict_audit_read_regular_state — O_NONBLOCK, O_NOFOLLOW, an lstat before and an
 # fstat identity match after, and a one-second alarm — but it reports the size rather
 # than the body, so a multi-megabyte file can be measured without being read.
-verdict_audit_regular_file_bytes() {  # path -> byte count; non-zero when unsafe
+verdict_audit_regular_file_bytes() {  # path [device:inode] -> byte count
   command -v perl >/dev/null 2>&1 || return 1
   perl -MFcntl=:DEFAULT -e '
-    my ($path) = @ARGV;
+    my ($path, $expected) = @ARGV;
     $SIG{ALRM} = sub { exit 1 };
     alarm 1;
     exit 1 if lstat($path) && -l _;
@@ -107,9 +107,10 @@ verdict_audit_regular_file_bytes() {  # path -> byte count; non-zero when unsafe
     my @named = lstat($path);
     exit 1 unless @opened && @named && -f $fh
       && $opened[0] == $named[0] && $opened[1] == $named[1];
+    exit 1 if $expected ne "" && "$opened[0]:$opened[1]" ne $expected;
     alarm 0;
     print $opened[7];
-  ' "$1"
+  ' -- "$1" "${2:-}"
 }
 
 # Why a completed agent's two output files are unusable, or empty when both are fine:
@@ -250,8 +251,8 @@ verdict_audit_copy_regular_state() {  # source destination max-bytes
 # not the session; earlier history is only hashed. Historical turns and harness envelopes
 # never enter the model-visible snapshot. Assistant claims stay whole; large tool events
 # become bounded previews plus size/hash metadata. Claim truncation is fail-closed.
-# This bounded representation serves triage and history bookkeeping. Auditors discover
-# the full parent source independently; previews alone are not proof.
+# This bounded representation serves triage and history bookkeeping. Auditors verify
+# the selected turn in native records; previews alone are not proof.
 _verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-max emit-identity
   local source="$1" destination="$2" max_turn_bytes="$3" max_snapshot_bytes="$4"
   local emit_identity="$5" source_identity snapshot_identity="" snapshot_bytes
@@ -492,6 +493,7 @@ _verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-m
     # are decoded. JSON escapes control characters and UTF-8 never reuses ASCII bytes,
     # so every LF ends a record wherever a block boundary falls.
     my ($position, $pending, $scanned) = ($before[7], "", 0);
+    my $found_user = 0;
     my (@turn_lines, @turn_records);
     while (1) {
       my $last = length($pending) - 1;
@@ -531,8 +533,11 @@ _verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-m
       # Never reinterpret an oversized or malformed snapshot as raw history.
       exit 1 if ref($record) eq "HASH"
         && ($record->{type} // "") eq "verdict_final_turn_snapshot";
-      last if is_real_user($record);
       push @turn_lines, $line;
+      if (is_real_user($record)) {
+        $found_user = 1;
+        last;
+      }
       push @turn_records, $record;
     }
     for my $record (reverse @turn_records) {
@@ -576,8 +581,9 @@ _verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-m
         if $hashed + $count > $turn_start;
       $hashed += $count;
     }
+    my $turn_sha256 = $turn_digest->hexdigest;
     exit 1 unless $hashed == $before[7]
-      && $turn_digest->hexdigest eq $decoded_digest->hexdigest;
+      && $turn_sha256 eq $decoded_digest->hexdigest;
     my $first_digest = $source_digest->hexdigest;
     my @after = stat($fh);
     my @named_after = lstat($path);
@@ -604,6 +610,10 @@ _verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-m
       && $verify_digest->hexdigest eq $first_digest
       && $verified[0] == $verified_named[0] && $verified[1] == $verified_named[1];
 
+    my $native_range = $found_user ? {
+      device_inode => "$before[0]:$before[1]",
+      start_byte => $turn_start, end_byte => $before[7], sha256 => $turn_sha256,
+    } : undef;
     my $build_manifest = sub {
       my ($claims_truncated, $keep_tools, $result_preview, $call_preview) = @_;
       my @records = $claims_truncated ? () : @assistant_records;
@@ -646,6 +656,7 @@ _verdict_audit_snapshot_final_turn() {  # source destination turn-max snapshot-m
         evidence_truncated => ($previewed || $omitted_count)
           ? JSON::PP::true : JSON::PP::false,
         source_bytes => $before[7], source_sha256 => $first_digest,
+        ($native_range ? (native_range => $native_range) : ()),
         final_turn_bytes => $final_turn_bytes, claim_bytes => $claim_bytes,
         max_snapshot_bytes => 0 + $max_snapshot, retained_bytes => $retained_bytes,
         omitted_kind_counts => \%omitted, omitted_kind_bytes => \%omitted_bytes,
@@ -815,7 +826,7 @@ verdict_audit_normalize_turn_snapshot() {  # max-allowed-bytes; snapshot JSON on
     def count: type == "number" and . >= 0 and floor == .;
     if length == 1
        and (.[0] | type) == "object"
-       and (.[0] | exact_keys([
+       and (.[0] | del(.native_range) | exact_keys([
          "type", "version", "truncated", "evidence_truncated", "source_bytes",
          "source_sha256", "final_turn_bytes", "claim_bytes", "max_snapshot_bytes",
          "retained_bytes", "omitted_kind_counts", "omitted_kind_bytes",
@@ -828,6 +839,13 @@ verdict_audit_normalize_turn_snapshot() {  # max-allowed-bytes; snapshot JSON on
        and (.[0].source_bytes | count)
        and (.[0].source_sha256 | type) == "string"
        and (.[0].source_sha256 | test("^[0-9a-f]{64}$"))
+       and (.[0] | if has("native_range") then
+         .source_bytes as $end | .native_range
+         | type == "object" and exact_keys(["device_inode", "start_byte", "end_byte", "sha256"])
+         and (.device_inode | type == "string" and test("\\A[0-9]+:[0-9]+\\z"))
+         and (.start_byte | count) and .start_byte < $end and .end_byte == $end
+         and (.sha256 | type == "string" and test("\\A[0-9a-f]{64}\\z"))
+       else true end)
        and (.[0].final_turn_bytes | count)
        and (.[0].claim_bytes | count)
        and (.[0].max_snapshot_bytes | count)

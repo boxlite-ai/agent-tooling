@@ -57,8 +57,9 @@ then passes the payload to `preflight-verdict-check.sh`. The verdict gate captur
 the final turn, checks existing evidence, and runs an independent auditor when
 needed. A matching result determines whether the reply can finish.
 
-The auditor discovers the full parent transcript. Bounded snapshots support triage
-and retry history; the dossier records the auditor's decision.
+The auditor discovers the parent source and reviews the latest turn bound to the
+request. Earlier records can establish identity or support specific proof and retry
+checks. Bounded snapshots support triage and retry history.
 
 Registered hook entry points stay in this directory. Supporting files are grouped
 by purpose:
