@@ -15,7 +15,13 @@ State the problem, scope, and acceptance criteria for closing this issue.
 
 ## Related work and lessons
 
-Apply `boxlite-design-doc`: open with the best-practice line, then the approach table and lessons, not just a link.
+Apply `boxlite-design-doc`. Open with the best-practice line, fill the method table, and include Lessons.
+
+| Method | Projects | Trade-offs | Stance |
+| --- | --- | --- | --- |
+| | | | |
+
+Use one row per method and list every eligible researched project under its cited methods.
 
 ## Design
 
