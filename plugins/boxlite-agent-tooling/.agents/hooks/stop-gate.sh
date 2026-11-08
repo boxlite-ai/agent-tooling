@@ -14,7 +14,7 @@
 # the hook itself, except that step 1 blocks with its correction. Missing dependencies
 # fail closed.
 #
-# Tests: bash .agents/hooks/session/stop-gate.test.sh
+# Tests: bash tests/session/stop-gate.test.sh
 set -uo pipefail
 
 hooks_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

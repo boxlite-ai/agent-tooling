@@ -29,7 +29,7 @@
 # Probing PATH for a vendor binary is the same mistake — both CLIs can be installed at
 # once. subagent.test.sh greps for every name above.
 #
-# Tests: bash .agents/lib/hook-host.test.sh
+# Tests: bash tests/lib/hook-host.test.sh
 
 # Exported AND non-empty:
 #   exported  — only the environment carries a host's answer. A same-named shell

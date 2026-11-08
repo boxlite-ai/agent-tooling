@@ -78,8 +78,8 @@ For `main → stack-1 → stack-2`, pushed `stack-1` becomes the base; no ancest
 Run from the repository root:
 
 ```sh
-bash plugins/boxlite-agent-tooling/.githooks/githooks.test.sh
-bash plugins/boxlite-agent-tooling/.githooks/lifecycle.test.sh
+bash plugins/boxlite-agent-tooling/tests/git/githooks.test.sh
+bash plugins/boxlite-agent-tooling/tests/git/lifecycle.test.sh
 ```
 
 The first suite covers gates, receipts, chaining, and push input; the second covers

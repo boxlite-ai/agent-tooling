@@ -1,34 +1,39 @@
 P := plugins/boxlite-agent-tooling
+PLUGIN_TESTS := $(P)/tests
+BOOTSTRAP_TESTS := tests/bootstrap
+export TEST_FILTER
 API_SHELL := $(P)/scripts/api-compatibility.sh \
   $(P)/.agents/hooks/preflight-commit-push.sh $(P)/.agents/hooks/cancel-verdict-audit.sh \
-  $(P)/.agents/hooks/audit/preflight-commit-push.test.sh \
-  $(P)/.agents/hooks/audit/run-commit-push-audit.test.sh \
-  $(P)/.agents/lib/subagent.test.sh \
-  $(P)/.githooks/pre-push $(P)/.githooks/githooks.test.sh
+  $(PLUGIN_TESTS)/audit/preflight-commit-push.test.sh \
+  $(PLUGIN_TESTS)/audit/run-commit-push-audit.test.sh \
+  $(PLUGIN_TESTS)/lib/subagent.test.sh \
+  $(P)/.githooks/pre-push $(PLUGIN_TESTS)/git/githooks.test.sh
 
 .PHONY: test\:subagent test\:verdict test\:architecture test\:parity test\:guidance test\:writing
 .PHONY: test\:api-compatibility test\:plugin test\:api-lint test\:guidance-check test\:bootstrap
 
 test\:bootstrap:
-	@for suite in templates/install.test.sh templates/claude-plugin-bootstrap.test.sh templates/codex-plugin-bootstrap.test.sh; do \
-	  case "$$suite" in *"$(TEST_FILTER)"*) ;; *) continue ;; esac; \
+	@for suite in $(addprefix $(BOOTSTRAP_TESTS)/,install.test.sh claude-plugin-bootstrap.test.sh codex-plugin-bootstrap.test.sh); do \
+	  case "$$suite" in *"$$TEST_FILTER"*) ;; *) \
+	    case "templates/$${suite##*/}" in *"$$TEST_FILTER"*) ;; *) continue ;; esac ;; \
+	  esac; \
 	  echo "Running $$suite"; bash "$$suite" || exit $$?; \
 	done
 
 test\:subagent:
-	bash $(P)/.agents/lib/subagent.test.sh
+	bash $(PLUGIN_TESTS)/lib/subagent.test.sh
 
 test\:verdict:
-	bash $(P)/.agents/hooks/audit/run-verdict-audit.test.sh
+	bash $(PLUGIN_TESTS)/audit/run-verdict-audit.test.sh
 
 test\:architecture:
-	bash $(P)/architecture.test.sh
+	bash $(PLUGIN_TESTS)/architecture.test.sh
 
 test\:parity:
-	bash $(P)/host-parity.test.sh
+	bash $(PLUGIN_TESTS)/host-parity.test.sh
 
 test\:guidance:
-	bash $(P)/scripts/sync-guidance.test.sh
+	bash $(PLUGIN_TESTS)/scripts/sync-guidance.test.sh
 
 test\:writing:
 	bash $(P)/scripts/check-writing-ownership.sh .
@@ -37,11 +42,24 @@ test\:guidance-check:
 	bash $(P)/scripts/sync-guidance.sh --check .
 
 test\:api-compatibility:
-	python3 -m unittest discover -s $(P)/tests -p 'test_api_compatibility*.py' -v $(API_TEST_ARGS)
+	python3 -m unittest discover -s $(PLUGIN_TESTS) -p 'test_api_compatibility*.py' -v $(API_TEST_ARGS)
 
+# Keep pre-move suite paths as TEST_FILTER aliases.
 test\:plugin:
-	@find $(P) -type f -name '*.test.sh' -print | sort | while IFS= read -r suite; do \
-	  case "$$suite" in *"$(TEST_FILTER)"*) ;; *) continue ;; esac; \
+	@find $(PLUGIN_TESTS) -type f -name '*.test.sh' -print | sort | while IFS= read -r suite; do \
+	  relative=$${suite#$(PLUGIN_TESTS)/}; \
+	  case "$$relative" in \
+	    pr/fork-target.test.sh) legacy=.agents/hooks/pr/tests/fork-target.test.sh ;; \
+	    watch/hooks/*) legacy=.agents/hooks/watch/$${relative##*/} ;; \
+	    audit/*|design/*|pr/*|resume/*|session/*) legacy=.agents/hooks/$$relative ;; \
+	    lib/*|watch/*) legacy=.agents/$$relative ;; \
+	    git/*) legacy=.githooks/$${relative#git/} ;; \
+	    scripts/*|architecture.test.sh|host-parity.test.sh) legacy=$$relative ;; \
+	    *) legacy=tests/$$relative ;; \
+	  esac; \
+	  case "$$suite" in *"$$TEST_FILTER"*) ;; *) \
+	    case "$(P)/$$legacy" in *"$$TEST_FILTER"*) ;; *) continue ;; esac ;; \
+	  esac; \
 	  echo "Running $$suite"; bash "$$suite" || exit $$?; \
 	done
 

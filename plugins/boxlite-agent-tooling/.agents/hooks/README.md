@@ -36,19 +36,19 @@ Runtime files live under the consumer's ignored `.agents/state/` directory.
 
 ## Tests
 
-Run adjacent suites from the repository root, for example:
+Run plugin suites from the repository root.
 
 ```sh
-bash plugins/boxlite-agent-tooling/.agents/hooks/design/preflight-design-doc.test.sh
-bash plugins/boxlite-agent-tooling/.agents/hooks/session/stop-gate.test.sh
+bash plugins/boxlite-agent-tooling/tests/design/preflight-design-doc.test.sh
+bash plugins/boxlite-agent-tooling/tests/session/stop-gate.test.sh
 ```
 
 Additional suites cover GitHub writing, PR design/explanations/size, TL;DR checks, auditor overrides, and watch delivery.
 
-- `session/tldr-gates.test.sh fast` checks the TL;DR denials in under a minute; its full matrix takes over ten minutes.
+- Pass `fast` to the [TL;DR suite](../../tests/session/tldr-gates.test.sh) to check denials in under a minute. Its full matrix takes over ten minutes.
 - Set `TLDR_GATES_CASES=<label>,…` to run only those cases, for example a fix's new ones within a foreground time limit; a label that runs no case fails the suite.
-- Managed questions also use [`scripts/claude-timed-prompts.test.sh`](../../scripts/claude-timed-prompts.test.sh).
-- `pr/fixtures/` holds recorded test inputs.
+- Managed questions also use [`tests/scripts/claude-timed-prompts.test.sh`](../../tests/scripts/claude-timed-prompts.test.sh).
+- [PR fixtures](../../tests/pr/fixtures/) hold recorded test inputs.
 
 ## How it works
 

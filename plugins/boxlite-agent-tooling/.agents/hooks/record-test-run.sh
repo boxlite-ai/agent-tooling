@@ -2,7 +2,7 @@
 # shellcheck source-path=SCRIPTDIR
 # PostToolUse / PostToolUseFailure hook: record each test run the agent executes,
 # so commit-push-auditor can see it.
-# Tests: bash .agents/hooks/audit/record-test-run.test.sh
+# Tests: bash tests/audit/record-test-run.test.sh
 #
 # The workflow asks the author to run each new test against reverted production code,
 # then against the fix. The auditor is denied the parent's history and has no time for

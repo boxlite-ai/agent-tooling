@@ -34,7 +34,7 @@
 # creates them). AGENT_TOOLING_GUIDANCE_FORCE=1 equals --force, for reaching force
 # through the consumer's install.sh.
 #
-# Tests: bash scripts/sync-guidance.test.sh
+# Tests: bash tests/scripts/sync-guidance.test.sh
 set -euo pipefail
 
 BEGIN_PREFIX='<!-- agent-tooling:guidance:begin '

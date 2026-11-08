@@ -4,7 +4,7 @@
 # gate hashes that exact update list and the resulting pushed diff, then replays
 # the original stdin to any chained framework hook.
 #
-# Tests: bash .githooks/githooks.test.sh
+# Tests: bash tests/git/githooks.test.sh
 set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"

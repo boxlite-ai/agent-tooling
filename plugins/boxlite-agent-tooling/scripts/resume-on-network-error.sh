@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Supervisor for unattended `claude -p` runs: restarts the session when a turn died
 # on the API rather than on finished work. Prints the final result JSON on stdout.
-# Tests: bash plugins/boxlite-agent-tooling/scripts/resume-on-network-error.test.sh
+# Tests: bash plugins/boxlite-agent-tooling/tests/scripts/resume-on-network-error.test.sh
 # Requires: claude, jq, curl (curl is used only to probe API reachability).
 #
 # Why this is a wrapper and not a hook

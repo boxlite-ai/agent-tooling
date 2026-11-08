@@ -33,7 +33,7 @@
 #   each successive gh pr command forces a fresh ack, even at the same HEAD.
 #   Mirrors the trade-off in preflight-commit-push.sh.
 #
-# Tests: bash .agents/hooks/pr/preflight-pr-review.test.sh
+# Tests: bash tests/pr/preflight-pr-review.test.sh
 set -euo pipefail
 
 publish_file=0

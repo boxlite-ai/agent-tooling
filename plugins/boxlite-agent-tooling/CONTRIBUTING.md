@@ -29,6 +29,13 @@ make test:writing test:parity test:architecture
 make test:plugin TEST_FILTER=<name>
 ```
 
+Plugin suites and fixtures live under [`tests/`](tests/) by subsystem. Bootstrap suites and fixtures live under [`tests/bootstrap/`](../../tests/bootstrap/).
+
+- `make test:plugin` discovers shell suites under the plugin test directory.
+- `make test:bootstrap` runs the installer and both host bootstrap suites. Run [prompt rules](../../tests/bootstrap/prompt-rules.test.sh) separately.
+- `TEST_FILTER` matches substrings of current and previous suite paths. For example, `TEST_FILTER=tests/` selects every shell suite in the chosen Make target.
+- Run each Python skill suite with `python3 -m unittest discover -s plugins/boxlite-agent-tooling/tests/skills/<skill>`.
+
 API changes also require `make test:api-compatibility test:api-lint` with oasdiff 1.33.0 or `OASDIFF_BIN`.
 
 Test affected Claude/Codex and OS combinations; report unverified coverage; Copilot installs remain unverified.

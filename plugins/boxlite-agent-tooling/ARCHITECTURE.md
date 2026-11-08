@@ -126,9 +126,10 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | `.agents/watch/` | Producer, durable intent, pending delivery, consumers. |
 | `.agents/skills/`, `.claude/agents/` | Complete skills and native auditor/advisor specs. |
 | [.githooks/](.githooks/README.md), [scripts/](scripts/README.md) | Git gates and maintenance commands. |
-| `guidance/workflow.md`, `host-parity.test.sh`, `architecture.test.sh` | Consumer policy, asset parity, map coverage. |
+| `guidance/workflow.md` | Consumer policy. |
+| [`tests/`](tests/), `tests/host-parity.test.sh`, `tests/architecture.test.sh` | Plugin suites by subsystem, asset parity, map coverage. |
 
-Entry paths stay stable. Helpers and tests resolve `audit`, `design`, `pr`, `resume`, `session`, and `watch` subdirectories from the plugin root.
+Entry paths stay stable. Runtime helpers live in subsystem directories. Tests resolve implementation paths from the plugin root.
 
 Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's canonical paths in symlink-free cache copies.
 

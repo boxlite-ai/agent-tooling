@@ -207,14 +207,12 @@ host modes and response rules.
 Run suites from the repository root, for example:
 
 ```sh
-bash plugins/boxlite-agent-tooling/scripts/design-doc.test.sh
-bash plugins/boxlite-agent-tooling/scripts/sync-guidance.test.sh
-bash plugins/boxlite-agent-tooling/scripts/refresh-installation.test.sh
+bash plugins/boxlite-agent-tooling/tests/scripts/design-doc.test.sh
+bash plugins/boxlite-agent-tooling/tests/scripts/sync-guidance.test.sh
+bash plugins/boxlite-agent-tooling/tests/scripts/refresh-installation.test.sh
 make test:bootstrap
 ```
 
-Most commands have adjacent `*.test.sh` suites.
-
-- Installation also uses [template tests](../../../templates/install.test.sh) and [Git lifecycle tests](../.githooks/lifecycle.test.sh).
-- `audit-history-*.test.sh`, [the audit reconciliation suite](audit-reconciliation.test.sh), and `audit-reflection-*.test.sh` cover shared history. `claude-timed-*.test.sh` cover launcher and question integration.
-- `fixtures/` contains test helpers, not operator commands.
+- Installation also uses [`tests/bootstrap/install.test.sh`](../../../tests/bootstrap/install.test.sh) and [Git lifecycle tests](../tests/git/lifecycle.test.sh).
+- `audit-history-*.test.sh`, [the audit reconciliation suite](../tests/scripts/audit-reconciliation.test.sh), and `audit-reflection-*.test.sh` cover shared history. `claude-timed-*.test.sh` cover launcher and question integration.
+- [Audit fixtures](../tests/audit/fixtures/) supply test helpers.

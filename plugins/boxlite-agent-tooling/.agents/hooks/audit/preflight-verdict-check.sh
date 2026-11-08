@@ -119,7 +119,7 @@
 #     The patterns are a curated, tunable list (below) targeting how claims are actually
 #     phrased; misses degrade to #915's self-declared behavior, never to a trap.
 #
-# Tests: bash .agents/hooks/audit/preflight-verdict-check.test.sh
+# Tests: bash tests/audit/preflight-verdict-check.test.sh
 set -uo pipefail
 verdict_gate_started_at="${VERDICT_STOP_STARTED_AT:-}"
 [[ "$verdict_gate_started_at" =~ ^[0-9]{1,10}$ ]] || verdict_gate_started_at="$(date +%s)"

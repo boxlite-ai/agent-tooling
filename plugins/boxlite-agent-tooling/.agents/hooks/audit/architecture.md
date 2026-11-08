@@ -182,7 +182,7 @@ Some native Codex output lacks exit metadata and stays unobserved; recorder rema
 
 ## Stop gate decisions
 
-After timed confirmations and writing checks, `.agents/hooks/audit/preflight-verdict-check.sh` logs these rung/outcome pairs. `architecture.test.sh` checks exact coverage.
+After timed confirmations and writing checks, `.agents/hooks/audit/preflight-verdict-check.sh` logs these rung/outcome pairs. `tests/architecture.test.sh` checks exact coverage.
 
 | Rung | Outcome | Condition |
 | --- | --- | --- |

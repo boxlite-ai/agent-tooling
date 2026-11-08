@@ -30,7 +30,7 @@
 #   commit-then-push of the same HEAD must re-audit; the user has accepted
 #   this trade-off to avoid stale-audit-passes-new-content failure modes.
 #
-# Tests: bash .agents/hooks/audit/preflight-commit-push.test.sh
+# Tests: bash tests/audit/preflight-commit-push.test.sh
 set -euo pipefail
 
 infrastructure_failure() { # prerequisite, recovery; retain the existing fatal exit contract
