@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, mkdtempSync, realpathSync, renameSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { runManagedFollowups } from '../.agents/lib/followup-claude.mjs';
+import { runManagedFollowups, SUDO } from '../.agents/lib/followup-claude.mjs';
 import { drainFollowups } from '../.agents/lib/followup-publisher.mjs';
 import { QUEUE_TOOL } from '../.agents/lib/followup-session.mjs';
 import { cloneIdentity, openFollowupQueue } from '../.agents/lib/followups.mjs';
@@ -170,9 +171,8 @@ test('native final result with an open process holds approved drafts', native, a
 
 const cliRoot = process.env.BOXLITE_FOLLOWUP_CLI_ROOT;
 const cliAgent = process.env.BOXLITE_FOLLOWUP_CLI_AGENT;
-test('legacy journal recovery through the CLI after a checkout rename', {
-  skip: process.platform !== 'darwin' || !cliRoot || !cliAgent, timeout: 30_000,
-}, t => {
+const isolated = { skip: process.platform !== 'darwin' || !cliRoot || !cliAgent, timeout: 30_000 };
+test('legacy journal recovery through the CLI after a checkout rename', isolated, t => {
   const root = mkdtempSync(join(cliRoot, 'legacy-cli-'));
   chmodSync(root, 0o755);
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -222,4 +222,68 @@ test('legacy journal recovery through the CLI after a checkout rename', {
   const status = invoke('status');
   assert.equal(status.status, 0, status.stderr);
   assert.equal(JSON.parse(status.stdout)[0].id, draft.id);
+});
+
+
+test('the default launcher kills descendants when stdout remains open after the result', isolated, async t => {
+  const root = mkdtempSync(join(cliRoot, 'default-close-'));
+  chmodSync(root, 0o755);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cwd = join(root, 'repo');
+  execFileSync('git', ['init', '-q', cwd]);
+  const queue = openFollowupQueue(join(root, 'state'), cloneIdentity(cwd), { initialize: true });
+  const wrapper = join(root, 'agent.cjs');
+  const pidFile = join(root, 'agent-pids.json');
+  const prefix = ['-n', '-H', '-u', cliAgent, '--'];
+  const signal = (name, pid) => spawnSync(SUDO, [...prefix, '/bin/kill', name, String(pid)],
+    { stdio: 'ignore', timeout: 3000 }).status === 0;
+
+  writeFileSync(wrapper, `#!${process.execPath}
+    const { spawn } = require('node:child_process');
+    const worker = spawn(process.execPath, ['-e', ${JSON.stringify(
+      "process.on('SIGTERM', () => {}); console.log('ready'); setTimeout(() => process.exit(), 15000);"
+    )}]);
+    worker.stdout.once('data', () => console.log(JSON.stringify([process.pid, worker.pid])));
+    process.on('SIGTERM', () => {});
+    setTimeout(() => process.exit(), 16000).unref();
+  `, { mode: 0o755 });
+
+  const sdkFile = join(root, 'sdk.mjs');
+  mkdirSync(join(root, 'node_modules', 'zod'), { recursive: true });
+  writeFileSync(join(root, 'node_modules', 'zod', 'index.js'), `
+    const schema = { optional() { return this; }, int() { return this; }, max() { return this; } };
+    exports.z = new Proxy({}, { get: () => () => schema });
+  `);
+  writeFileSync(join(root, 'package.json'), JSON.stringify({
+    name: '@anthropic-ai/claude-agent-sdk', version: '0.3.319',
+  }));
+  writeFileSync(sdkFile, `
+    import { once } from 'node:events';
+    import { writeFileSync } from 'node:fs';
+    export const tool = () => {};
+    export const createSdkMcpServer = () => {};
+    export async function* query({ options }) {
+      const child = options.spawnClaudeCodeProcess({ command: options.pathToClaudeCodeExecutable, args: [], cwd: options.cwd });
+      const [pids] = await once(child.stdout, 'data');
+      writeFileSync(${JSON.stringify(pidFile)}, pids);
+      yield { type: 'result', session_id: options.sessionId, subtype: 'success' };
+      await once(child.stdout, 'close');
+    }
+  `);
+
+  try {
+    await assert.rejects(runManagedFollowups(queue, cwd, prefix, sdkFile, wrapper, 'Fixture', { closeTimeout: 500 }),
+      /did not close within the deadline/);
+    const [agent, descendant] = JSON.parse(readFileSync(pidFile, 'utf8'));
+    assert.ok(Number.isSafeInteger(agent) && agent > 1);
+    assert.ok(Number.isSafeInteger(descendant) && descendant > 1 && descendant !== agent);
+    for (let poll = 0; poll < 20 && signal('-0', descendant); poll++) await delay(100);
+    assert.equal(signal('-0', descendant), false, 'descendant remains alive after the shutdown deadline');
+  } finally {
+    if (existsSync(pidFile)) {
+      for (const pid of JSON.parse(readFileSync(pidFile, 'utf8'))) {
+        if (Number.isSafeInteger(pid) && pid > 1) signal('-KILL', pid);
+      }
+    }
+  }
 });
