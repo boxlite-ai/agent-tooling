@@ -23,10 +23,10 @@ def user_question_design_choices:
 def user_question_design_pattern:
   "^design-decision: (?<choice>" + user_question_design_choices + ")\\s+\\S";
 
-def user_question_git_pattern($prefix; $id):
+def user_question_bound_choice_pattern($prefix; $id):
   "^" + $prefix + " " + $id + " (" + (user_question_policy($prefix).choices | join("|")) + ")$";
 
 def user_question_git_reply:
   capture("^(?<kind>commit|push)-audit-decision: (?<id>[0-9a-f]{32}) ") as $binding |
-  select(test(user_question_git_pattern($binding.kind + "-audit-decision:"; $binding.id))) |
+  select(test(user_question_bound_choice_pattern($binding.kind + "-audit-decision:"; $binding.id))) |
   $binding + {text:.};

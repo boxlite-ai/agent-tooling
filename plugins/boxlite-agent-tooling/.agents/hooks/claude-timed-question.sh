@@ -56,11 +56,7 @@ case "$(jq -r .hook_event_name <<<"$payload")" in
        map(select(type=="string" and length>0)) | .[0]) |
       select(type=="string") | {tool_use_id:$id,answer:.}' <<<"$payload")" \
       || fail 'no user reply; keep the request unapproved and follow its original deadline'
-    request="$(timed_user_prompt native-reply "$state" "$id" "$answer")" \
-      || fail 'no valid timely reply; never infer approval, follow the original deadline'
-    if [[ "$kind" == pr-review ]]; then
-      jq -c '{branch:.spec.binding.branch,head:.spec.binding.head,message:.response,request:.id}' <<<"$request" \
-        | verdict_audit_write_atomic "$repo/.agents/state/pr-reviewed.json" || fail 'could not record review acknowledgment'
-    fi ;;
+    timed_user_prompt native-reply "$state" "$id" "$answer" >/dev/null \
+      || fail 'no valid timely reply; never infer approval, follow the original deadline' ;;
   *) fail 'unsupported hook event' ;;
 esac

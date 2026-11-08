@@ -61,7 +61,7 @@ user_question() (  # operation, plugin root, operation arguments
             .label as $label |
             (if $request.spec.prefix == "design-decision:" then
                "design-decision: " + $label + " <reason>"
-             elif $request.spec.fallback == "reflect-again" then
+             elif $request.spec.prefix == "pr-size-exception:" or $request.spec.fallback == "reflect-again" then
                $request.spec.prefix + " " + $request.id + " " + ($label | sub(" \\(Recommended\\)$"; ""))
              else $label end) as $answer |
             "- `" + $answer + "` — " + .description)

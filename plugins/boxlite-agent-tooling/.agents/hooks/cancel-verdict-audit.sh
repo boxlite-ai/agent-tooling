@@ -155,6 +155,13 @@ git_audit_decision_reply "$payload" "$project_dir" "$tooling_root" && exit 0
 # A failed confirmation approves nothing; report it to the session and keep the prompt.
 # shellcheck source=../lib/user-question.sh
 source "$tooling_root/.agents/lib/user-question.sh" || exit 2
+if [[ "$prompt_text" =~ ^[[:space:]]*(reviewed:|pr-size-exception:) ]]; then
+  # shellcheck source=../lib/pr-question-reply.sh
+  source "$tooling_root/.agents/lib/pr-question-reply.sh" || exit 2
+  if ! pr_question_reply "$payload" "$project_dir" "$tooling_root" 2>/dev/null; then
+    printf 'PR confirmation was not recorded. Check the open request, checkout, and deadline.\n'
+  fi
+fi
 if user_question api-match "$tooling_root" "$payload" >/dev/null; then
   if compatibility_record="$(printf '%s' "$payload" |
        bash "$tooling_root/scripts/api-compatibility.sh" record "$project_dir" 2>&1)"; then

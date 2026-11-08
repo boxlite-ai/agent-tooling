@@ -52,8 +52,7 @@ pr_size_check() { # context JSON {root,project,session,tooling}, resolved target
     return 1
   fi
   message="$(user_question render "$tooling" pr/pr-size-exception "lines=$lines" \
-    "base=$(jq -r .base <<<"$snapshot")" "head=$(jq -r .head <<<"$snapshot")" \
-    "request_id=$request_id" "state=$state" "tooling=$tooling")" || return 2
+    "base=$(jq -r .base <<<"$snapshot")" "head=$(jq -r .head <<<"$snapshot")")" || return 2
   [[ "$message" == *[![:space:]]* ]] || return 2
   printf '%s\n' "$message"
   timed_user_prompt_instruction "$tooling" "$record" || return 2

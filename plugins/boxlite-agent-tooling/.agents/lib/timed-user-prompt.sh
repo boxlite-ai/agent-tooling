@@ -40,7 +40,7 @@ timed_user_prompt() { # operation state-path spec-or-request-id [verbatim-respon
 }
 
 _timed_user_prompt_transition() { # same arguments as the facade; lock already held
-  local operation="$1" path="$2" argument="$3" response="${4:-}" record=null snapshot now nonce next archive library
+  local operation="$1" path="$2" argument="$3" response="${4:-}" record=null snapshot now nonce next archive library marker marker_record current_marker
   library="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 2
   now="$(date -u +%s)" || return 2
   [[ "$now" =~ ^[0-9]{1,12}$ ]] || return 2
@@ -68,7 +68,7 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
         elif $s.prefix == "design-decision:" then
           ($policy.choices | index($answer) != null) or test(user_question_design_pattern)
         elif ($s | git_decision) then (($policy.choices + user_question_labels($policy)) | index($answer) != null)
-          or test(user_question_git_pattern($s.prefix; "[0-9a-f]{32}"))
+          or test(user_question_bound_choice_pattern($s.prefix; "[0-9a-f]{32}"))
         else startswith($s.prefix + " ")
           and ([.[($s.prefix|length):] | scan("\\S+")] | length) >= $s.minimum_words end);
     def valid:
@@ -89,7 +89,7 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
           and .response == user_question_policy(.spec.prefix).choices[1]
         else .response == "" end)
       and (. as $record | if (.spec | git_decision) and (.response | startswith($record.spec.prefix))
-        then .response | test(user_question_git_pattern($record.spec.prefix; $record.id))
+        then .response | test(user_question_bound_choice_pattern($record.spec.prefix; $record.id))
         else true end)
       and (if .fallback_delivered then (.status | IN("expired","declined")) else true end);
     # Older version-one records predate native questions; preserve their deadline.
@@ -124,9 +124,20 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
     elif $op == "prompt-reply" and (.spec | git_decision) then
       .spec as $spec |
       if .status != "pending" or ($reply | line | not)
-        or ($reply | test(user_question_git_pattern($spec.prefix; $arg)) | not)
+        or ($reply | test(user_question_bound_choice_pattern($spec.prefix; $arg)) | not)
       then error("Git audit choice is stale or does not match this request")
       else .status = "accepted" | .response = $reply end
+    elif $op == "prompt-reply" and (.spec.prefix | IN("pr-size-exception:", "reviewed:")) then
+      .spec as $spec |
+      if .question_tool_id != "" or $now >= .deadline
+      then error("PR confirmation is closed or belongs to a native question")
+      elif .status == "accepted" and $spec.prefix == "reviewed:" and .response == $reply then .
+      elif .status != "pending" then error("PR confirmation is no longer pending")
+      elif $spec.prefix == "pr-size-exception:" and $reply == user_question_policy($spec.prefix).choices[1]
+      then .status = "declined" | .response = $reply
+      elif ($reply | response_ok($spec) and utf8bytelength <= 1024) then
+        .status = "accepted" | .response = $reply
+      else error("response does not match this PR confirmation") end
     elif $op == "prompt-reply" then
       # The human supplied a directive; the deadline only ends the agent wait.
       if .spec.prefix != "design-decision:" or ($reply | line and test(user_question_design_pattern) | not)
@@ -172,6 +183,18 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       }
   fi
   printf '%s\n' "$next" | verdict_audit_write_atomic "$path" || return 2
+  if [[ "$operation" == prompt-reply || "$operation" == native-reply ]] &&
+     jq -e '.spec.prefix == "reviewed:"' <<<"$next" >/dev/null; then
+    # Keep marker publication under the request lock. A failed publication
+    # blocks the gate; the same typed reply can repair it within the deadline.
+    marker="${path%/*}/pr-reviewed.json"
+    marker_record="$(jq -c '{branch:.spec.binding.branch,head:.spec.binding.head,message:.response,request:.id}' <<<"$next")" \
+      || return 2
+    current_marker="$(verdict_audit_read_regular_state "$marker" 8192 json 2>/dev/null)" || current_marker=""
+    if [[ "${current_marker#*$'\n'}" != "$marker_record" ]]; then
+      printf '%s\n' "$marker_record" | verdict_audit_write_atomic "$marker" || return 2
+    fi
+  fi
   if [[ "$operation" == question ]]; then _timed_user_prompt_question "$next"
   else printf '%s\n' "$next"; fi
 }

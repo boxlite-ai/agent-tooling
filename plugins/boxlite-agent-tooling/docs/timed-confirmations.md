@@ -21,14 +21,16 @@ New/renewed requests receive 300 seconds; legacy 180-second requests keep their 
 
 | Choice | Authority |
 | --- | --- |
-| Size | CLI/native exact labels; legacy reasons remain readable; never authorize review. |
-| Review | Bind checkout/branch/HEAD/session/request. Consume the timely reply before allowing the protected command. |
+| Size | Submit the exact choice line with its request ID. CLI/native labels and legacy reasons remain valid. Size approval grants no review authority. |
+| Review | Type `reviewed: <what changed>` in the checkout that opened the request. The gate consumes the reply before allowing the protected command. |
 | Design | `.agents/hooks/design-decision-prompt.sh` accepts human first-line directives/correlated Codex replies, including late replies; CLI `respond` cannot relay them. |
 | Git retry | Managed native or standalone prefix/request/choice; validate session/epoch/branch/HEAD/latest failure; no CLI relay/consume/renew. |
 
 Legacy Codex design replies require the exact generated title/directives and one string-valued `questionItemId`/`question`/`answer` item; opaque host IDs authenticate nothing.
 
 Malformed/mixed/stale/replayed/legacy-unbound answers retain ordinary cancellation; design writers recheck live content/history before mutation without consuming changed replies or serializing independent writers.
+
+The host prompt hook records timely size and review replies in protected state. Codex model tools can keep workspace-write restrictions.
 
 ### Renewal
 

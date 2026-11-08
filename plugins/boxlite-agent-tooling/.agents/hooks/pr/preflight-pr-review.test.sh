@@ -863,7 +863,7 @@ long_tail="$(printf '%04096d' 0 | tr 0 x)"
 ack_reason="$(reason_for "gh pr ready $long_tail")"
 assert_reason_budget "missing-ack reason stays bounded even for a long command" "$ack_reason"
 for contract in "Ask once in plain text" "reviewed:" \
-                ".agents/state/pr-reviewed.json" '"branch"' '"head"' '"message"' \
+                "prompt hook records" "same command" \
                 "Keeping draft" "inspecting the diff" "Never infer" "fabricate"; do
   assert_reason_contains "ack reason keeps '$contract'" "$ack_reason" "$contract"
 done
@@ -882,8 +882,8 @@ mkdir -p "$LONG_STATE/.agents/state"
 long_reason="$(reason_for_repo "$LONG_REPO" "$LONG_STATE" 'gh pr ready 42')"
 assert_reason_budget "long-ref fallback stays bounded" "$long_reason"
 for contract in "Ask once in plain text" "reviewed:" \
-                ".agents/state/pr-reviewed.json" '"branch"' '"head"' '"message"' \
-                "Then retry" "Never infer" "fabricate"; do
+                "prompt hook records" "same command" \
+                "Never infer" "fabricate"; do
   assert_reason_contains "long-ref fallback keeps '$contract'" "$long_reason" "$contract"
 done
 long_head="$(git -C "$LONG_REPO" rev-parse HEAD)"
