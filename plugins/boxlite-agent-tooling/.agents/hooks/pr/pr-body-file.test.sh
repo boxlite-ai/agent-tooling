@@ -37,6 +37,7 @@ case "$*" in
     printf '%s\n' "$@" > "$FILE_PR_SENT.args"
     grep -Fxq -- --body-file=- "$FILE_PR_SENT.args"
     cat > "$FILE_PR_SENT"
+    if [[ -n "${FILE_PR_STDOUT:-}" ]]; then printf '%s\n' "$FILE_PR_STDOUT"; fi
     exit "${FILE_PR_EXIT:-0}" ;;
   *) exit 2 ;;
 esac
@@ -56,7 +57,7 @@ exec "$FILE_PR_REAL_PERL" "$@"
 PERL
 chmod +x "$scratch/bin/"{gh,perl}
 export PATH="$scratch/bin:$PATH" CODEX_THREAD_ID=codex-file-pr
-unset CLAUDE_CODE_SESSION_ID GH_HOST GH_REPO GIT_DIR GIT_WORK_TREE
+unset CLAUDE_CODE_SESSION_ID GH_HOST GH_REPO GIT_DIR GIT_WORK_TREE BOXLITE_PR_WATCH
 cd "$scratch/repo"
 bash "$plugin/scripts/design-doc.sh" bind "$FILE_PR_URL" >/dev/null
 hook="$plugin/.agents/hooks/preflight-pr-review.sh"
@@ -154,9 +155,18 @@ CODEX_THREAD_ID='' CLAUDE_CODE_SESSION_ID=claude-file-pr launch edit 42 -t "$tit
 cmp "$FILE_PR_SOURCE.original" "$FILE_PR_SENT"
 launch create --draft --title "$title" '--body-file=./body file.md'
 cmp "$FILE_PR_SOURCE.original" "$FILE_PR_SENT"
+pr_url=https://github.com/example/repo/pull/42
+repo_digest="$(printf '%s' "$(pwd -P)" | shasum -a 256 | awk '{print $1}')"
+result="$(FILE_PR_STDOUT="$pr_url" launch create --draft --title "$title" --body-file "$FILE_PR_SOURCE" 2>&1)"
+if [[ "$result" != "$pr_url"$'\n'"boxlite-pr-write $repo_digest $pr_url" ]]; then
+  printf 'FAIL: completed checked write did not confirm its PR and checkout\n' >&2
+  exit 1
+fi
+result="$(FILE_PR_STDOUT="$pr_url" launch create --draft --title "$title" --body-file "$FILE_PR_SOURCE" --dry-run 2>&1)"
+[[ "$result" == "$pr_url" ]]
 status=0
-FILE_PR_EXIT=17 launch create --draft --title "$title" --body-file "$FILE_PR_SOURCE" || status=$?
-[[ "$status" == 17 ]]
+result="$(FILE_PR_STDOUT="$pr_url" FILE_PR_EXIT=17 launch create --draft --title "$title" --body-file "$FILE_PR_SOURCE" 2>&1)" || status=$?
+[[ "$status" == 17 && "$result" == "$pr_url" ]]
 
 FILE_PR_LINES=401 reject 'Bypass limit' launch create --draft --title "$title" --body-file "$FILE_PR_SOURCE"
 reject 'title must' launch create --title 'Bad title' --body-file "$FILE_PR_SOURCE"

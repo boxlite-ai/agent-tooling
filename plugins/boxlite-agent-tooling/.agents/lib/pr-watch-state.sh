@@ -32,6 +32,16 @@ pr_watch_id_is_valid() {
   [[ "${1-}" =~ ^watch-[0-9a-f]{24}$ ]]
 }
 
+pr_watch_checkout_digest() {
+  local root
+  root="$(cd -- "$1" && pwd -P)" || return 1
+  LC_ALL=C printf '%s' "$root" | shasum -a 256 | awk '{print $1}'
+}
+
+pr_watch_url_is_valid() {
+  [[ "${1-}" =~ ^https://github[.]com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/pull/[1-9][0-9]*$ ]]
+}
+
 # Watch state lives below Git's private directory, but a crash or local pathname
 # replacement can still leave a symlink, FIFO, or unrelated inode at a leaf.
 # Keep the directory identity explicit and make every leaf operation select one

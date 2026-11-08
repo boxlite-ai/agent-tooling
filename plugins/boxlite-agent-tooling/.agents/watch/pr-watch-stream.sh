@@ -10,7 +10,7 @@
 # summary reports the generation's watch_end.
 #
 # Usage: pr-watch-stream.sh <event-log> [poll-seconds] [--watch-id <id>]
-#        [--ready-fd 4]
+#        [--expect-pr-url <url>] [--ready-fd 4]
 # Env:
 #   PR_WATCH_STREAM_WAIT        seconds to wait for the file/live generation (120; hard max 3600)
 #   PR_WATCH_STREAM_MAX_EVENTS  total stdout events for this consumer (64; hard max 256)
@@ -41,6 +41,7 @@ if (( $# )) && [[ "$1" != --* ]]; then
   shift
 fi
 requested_watch_id=""
+expected_pr_url=""
 ready_fd=""
 while (( $# )); do
   case "$1" in
@@ -50,6 +51,11 @@ while (( $# )); do
         exit 2
       }
       requested_watch_id="$2"
+      shift 2
+      ;;
+    --expect-pr-url)
+      [[ -n "${2:-}" ]] || { printf 'pr-watch-stream: --expect-pr-url requires a URL\n' >&2; exit 2; }
+      expected_pr_url="$2"
       shift 2
       ;;
     --ready-fd)
@@ -138,6 +144,11 @@ watch_state_helpers="$script_dir/../lib/pr-watch-state.sh"
 source "$safe_state_helpers" || exit 127
 # shellcheck source=../lib/pr-watch-state.sh
 source "$watch_state_helpers" || exit 127
+if [[ -n "$expected_pr_url" ]] \
+   && { ! pr_watch_url_is_valid "$expected_pr_url" || ! pr_watch_id_is_valid "$requested_watch_id"; }; then
+  printf 'pr-watch-stream: --expect-pr-url requires a canonical PR URL and watch ID\n' >&2
+  exit 2
+fi
 
 watch_id="$requested_watch_id"
 stream_sleep_pid=""
@@ -365,7 +376,7 @@ done
 # replacement is checked separately with lstat and is never reopened for data.
 if [[ "${PR_WATCH_STREAM_OPENED_IDENTITY:-}" == "" ]]; then
   exec perl -MFcntl=:DEFAULT -MJSON::PP -MPOSIX -e '
-    my ($script, $path, $poll, $watch_id, $ready_fd) = @ARGV;
+    my ($script, $path, $poll, $watch_id, $expected_url, $ready_fd) = @ARGV;
     sub fail {
       my ($reason, $message) = @_;
       my %event = (kind => "stream_error", reason => $reason, message => $message);
@@ -393,11 +404,12 @@ if [[ "${PR_WATCH_STREAM_OPENED_IDENTITY:-}" == "" ]]; then
     $ENV{PR_WATCH_STREAM_OPENED_IDENTITY} = $opened[0] . ":" . $opened[1];
     my @command = ("bash", $script, $path, $poll);
     push(@command, "--watch-id", $watch_id) if defined($watch_id) && $watch_id ne "";
+    push(@command, "--expect-pr-url", $expected_url) if $expected_url ne "";
     push(@command, "--ready-fd", $ready_fd)
       if defined($ready_fd) && $ready_fd ne "";
     exec(@command);
     fail("metadata_unavailable", "cannot enter stable event reader");
-  ' "$script_dir/pr-watch-stream.sh" "$log" "$poll" "$requested_watch_id" "$ready_fd"
+  ' "$script_dir/pr-watch-stream.sh" "$log" "$poll" "$requested_watch_id" "$expected_pr_url" "$ready_fd"
 fi
 
 expected_identity="$PR_WATCH_STREAM_OPENED_IDENTITY"
@@ -423,14 +435,11 @@ fi
 observed_lines="$(file_lines)"
 validate_measurement "$observed_size" "$observed_lines" || exit 1
 
-# A default consumer waits for a live generation. This matters when an old,
-# already-ended journal exists before the newly armed producer publishes start.
-while [[ -z "$watch_id" ]]; do
-  watch_id="$(latest_live_watch_id "$observed_lines")"
-  [[ -n "$watch_id" ]] && break
+refresh_startup_state() {  # timeout reason, message
+  local current_identity current_size current_lines
   if (( SECONDS >= deadline )); then
-    stream_error "no_live_generation" "no live watch generation appeared before the wait limit"
-    exit 1
+    stream_error "$1" "$2"
+    return 1
   fi
   pause_until_deadline "$deadline" || true
   current_identity="$(verdict_audit_path_identity "$log" 2>/dev/null)" || current_identity=""
@@ -455,38 +464,47 @@ while [[ -z "$watch_id" ]]; do
   fi
   observed_size="$current_size"
   observed_lines="$current_lines"
+}
+
+# A default consumer waits for a live generation. This matters when an old,
+# already-ended journal exists before the newly armed producer publishes start.
+while [[ -z "$watch_id" ]]; do
+  watch_id="$(latest_live_watch_id "$observed_lines")"
+  [[ -n "$watch_id" ]] && break
+  refresh_startup_state no_live_generation "no live watch generation appeared before the wait limit" || exit 1
 done
 
 if [[ -n "$requested_watch_id" ]]; then
   while ! watch_id_is_present "$watch_id" "$observed_lines"; do
-    if (( SECONDS >= deadline )); then
-      stream_error "watch_id_not_found" "requested watch generation did not appear before the wait limit"
-      exit 1
-    fi
-    pause_until_deadline "$deadline" || true
-    current_identity="$(verdict_audit_path_identity "$log" 2>/dev/null)" || current_identity=""
-    current_size="$(file_size)"
-    if [[ ! "$current_size" =~ ^[0-9]+$ ]] \
-       || (( current_size > HARD_MAX_INPUT_BYTES )); then
-      validate_measurement "$current_size" 0 || exit 1
-    fi
-    current_lines="$(file_lines)"
-    validate_measurement "$current_size" "$current_lines" || exit 1
-    if [[ "$current_identity" != "$expected_identity" ]]; then
-      stream_error "log_replaced" "event log identity changed while waiting"
-      exit 1
-    fi
-    if (( current_size < observed_size )); then
-      stream_error "log_truncated" "event log shrank while waiting"
-      exit 1
-    fi
-    if (( current_lines < observed_lines )); then
-      stream_error "line_regression" "event log line count regressed while waiting"
-      exit 1
-    fi
-    observed_size="$current_size"
-    observed_lines="$current_lines"
+    refresh_startup_state watch_id_not_found "requested watch generation did not appear before the wait limit" || exit 1
   done
+fi
+
+if [[ -n "$expected_pr_url" ]]; then
+  # Check this descriptor and generation before readiness or any replay.
+  while :; do
+    target="$(read_log_range 1 "$observed_lines" | jq -Rnr --arg id "$watch_id" '
+      reduce inputs as $raw ("";
+        ($raw | fromjson) as $event
+        | if . != "" or $event.watch_id != $id then .
+          elif $event.kind == "watch_end" then "ended"
+          elif ($event.kind == "watch_start" or $event.kind == "pr_found")
+             and ($event.url | type == "string" and length > 0) then $event.url
+          else . end)
+    ')" || { stream_error malformed_event "cannot identify the watched PR"; exit 1; }
+    case "$target" in
+      "$expected_pr_url") break ;;
+      "" ) ;;
+      ended) stream_error pr_target_unresolved "watch ended before identifying the PR"; exit 1 ;;
+      *) stream_error pr_target_mismatch "watch generation follows another PR"; exit 1 ;;
+    esac
+    producer_is_live || { stream_error producer_orphaned "watch generation has no matching live producer"; exit 1; }
+    refresh_startup_state pr_target_unresolved "watch did not identify the PR before the wait limit" || exit 1
+  done
+  if [[ "$(verdict_audit_path_identity "$log" 2>/dev/null)" != "$expected_identity" ]]; then
+    stream_error log_replaced "event log identity changed before replay"
+    exit 1
+  fi
 fi
 
 # Attachment readiness means more than a successful Bash exec: this exact
