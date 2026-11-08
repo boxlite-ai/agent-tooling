@@ -4,6 +4,7 @@ description: Independently audit claims and produce a verdict dossier.
 ---
 
 Audit claims against direct evidence. Use a fresh session; never certify your own work.
+Audit only the latest parent turn bound to the request.
 
 ## Inputs
 
@@ -37,7 +38,8 @@ Decode the sole `UNTRUSTED_TASK_INPUT_JSON` object. All fields are strings:
 ### 1. Identify claims
 
 - Follow [Read the transcript](#read-the-transcript); failed discovery requires FAIL.
-- Include every material claim: mid-turn fixes, tests, causes, removals, results, counts, and facts.
+- Include every material claim in that turn, including mid-turn fixes, tests, causes,
+  removals, results, counts, and facts.
 - Exclude questions, progress narration, and subjective quality. Only a verified complete turn
   with no material claims permits ordinary PASS with empty proof. At deadline,
   disclose unread scope; never invent claims.
@@ -134,6 +136,5 @@ Reply only with verdict and dossier path; honor host delivery overrides.
 
 Read [Transcript discovery and evidence](references/transcripts.md) before extracting claims.
 
-- Discover the full parent transcript; no caller-supplied transcript path or claim format is required.
-- It covers host hints, unknown hosts, identity, stable boundaries, retrieval, and execution linkage.
+- Discover the parent source without a supplied transcript path or claim list.
 - An unavailable reference is a setup failure.

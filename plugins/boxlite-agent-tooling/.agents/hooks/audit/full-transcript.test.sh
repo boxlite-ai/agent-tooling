@@ -13,6 +13,18 @@ check() {
   fi
 }
 
+fixture_stop() (
+  cd "$repo" &&
+    CLAUDE_PROJECT_DIR="$repo" BOXLITE_HOOK_HOST="$host" TMPDIR="$state/tmp" \
+      bash "$plugin_root/.agents/hooks/audit/preflight-verdict-check.sh"
+)
+
+normalize_snapshot() (
+  # shellcheck source=../../lib/verdict-audit-state.sh
+  source "$plugin_root/.agents/lib/verdict-audit-state.sh"
+  verdict_audit_normalize_turn_snapshot
+)
+
 cat > "$fixture_root/auditor.sh" <<'AUDITOR'
 set -euo pipefail
 state="$CLAUDE_PROJECT_DIR/.agents/state"
@@ -33,6 +45,9 @@ for candidate in "$TEST_TRANSCRIPT_STORE"/*.jsonl; do
 done
 [[ -n "$transcript" ]] || exit 92
 cp "$transcript" "$state/received.jsonl"
+if [[ "${TEST_APPEND_DURING_AUDIT:-}" == yes ]]; then
+  printf '%s\n' '{"type":"metadata","event":"fixture append after capture"}' >> "$transcript"
+fi
 # The stub resolves fixture storage, not a production discovery implementation.
 # It establishes handoff behavior; independent skill evaluations check judgment.
 find "$TMPDIR" -name transcript.jsonl -print > "$state/parent-copies"
@@ -47,8 +62,10 @@ tree="$(GIT_INDEX_FILE="$idx" git write-tree)"
 rm -f "$idx"
 jq -nc --arg branch "$(git branch --show-current)" --arg head "$(git rev-parse HEAD)" \
   --arg tree "$tree" --arg generation "$VERDICT_AUDITOR_GENERATION" \
+  --arg verdict "${TEST_AUDIT_VERDICT:-PASS}" \
   '{branch:$branch,head:$head,tree_hash:$tree,generation:$generation,
-    verdict:"PASS",proof:[],findings:[]}' > "$VERDICT_AUDITOR_OUTPUT_FILE"
+    verdict:$verdict,proof:[],
+    findings:(if $verdict == "FAIL" then ["fixture proof gap"] else [] end)}' > "$VERDICT_AUDITOR_OUTPUT_FILE"
 bash "$TEST_HISTORY_RESULT_HELPER" "$task" "$VERDICT_AUDITOR_OUTPUT_FILE"
 validator="$(sed -n 's/^Dossier validator JSON: //p' "$state/prompt" | jq -er .path)"
 if [[ -n "$history" ]]; then
@@ -144,6 +161,20 @@ for host in claude codex unknown; do
       > "$TEST_TRANSCRIPT_STORE/wrong-repo.jsonl"
     source_path="$TEST_TRANSCRIPT_STORE/parent.jsonl"
     expected="$(shasum -a 256 "$source_path" | cut -d ' ' -f 1)"
+    expected_range="$(perl -MDigest::SHA -MJSON::PP -e '
+      open my $file, "<:raw", $ARGV[0] or die $!;
+      my ($dev, $ino) = stat($file);
+      my $digest = Digest::SHA->new(256);
+      my ($start, $end) = (undef, 0);
+      while (my $line = <$file>) {
+        $start = $end if index($line, q{"Verify the new work."}) >= 0;
+        $digest->add($line) if defined $start;
+        $end += length $line;
+      }
+      die "missing fixture boundary" unless defined $start;
+      print encode_json({device_inode=>"$dev:$ino",start_byte=>$start,end_byte=>$end,
+        sha256=>$digest->hexdigest});
+    ' "$source_path")"
     started="$(date +%s)"
     rc=0
     if [[ "$entry" != stop ]]; then
@@ -154,10 +185,8 @@ for host in claude codex unknown; do
         "$bookkeeping" "$session" legacy -) > "$state/stdout" 2> "$state/stderr" || rc=$?
     else
       jq -nc --arg path "$source_path" --arg session "$session" \
-        '{hook_event_name:"Stop",session_id:$session,transcript_path:$path}' \
-        | (cd "$repo" && CLAUDE_PROJECT_DIR="$repo" BOXLITE_HOOK_HOST="$host" \
-          TMPDIR="$state/tmp" \
-          bash "$plugin_root/.agents/hooks/audit/preflight-verdict-check.sh") \
+        '{hook_event_name:"Stop",session_id:$session,transcript_path:$path,turn_id:"fixture-turn"}' \
+        | TEST_APPEND_DURING_AUDIT=yes fixture_stop \
           > "$state/stdout" 2> "$state/stderr" || rc=$?
     fi
     finished="$(date +%s)"
@@ -193,6 +222,97 @@ for host in claude codex unknown; do
           "$state/history-transcript.json" >/dev/null 2>&1; then bounded=yes; fi
       check "$host history retains a bounded bookkeeping snapshot" "$bounded" yes
       check "$host Stop accepts the bound PASS" "$(cat "$state/stdout")" ""
+      scope="$(printf '%s' "$session" | git -C "$repo" hash-object --stdin)"
+      index="$state/last-verdict-index.json.git-$scope"
+      generation="$(jq -r .audit_generation "$state/task")"
+      indexed=no
+      if jq -e --arg generation "$generation" --argjson range "$expected_range" '
+          .version == 1 and .generation == $generation and .turn_id == "fixture-turn"
+          and (.message_id | test("^cksum-")) and .native_range == $range
+        ' "$index" >/dev/null 2>&1; then indexed=yes; fi
+      check "$host index keeps the accepted range across a transcript append" "$indexed" yes
+      locator="$(bash "$plugin_root/scripts/read-verdict-index.sh" "$repo" "$session" "$source_path")"
+      check "$host reader accepts the consumed PASS index after append" \
+        "$locator" "$(jq -r .end_byte <<<"$expected_range")"
+      history_range=no
+      if jq -e --argjson range "$expected_range" '.[0].native_range == $range' \
+          "$state/history-transcript.json" >/dev/null; then history_range=yes; fi
+      check "$host auditor receives the complete latest native range" "$history_range" yes
+      native_snapshot="$(jq -c '.[0]' "$state/history-transcript.json")"
+
+      jq -nc --arg session "$session" '
+        {hook_event_name:"Stop", session_id:$session, transcript_path:null,
+         turn_id:"payload-turn",last_assistant_message:"Verified the payload fixture."}' \
+        | fixture_stop \
+          > "$state/payload-stdout" 2> "$state/payload-stderr"
+      indexed=no
+      if jq -e --arg old "$generation" '
+          .generation != $old and .turn_id == "payload-turn" and (has("native_range") | not)
+        ' "$index" >/dev/null 2>&1; then indexed=yes; fi
+      check "$host payload-only PASS replaces the position without inheriting an old range" "$indexed" yes
+
+      payload_index="$(cat "$index" 2>/dev/null)"
+      jq -nc --arg session "$session" '
+        {hook_event_name:"Stop",session_id:$session,transcript_path:null,
+         last_assistant_message:"Which fixture should I inspect?"}' \
+        | fixture_stop \
+          > "$state/chat-stdout" 2> "$state/chat-stderr"
+      check "$host classifier-only allow keeps the last verdict index" \
+        "$(cat "$index" 2>/dev/null)" "$payload_index"
+
+      if [[ "$host" == codex ]]; then
+        if jq -c 'del(.native_range)' <<<"$native_snapshot" | normalize_snapshot >/dev/null; then
+          legacy=accepted
+        else
+          legacy=rejected
+        fi
+        check "legacy snapshots need no native range" "$legacy" accepted
+        if jq -c '.native_range.end_byte += 1' <<<"$native_snapshot" | normalize_snapshot >/dev/null; then
+          malformed=accepted
+        else
+          malformed=rejected
+        fi
+        check "a native range cannot run past its captured source" "$malformed" rejected
+
+        jq -nc --arg session "$session" '
+          {hook_event_name:"Stop",session_id:$session,transcript_path:null,
+           last_assistant_message:"Verified the failing fixture."}' \
+          | TEST_AUDIT_VERDICT=FAIL fixture_stop > "$state/fail-stdout" 2> "$state/fail-stderr"
+        failure="$(jq -r '.reason | contains("fixture proof gap")' "$state/fail-stdout")"
+        check "fixture FAIL reaches Stop" "$failure" true
+        check "FAIL preserves the prior PASS index" "$(cat "$index")" "$payload_index"
+
+        sibling_session="${session}-sibling"
+        sibling_scope="$(printf '%s' "$sibling_session" | git -C "$repo" hash-object --stdin)"
+        sibling_index="$state/last-verdict-index.json.git-$sibling_scope"
+        jq -nc --arg id "$sibling_session" --arg cwd "$repo" \
+          '{type:"session_meta",payload:{id:$id,cwd:$cwd}}' > "$TEST_TRANSCRIPT_STORE/sibling.jsonl"
+        mkdir "$sibling_index"
+        jq -nc --arg session "$sibling_session" '
+          {hook_event_name:"Stop",session_id:$session,transcript_path:null,
+           last_assistant_message:"Verified the sibling fixture."}' \
+          | fixture_stop > "$state/sibling-stdout" 2> "$state/sibling-stderr"
+        check "unwritable index leaves the sibling PASS valid" "$(cat "$state/sibling-stdout")" ""
+        diagnosed=no
+        if [[ -d "$sibling_index" ]] && grep -Fq 'could not save the last verdict index' "$state/sibling-stderr"; then
+          diagnosed=yes
+        fi
+        check "unwritable index reports a diagnostic and preserves the directory" "$diagnosed" yes
+
+        rmdir "$sibling_index"
+        printf '{interrupted\n' > "$sibling_index"
+        jq -nc --arg session "$sibling_session" '
+          {hook_event_name:"Stop",session_id:$session,transcript_path:null,
+           turn_id:"unexpected\nsecond line",last_assistant_message:"Verified the second sibling fixture."}' \
+          | fixture_stop > "$state/sibling-stdout" 2> "$state/sibling-stderr"
+        indexed=no
+        if jq -e '.version == 1 and (has("native_range") or has("turn_id") | not)' \
+            "$sibling_index" >/dev/null 2>&1; then
+          indexed=yes
+        fi
+        check "a sibling PASS replaces a broken index and drops an invalid turn ID" "$indexed" yes
+        check "a sibling session cannot replace the prior index" "$(cat "$index")" "$payload_index"
+      fi
     fi
   done
 done
