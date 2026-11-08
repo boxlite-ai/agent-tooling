@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -54,17 +54,45 @@ export function startupSettings(session, sessionId, cwd) {
   ] }] } };
 }
 
+async function waitForClose(exit, timeout) {
+  let timer;
+  try {
+    return await Promise.race([exit, new Promise(done => { timer = setTimeout(done, timeout); })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function launchAgent(prefix, { command, args, cwd, signal }) {
+  // Use a fresh group and keep operator credentials out of the agent environment.
+  return spawn(SUDO, [...prefix, '/usr/bin/env', 'CLAUDE_CODE_ENTRYPOINT=sdk-ts', command, ...args],
+    { cwd, signal, detached: true, env: AGENT_ENV, stdio: ['pipe', 'pipe', 'inherit'] });
+}
+
+async function closeAgent(child, exit, stop, timeout) {
+  if (!exit) return;
+  const status = await waitForClose(exit, timeout);
+  if (status) return status;
+
+  try {
+    stop(child);
+  } finally {
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    if (!await waitForClose(exit, timeout)) child.unref();
+  }
+  throw new Error('Managed Claude did not close within the deadline');
+}
+
 export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFile, prompt, {
-  launch = ({ command, args, cwd: childCwd, signal }) =>
-    // Keep operator credentials out of the agent account's environment.
-    spawn(SUDO, [...prefix, '/usr/bin/env', 'CLAUDE_CODE_ENTRYPOINT=sdk-ts', command, ...args],
-      { cwd: childCwd, signal, env: AGENT_ENV, stdio: ['pipe', 'pipe', 'inherit'] }),
-  github,
+  launch, github, verifySdk, closeTimeout = 5000,
 } = {}) {
   if (!isAbsolute(sdkFile ?? '') || !isAbsolute(claudeFile ?? '')) {
     throw new Error('SDK module and Claude executable must be absolute paths');
   }
   const sdkPath = realpathSync(sdkFile);
+  verifySdk?.(sdkPath);
   const sdkPackage = JSON.parse(readFileSync(join(dirname(sdkPath), 'package.json'), 'utf8'));
   if (sdkPackage.name !== '@anthropic-ai/claude-agent-sdk' || sdkPackage.version !== SDK_VERSION) {
     throw new Error(`Use Claude Agent SDK ${SDK_VERSION} for managed follow-ups`);
@@ -89,10 +117,11 @@ export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFil
         hooks: sessionHooks(session),
         spawnClaudeCodeProcess: options => {
           if (exit) throw new Error('Expected one supervised Claude process');
-          child = launch(options);
+          child = launch ? launch(options) : launchAgent(prefix, options);
           exit = new Promise(done => {
             child.once('close', (code, exitSignal) => done({ code, signal: exitSignal }));
-            child.once('error', () => done({ code: null, signal: null }));
+            // Abort can emit an error before the process and pipes have closed.
+            child.on('error', () => {});
           });
           return child;
         },
@@ -106,13 +135,23 @@ export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFil
     }
     streamComplete = true;
   } finally {
-    let timer;
-    const unknown = { code: null, signal: null };
-    const timeout = new Promise(done => { timer = setTimeout(() => done(unknown), 5000); });
-    const status = exit ? await Promise.race([exit, timeout]) : unknown;
-    clearTimeout(timer);
-    if (status === unknown) child?.kill();
-    released = session.finish({ ...status, streamComplete, platform: process.platform });
+    let status;
+    try {
+      status = await closeAgent(child, exit, process => {
+        if (!launch && process.pid) {
+          try {
+            execFileSync(SUDO, [...prefix, '/bin/kill', '-KILL', '--', `-${process.pid}`],
+              { cwd, env: AGENT_ENV, stdio: 'ignore', timeout: 1000 });
+          } finally {
+            process.kill('SIGKILL');
+          }
+        } else process.kill('SIGKILL');
+      }, closeTimeout);
+    } finally {
+      released = session.finish({
+        ...(status ?? { code: null, signal: null }), streamComplete, platform: process.platform,
+      });
+    }
   }
   return released ? { released, ...await drainFollowups(queue, github) } : { released };
 }

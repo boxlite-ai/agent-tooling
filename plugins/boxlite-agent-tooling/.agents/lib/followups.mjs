@@ -4,7 +4,9 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync,
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-const MAX_STATE_BYTES = 8 * 1024 * 1024;
+const MAX_DRAFT_BYTES = 8 * 1024 * 1024;
+// The separate budget covers bounded sessions, grants, and reconciliation metadata.
+const MAX_STATE_BYTES = 2 * MAX_DRAFT_BYTES;
 const MAX_RECORDS = 2048;
 const MARKER = '<!-- boxlite-followup:';
 const REPOSITORY = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
@@ -24,6 +26,19 @@ function bounded(value, max, label) {
   return value;
 }
 
+function identifier(value, bytes, label) {
+  bounded(value, bytes, label);
+  requireValue(Buffer.byteLength(JSON.stringify(value)) <= bytes, `Invalid ${label}`);
+  return value;
+}
+
+function processExited(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); }
+  catch (error) { return error.code === 'ESRCH'; }
+  return false;
+}
+
 export function git(cwd, ...args) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')));
   return execFileSync('git', ['-C', cwd, ...args], {
@@ -31,10 +46,12 @@ export function git(cwd, ...args) {
   }).trim();
 }
 
-export function cloneIdentity(cwd) {
+export function cloneIdentity(cwd, { legacy = false } = {}) {
   const dir = realpathSync(git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'));
-  const { dev, ino } = statSync(dir, { bigint: true });
-  return digest([dir, dev.toString(), ino.toString()]);
+  const { dev, ino, birthtimeNs } = statSync(dir, { bigint: true });
+  return legacy
+    ? digest([dir, dev.toString(), ino.toString()])
+    : digest([dev.toString(), ino.toString(), birthtimeNs.toString()]);
 }
 
 function privateDirectory(path, create) {
@@ -44,9 +61,9 @@ function privateDirectory(path, create) {
     (info.uid === process.getuid() && (info.mode & 0o077) === 0)), 'Follow-up state directory must be private');
 }
 
-function binding(state, caller, handle) {
+function binding(state, caller, handle, clone) {
   const session = state.sessions[handle];
-  requireValue(caller?.root === true && caller.clone === state.clone && session?.phase === 'open' &&
+  requireValue(caller?.root === true && caller.clone === clone && session?.phase === 'open' &&
     session.native === caller.native && session.instance === caller.instance &&
     session.prompt === caller.prompt && Number.isSafeInteger(caller.cursor) && caller.cursor >= 0,
   'Queue handle does not match the live root session, clone, and prompt');
@@ -70,19 +87,20 @@ export function eligibleFollowup(state, draft) {
 
 // The lock database stays reserved while a durable attempt is committed in the state
 // database and the same process owns the transport. A crash releases the lock, not the attempt.
-export function openFollowupQueue(stateRoot, clone, { initialize = false, registryRoot } = {}) {
+export function openFollowupQueue(stateRoot, clone, { initialize = false, registryRoot, legacyClone } = {}) {
   requireValue(/^[a-f0-9]{64}$/.test(clone), 'Invalid clone identity');
+  requireValue(!legacyClone || /^[a-f0-9]{64}$/.test(legacyClone), 'Invalid legacy clone identity');
   privateDirectory(stateRoot, initialize);
   const root = realpathSync(stateRoot);
-  const directory = join(root, clone);
-  const statePath = join(directory, 'queue.sqlite');
-  const lockPath = join(directory, 'lock.sqlite');
+  let journal = clone;
+  const journalFile = name => join(root, journal, name);
 
   function checkQueue(create) {
-    if (create && !existsSync(directory)) initializeQueue(root, directory, clone);
+    const directory = join(root, journal);
+    if (create && !existsSync(directory)) initializeQueue(root, directory, journal);
     privateDirectory(directory, false);
-    for (const file of [statePath, lockPath]) {
-      requireValue(lstatSync(file).isFile(), 'Follow-up state is missing or unsafe');
+    for (const name of ['queue.sqlite', 'lock.sqlite']) {
+      requireValue(lstatSync(journalFile(name)).isFile(), 'Follow-up state is missing or unsafe');
     }
   }
 
@@ -95,14 +113,22 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
       registry.exec(`PRAGMA busy_timeout = 1000;
         CREATE TABLE IF NOT EXISTS roots (clone TEXT PRIMARY KEY, path TEXT NOT NULL, identity TEXT NOT NULL);
         BEGIN IMMEDIATE;`);
-      const bound = registry.prepare('SELECT path, identity FROM roots WHERE clone = ?').get(clone);
+      registry.exec('CREATE TABLE IF NOT EXISTS journal_keys (clone TEXT PRIMARY KEY, journal TEXT NOT NULL)');
+      const rootFor = registry.prepare('SELECT path, identity FROM roots WHERE clone = ?');
+      const current = rootFor.get(clone);
+      const previous = !current && legacyClone ? rootFor.get(legacyClone) : undefined;
+      const bound = current ?? previous;
       requireValue(bound || initialize, 'Run init to bind this clone to its follow-up state directory');
       requireValue(!bound || bound.path === root, 'Clone already uses another follow-up state directory');
+      if (previous) journal = legacyClone;
+      else journal = registry.prepare('SELECT journal FROM journal_keys WHERE clone = ?').get(clone)?.journal ?? clone;
+      requireValue(/^[a-f0-9]{64}$/.test(journal), 'Invalid follow-up journal key');
       checkQueue(!bound);
-      const { dev, ino } = statSync(statePath, { bigint: true });
+      const { dev, ino } = statSync(journalFile('queue.sqlite'), { bigint: true });
       const identity = `${dev}:${ino}`;
       requireValue(!bound || bound.identity === identity, 'Bound follow-up journal was replaced');
-      if (!bound) registry.prepare('INSERT INTO roots VALUES (?, ?, ?)').run(clone, root, identity);
+      if (!current) registry.prepare('INSERT INTO roots VALUES (?, ?, ?)').run(clone, root, identity);
+      if (previous) registry.prepare('INSERT INTO journal_keys VALUES (?, ?)').run(clone, journal);
       registry.exec('COMMIT');
     } finally {
       registry.close();
@@ -112,7 +138,7 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
   }
 
   function locked(action) {
-    const lock = new DatabaseSync(lockPath);
+    const lock = new DatabaseSync(journalFile('lock.sqlite'));
     let db;
     let deferred = false;
     const finish = () => {
@@ -120,17 +146,41 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
     };
     try {
       lock.exec('BEGIN IMMEDIATE');
-      db = new DatabaseSync(statePath);
+      db = new DatabaseSync(journalFile('queue.sqlite'));
       const raw = db.prepare('SELECT document FROM queue WHERE id = 1').get()?.document;
       requireValue(typeof raw === 'string' && Buffer.byteLength(raw) <= MAX_STATE_BYTES, 'Unreadable follow-up state');
       const state = JSON.parse(raw);
-      requireValue(state.version === 1 && state.clone === clone, 'Follow-up state belongs to another clone or version');
-      const save = () => {
-        const encoded = JSON.stringify(state);
-        requireValue(Buffer.byteLength(encoded) <= MAX_STATE_BYTES, 'Follow-up state is full');
-        db.prepare('UPDATE queue SET document = ? WHERE id = 1').run(encoded);
+      requireValue(state.version === 1 && state.clone === journal, 'Follow-up state belongs to another clone or version');
+      db.exec('CREATE TABLE IF NOT EXISTS completed (id TEXT PRIMARY KEY, record TEXT NOT NULL)');
+      const completed = {
+        get: id => JSON.parse(db.prepare('SELECT record FROM completed WHERE id = ?').get(id)?.record ?? 'null'),
+        list: () => db.prepare('SELECT record FROM completed ORDER BY rowid').all().map(row => JSON.parse(row.record)),
       };
-      const result = action(state, save);
+      const save = () => {
+        const retiring = Object.values(state.drafts).filter(draft =>
+          draft.status !== 'pending' && state.attempts[draft.id]?.status !== 'pending');
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          const insert = db.prepare('INSERT INTO completed VALUES (?, ?)');
+          for (const draft of retiring) {
+            const { id } = draft;
+            insert.run(id, JSON.stringify({ draft, grant: state.grants[id], release: state.releases[id],
+              attempt: state.attempts[id] }));
+            delete state.drafts[id];
+            delete state.grants[id];
+            delete state.releases[id];
+            delete state.attempts[id];
+          }
+          const encoded = JSON.stringify(state);
+          requireValue(Buffer.byteLength(encoded) <= MAX_STATE_BYTES, 'Follow-up state is full');
+          db.prepare('UPDATE queue SET document = ? WHERE id = 1').run(encoded);
+          db.exec('COMMIT');
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
+      };
+      const result = action(state, save, completed);
       if (result instanceof Promise) {
         deferred = true;
         return result.finally(finish);
@@ -146,13 +196,13 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
     start(caller) {
       return locked((state, save) => {
         requireValue(caller.root === true && caller.clone === clone, 'Queue startup requires the live root session');
-        for (const name of ['native', 'instance', 'prompt']) bounded(caller[name], 256, name);
+        for (const name of ['native', 'instance', 'prompt']) identifier(caller[name], 256, name);
         for (const [handle, session] of Object.entries(state.sessions)) {
-          if (session.native === caller.native) delete state.sessions[handle];
+          if (session.native === caller.native || processExited(session.owner)) delete state.sessions[handle];
         }
         requireValue(Object.keys(state.sessions).length < MAX_RECORDS, 'Follow-up session table is full');
         const handle = randomUUID();
-        state.sessions[handle] = { native: caller.native, instance: caller.instance, prompt: caller.prompt, phase: 'open' };
+        state.sessions[handle] = { native: caller.native, instance: caller.instance, prompt: caller.prompt, owner: process.pid, phase: 'open' };
         save();
         return handle;
       });
@@ -160,8 +210,8 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
 
     prompt(caller, handle, prompt) {
       return locked((state, save) => {
-        const session = binding(state, caller, handle);
-        session.prompt = bounded(prompt, 256, 'prompt');
+        const session = binding(state, caller, handle, clone);
+        session.prompt = identifier(prompt, 256, 'prompt');
         delete session.ack;
         delete session.seal;
         delete session.requested;
@@ -170,8 +220,8 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
     },
 
     capture(caller, { handle, action, ...input }) {
-      return locked((state, save) => {
-        const session = binding(state, caller, handle);
+      return locked((state, save, completed) => {
+        const session = binding(state, caller, handle, clone);
         const revisions = () => draftRevisions(state, handle);
         if (action === 'list') return { drafts: revisions() };
         if (action === 'acknowledge') {
@@ -182,7 +232,7 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
             'Invalid draft revision');
           supplied.sort((a, b) => a.id.localeCompare(b.id));
           requireValue(digest(supplied) === digest(current), 'Acknowledge the exact pending draft revisions');
-          session.ack = { cursor: caller.cursor, drafts: current };
+          session.ack = { cursor: caller.cursor, digest: digest(current) };
           delete session.seal;
           save();
           return { acknowledged: current };
@@ -190,7 +240,7 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
         if (action === 'resolve') {
           const draft = state.drafts[input.id];
           requireValue(draft?.handle === handle && draft.revision === input.revision, 'Draft revision is stale');
-          requireValue(!input.url || ISSUE_URL.test(input.url), 'Expected a GitHub issue URL');
+          requireValue(!input.url || (input.url.length <= 510 && ISSUE_URL.test(input.url)), 'Expected a GitHub issue URL');
           draft.status = 'resolved';
           if (input.url) draft.url = input.url;
           save();
@@ -203,7 +253,7 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
         const operation = bounded(input.operation, 128, 'operation').trim().toLowerCase();
         const failure = bounded(input.failure, 128, 'failure mode').trim().toLowerCase();
         const id = digest([repository, operation, failure]);
-        const old = state.drafts[id];
+        const old = state.drafts[id] ?? completed.get(id)?.draft;
         if (old?.status === 'filed' || old?.status === 'resolved') {
           return { id, revision: old.revision, status: old.status };
         }
@@ -221,6 +271,7 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
         }
         const revision = (old?.revision ?? 0) + 1;
         state.drafts[id] = { id, revision, handle, marker, title, body: finalBody, evidence, route: input.route, status: 'pending' };
+        requireValue(Buffer.byteLength(JSON.stringify(state.drafts)) <= MAX_DRAFT_BYTES, 'Follow-up queue is full');
         delete state.grants[id];
         delete state.releases[id];
         save();
@@ -230,9 +281,9 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
 
     checkpoint(caller, handle, response) {
       return locked((state, save) => {
-        const session = binding(state, caller, handle);
-        if (session.ack?.cursor === caller.cursor && digest(session.ack.drafts) === digest(draftRevisions(state, handle))) {
-          if (response) session.seal = { ...session.ack, response };
+        const session = binding(state, caller, handle, clone);
+        if (session.ack?.cursor === caller.cursor && session.ack.digest === digest(draftRevisions(state, handle))) {
+          if (response) session.seal = { ...session.ack, response: identifier(response, 256, 'Stop response') };
           else delete session.seal;
           save();
           return response ? 'sealed' : 'incomplete';
@@ -247,7 +298,7 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
 
     close(caller, handle) {
       return locked((state, save) => {
-        binding(state, caller, handle).phase = 'closing';
+        binding(state, caller, handle, clone).phase = 'closing';
         save();
       });
     },
@@ -260,9 +311,10 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
             session.prompt !== caller.prompt) return 0;
         delete state.sessions[handle];
         let released = 0;
+        const drafts = draftRevisions(state, handle);
         if (session.phase === 'closing' && verifiedResponse && session.seal?.response === verifiedResponse &&
-            session.seal.cursor === caller.cursor && digest(session.seal.drafts) === digest(draftRevisions(state, handle))) {
-          for (const { id, revision } of session.seal.drafts) {
+            session.seal.cursor === caller.cursor && session.seal.digest === digest(drafts)) {
+          for (const { id, revision } of drafts) {
             state.releases[id] = revision;
             released += 1;
           }
@@ -273,12 +325,15 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
     },
 
     status() {
-      return locked(state => Object.values(state.drafts).map(draft => ({
-        ...draft, enrolled: state.enrollment[draft.route] ?? null,
-        approved: state.grants[draft.id] === grantDigest(state, draft),
-        released: state.releases[draft.id] === draft.revision,
-        attempt: state.attempts[draft.id] ?? null,
-      })));
+      return locked((state, _save, completed) => {
+        const active = Object.values(state.drafts).map(draft => ({
+          draft, grant: state.grants[draft.id], release: state.releases[draft.id], attempt: state.attempts[draft.id],
+        }));
+        return [...completed.list(), ...active].map(({ draft, grant, release, attempt }) => ({
+          ...draft, enrolled: state.enrollment[draft.route] ?? null,
+          approved: grant === grantDigest(state, draft), released: release === draft.revision, attempt: attempt ?? null,
+        }));
+      });
     },
 
     enroll(route, target) {
@@ -286,10 +341,11 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
         requireValue(route === 'tooling' || route === 'consumer', 'Invalid enrollment route');
         if (target === null) delete state.enrollment[route];
         else {
-          bounded(target.id, 256, 'GitHub repository ID');
+          identifier(target.id, 256, 'GitHub repository ID');
+          identifier(target.name, 256, 'GitHub repository name');
           requireValue(REPOSITORY.test(target.name) &&
             (route !== 'tooling' || target.name.toLowerCase() === 'boxlite-ai/agent-tooling'), 'Invalid enrollment target');
-          state.enrollment[route] = { ...target, generation: randomUUID() };
+          state.enrollment[route] = { id: target.id, name: target.name, generation: randomUUID() };
         }
         save();
       });

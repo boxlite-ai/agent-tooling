@@ -6,15 +6,16 @@ const ISSUE_FIELDS = 'id url body repository { id } author { ... on User { id } 
 const VIEWER = 'query { viewer { id } }';
 const REPOSITORY = 'query($owner:String!,$name:String!) { repository(owner:$owner,name:$name) { id nameWithOwner } }';
 const CREATE = `mutation($input:CreateIssueInput!) { createIssue(input:$input) { issue { ${ISSUE_FIELDS} } } }`;
-const PAGE = `query($id:ID!,$cursor:String) {
+const PAGE = `query($id:ID!,$cursor:String,$size:Int!) {
   node(id:$id) { ... on Repository {
-    id issues(first:50,after:$cursor,states:[OPEN,CLOSED],orderBy:{field:CREATED_AT,direction:ASC}) {
+    id issues(first:$size,after:$cursor,states:[OPEN,CLOSED],orderBy:{field:CREATED_AT,direction:ASC}) {
       nodes { ${ISSUE_FIELDS} } pageInfo { hasNextPage endCursor }
     }
   } }
 }`;
 const ISSUE_URL = /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/issues\/[1-9][0-9]*$/i;
 const MAX_RESPONSE = 4 * 1024 * 1024;
+const PAGE_SIZE = 50;
 const BACKOFF_MS = 60_000;
 
 export function githubClient(timeout = 5000) {
@@ -40,7 +41,7 @@ export function githubClient(timeout = 5000) {
       res.on('error', reject);
       res.on('data', chunk => {
         bytes += chunk.length;
-        if (bytes > MAX_RESPONSE) res.destroy(new Error('GitHub response exceeded the limit'));
+        if (bytes > MAX_RESPONSE) res.destroy(Object.assign(new Error('GitHub response exceeded the limit'), { responseTooLarge: true }));
         else chunks.push(chunk);
       });
       res.on('end', () => {
@@ -81,8 +82,12 @@ export async function githubRepository(client, name) {
   return { id: repository.id, name: repository.nameWithOwner };
 }
 
+function boundedField(value, bytes) {
+  return typeof value === 'string' && value.length > 0 && Buffer.byteLength(JSON.stringify(value)) <= bytes;
+}
+
 function matchingIssue(issue, attempt) {
-  return typeof issue?.id === 'string' && typeof issue.url === 'string' && ISSUE_URL.test(issue.url) &&
+  return boundedField(issue?.id, 256) && boundedField(issue.url, 512) && ISSUE_URL.test(issue.url) &&
     issue.repository?.id === attempt.target && issue.author?.id === attempt.author &&
     typeof issue.body === 'string' && issue.body.split(/\r?\n/).includes(attempt.marker);
 }
@@ -99,12 +104,13 @@ function defer(attempt, error) {
 
 async function reconcile(send, draft, attempt, save) {
   let page;
+  const size = attempt.pageSize ?? PAGE_SIZE;
   try {
-    const data = await send(PAGE, { id: attempt.target, cursor: attempt.cursor ?? null });
+    const data = await send(PAGE, { id: attempt.target, cursor: attempt.cursor ?? null, size });
     if (data.node?.id !== attempt.target) throw new Error('GitHub target unavailable');
     page = data.node.issues;
     if (!Array.isArray(page?.nodes) || typeof page.pageInfo?.hasNextPage !== 'boolean' ||
-        (page.pageInfo.hasNextPage && (!page.pageInfo.endCursor || page.pageInfo.endCursor === attempt.cursor))) {
+        (page.pageInfo.hasNextPage && (!boundedField(page.pageInfo.endCursor, 512) || page.pageInfo.endCursor === attempt.cursor))) {
       throw new Error('Incomplete GitHub issue page');
     }
   } catch (error) {
@@ -112,7 +118,8 @@ async function reconcile(send, draft, attempt, save) {
       delete attempt.cursor;
       delete attempt.matches;
     }
-    defer(attempt, error);
+    if (error.responseTooLarge && size > 1) attempt.pageSize = Math.floor(size / 2);
+    else defer(attempt, error);
     save();
     return;
   }
@@ -149,23 +156,19 @@ export async function drainFollowups(queue, client) {
     requests += 1;
     return client(query, variables, remaining());
   };
-  const visited = new Set();
   while (canRequest()) {
     const worked = await queue.publish(async (state, save) => {
-      // Give each eligible draft one operation before revisiting its read cursor.
-      const candidates = Object.values(state.drafts).filter(draft => {
-        const attempt = state.attempts[draft.id];
+      // Resume after the last scheduled draft, including across drain invocations.
+      const drafts = Object.values(state.drafts);
+      const offset = drafts.findIndex(draft => draft.id === state.lastScheduled) + 1;
+      const draft = [...drafts.slice(offset), ...drafts.slice(0, offset)].find(candidate => {
+        const attempt = state.attempts[candidate.id];
         if (attempt?.nextAt > Date.now()) return false;
         if (attempt && attempt.status !== 'unsent') return attempt.status === 'pending';
-        return eligibleFollowup(state, draft) && requests + (author ? 1 : 2) <= 10;
+        return eligibleFollowup(state, candidate) && requests + (author ? 1 : 2) <= 10;
       });
-      let draft = candidates.find(candidate => !visited.has(candidate.id));
-      if (!draft && candidates.length) {
-        visited.clear();
-        [draft] = candidates;
-      }
       if (!draft) return false;
-      visited.add(draft.id);
+      state.lastScheduled = draft.id;
       const existing = state.attempts[draft.id];
       if (existing && existing.status !== 'unsent') {
         await reconcile(send, draft, existing, save);
@@ -174,7 +177,7 @@ export async function drainFollowups(queue, client) {
       if (!author) {
         const data = await send(VIEWER, {});
         author = data.viewer?.id;
-        if (typeof author !== 'string' || !author) throw new Error('GitHub author identity is unavailable');
+        if (!boundedField(author, 256)) throw new Error('GitHub author identity is unavailable');
       }
       if (!canRequest()) return false;
       const target = state.enrollment[draft.route].id;

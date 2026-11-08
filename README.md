@@ -185,7 +185,9 @@ For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent
 
 The opt-in [follow-up launcher](plugins/boxlite-agent-tooling/scripts/followups.mjs) gives a managed Claude run a local queue. SessionStart supplies the queue handle and capture rule. Stop can request one more pass to save missed findings and acknowledge their revisions.
 
-Use Node.js 24, Claude Agent SDK `0.3.319`, Git, and an authenticated operator `gh`. Run from the target checkout with a dedicated agent account available through noninteractive `sudo`. Give that account access to the checkout, its own Claude credentials, and read-only access to the plugin.
+Run from the target checkout on macOS or Linux with Node.js 24, Git, and an authenticated operator `gh`. Use a dedicated agent account through noninteractive `sudo`. Give it checkout access, its own Claude credentials, and read-only access to the plugin.
+
+Install Claude Agent SDK `0.3.319` with npm in a dedicated operator-private directory, outside other npm trees. Unset `NODE_PATH`. Give the agent read and execute access to the separate Claude executable.
 
 ```sh
 node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" init
@@ -196,13 +198,13 @@ node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" release "
 node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" drain
 ```
 
-Use an operator-private state directory outside the checkout and absolute SDK and Claude paths. Run `init` with the same directory for every linked worktree. The operator registry binds each clone to one journal.
+Use an operator-private state directory outside the checkout and absolute SDK and Claude paths. Run `init` with the same directory for every linked worktree. The operator registry binds each clone to one journal, including after a same-filesystem rename.
 
 `enroll consumer` uses the committed consumer profile and matching origin. `opt-out tooling` or `opt-out consumer` revokes enrollment.
 
 The operator reviews the exact title, body, and destination before authorizing public disclosure. `approve` waits for a verified managed close. `release` records the same approval and explicitly releases the revision.
 
-Claude Code `2.1.319` can omit SessionEnd in one-shot mode. On macOS, the launcher checks the final Stop, completed result, SDK stream exhaustion, and clean child exit before releasing drafts. Other platforms and versions leave drafts pending for foreground review.
+Claude Code `2.1.319` can omit SessionEnd in one-shot mode. On macOS, the launcher checks the final Stop, completed result, SDK stream exhaustion, and clean child exit before releasing drafts. On Linux and with other Claude versions, review and release drafts in the foreground. Windows and unmanaged sessions use manual issue filing.
 
 Use `capture` with JSON on stdin for foreground capture. The fields are `repository`, `operation`, `failure`, `route`, `title`, `body`, and `evidence`.
 

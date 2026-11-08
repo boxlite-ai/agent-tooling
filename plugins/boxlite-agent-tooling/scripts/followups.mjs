@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -16,6 +17,37 @@ function fail(message) { throw new Error(message); }
 function inside(root, path) {
   const difference = relative(root, path);
   return !difference || (!isAbsolute(difference) && difference !== '..' && !difference.startsWith(`..${sep}`));
+}
+
+function existing(path) {
+  try { return lstatSync(path); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
+
+function canonicalLocation(path) {
+  if (existing(path)) return realpathSync(path);
+  return join(canonicalLocation(dirname(path)), basename(path));
+}
+
+function checkSdk(sdkPath, probe, inspect) {
+  const root = dirname(dirname(dirname(dirname(sdkPath))));
+  const modules = join(root, 'node_modules');
+  if (sdkPath !== join(modules, '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs') || process.env.NODE_PATH) {
+    fail('Use a private npm install for the SDK with NODE_PATH unset');
+  }
+  probe('/bin/sh', ['-c', 'test ! -r "$1" && test ! -w "$1" && test ! -x "$1"', 'sh', root]);
+  inspect(root);
+
+  // The SDK and dependencies execute as the operator. Reject external npm links
+  // and fallback search trees that sit outside the private installation.
+  for (const entry of readdirSync(modules, { withFileTypes: true, recursive: true })) {
+    if (entry.isSymbolicLink() && !inside(modules, realpathSync(join(entry.parentPath, entry.name)))) {
+      fail('SDK dependency links outside the private npm installation');
+    }
+  }
+  for (const path of createRequire(sdkPath).resolve.paths('zod')) {
+    if (!inside(modules, path) && existing(path)) fail('SDK install must be outside other npm trees');
+  }
 }
 
 function isolatedUser(user, cwd, stateRoot, registryRoot, executable) {
@@ -33,16 +65,17 @@ function isolatedUser(user, cwd, stateRoot, registryRoot, executable) {
     probe('/bin/sh', ['-c', 'test ! -r "$1" && test ! -w "$1" && test ! -x "$1"', 'sh', root]);
   }
   const inspected = new Set();
-  for (const root of [PLUGIN, dirname(stateRoot), dirname(registryRoot), executable].filter(Boolean)) {
+  const inspect = root => {
     for (let path = root; !inspected.has(path); path = dirname(path)) {
       probe('/bin/sh', ['-c', 'test ! -w "$1"', 'sh', path]);
       inspected.add(path);
     }
-  }
+  };
+  for (const root of [PLUGIN, dirname(stateRoot), dirname(registryRoot), executable].filter(Boolean)) inspect(root);
   const writable = probe('/usr/bin/find', [PLUGIN, '-exec', '/bin/sh', '-c',
     'for entry do if test -w "$entry"; then printf "%s\\n" "$entry"; fi; done', 'sh', '{}', '+']);
   if (writable) fail('The agent account can modify the installed plugin');
-  return prefix;
+  return { prefix, verifySdk: sdkPath => checkSdk(sdkPath, probe, inspect) };
 }
 
 function consumerName(cwd) {
@@ -88,7 +121,7 @@ async function main() {
   const cwd = realpathSync(git(process.cwd(), 'rev-parse', '--show-toplevel'));
   const stateRoot = resolve(stateArgument);
   const common = realpathSync(git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'));
-  const statePath = join(realpathSync(dirname(stateRoot)), basename(stateRoot));
+  const statePath = join(canonicalLocation(dirname(stateRoot)), basename(stateRoot));
   if (inside(cwd, statePath) || inside(common, statePath)) fail('Follow-up authority must be outside the checkout and Git directory');
   const clone = cloneIdentity(cwd);
   const registryRoot = join(userInfo().homedir, '.boxlite-followups');
@@ -101,11 +134,13 @@ async function main() {
     fail('SDK module and Claude executable must be absolute paths');
   }
   const executable = action === 'run' ? realpathSync(args[1]) : undefined;
-  const prefix = isolatedUser(agentUser, cwd, statePath, registryRoot, executable);
-  const queue = openFollowupQueue(statePath, clone, { initialize, registryRoot });
+  const { prefix, verifySdk } = isolatedUser(agentUser, cwd, statePath, registryRoot, executable);
+  const queue = openFollowupQueue(statePath, clone, {
+    initialize, registryRoot, legacyClone: cloneIdentity(cwd, { legacy: true }),
+  });
   if (initialize || action === 'status') return queue.status();
   if (action === 'run') {
-    return runManagedFollowups(queue, cwd, prefix, args[0], executable, await readInput());
+    return runManagedFollowups(queue, cwd, prefix, args[0], executable, await readInput(), { verifySdk });
   }
   if (action === 'drain') return drainFollowups(queue);
   if (action === 'opt-out') return queue.enroll(args[0], null);
