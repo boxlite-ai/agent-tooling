@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 In plugin, edit `guidance/workflow.md`; run
 `bash scripts/sync-guidance.sh <repo-root>` and `bash scripts/sync-guidance.test.sh`.
 
-<!-- agent-tooling:guidance:begin rev=1f433e122f5d-dirty sha256=0b3c81ebf0f0 -->
+<!-- agent-tooling:guidance:begin rev=0b91db4fb41b-dirty sha256=754253ba73a0 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -109,11 +109,6 @@ Classify each behavioral claim against its base contract:
 | New entry points over unchanged, correct dependencies | New-contract proof; dependency reuse alone is not a fix |
 | Wholly new contracts | Verify base/source evidence of no equivalent prior contract; run positive, negative, and boundary tests against the implementation; mark full-revert defect proof not applicable with a reason; new security APIs also need allowed/denied checks at real security boundaries |
 | Mixed changes | Apply both standards, defect proof and new-contract proof, per claim |
-
-#### Live agent tests
-
-- Test every new or changed agent-facing feature through its normal entry point in real Codex and Claude Code sessions, at minimum.
-- Record each scenario, host version, OS, and observed result. Report missing live coverage separately from fixture results.
 
 #### Defect proof
 

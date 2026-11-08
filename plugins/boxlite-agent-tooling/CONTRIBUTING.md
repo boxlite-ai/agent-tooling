@@ -31,9 +31,13 @@ make test:plugin TEST_FILTER=<name>
 
 API changes also require `make test:api-compatibility test:api-lint` with oasdiff 1.33.0 or `OASDIFF_BIN`.
 
-Follow the [live agent test rule](guidance/workflow.md#live-agent-tests) and test affected OS combinations. Report unverified coverage. Copilot installs remain unverified.
-
 For releases and upgrades, see [release maintenance](scripts/README.md#release-maintenance). For test setup, see [auditor test isolation](.agents/hooks/audit/README.md#auditor-test-isolation).
+
+### Live agent tests
+
+Test every new or changed agent-facing feature through its normal entry point in real Codex and Claude Code sessions. Cover affected OS combinations.
+
+Record the scenario, host version, OS, and observed result. Report missing live coverage separately from fixture results. Copilot installs remain unverified.
 
 ## Commit & PR messages
 
