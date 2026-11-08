@@ -70,7 +70,7 @@ Reject severity labels/unresolved local anchors; outside evidence remains unchec
 | Overrule | Record `OVERRIDDEN`; retained `overruled:` findings are not re-raised. |
 | No answer after five minutes | Keep edits blocked. |
 
-Only managed question hooks, correlated Codex replies, or a human's first-line `design-decision: <choice> <reason>` record decisions.
+The prompt hook records the human's first-line `design-decision: <request-id> <choice> <reason>` after checking the current request.
 
 Neither design agent has a force-pass card; they gate edits, not turn completion or commits.
 
@@ -104,7 +104,7 @@ The design gate allows a native commit/push or verdict auditor to save its assig
 | --- | --- |
 | Audit | `design-doc.sh verdict`, default 900 seconds; only critical/high gaps FAIL; content edits need fresh review. |
 | Advice | `design-doc.sh advice`; advice never changes verdict. |
-| Repeated FAIL | Submit `design-doc.sh reflect` or answer first-line `design-decision: <Redesign\|Reflect again\|Overrule> <reason>`. |
+| Repeated FAIL | Submit `design-doc.sh reflect` or answer first-line `design-decision: <request-id> <Redesign\|Reflect again\|Overrule> <reason>`. |
 | Codex question | Exact async payload/request-ID title; matching late answers count, silence blocks, changed design/history needs new request. |
 | Provider auth | GitHub `gh`; Notion `NOTION_TOKEN`; Linear `LINEAR_API_KEY`; environment only. |
 | Binding/content | Re-register after branch changes; Notion text must use top-level blocks. |

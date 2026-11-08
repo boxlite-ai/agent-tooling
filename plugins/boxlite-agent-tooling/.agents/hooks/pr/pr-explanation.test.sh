@@ -46,15 +46,21 @@ while IFS= read -r fixture; do
       metadata) command='gh pr edit 1 --add-label safe' ;;
     esac
     # A denial must leave the caller's approval state untouched.
-    printf '{"fixture":"preserve"}\n' > .agents/state/pr-reviewed.json
-    cp .agents/state/pr-reviewed.json "$scratch/marker-before"
+    review_state=.agents/state/pr-review-request.json
+    if [[ "$valid" == false ]]; then
+      printf '{"fixture":"preserve"}\n' > "$review_state"
+      cp "$review_state" "$scratch/request-before"
+    else
+      rm -f "$review_state"
+    fi
     output="$(jq -nc --arg command "$command" '{tool_input:{command:$command}}' \
       | bash "$plugin/.agents/hooks/preflight-pr-review.sh")"
     reason="$(jq -r '.hookSpecificOutput.permissionDecisionReason // ""' <<<"$output")"
-    if { [[ "$valid" == false && "$reason" == 'PR description requires a nonempty ## How it works section.'* ]] ||
-         [[ "$valid" == true && "$operation" == draft && -z "$output" ]] ||
-         [[ "$valid" == true && "$operation" != draft && "$reason" == *'Review required'* ]]; } \
-       && cmp -s .agents/state/pr-reviewed.json "$scratch/marker-before"; then
+    if { [[ "$valid" == false && "$reason" == 'PR description requires a nonempty ## How it works section.'* ]] &&
+         cmp -s "$review_state" "$scratch/request-before"; } ||
+       [[ "$valid" == true && "$operation" == draft && -z "$output" && ! -e "$review_state" ]] ||
+       { [[ "$valid" == true && "$operation" != draft && "$reason" == *'Review required'* ]] &&
+         jq -e '.status=="pending"' "$review_state" >/dev/null; }; then
       pass=$((pass+1))
     else
       printf 'FAIL %s/%s: valid=%s; %s\n' "$name" "$operation" "$valid" "$output"

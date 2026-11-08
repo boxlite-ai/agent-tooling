@@ -24,8 +24,8 @@ check() {
   failures=$((failures + 1))
 }
 route() {
-  bash -c 'source "$1/.agents/lib/subagent.sh"; source "$1/.agents/lib/timed-user-prompt.sh";
-    timed_user_prompt_instruction "$1" '\''{"id":"fixture","deadline":123,"spec":{"fallback":"split","prefix":"pr-size-exception:"}}'\''' _ "$plugin"
+  bash -c 'source "$1/.agents/lib/user-question.sh";
+    user_question instruction "$1" '\''{"id":"fixture","deadline":123,"spec":{"fallback":"split","prefix":"pr-size-exception:"}}'\''' _ "$plugin"
 }
 
 # A timeout variable alone says nothing about Remote Control being connected.
@@ -39,8 +39,8 @@ check jq -e --arg plugin "$plugin" '.marker=="1" and .timeout=="300000" and
     "--resume","session with spaces","--plugin-dir",$plugin]' <<<"$out"
 marker="$(jq -r .marker <<<"$out")"
 BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS="$marker" check bash -c '
-  source "$1/.agents/lib/timed-user-prompt.sh"
-  timed_user_prompt_native_available
+  source "$1/.agents/lib/hook-interactive-prompt.sh"
+  hook_interactive_prompt_claude_available
 ' _ "$plugin"
 managed_route="$(BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS="$marker" route)"
 check test "${managed_route#*plain text}" != "$managed_route"

@@ -39,14 +39,25 @@ timed_user_prompt() { # operation state-path spec-or-request-id [verbatim-respon
   ' "$library" "$2" "$@"
 }
 
+timed_user_prompt_read() { # path -> current-format JSON, without changing state
+  local snapshot
+  snapshot="$(verdict_audit_read_regular_state "$1" 16384 json)" || {
+    printf 'timed-user-prompt: cannot read request at %s\n' "$1" >&2
+    return 2
+  }
+  jq -ce 'select(type == "object" and .version == 2)' <<<"${snapshot#*$'\n'}" || {
+    printf 'timed-user-prompt: unsupported request at %s; resolve it before continuing\n' "$1" >&2
+    return 2
+  }
+}
+
 _timed_user_prompt_transition() { # same arguments as the facade; lock already held
-  local operation="$1" path="$2" argument="$3" response="${4:-}" record=null snapshot now nonce next archive library marker marker_record current_marker
+  local operation="$1" path="$2" argument="$3" response="${4:-}" record=null now nonce next archive library
   library="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 2
   now="$(date -u +%s)" || return 2
   [[ "$now" =~ ^[0-9]{1,12}$ ]] || return 2
   if [[ -e "$path" || -L "$path" ]]; then
-    snapshot="$(verdict_audit_read_regular_state "$path" 16384 json)" || return 2
-    record="${snapshot#*$'\n'}"
+    record="$(timed_user_prompt_read "$path")" || return 2
   fi
   nonce="$(perl -e 'open my $f, "<", "/dev/urandom" or exit 2;
     read($f, my $bytes, 16) == 16 or exit 2; print unpack("H*", $bytes)')" || return 2
@@ -56,55 +67,49 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
     def line: type == "string" and utf8bytelength <= 4096
       and (explode | all(. >= 32 and . != 127));
     def spec:
-      type == "object" and (keys == ["binding","fallback","minimum_words","prefix"])
+      type == "object" and (keys == ["binding","fallback","prefix"])
       and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 8192))
       and (.prefix | type == "string")
-      and (user_question_policy(.prefix) as $policy | $policy != null and .fallback == $policy.fallback)
-      and (.minimum_words | type == "number" and . >= 1 and . <= 100 and floor == .);
-    def git_decision: user_question_policy(.prefix).fallback == "reflect-again";
-    def response_ok($s):
-      line and (. as $answer | user_question_policy($s.prefix) as $policy |
-        if $s.prefix == "pr-size-exception:" and . == $policy.choices[0] then true
-        elif $s.prefix == "design-decision:" then
-          ($policy.choices | index($answer) != null) or test(user_question_design_pattern)
-        elif ($s | git_decision) then (($policy.choices + user_question_labels($policy)) | index($answer) != null)
-          or test(user_question_bound_choice_pattern($s.prefix; "[0-9a-f]{32}"))
-        else startswith($s.prefix + " ")
-          and ([.[($s.prefix|length):] | scan("\\S+")] | length) >= $s.minimum_words end);
+      and (user_question_policy(.prefix) as $policy | $policy != null and .fallback == $policy.fallback);
+    def git_decision: .fallback == "reflect-again";
+    def review: .spec.prefix == "reviewed:";
+    def integer: type == "number" and . >= 0 and floor == .;
+    def checked_reply($request):
+      select(line) | select($request.spec.prefix != "reviewed:" or utf8bytelength <= 1024) |
+      user_question_directive |
+      select(.id == $request.id and .prefix == $request.spec.prefix) |
+      select(.prefix as $prefix | .answer | user_question_answer_valid($prefix));
+    def split_choice:
+      .prefix == "pr-size-exception:" and .answer == user_question_policy(.prefix).choices[1];
     def valid:
-      type == "object" and .version == 1 and (.spec | spec)
-      and (keys == ["created_at","deadline","fallback_delivered","id","question_tool_id","response","spec","status","version"])
+      type == "object" and .version == 2 and (.spec | spec)
+      and (keys == ["accepted_at","created_at","deadline","fallback_delivered","id","response","spec","status","version"])
       and (.id | type == "string" and test("^[0-9a-f]{32}$"))
-      and (.created_at | type == "number" and . >= 0 and floor == .)
-      # Keep legacy deadlines valid without extending existing attempts.
-      and (.deadline == .created_at + 180 or .deadline == .created_at + 300)
+      and (.created_at | integer) and .deadline == .created_at + 300
       and (.status | IN("pending","accepted","expired","consumed","declined"))
-      and (.question_tool_id | type == "string" and test("^[A-Za-z0-9_-]{0,200}$"))
       and (.fallback_delivered | type == "boolean");
     def record_ok:
-      valid
-      and (if .status == "accepted" or .status == "consumed"
-        then .spec as $s | .response | response_ok($s)
-        elif .status == "declined" then .spec.prefix == "pr-size-exception:"
-          and .response == user_question_policy(.spec.prefix).choices[1]
-        else .response == "" end)
-      and (. as $record | if (.spec | git_decision) and (.response | startswith($record.spec.prefix))
-        then .response | test(user_question_bound_choice_pattern($record.spec.prefix; $record.id))
-        else true end)
+      valid and (. as $request |
+        if .status | IN("accepted","consumed") then
+          (.accepted_at | integer) and .accepted_at >= .created_at
+          and (.spec.prefix == "design-decision:" or .accepted_at < .deadline)
+          and ((.response | checked_reply($request) | split_choice | not) // false)
+        elif .status == "declined" then
+          .accepted_at == null and ((.response | checked_reply($request) | split_choice) // false)
+        else .accepted_at == null and .response == "" end)
       and (if .fallback_delivered then (.status | IN("expired","declined")) else true end);
-    # Older version-one records predate native questions; preserve their deadline.
-    if type == "object" and .version == 1 and (has("question_tool_id") | not)
-      then .question_tool_id = "" else . end |
     if . != null and (record_ok | not) then error("invalid confirmation state") else . end |
-    if . != null and $now < .created_at then error("clock moved backwards") else . end |
-    if . != null and .status == "pending" and $now >= .deadline
-      then .status = "expired" else . end |
+    if . != null and ($now < .created_at or (.accepted_at != null and $now < .accepted_at))
+      then error("clock moved backwards") else . end |
+    if . != null and ((.status == "pending" and $now >= .deadline)
+        or (review and .status == "accepted" and $now - .accepted_at > 600))
+      then .status = "expired" | .accepted_at = null | .response = "" else . end |
     if $op == "request" then
       ($arg | fromjson) as $spec |
       if ($spec | spec | not) then error("invalid confirmation specification")
       elif . == null or .spec != $spec or .status == "consumed" then
-        {version:1,id:$id,spec:$spec,created_at:$now,deadline:($now+300),
-         status:"pending",response:"",fallback_delivered:false,question_tool_id:""}
+        {version:2,id:$id,spec:$spec,created_at:$now,deadline:($now+300),
+         accepted_at:null,status:"pending",response:"",fallback_delivered:false}
       else . end
     elif . == null or .id != $arg then error("unknown or superseded confirmation")
     elif $op == "renew" then
@@ -112,62 +117,24 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
         or ($reply | line and test("\\S") | not)
       then error("renewal requires an expired or declined PR-size request and the explicit human instruction")
       else .id = $id | .created_at = $now | .deadline = ($now+300)
-        | .status = "pending" | .response = "" | .fallback_delivered = false
-        | .question_tool_id = "" end
-    elif $op == "present" then
-      if .status != "pending" or ($reply | test("^[A-Za-z0-9_-]{1,200}$") | not)
-        or (.question_tool_id != "" and .question_tool_id != $reply)
-      then error("question expired or was already presented")
-      else .question_tool_id = $reply end
-    elif $op == "respond" and (.spec.prefix == "design-decision:" or (.spec | git_decision)) then
-      error("audit decisions come only from the human: the managed question or a typed decision line")
-    elif $op == "prompt-reply" and (.spec | git_decision) then
-      .spec as $spec |
-      if .status != "pending" or ($reply | line | not)
-        or ($reply | test(user_question_bound_choice_pattern($spec.prefix; $arg)) | not)
-      then error("Git audit choice is stale or does not match this request")
-      else .status = "accepted" | .response = $reply end
-    elif $op == "prompt-reply" and (.spec.prefix | IN("pr-size-exception:", "reviewed:")) then
-      .spec as $spec |
-      if .question_tool_id != "" or $now >= .deadline
-      then error("PR confirmation is closed or belongs to a native question")
-      elif .status == "accepted" and $spec.prefix == "reviewed:" and .response == $reply then .
-      elif .status != "pending" then error("PR confirmation is no longer pending")
-      elif $spec.prefix == "pr-size-exception:" and $reply == user_question_policy($spec.prefix).choices[1]
-      then .status = "declined" | .response = $reply
-      elif ($reply | response_ok($spec) and utf8bytelength <= 1024) then
-        .status = "accepted" | .response = $reply
-      else error("response does not match this PR confirmation") end
+        | .status = "pending" | .response = "" | .fallback_delivered = false end
     elif $op == "prompt-reply" then
-      # The human supplied a directive; the deadline only ends the agent wait.
-      if .spec.prefix != "design-decision:" or ($reply | line and test(user_question_design_pattern) | not)
-      then error("only an explicit design-decision line from the human prompt counts")
-      elif (.status | IN("pending","expired") | not) then error("confirmation no longer accepts replies")
-      else .status = "accepted" | .response = $reply | .fallback_delivered = false end
-    elif $op == "respond" or $op == "native-reply" then
-      if .status != "pending" then error("confirmation no longer accepts replies")
-      else . end |
-      (if $op == "native-reply" then
-        ($reply | fromjson) as $native |
-        if .question_tool_id == "" or $native.tool_use_id != .question_tool_id
-          or ($native | keys) != ["answer","tool_use_id"]
-        then error("response does not match the presented question") else $native.answer end
-       elif .question_tool_id != "" then error("native replies must come through the question hook")
-       else $reply end) as $answer |
-      .spec as $s |
-      if $s.prefix == "pr-size-exception:" and $answer == user_question_policy($s.prefix).choices[1]
-      then .status = "declined" | .response = $answer
-      elif ($answer | response_ok($s) | not)
-      then error("response does not match this confirmation")
-      else .status = "accepted" | .response = $answer end
+      . as $request |
+      if .status != "pending" and (.spec.prefix != "design-decision:" or .status != "expired")
+      then error("confirmation is no longer pending")
+      else ($reply | checked_reply($request) // null) as $answer |
+        if $answer == null then error("response does not match this confirmation")
+        elif ($answer | split_choice) then .status = "declined" | .response = $reply
+        else .status = "accepted" | .response = $reply | .accepted_at = $now | .fallback_delivered = false end
+      end
     elif $op == "consume" then
       if (.spec | git_decision) then error("Git retry choices remain bound to their failed round")
-      elif .status != "accepted" then error("confirmation is not accepted")
+      elif .status != "accepted" then error("confirmation is not accepted or has expired")
       else .status = "consumed" end
     elif $op == "fallback" then
       if (.status | IN("expired","declined") | not) then error("confirmation has not expired or been declined")
       else .fallback_delivered = true end
-    elif $op == "status" or $op == "question" then .
+    elif $op == "status" then .
     else error("unknown confirmation operation") end
   ' <<<"$record")" || return 2
   if [[ "$operation" == renew ]]; then
@@ -183,38 +150,5 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       }
   fi
   printf '%s\n' "$next" | verdict_audit_write_atomic "$path" || return 2
-  if [[ "$operation" == prompt-reply || "$operation" == native-reply ]] &&
-     jq -e '.spec.prefix == "reviewed:"' <<<"$next" >/dev/null; then
-    # Keep marker publication under the request lock. A failed publication
-    # blocks the gate; the same typed reply can repair it within the deadline.
-    marker="${path%/*}/pr-reviewed.json"
-    marker_record="$(jq -c '{branch:.spec.binding.branch,head:.spec.binding.head,message:.response,request:.id}' <<<"$next")" \
-      || return 2
-    current_marker="$(verdict_audit_read_regular_state "$marker" 8192 json 2>/dev/null)" || current_marker=""
-    if [[ "${current_marker#*$'\n'}" != "$marker_record" ]]; then
-      printf '%s\n' "$marker_record" | verdict_audit_write_atomic "$marker" || return 2
-    fi
-  fi
-  if [[ "$operation" == question ]]; then _timed_user_prompt_question "$next"
-  else printf '%s\n' "$next"; fi
-}
-
-_timed_user_prompt_question() {
-  local root
-  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 2
-  # shellcheck source=user-question.sh
-  source "$root/.agents/lib/user-question.sh" || return 2
-  user_question card "$root" "$1"
-}
-
-timed_user_prompt_native_available() {
-  [[ "${BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS:-}" == 1 \
-    && "${CLAUDE_AFK_TIMEOUT_MS:-}" =~ ^[1-9][0-9]{0,5}$ ]] \
-    && (( CLAUDE_AFK_TIMEOUT_MS <= 300000 ))
-}
-
-timed_user_prompt_instruction() { # tooling-root request-json
-  # shellcheck source=user-question.sh
-  source "$1/.agents/lib/user-question.sh" || return 2
-  user_question instruction "$1" "$2"
+  printf '%s\n' "$next"
 }

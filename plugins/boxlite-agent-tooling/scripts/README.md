@@ -181,7 +181,7 @@ See [state contracts](../.agents/hooks/audit/state.md#state-files) and the
 
 | Script / arguments | Responsibility and effects |
 | --- | --- |
-| [timed-user-prompt.sh](timed-user-prompt.sh) `request\|status\|question\|respond\|renew\|consume\|fallback STATE SPEC_OR_ID [HUMAN_TEXT]` | Persist confirmation deadlines, exact human responses, consumption, and expiry; renewal requires the user's explicit instruction. |
+| [timed-user-prompt.sh](timed-user-prompt.sh) `request\|status\|renew\|consume\|fallback STATE SPEC_OR_ID [RENEWAL_INSTRUCTION]` | Persist confirmation deadlines, exact human responses, consumption, and expiry; renewal requires the user's explicit instruction. |
 | [claude-with-timed-prompts.sh](claude-with-timed-prompts.sh) `[claude args...]` | Launch Claude with this plugin; configure native question timeout for supported local sessions and disable Remote Control there. |
 | [continue-timed-prompts.sh](continue-timed-prompts.sh) | Called by the Stop gate with hook JSON on stdin; emit a continuation for pending confirmations or their timeout fallback. |
 | [resume-on-network-error.sh](resume-on-network-error.sh) `[--max-restarts N] [--max-wait SECONDS] [--probe-url URL] [--] <prompt> [claude args...]` | Supervise `claude -p`, retry eligible API failures within budgets, and print final result JSON. |

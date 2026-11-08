@@ -1,24 +1,9 @@
 ---
 name: timed-question-size
-used-by: .agents/lib/timed-user-prompt.sh
+used-by: .agents/lib/user-question.sh
 placeholders: prefix, id, label_1, label_2
 ---
-{
-  "questions": [
-    {
-      "question": "{{prefix}} Bypass the 400-line guideline for this PR? [{{id}}]",
-      "header": "PR size",
-      "multiSelect": false,
-      "options": [
-        {
-          "label": "{{label_1}}",
-          "description": "Proceed with this PR without splitting."
-        },
-        {
-          "label": "{{label_2}}",
-          "description": "Break changes into smaller PRs."
-        }
-      ]
-    }
-  ]
-}
+Bypass the 400-line guideline for this PR?
+
+- `{{prefix}} {{id}} {{label_1}}` — Proceed with this PR.
+- `{{prefix}} {{id}} {{label_2}}` — Break changes into smaller PRs.

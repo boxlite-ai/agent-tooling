@@ -1,7 +1,7 @@
 def user_question_policy($prefix):
   if $prefix | IN("commit-audit-decision:", "push-audit-decision:") then
     {template:"questions/timed-question-git-audit", fallback:"reflect-again",
-      choices:["Reflect again", "Stop"], recommended:true}
+      choices:["Reflect again", "Stop"]}
   else
     {
       "pr-size-exception:": {template:"questions/timed-question-size", fallback:"split",
@@ -13,20 +13,16 @@ def user_question_policy($prefix):
     }[$prefix]
   end;
 
-def user_question_labels($policy):
-  $policy.choices | if $policy.recommended then .[0] += " (Recommended)" else . end;
-
-# Choices are fixed labels from the policy, with no regex operators.
 def user_question_design_choices:
   user_question_policy("design-decision:").choices | join("|");
 
 def user_question_design_pattern:
-  "^design-decision: (?<choice>" + user_question_design_choices + ")\\s+\\S";
+  "^(" + user_question_design_choices + ")\\s+\\S";
 
-def user_question_bound_choice_pattern($prefix; $id):
-  "^" + $prefix + " " + $id + " (" + (user_question_policy($prefix).choices | join("|")) + ")$";
+def user_question_directive:
+  capture("\\A(?<prefix>\\S+:) (?<id>[0-9a-f]{32}) (?<answer>[^\\r\\n]+)\\z");
 
-def user_question_git_reply:
-  capture("^(?<kind>commit|push)-audit-decision: (?<id>[0-9a-f]{32}) ") as $binding |
-  select(test(user_question_bound_choice_pattern($binding.kind + "-audit-decision:"; $binding.id))) |
-  $binding + {text:.};
+def user_question_answer_valid($prefix):
+  if $prefix == "design-decision:" then test(user_question_design_pattern)
+  elif $prefix == "reviewed:" then test("\\S")
+  else . as $answer | user_question_policy($prefix).choices | index($answer) != null end;

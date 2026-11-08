@@ -73,10 +73,9 @@ jq -e 'type == "object"' <<<"$request" >/dev/null 2>&1 || deny 'audit request un
 listed() { jq -r --arg key "$1" '.[$key][] | "- " + .' <<<"$request"; }
 session="$(jq -r '.session_id // "" | strings' <<<"$payload")" || session=''
 
-# A stopped loop waits for the human's choice. Only the managed question's hook and the
-# prompt hook record one (design #309); an accepted choice is applied here, once.
+# A stopped loop waits for a typed choice. Apply the recorded choice once.
 design_decision() {
-  local root decisions spec decision choice reason approval reply_format
+  local root decisions spec decision choice reason approval reply_format id
   # shellcheck source=../lib/timed-user-prompt.sh
   source "$plugin_root/.agents/lib/timed-user-prompt.sh" || deny 'design decision unavailable'
   root="$(jq -r .repo_root <<<"$request")"
@@ -86,10 +85,10 @@ design_decision() {
       --arg branch "$(git -C "$root" branch --show-current 2>/dev/null)" \
       '{binding:{root:.repo_root, branch:$branch, head:$head, session:$session, url:.design_url,
         content_sha256, history_hash, fails, stop},
-        prefix:"design-decision:", fallback:"keep-blocked", minimum_words:1}' <<<"$request")" \
-     || ! decision="$(timed_user_prompt request "$decisions" "$spec")"; then
+        prefix:"design-decision:", fallback:"keep-blocked"}' <<<"$request")"; then
     deny 'design decision unavailable'
   fi
+  decision="$(timed_user_prompt request "$decisions" "$spec" 2>&1)" || deny "$decision"
   case "$(jq -r .status <<<"$decision")" in
     accepted)
       if ! choice="$(user_question design-choice "$plugin_root" "$decision")" \
@@ -109,8 +108,9 @@ design_decision() {
     *)
       reason='the FAIL limit was reached'
       [[ "$(jq -r .stop <<<"$request")" == cap ]] || reason='a blocking finding repeated or their number did not drop'
-      if ! decision="$(timed_user_prompt_instruction "$plugin_root" "$decision")" \
-         || ! reply_format="$(user_question design-format "$plugin_root")" \
+      id="$(jq -er .id <<<"$decision")" || deny 'request id unavailable'
+      if ! decision="$(user_question instruction "$plugin_root" "$decision")" \
+         || ! reply_format="$(user_question design-format "$plugin_root" "$id")" \
          || ! decision="$(user_question render "$plugin_root" design/audit-stopped "reason=$reason" \
            "fails=$(jq -r .fails <<<"$request")" "findings=$(listed open_findings)" \
            "instruction=$decision" "reply_format=$reply_format")"; then

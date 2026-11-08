@@ -292,11 +292,14 @@ rm -f "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-desi
 record_on "$(revision 2)" "$two"
 publish "$(revision 3)"; record_on "$(revision 3)" '["high: research: A"]'
 expect_denial 'a repeated finding at FAIL 2 stops the loop' codex 'INCOMPLETE: the design-audit loop stopped after FAIL 2'
-expect_denial 'the stop names the typed decision line' codex 'design-decision: <Redesign|Reflect again|Overrule> <reason>'
-said 'a bare choice records nothing' "$(typed 'design-decision: Overrule')" 'nothing recorded'
-said 'another session cannot decide' "$(typed 'design-decision: Overrule fine' other-session)" 'another session'
+decision_state="$scratch/repo/.agents/state/design-decision-request.json"
+decision_id="$(jq -er .id "$decision_state")"
+expect_denial 'the stop names the typed decision line' codex "design-decision: $decision_id <Redesign|Reflect again|Overrule> <reason>"
+said 'a bare choice records nothing' "$(typed "design-decision: $decision_id Overrule")" 'nothing recorded'
+said 'another session cannot decide' "$(typed "design-decision: $decision_id Overrule fine" other-session)" 'session, branch, or HEAD'
 check Write 'edit source' deny
-said 'a typed first line records the choice' "$(typed $'design-decision: Overrule the gaps are acceptable\nthanks')" 'recorded'
+said 'a typed first line records the choice' \
+  "$(typed "$(printf 'design-decision: %s Overrule the gaps are acceptable\nthanks' "$decision_id")")" 'recorded "'
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' allow
 done
@@ -311,7 +314,8 @@ expect_denial 'no drop in findings stops the loop' codex 'INCOMPLETE'
 printf '%s\n' "$(( started + 301 ))" > "$DESIGN_TEST_CLOCK"
 expect_denial 'an unanswered stop keeps edits blocked' codex 'edits stay blocked'
 check Write 'edit source' deny
-said 'a late typed line still counts' "$(typed 'design-decision: Redesign start from the findings')" 'recorded'
+decision_id="$(jq -er .id "$decision_state")"
+said 'a late typed line still counts' "$(typed "design-decision: $decision_id Redesign start from the findings")" 'recorded "'
 expect_denial 'Redesign asks for a fresh draft' codex 'The human chose Redesign'
 unset DESIGN_TEST_CLOCK
 said 'the prompt hook routes typed decisions' "$(cat "$plugin/.agents/hooks/cancel-verdict-audit.sh")" 'design-decision-prompt.sh'

@@ -80,8 +80,7 @@ Context: `repo_root`, `session`, `epoch`, `branch`, `gate`; limits: eight failur
 - `last-audit.json`: Git dossier.
 - `last-audit-handoff.json`: auditor request.
 - `commit-audit-receipt.json`: commit-msg approval spent by pre-push.
-- `pr-reviewed.json`: bound acknowledgment.
-- `pr-review-request.json`: review lifecycle.
+- `pr-review-request.json`: bound review request, acceptance time, and consumption.
 - `pr-size-request.json`: diff/choice lifecycle; renewal archives use `<state>.expired-<request-id>.json`.
 
 ### Runtime state

@@ -26,8 +26,7 @@ branch="$(git -C "$repo" branch --show-current)" || exit 2
 for name in "${names[@]}"; do
   path="$repo/.agents/state/$name.json"
   [[ -e "$path" || -L "$path" ]] || continue
-  snapshot="$(verdict_audit_read_regular_state "$path" 16384 json)" || exit 2
-  request="${snapshot#*$'\n'}"
+  request="$(timed_user_prompt_read "$path")" || exit 2
   request_session="$session"
   if [[ "$(jq -r .spec.fallback <<<"$request")" == reflect-again ]]; then
     # shellcheck source=../.agents/lib/git-audit-decision.sh
@@ -44,7 +43,7 @@ for name in "${names[@]}"; do
   status="$(jq -r .status <<<"$request")"
   case "$status" in
     pending)
-      reason="$(timed_user_prompt_instruction "$plugin" "$request")" || exit 2
+      reason="$(user_question instruction "$plugin" "$request")" || exit 2
       reason="$(user_question render "$plugin" questions/timed-continue-pending \
         "name=${name%-request}" "instruction=$reason")" || exit 2 ;;
     declined)

@@ -104,12 +104,12 @@ check 'later body replacement is checked' "$draft '$DESIGN_TEST_BODY' --body '${
 export DESIGN_TEST_DELETED=1
 check 'deleted document blocks a matching link' "$draft '$DESIGN_TEST_BODY'" 'design doc'
 export DESIGN_TEST_DELETED=0 DESIGN_TEST_BODY="${SUMMARY_PREFIX}Missing design link."
-printf '{"fixture":"must remain"}\n' > .agents/state/pr-reviewed.json
-cp .agents/state/pr-reviewed.json "$scratch/marker-before"
+printf '{"fixture":"must remain"}\n' > .agents/state/pr-review-request.json
+cp .agents/state/pr-review-request.json "$scratch/request-before"
 check 'ready checks the published body' 'gh pr ready 42' 'link the registered design doc'
 check 'metadata edits check the published body' 'gh pr edit 42 --add-label safe' 'link the registered design doc'
-cmp .agents/state/pr-reviewed.json "$scratch/marker-before"
-rm .agents/state/pr-reviewed.json
+cmp .agents/state/pr-review-request.json "$scratch/request-before"
+rm .agents/state/pr-review-request.json
 export SUMMARY_PREFIX=$'## TL;DR\n\nFixture summary.\n\n## How it works\n\nVerify the document link.\n\n'
 export DESIGN_TEST_BODY="${SUMMARY_PREFIX}Design doc: $DESIGN_TEST_URL"
 check 'matching published body reaches human review' 'gh pr ready 42' 'Review required'

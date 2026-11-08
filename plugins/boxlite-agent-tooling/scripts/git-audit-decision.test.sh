@@ -93,28 +93,20 @@ jq -e --arg id "$original_id" '.id==$id and .deadline==1300' "$decision" >/dev/n
 jq -e '.attempts | length==3' "$state" >/dev/null
 printf 'PASS: unsafe request paths block; concurrent retries preserve one checkpoint\n'
 
+user_prompt() {
+  jq -nc --arg prompt "$1" '{hook_event_name:"UserPromptSubmit",
+    session_id:"decision-session",prompt:$prompt}' \
+    | bash "$plugin/.agents/hooks/cancel-verdict-audit.sh"
+}
 select_kind push
 id="$(jq -r .id "$decision")"
-question="$(bash "$prompt_cli" question "$decision" "$id")"
-jq -e '[.questions[0].options[].label] == ["Reflect again (Recommended)","Stop"]' <<<"$question" >/dev/null
-native_reply() {
-  jq -nc --arg event "$1" --argjson question "$question" --arg answer "$2" '
-    {hook_event_name:$event,tool_name:"AskUserQuestion",session_id:"decision-session",
-     tool_use_id:"git-choice",tool_input:$question,
-     tool_response:{answers:{($question.questions[0].question):$answer}}}' \
-    | BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1 CLAUDE_AFK_TIMEOUT_MS=300000 \
-      bash "$plugin/.agents/hooks/claude-timed-question.sh"
-}
 if bash "$prompt_cli" respond "$decision" "$id" Stop >"$scratch/out" 2>"$scratch/err"; then
   printf 'FAIL: agent-relayed decision accepted\n' >&2; exit 1
 fi
 printf '1299\n' > "$AUDIT_DECISION_TEST_CLOCK"
-native_reply PreToolUse Stop
-native_reply PostToolUse Stop
-jq -e '.status=="accepted" and .response=="Stop"' "$decision" >/dev/null
-if native_reply PostToolUse 'Reflect again (Recommended)' >"$scratch/out" 2>"$scratch/err"; then
-  printf 'FAIL: native reply replay changed Stop\n' >&2; exit 1
-fi
+user_prompt "push-audit-decision: $id Stop" >"$scratch/reply"
+[[ "$(cat "$scratch/reply")" == *"retained the failed audit cycle"* ]]
+jq -e --arg id "$id" '.status=="accepted" and .response==("push-audit-decision: " + $id + " Stop")' "$decision" >/dev/null
 if bash "$prompt_cli" consume "$decision" "$id" >"$scratch/out" 2>"$scratch/err"; then
   printf 'FAIL: consumption could reopen a stopped checkpoint\n' >&2; exit 1
 fi
@@ -143,14 +135,8 @@ next_id="$(jq -r .id "$decision")"
 [[ "$next_id" != "$id" ]]
 jq -e '.deadline==1600 and .status=="pending"' "$decision" >/dev/null
 
-user_prompt() {
-  jq -nc --arg prompt "$1" '{hook_event_name:"UserPromptSubmit",
-    session_id:"decision-session",prompt:$prompt}' \
-    | bash "$plugin/.agents/hooks/cancel-verdict-audit.sh"
-}
 answer="commit-audit-decision: $next_id Reflect again"
-wrapper="$(jq -nc --arg answer "$answer" '[{answer:$answer}]')"
-user_prompt "<send_user_message_question_reply>$wrapper</send_user_message_question_reply>" >"$scratch/reply"
+user_prompt "$answer" >"$scratch/reply"
 [[ "$(cat "$scratch/reply")" == *"retained the failed audit cycle"* ]]
 [[ ! -e ".agents/state/verdict-prompt-epoch.$scope" ]]
 jq -e '.status=="accepted"' "$decision" >/dev/null
@@ -168,7 +154,7 @@ jq -e '(.attempts | length)==1 and (.closed | length)==1
 select_kind push
 reject_prepare a4
 [[ "$(cat "$scratch/err")" == *"human chose Stop"* ]]
-printf 'PASS: native Stop persists; timeout and text replies preserve history and require reflection\n'
+printf 'PASS: typed Stop persists; timeout and text replies preserve history and require reflection\n'
 
 select_kind commit
 record_error next-cycle
@@ -193,10 +179,28 @@ epoch="$(cat ".agents/state/verdict-prompt-epoch.$scope")"
 user_prompt "$answer
 also change the task" >/dev/null
 [[ "$(cat ".agents/state/verdict-prompt-epoch.$scope")" != "$epoch" ]]
-if native_reply PreToolUse Stop >"$scratch/out" 2>"$scratch/err"; then
-  printf 'FAIL: a stale native question survived prompt revocation\n' >&2; exit 1
+printf 'PASS: replay and mixed text cannot preserve old authority\n'
+
+# An older Stop must block even when an ordinary prompt advances the session epoch.
+select_kind push
+jq '.version=1 | del(.accepted_at) | .question_tool_id="old-card" | .response="Stop"
+  | .spec.minimum_words=1' "$decision" > "$scratch/legacy-stop"
+cp "$scratch/legacy-stop" "$decision"
+user_prompt 'Continue with the current task' >/dev/null
+new_epoch="$(cat ".agents/state/verdict-prompt-epoch.$scope")"
+context="$(jq -c --arg epoch "$new_epoch" '.epoch=$epoch' <<<"$context")"
+state="$scratch/push-new-epoch.json"
+next_action="$(jq -nc --argjson context "$context" '{context:$context}' |
+  bash "$cli" next-action "$state")"
+jq -e --arg path "$decision" '.action=="stop" and (.reason|contains($path))' <<<"$next_action" >/dev/null
+if prepare after-legacy-stop >"$scratch/out" 2>"$scratch/err"; then
+  printf 'FAIL: unsupported Stop allowed a new audit cycle\n' >&2
+  exit 1
 fi
-printf 'PASS: replay, mixed text and stale native choices cannot preserve old authority\n'
+[[ ! -e "$state" ]]
+grep -Fq "unsupported request at $decision" "$scratch/err"
+cmp "$scratch/legacy-stop" "$decision"
+printf 'PASS: unsupported Stop survives epoch changes without retry or fallback\n'
 
 # Detached checkouts use the same HEAD branch binding in all host paths.
 git -c core.hooksPath=/dev/null checkout --detach -q
@@ -211,14 +215,9 @@ for attempt in detached1 detached2 detached3; do
 done
 reject_prepare detached4
 id="$(jq -r .id "$decision")"
-question="$(bash "$prompt_cli" question "$decision" "$id")"
 printf '%s' '{"session_id":"detached-session"}' \
   | bash "$plugin/scripts/continue-timed-prompts.sh" \
-  | jq -e '.decision=="block"' >/dev/null
-jq -nc --argjson question "$question" '{hook_event_name:"PreToolUse",tool_name:"AskUserQuestion",
-  session_id:"detached-session",tool_use_id:"detached-choice",tool_input:$question}' \
-  | BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1 CLAUDE_AFK_TIMEOUT_MS=300000 \
-    bash "$plugin/.agents/hooks/claude-timed-question.sh"
+  | jq -e --arg id "$id" '.decision=="block" and (.reason|contains($id))' >/dev/null
 # Expiry grants retries, but never extends the eight-failure safety budget.
 for n in 4 5 6 7 8; do
   printf '%s\n' "$(jq -r .deadline "$decision")" > "$AUDIT_DECISION_TEST_CLOCK"

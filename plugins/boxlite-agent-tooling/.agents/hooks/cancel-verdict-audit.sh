@@ -158,8 +158,11 @@ source "$tooling_root/.agents/lib/user-question.sh" || exit 2
 if [[ "$prompt_text" =~ ^[[:space:]]*(reviewed:|pr-size-exception:) ]]; then
   # shellcheck source=../lib/pr-question-reply.sh
   source "$tooling_root/.agents/lib/pr-question-reply.sh" || exit 2
-  if ! pr_question_reply "$payload" "$project_dir" "$tooling_root" 2>/dev/null; then
+  if pr_reply_result="$(pr_question_reply "$payload" "$project_dir" "$tooling_root" 2>&1)"; then
+    printf '%s\n' "$pr_reply_result"
+  else
     printf 'PR confirmation was not recorded. Check the open request, checkout, and deadline.\n'
+    [[ -z "$pr_reply_result" ]] || printf '%s\n' "$pr_reply_result"
   fi
 fi
 if user_question api-match "$tooling_root" "$payload" >/dev/null; then
@@ -170,9 +173,8 @@ if user_question api-match "$tooling_root" "$payload" >/dev/null; then
     printf 'api-compatibility: confirmation not recorded: %s\n' "${compatibility_record#api-compatibility: }"
   fi
 fi
-# The receiver validates typed decisions and correlated Codex replies; wakes exit above.
-if [[ "$prompt_text" =~ ^[[:space:]]*design-decision: \
-   || "$prompt_text" =~ ^[[:space:]]*\<send_user_message_question_reply\> ]]; then
+# The receiver validates typed decisions after internal wakes have been filtered.
+if [[ "$prompt_text" =~ ^[[:space:]]*design-decision: ]]; then
   printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$project_dir" \
     bash "$tooling_root/.agents/hooks/design-decision-prompt.sh"
 fi
