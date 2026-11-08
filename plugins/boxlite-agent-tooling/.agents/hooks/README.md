@@ -15,7 +15,6 @@ See [host wiring](../../hooks/README.md) for events and host differences,
 | [preflight-design-doc.sh](preflight-design-doc.sh) | Editor/patch `PreToolUse` JSON | Require a current design, audit PASS, and advice before repository edits; exempt an active auditor's exact task-bound report write. |
 | [preflight-commit-push.sh](preflight-commit-push.sh) | Shell `PreToolUse` or delegated Git payload | Require matching commit/push evidence; delegate to installed Git gates. |
 | [preflight-pr-review.sh](preflight-pr-review.sh) | Shell `PreToolUse` JSON | Inspect GitHub writing and PR design, explanation, size, and review acknowledgment. |
-| [claude-timed-question.sh](claude-timed-question.sh) | Claude `AskUserQuestion` pre/post JSON | Validate a managed question and capture the user's timely typed response. |
 | [post-remote-write-watch.sh](post-remote-write-watch.sh) | Shell `PostToolUse` JSON | Connect successful remote writes and pending events to the host's watch consumer. |
 | [stop-gate.sh](stop-gate.sh) | `Stop` JSON | Sequence timed confirmations, writing checks, and verdict validation. |
 | [preflight-verdict-check.sh](audit/preflight-verdict-check.sh) | Stop payload forwarded by `stop-gate.sh` | Inspect the whole final turn and validate a dossier or request an independent audit. |

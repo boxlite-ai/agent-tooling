@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source-only PR size facade. Requires pr-target, jq, subagent, and timed-user-prompt.
+# Source-only PR size facade. Requires pr-target, jq, user-question, and timed-user-prompt.
 
 _pr_size_snapshot() { # resolved target -> target identity plus code additions
   local target="$1" repository host head base response filter
@@ -30,8 +30,11 @@ pr_size_check() { # context JSON {root,project,session,tooling}, resolved target
   state="$project/.agents/state/pr-size-request.json"
   spec="$(jq -nc --argjson snapshot "$snapshot" --argjson context "$context" '
     {binding:($snapshot+{root:$context.root,session:$context.session}),
-     prefix:"pr-size-exception:",fallback:"split",minimum_words:12}')" || return 2
-  record="$(timed_user_prompt request "$state" "$spec")" || return 2
+     prefix:"pr-size-exception:",fallback:"split"}')" || return 2
+  record="$(timed_user_prompt request "$state" "$spec" 2>&1)" || {
+    printf '%s\n' "$record"
+    return 2
+  }
   request_id="$(jq -r .id <<<"$record")"
   status="$(jq -r .status <<<"$record")"
   if [[ "$status" == accepted ]]; then
@@ -41,21 +44,20 @@ pr_size_check() { # context JSON {root,project,session,tooling}, resolved target
     return 0
   fi
   if [[ "$status" == declined ]]; then
-    subagent_prompt pr/pr-size-declined "$tooling" \
+    user_question render "$tooling" pr/pr-size-declined \
       "request_id=$request_id" "state=$state" "tooling=$tooling" || return 2
     return 1
   fi
   if [[ "$status" == expired ]]; then
-    subagent_prompt pr/pr-size-expired "$tooling" "lines=$lines" \
+    user_question render "$tooling" pr/pr-size-expired "lines=$lines" \
       "base=$(jq -r .base <<<"$snapshot")" "head=$(jq -r .head <<<"$snapshot")" \
       "request_id=$request_id" "state=$state" "tooling=$tooling" || return 2
     return 1
   fi
-  message="$(subagent_prompt pr/pr-size-exception "$tooling" "lines=$lines" \
-    "base=$(jq -r .base <<<"$snapshot")" "head=$(jq -r .head <<<"$snapshot")" \
-    "request_id=$request_id" "state=$state" "tooling=$tooling")" || return 2
+  message="$(user_question render "$tooling" pr/pr-size-exception "lines=$lines" \
+    "base=$(jq -r .base <<<"$snapshot")" "head=$(jq -r .head <<<"$snapshot")")" || return 2
   [[ "$message" == *[![:space:]]* ]] || return 2
   printf '%s\n' "$message"
-  timed_user_prompt_instruction "$tooling" "$record" || return 2
+  user_question instruction "$tooling" "$record" || return 2
   return 1
 }

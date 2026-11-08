@@ -1,28 +1,10 @@
 ---
 name: timed-question-design
-used-by: .agents/lib/timed-user-prompt.sh
-placeholders: prefix, id
+used-by: .agents/lib/user-question.sh
+placeholders: prefix, id, label_1, label_2, label_3
 ---
-{
-  "questions": [
-    {
-      "question": "{{prefix}} The design-audit loop stopped. How should it continue? [{{id}}]",
-      "header": "Research",
-      "multiSelect": false,
-      "options": [
-        {
-          "label": "Redesign",
-          "description": "Write a fresh draft from the findings and reflection; the FAIL count resets."
-        },
-        {
-          "label": "Reflect again",
-          "description": "One more audit after a reflection; its FAIL stops again."
-        },
-        {
-          "label": "Overrule",
-          "description": "Accept the open findings: OVERRIDDEN BY USER, never PASS."
-        }
-      ]
-    }
-  ]
-}
+The design audit stopped. How should it continue?
+
+- `{{prefix}} {{id}} {{label_1}} <reason>` — Write a fresh draft from the findings and reflection. The FAIL count resets.
+- `{{prefix}} {{id}} {{label_2}} <reason>` — Reflect and run one more audit. Its FAIL stops again.
+- `{{prefix}} {{id}} {{label_3}} <reason>` — Accept the open findings as OVERRIDDEN BY USER.

@@ -6,10 +6,9 @@
 #
 # Flow on a missing-review denial:
 #   1. Hook denies the gh tool call.
-#   2. Reason text instructs the parent agent to obtain a TYPED confirmation
-#      from the human (not a yes/no click) and persist it verbatim to
-#      .agents/state/pr-reviewed.json bound to current branch + HEAD.
-#   3. Parent retries -> hook validates the marker and allows on match.
+#   2. The host prompt hook records the human's typed confirmation in the
+#      request bound to this checkout, target, and head.
+#   3. On retry, the gate rechecks the target and consumes the request once.
 #
 # Wired in .claude/settings.json under hooks.PreToolUse with matcher "Bash".
 #
@@ -27,11 +26,10 @@
 # * Two deterministic content checks run before the ack gate — a Conventional-
 #   Commit `--title`, and an explicit, inspectable, concise PR body
 #   (CONTRIBUTING.md #commit--pr-messages). No diagram is required. A non-draft
-#   create without a body fails closed; neither check consumes the ack marker.
+#   create without a body fails closed; neither check consumes the acknowledgment.
 #
-# * One-shot consumption: the marker file is `rm -f`'d on the allow path so
-#   each successive gh pr command forces a fresh ack, even at the same HEAD.
-#   Mirrors the trade-off in preflight-commit-push.sh.
+# * One-shot consumption: the request transition is locked, so each gh pr
+#   command needs a fresh acknowledgment, even at the same HEAD.
 #
 # Tests: bash .agents/hooks/pr/preflight-pr-review.test.sh
 set -euo pipefail
@@ -1868,8 +1866,6 @@ if [[ -n "$command_directory" ]] \
 fi
 branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
-marker_file="$project_dir/.agents/state/pr-reviewed.json"
-max_age_seconds=600
 request_file="$project_dir/.agents/state/pr-review-request.json"
 state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
 if [[ ! -r "$state_lib" ]]; then
@@ -1885,6 +1881,8 @@ if [[ ! -r "$subagent_lib" ]]; then
 fi
 # shellcheck source=../lib/subagent.sh
 source "$subagent_lib"
+# shellcheck source=../lib/user-question.sh
+source "$tooling_root/.agents/lib/user-question.sh" || exit 2
 timed_lib="$tooling_root/.agents/lib/timed-user-prompt.sh"
 [[ -r "$timed_lib" ]] || { printf 'preflight-pr-review: timed prompt library missing\n' >&2; exit 2; }
 # shellcheck source=../lib/timed-user-prompt.sh
@@ -1896,51 +1894,29 @@ size_lib="$tooling_root/.agents/lib/pr-size.sh"
 [[ -r "$size_lib" ]] || { printf 'preflight-pr-review: PR size library missing\n' >&2; exit 2; }
 # shellcheck source=../lib/pr-size.sh
 source "$size_lib"
-marker_selection=""
-marker_selected_identity=""
-
-load_review_prompt() { # prompt name, tooling root, optional key=value pairs
-  local rendered
-  rendered="$(subagent_prompt "$@")" || return 2
-  if [[ "$rendered" != *[![:space:]]* ]]; then
-    printf 'preflight-pr-review: empty prompt: %s/.agents/prompts/%s.md\n' "$2" "$1" >&2
-    return 2
-  fi
-  printf '%s' "$rendered"
-}
 
 # Render before selecting or consuming the acknowledgment. The same document handles
 # normal denials and long-ref recovery, so the review question cannot drift out of one.
-review_question="$(load_review_prompt pr/pr-review-question "$tooling_root")" || exit 2
+review_question="$(user_question render "$tooling_root" pr/pr-review-question)" || exit 2
 if (( publish_file )); then
   review_question+=" Review body SHA-256 $publish_body_sha256."
 fi
 load_writing_policy
-description_guidance="$(load_review_prompt pr/pr-description-guidance "$tooling_root")" || exit 2
-ack_instruction="$(load_review_prompt pr/pr-review-ack "$tooling_root" \
+description_guidance="$(subagent_prompt pr/pr-description-guidance "$tooling_root")" || exit 2
+ack_instruction="$(user_question render "$tooling_root" pr/pr-review-ack \
   "review_question=$review_question" "context= for gh pr $subcmd; bind $branch@$head")" || exit 2
-bounded_ack_recovery="$(load_review_prompt pr/pr-review-ack "$tooling_root" \
+bounded_ack_recovery="$(user_question render "$tooling_root" pr/pr-review-ack \
   "review_question=$review_question" "context=; the detailed diagnostic exceeded 1200 bytes")" || exit 2
 if (( $(LC_ALL=C printf '%s' "$bounded_ack_recovery" | wc -c) > 1200 )); then
   printf 'preflight-pr-review: rendered pr-review-ack.md recovery exceeds 1200 bytes\n' >&2
   exit 2
 fi
 
-cleanup_marker_selection() {
-  if [[ -n "$marker_selection" && -n "$marker_selected_identity" ]]; then
-    verdict_audit_unlink_if_identity \
-      "$marker_selection" "$marker_selected_identity" 2>/dev/null || true
-  fi
-  marker_selection=""
-  marker_selected_identity=""
-}
-
 deny() {
   local reason="$1" reason_bytes
-  cleanup_marker_selection
   reason_bytes="$(LC_ALL=C printf '%s' "$reason" | wc -c | tr -d ' ')"
   if (( reason_bytes > 1200 )); then
-    # Fail closed without feeding an unbounded command, branch, path, or marker
+    # Fail closed without feeding an unbounded command, branch or path
     # value back into the model context.
     reason="${timer_instruction:-}
 $bounded_ack_recovery"
@@ -2122,94 +2098,21 @@ request_spec="$(jq -nc --arg repo "$repo_root" --arg branch "$branch" --arg head
   --argjson target "$(pr_target_binding "$pr_target")" \
   --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
   --arg body_sha256 "$publish_body_sha256" \
-  '{binding:{repo:$repo,branch:$branch,head:$head,session:$session,target:$target},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}
+  '{binding:{repo:$repo,branch:$branch,head:$head,session:$session,target:$target},prefix:"reviewed:",fallback:"keep-draft"}
    | if $body_sha256 != "" then .binding.body_sha256 = $body_sha256 else . end')"
-review_request="$(timed_user_prompt request "$request_file" "$request_spec")" || exit 2
-request_id="$(jq -r .id <<<"$review_request")"
-request_status="$(jq -r .status <<<"$review_request")"
-timer_instruction="$(timed_user_prompt_instruction "$tooling_root" "$review_request")" || exit 2
-if [[ "$request_status" == expired ]]; then
-  deny "Review confirmation timed out. Leave the PR in draft or uncreated; no publication was authorized."
-fi
-if [[ ! -e "$marker_file" && ! -L "$marker_file" ]]; then
-  deny "$timer_instruction
-$ack_instruction"
-fi
-# ─────────────────────────────────────────────────────────────────────────────
-
-marker_selection="${marker_file}.inspect-$$-${RANDOM:-0}"
-marker_selected_identity="$(verdict_audit_link_no_clobber_identity \
-  "$marker_file" "$marker_selection" 2>/dev/null)" || marker_selected_identity=""
-if [[ -z "$marker_selected_identity" ]]; then
-  marker_selection=""
-  deny "No current PR-review acknowledgment is on file.
-
-${ack_instruction}"
-fi
-
-marker_snapshot="$(verdict_audit_read_regular_state \
-  "$marker_selection" 8192 json 2>/dev/null)" || marker_snapshot=""
-marker_mtime=""
-marker_json=""
-if [[ "$marker_snapshot" == *$'\n'* ]]; then
-  marker_mtime="${marker_snapshot%%$'\n'*}"
-  marker_json="${marker_snapshot#*$'\n'}"
-fi
-marker_document="$(printf '%s' "$marker_json" | jq -ecs '
-  def exact_keys($wanted): (keys | sort) == ($wanted | sort);
-  def bounded_line($bytes):
-    type == "string" and utf8bytelength <= $bytes
-    and (explode | all(. != 0 and . != 10 and . != 13));
-  if length == 1 and (.[0] | type) == "object"
-     and (.[0] | exact_keys(["branch", "head", "message", "request"]))
-     and (.[0].branch | bounded_line(4096))
-     and (.[0].head | type == "string"
-          and test("^[0-9a-f]{40}([0-9a-f]{24})?$|^\\?$"))
-     and (.[0].message | bounded_line(1024))
-     and (.[0].request | type == "string" and test("^[0-9a-f]{32}$"))
-  then .[0] else empty end
-' 2>/dev/null || true)"
-if [[ -z "$marker_document" || ! "$marker_mtime" =~ ^[0-9]+$ ]]; then
-  deny "PR-review acknowledgment is malformed or exceeds its safety limits.
-${ack_instruction}"
-fi
-marker_branch="$(printf '%s' "$marker_document" | jq -r '.branch')"
-marker_head="$(printf '%s' "$marker_document" | jq -r '.head')"
-marker_message="$(printf '%s' "$marker_document" | jq -r '.message')"
-
-now_epoch="$(date +%s)"
-age=$(( now_epoch - marker_mtime ))
-
-if [[ "$marker_branch" != "$branch" ]] || \
-   [[ "$marker_head" != "$head" ]] || \
-   (( age < 0 || age > max_age_seconds )); then
-  deny "PR-review acknowledgment is stale or not bound to current branch+HEAD (max age ${max_age_seconds}s).
-${ack_instruction}"
-fi
-
-if [[ "$(jq -r .request <<<"$marker_document")" != "$request_id" ]]; then
-  deny "PR-review acknowledgment belongs to an old request. $ack_instruction"
-fi
-if [[ "$request_status" == pending ]]; then
-  review_request="$(timed_user_prompt respond "$request_file" "$request_id" "$marker_message")" \
-    || deny "Invalid or late review response. $ack_instruction"
-fi
-[[ "$(jq -r .response <<<"$review_request")" == "$marker_message" ]] \
-  || deny "Review response changed after acceptance. $ack_instruction"
+review_request="$(timed_user_prompt request "$request_file" "$request_spec" 2>&1)" || deny "$review_request"
+request_id="$(jq -er .id <<<"$review_request")" || exit 2
+timer_instruction="$(user_question instruction "$tooling_root" "$review_request")" || exit 2
+case "$(jq -r .status <<<"$review_request")" in
+  expired) deny "Review confirmation timed out. Leave the PR in draft or uncreated." ;;
+  accepted) ;;
+  *) deny "$timer_instruction
+$ack_instruction" ;;
+esac
 
 current_target="$(pr_target_resolve "${protected_size_args[@]}")" \
   && [[ "$current_target" == "$pr_target" ]] || deny 'PR target changed after review; retry and review the current refs.'
-# Marker is valid for this exact target. Consume it so the next
-# gh pr create/edit/ready forces a fresh ack.
-consume_status=0
-verdict_audit_unlink_if_identity \
-  "$marker_file" "$marker_selected_identity" 2>/dev/null || consume_status=$?
-if (( consume_status != 0 )); then
-  deny "The matching PR-review acknowledgment could not be consumed safely.
-${ack_instruction}"
-fi
 timed_user_prompt consume "$request_file" "$request_id" >/dev/null \
-  || deny "Review confirmation could not be consumed; nothing was authorized."
-cleanup_marker_selection
+  || deny 'Review confirmation expired or was already used; nothing was authorized.'
 publish_checked_pr
 exit 0

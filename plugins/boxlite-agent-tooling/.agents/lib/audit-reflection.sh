@@ -103,7 +103,11 @@ _audit_reflection_transition() { # library operation state-path; lease already h
       fi
       # shellcheck source=git-audit-decision.sh
       source "$library/git-audit-decision.sh" || return 2
-      git_audit_checkpoint "$library" "$checked" "$path" || return 2
+      decision="$(git_audit_checkpoint_result "$library" "$checked" "$path")" || return 2
+      if [[ "$(jq -r .action <<<"$decision")" != continue ]]; then
+        jq -r .reason <<<"$decision" >&2
+        return 2
+      fi
     fi
   fi
   next="$(printf '%s\n%s\n' "$state" "$request" \

@@ -20,7 +20,8 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 
 | Event | Script | Contract |
 | --- | --- | --- |
-| `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Revoke old authority; unchanged audit work may finish as prior evidence. |
+| `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Record typed PR replies and revoke old authority. Unchanged audit work may finish as prior evidence. |
+| Typed design decision | `.agents/hooks/design-decision-prompt.sh` | Record a reply bound to the current request and session. |
 | Opt-in `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Reference workflow and writing skill; absent from plugin manifests. |
 | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | Track workers, escalation, completion, overrides, and Git attempt closure. |
 | Auditor/advisor start, tool, stop | `.agents/hooks/audit-deadline.sh` | Publish native dossier-worker ownership, enforce deadlines, and clean up owned tasks. |
@@ -29,7 +30,6 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 | Commit/push `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | Delegate to installed Git gates; deny with an explicit next action. |
 | GitHub/PR shell `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Check writing, privacy, design, description, size, and human review acknowledgment. |
 | PR body file | `scripts/gh-pr.sh` | Run the same PR checks and publish the checked snapshot over stdin. |
-| Claude question pre/post tool | `.agents/hooks/claude-timed-question.sh` | Validate managed presentation and timely answers; expiry grants no authority. |
 | Remote-write `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Attach successful writes to PR monitoring. |
 | Test `PostToolUse`; Claude failure event | `.agents/hooks/record-test-run.sh` | Record supported completed `make test...` results in ignored test-run receipts. |
 | `Stop` | `.agents/hooks/stop-gate.sh` | Continue timed requests, check writing, then execute verdict checking. |

@@ -61,6 +61,8 @@ request="$(design_doc_binding edit "$cwd")" || status=$?
 (( status != 0 )) || exit 0
 # shellcheck source=../lib/subagent.sh
 source "$plugin_root/.agents/lib/subagent.sh" || deny 'prompt loader unavailable'
+# shellcheck source=../lib/user-question.sh
+source "$plugin_root/.agents/lib/user-question.sh" || deny 'question library unavailable'
 if (( status != 3 )); then
   instruction="$(subagent_prompt design/design-required "$plugin_root" "plugin_root=$plugin_root")" \
     || deny 'design instruction unavailable'
@@ -71,10 +73,9 @@ jq -e 'type == "object"' <<<"$request" >/dev/null 2>&1 || deny 'audit request un
 listed() { jq -r --arg key "$1" '.[$key][] | "- " + .' <<<"$request"; }
 session="$(jq -r '.session_id // "" | strings' <<<"$payload")" || session=''
 
-# A stopped loop waits for the human's choice. Only the managed question's hook and the
-# prompt hook record one (design #309); an accepted choice is applied here, once.
+# A stopped loop waits for a typed choice. Apply the recorded choice once.
 design_decision() {
-  local root decisions spec decision choice reason
+  local root decisions spec decision choice reason approval reply_format id
   # shellcheck source=../lib/timed-user-prompt.sh
   source "$plugin_root/.agents/lib/timed-user-prompt.sh" || deny 'design decision unavailable'
   root="$(jq -r .repo_root <<<"$request")"
@@ -84,14 +85,13 @@ design_decision() {
       --arg branch "$(git -C "$root" branch --show-current 2>/dev/null)" \
       '{binding:{root:.repo_root, branch:$branch, head:$head, session:$session, url:.design_url,
         content_sha256, history_hash, fails, stop},
-        prefix:"design-decision:", fallback:"keep-blocked", minimum_words:1}' <<<"$request")" \
-     || ! decision="$(timed_user_prompt request "$decisions" "$spec")"; then
+        prefix:"design-decision:", fallback:"keep-blocked"}' <<<"$request")"; then
     deny 'design decision unavailable'
   fi
+  decision="$(timed_user_prompt request "$decisions" "$spec" 2>&1)" || deny "$decision"
   case "$(jq -r .status <<<"$decision")" in
     accepted)
-      if ! choice="$(jq -c '{choice:(.response | capture("(?<c>Redesign|Reflect again|Overrule)").c),
-          binding:.spec.binding}' <<<"$decision")" \
+      if ! choice="$(user_question design-choice "$plugin_root" "$decision")" \
          || ! design_doc_binding decide "$cwd" "$choice" >/dev/null \
          || ! timed_user_prompt consume "$decisions" "$(jq -r .id <<<"$decision")" >/dev/null; then
         deny 'the design decision could not be applied'
@@ -101,14 +101,19 @@ design_decision() {
       (( status != 0 )) || exit 0
       (( status == 3 )) || deny 'audit request unreadable' ;;
     expired)
-      deny "$(subagent_prompt design/audit-expired "$plugin_root" "findings=$(listed open_findings)")" ;;
+      approval="$(user_question redesign-approval "$plugin_root")" || deny 'redesign question unavailable'
+      decision="$(user_question render "$plugin_root" design/audit-expired \
+        "findings=$(listed open_findings)" "approval=$approval")" || deny 'redesign instruction unavailable'
+      deny "$decision" ;;
     *)
       reason='the FAIL limit was reached'
       [[ "$(jq -r .stop <<<"$request")" == cap ]] || reason='a blocking finding repeated or their number did not drop'
-      if ! decision="$(timed_user_prompt_instruction "$plugin_root" "$decision")" \
-         || ! decision="$(subagent_prompt design/audit-stopped "$plugin_root" "reason=$reason" \
+      id="$(jq -er .id <<<"$decision")" || deny 'request id unavailable'
+      if ! decision="$(user_question instruction "$plugin_root" "$decision")" \
+         || ! reply_format="$(user_question design-format "$plugin_root" "$id")" \
+         || ! decision="$(user_question render "$plugin_root" design/audit-stopped "reason=$reason" \
            "fails=$(jq -r .fails <<<"$request")" "findings=$(listed open_findings)" \
-           "instruction=$decision")"; then
+           "instruction=$decision" "reply_format=$reply_format")"; then
         deny 'audit instruction unavailable'
       fi
       deny "$decision" ;;
@@ -116,7 +121,10 @@ design_decision() {
 }
 [[ "$(jq -r .blocked <<<"$request")" != true ]] || design_decision
 if [[ "$(jq -r .redesign <<<"$request")" == true ]]; then
-  deny "$(subagent_prompt design/audit-redesign "$plugin_root")"
+  approval="$(user_question redesign-approval "$plugin_root")" || deny 'redesign question unavailable'
+  message="$(user_question render "$plugin_root" design/audit-redesign "approval=$approval")" \
+    || deny 'redesign instruction unavailable'
+  deny "$message"
 fi
 if [[ "$(jq -r .reflection_due <<<"$request")" == true ]]; then
   message="$(subagent_prompt design/audit-reflect "$plugin_root" "plugin_root=$plugin_root" \
@@ -138,7 +146,7 @@ if [[ "$(jq -r .advice_due <<<"$request")" == true ]]; then
        "probe_rules=$privacy" "deadline=$advice_deadline" "task_input_json=$advice_input")" \
      || ! instruction="$(subagent_instruction --agent design-advisor --root "$plugin_root" \
        --description 'Design advice' --task "$task")" \
-     || ! message="$(subagent_prompt design/advice-required "$plugin_root" \
+     || ! message="$(user_question render "$plugin_root" design/advice-required \
        "verdict=$(jq -r .verdict <<<"$request")" "advisories=${advisories:-- none}" \
        "instruction=$instruction")"; then
     deny 'design advice instruction unavailable'

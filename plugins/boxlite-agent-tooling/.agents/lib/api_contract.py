@@ -8,7 +8,6 @@ import tempfile
 
 SPEC_PATHSPEC = ":(top,glob)**/*openapi*.yaml"
 OASDIFF_VERSION = "1.33.0"
-SKIP_CONFIRMATION = "api compatibility: skip"
 
 
 def canonical(value):
@@ -84,7 +83,8 @@ def load_inputs(root, explicit_base, revision=None):
         return None
     tooling = Path(__file__).resolve().parents[2]
     policy = {p: hashlib.sha256((tooling / p).read_bytes()).hexdigest() for p in (
-        ".agents/lib/api_contract.py", "scripts/api-compatibility.py", "scripts/api-compatibility.sh")}
+        ".agents/lib/api_contract.py", "scripts/api-compatibility.py", "scripts/api-compatibility.sh",
+        ".agents/lib/api-question.json", ".agents/lib/user-question.sh")}
     # Confirmation binds the specification change, so unrelated files never invalidate it.
     # Ignore Git's CRLF/LF conversion in approval hashes; retain exact snapshots.
     fingerprint = digest({

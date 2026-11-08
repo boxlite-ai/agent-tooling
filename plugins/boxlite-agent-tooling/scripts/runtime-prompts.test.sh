@@ -6,21 +6,21 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/plugin/.agents" "$scratch/consumer"
 cp -R "$plugin/.agents/lib" "$plugin/.agents/prompts" "$scratch/plugin/.agents/"
-# shellcheck source=../.agents/lib/timed-user-prompt.sh
-source "$scratch/plugin/.agents/lib/timed-user-prompt.sh"
-request='{"id":"quote\" and newline\n", "spec":{"prefix":"reviewed:","fallback":"keep-draft"}}'
-question="$(_timed_user_prompt_question "$request")"
-jq -e '.questions[0].question | contains("quote\" and newline\n")' <<<"$question" >/dev/null
-# Change the shipped question, then call the same production renderer again.
-sed 's/Keep draft/Edited choice/' "$plugin/.agents/prompts/questions/timed-question-review.md" \
+# shellcheck source=../.agents/lib/user-question.sh
+source "$scratch/plugin/.agents/lib/user-question.sh"
+request='{"id":"0123456789abcdef0123456789abcdef","deadline":123,"spec":{"prefix":"reviewed:","fallback":"keep-draft"}}'
+question="$(user_question instruction "$scratch/plugin" "$request")"
+[[ "$question" == *'reviewed: 0123456789abcdef0123456789abcdef'* ]]
+# Change the shipped template, then call the same production renderer again.
+sed 's/{{label_1}}/Edited choice/' "$plugin/.agents/prompts/questions/timed-question-review.md" \
   > "$scratch/plugin/.agents/prompts/questions/timed-question-review.md"
-question="$(_timed_user_prompt_question "$request")"
-jq -e '.questions[0].options[0].label == "Edited choice"' <<<"$question" >/dev/null
+question="$(user_question instruction "$scratch/plugin" "$request")"
+[[ "$question" == *'Edited choice'* ]]
 rm "$scratch/plugin/.agents/prompts/questions/timed-question-review.md"
 status=0
-question="$(_timed_user_prompt_question "$request" 2>/dev/null)" || status=$?
+question="$(user_question instruction "$scratch/plugin" "$request" 2>/dev/null)" || status=$?
 [[ "$status" == 2 && -z "$question" ]]
-printf 'PASS native questions reload Markdown and reject missing templates\n'
+printf 'PASS timed questions reload Markdown and reject missing templates\n'
 
 # The renderer still validates commands before composing its Markdown instruction.
 # shellcheck source=../.agents/lib/hook-interactive-prompt.sh

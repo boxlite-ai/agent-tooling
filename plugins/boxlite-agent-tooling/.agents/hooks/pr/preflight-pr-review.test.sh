@@ -5,7 +5,7 @@
 #   1. Command matcher: gh pr create / edit / ready vs. unrelated bash,
 #      chained invocations, draft exclusion.
 #   2. Gate logic: missing / mismatched / stale / malformed-message /
-#      consumed marker paths.
+#      consumed requests.
 #
 # Supported shell boundary: direct simple commands, the literal command/exec/env
 # wrappers, and literal eval or bash/sh -c payloads are inspectable. Compound or
@@ -27,6 +27,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 export CLAUDE_PROJECT_DIR="$TMP"
 mkdir -p "$TMP/.agents/state"
+REVIEW_STATE="$TMP/.agents/state/pr-review-request.json"
 
 # Use a real branch in an isolated checkout; GitHub is a small-PR test double.
 # The hook still comes from THIS suite's plugin, not from the fixture checkout.
@@ -78,18 +79,28 @@ run() {
   fi
 }
 
-write_marker() {
-  local message="$1" request_id prime='gh pr ready 42'
-  rm -f "$TMP/.agents/state/pr-review-request.json"
+record_ack() { # request path, reply text
+  local id
+  id="$(jq -er .id "$1")" || return 1
+  bash -c '
+    source "$1/.agents/lib/timed-user-prompt.sh"
+    timed_user_prompt prompt-reply "$2" "$3" "reviewed: $3 $4"
+  ' fixture "$REPO_ROOT" "$1" "$id" "$2" >/dev/null
+}
+
+write_ack() {
+  local message="$1" prime='gh pr ready 42'
+  rm -f "$REVIEW_STATE"
   if [[ "${2:-}" == *create* ]]; then
     prime="gh pr create --title 'fix: prepare review' --body '$DOC_LINK'"
   fi
   jq -nc --arg command "$prime" '{tool_input:{command:$command}}' | "$HOOK" >/dev/null
-  request_id="$(jq -r .id "$TMP/.agents/state/pr-review-request.json")"
-  jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" --arg m "$message" --arg r "$request_id" \
-        '{branch:$b, head:$h, message:$m,request:$r}' \
-        > "$TMP/.agents/state/pr-reviewed.json"
+  if [[ "$message" == reviewed:\ * ]]; then
+    record_ack "$REVIEW_STATE" "${message#reviewed: }"
+  fi
 }
+
+ack_status() { jq -r .status "${1:-$REVIEW_STATE}" 2>/dev/null || printf 'missing'; }
 
 reason_for() {
   jq -nc --arg command "$1" '{tool_input:{command:$command}}' | "$HOOK" \
@@ -122,7 +133,7 @@ assert_reason_contains() {
 }
 
 echo "## Matcher: should pass through (not a gated gh pr invocation)"
-rm -f "$TMP/.agents/state/pr-reviewed.json"
+rm -f "$REVIEW_STATE"
 run "ls"                                "ls"                                "passthrough"
 run "gh pr list (different subcmd)"     "gh pr list"                        "passthrough"
 run "gh pr view (different subcmd)"     "gh pr view 123"                    "passthrough"
@@ -299,258 +310,178 @@ run "gh-suffixed executable lookalike"     "/opt/bin/gh-helper pr ready 42"    "
 run "gh path with trailing component"      "/opt/bin/gh/tool pr ready 42"      "passthrough"
 
 echo
-echo "## Gate logic: marker file states"
+echo "## Gate logic: acknowledgment states"
 
 run_hard_deny() { # description command
-  local desc="$1" cmd="$2" out decision marker_state
-  write_marker "reviewed: hard deny must preserve this marker"
+  local desc="$1" cmd="$2" out decision ack_state
+  write_ack "reviewed: hard deny must preserve this acknowledgment"
   out="$(printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | "$HOOK")"
   decision="$(printf '%s' "$out" \
     | jq -r '.hookSpecificOutput.permissionDecision // "passthrough"' 2>/dev/null \
     || echo parse_error)"
-  [[ -f "$TMP/.agents/state/pr-reviewed.json" ]] \
-    && marker_state=kept || marker_state=gone
-  if [[ "$decision" == deny && "$marker_state" == kept ]]; then
+  [[ "$(ack_status)" == accepted ]] && ack_state=kept || ack_state=gone
+  if [[ "$decision" == deny && "$ack_state" == kept ]]; then
     pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s (decision=%s marker=%s)\n' \
-      "$desc" "$decision" "$marker_state"
+    fail=$((fail + 1)); printf '  FAIL  %s (decision=%s acknowledgment=%s)\n' \
+      "$desc" "$decision" "$ack_state"
   fi
 }
 
 run_allow_consumes() { # description command
-  local desc="$1" cmd="$2" out decision marker_state
-  write_marker "reviewed: one literal wrapped operation" "$cmd"
+  local desc="$1" cmd="$2" out decision ack_state
+  write_ack "reviewed: one literal wrapped operation" "$cmd"
   out="$(printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | "$HOOK")"
   [[ -z "$out" ]] && decision=passthrough || decision=deny
-  [[ -f "$TMP/.agents/state/pr-reviewed.json" ]] \
-    && marker_state=kept || marker_state=gone
-  if [[ "$decision" == passthrough && "$marker_state" == gone ]]; then
+  [[ "$(ack_status)" == consumed ]] && ack_state=gone || ack_state=kept
+  if [[ "$decision" == passthrough && "$ack_state" == gone ]]; then
     pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s (decision=%s marker=%s)\n' \
-      "$desc" "$decision" "$marker_state"
+    fail=$((fail + 1)); printf '  FAIL  %s (decision=%s acknowledgment=%s)\n' \
+      "$desc" "$decision" "$ack_state"
   fi
 }
 
-run_hard_deny "loop body cannot spend one marker repeatedly" \
+run_hard_deny "loop body cannot spend one acknowledgment repeatedly" \
   'for item in one two; do gh pr ready 42; done'
 run_hard_deny "conditional branch cannot spend an execution-ambiguous marker" \
   'if true; then gh pr ready 42; fi'
 run_hard_deny "repeated function calls cannot reuse one lexical protected site" \
   'open_pr() { gh pr ready 42; }; open_pr; open_pr'
-run_hard_deny "dynamic bash payload cannot spend a marker" \
+run_hard_deny "dynamic bash payload cannot spend an acknowledgment" \
   'bash -c "$PR_SCRIPT"'
-run_hard_deny "dynamic eval payload cannot spend a marker" \
+run_hard_deny "dynamic eval payload cannot spend an acknowledgment" \
   'eval "$PR_SCRIPT"'
-run_hard_deny "bash combined flags cannot spend a marker" \
+run_hard_deny "bash combined flags cannot spend an acknowledgment" \
   "bash -lc 'gh pr ready 42'"
-run_hard_deny "sh combined flags cannot spend a marker" \
+run_hard_deny "sh combined flags cannot spend an acknowledgment" \
   "sh -lc 'gh pr ready 42'"
-run_hard_deny "exec combined flags cannot spend a marker" \
+run_hard_deny "exec combined flags cannot spend an acknowledgment" \
   'exec -cl gh pr ready 42'
-run_hard_deny "builtin eval cannot spend a marker" \
+run_hard_deny "builtin eval cannot spend an acknowledgment" \
   "builtin eval 'gh pr ready 42'"
-run_hard_deny "builtin exec cannot spend a marker" \
+run_hard_deny "builtin exec cannot spend an acknowledgment" \
   'builtin exec gh pr ready 42'
-run_hard_deny "literal assignments cannot assemble and spend a marker" \
+run_hard_deny "literal assignments cannot assemble and spend an acknowledgment" \
   'cmd=gh; noun=pr; verb=ready; "$cmd" "$noun" "$verb" 42'
-run_hard_deny "dynamic gh executable path cannot spend a marker" \
+run_hard_deny "dynamic gh executable path cannot spend an acknowledgment" \
   '"/opt/$GH_DIR/gh" pr ready 42'
-run_hard_deny "ANSI-C executable structure cannot spend a marker" \
+run_hard_deny "ANSI-C executable structure cannot spend an acknowledgment" \
   "\$'gh' pr ready 42"
-run_hard_deny "literal alias expansion cannot spend a marker" \
+run_hard_deny "literal alias expansion cannot spend an acknowledgment" \
   "alias ship='gh pr ready 42'; ship"
 run_hard_deny "command -p cannot change executable lookup" \
   'command -p gh pr ready 42'
-run_allow_consumes "direct exec wrapper spends exactly one marker" \
+run_allow_consumes "direct exec wrapper spends exactly one acknowledgment" \
   'exec gh pr ready 42'
-run_allow_consumes "direct env wrapper spends exactly one marker" \
+run_allow_consumes "direct env wrapper spends exactly one acknowledgment" \
   'env gh pr ready 42'
-run_allow_consumes "absolute gh path spends exactly one marker" \
+run_allow_consumes "absolute gh path spends exactly one acknowledgment" \
   '/opt/homebrew/bin/gh pr ready 42'
-run_allow_consumes "command-wrapped gh path spends exactly one marker" \
+run_allow_consumes "command-wrapped gh path spends exactly one acknowledgment" \
   'command ./tools/gh pr ready 42'
 
-write_marker "reviewed: refactor auth middleware"
-run "valid marker → allow"              "gh pr ready 42"                    "passthrough"
-run "marker consumed on allow"          "gh pr ready 42"                    "deny"
+write_ack "reviewed: refactor auth middleware"
+run "valid acknowledgment → allow"              "gh pr ready 42"                    "passthrough"
+run "acknowledgment consumed on allow"          "gh pr ready 42"                    "deny"
 
-write_marker "reviewed: exactly one protected operation"
+write_ack "reviewed: exactly one protected operation"
 multi_pr_out="$(printf '%s' 'gh pr ready 41 && gh pr ready 42' \
   | jq -Rs '{tool_input:{command:.}}' | "$HOOK")"
 multi_pr_decision="$(printf '%s' "$multi_pr_out" \
   | jq -r '.hookSpecificOutput.permissionDecision // "passthrough"' 2>/dev/null \
   || echo parse_error)"
 if [[ "$multi_pr_decision" == deny \
-   && -f "$TMP/.agents/state/pr-reviewed.json" ]]; then
-  pass=$((pass + 1)); printf '  PASS  multiple protected operations deny atomically without consuming one marker\n'
+   && "$(ack_status)" == accepted ]]; then
+  pass=$((pass + 1)); printf '  PASS  multiple protected operations deny atomically without consuming one acknowledgment\n'
 else
-  fail=$((fail + 1)); printf '  FAIL  multiple protected operations deny atomically without consuming one marker (decision=%s marker=%s)\n' \
-    "$multi_pr_decision" "$([[ -f "$TMP/.agents/state/pr-reviewed.json" ]] && echo kept || echo gone)"
+  fail=$((fail + 1)); printf '  FAIL  multiple protected operations deny atomically without consuming one acknowledgment (decision=%s acknowledgment=%s)\n' \
+    "$multi_pr_decision" "$([[ "$(ack_status)" == accepted ]] && echo kept || echo gone)"
 fi
-run "preserved marker authorizes one retried operation" \
+run "preserved acknowledgment authorizes one retried operation" \
   "gh pr ready 42" "passthrough"
 
-# Both hooks select the same inode before either reaches the consume step. Stable
-# selection is not authorization: exactly one atomic consume may spend the marker.
-write_marker "reviewed: concurrent marker"
-CONCURRENT_PR_BARRIER="$TMP/concurrent-pr-barrier"
-CONCURRENT_PR_DATE="$TMP/concurrent-pr-date"
-mkdir -p "$CONCURRENT_PR_BARRIER" "$CONCURRENT_PR_DATE"
-CONCURRENT_PR_REAL_DATE="$(command -v date)"
-# shellcheck disable=SC2016 # These literals are the mock date executable's source.
-printf '%s\n' '#!/usr/bin/env bash' \
-  '[[ "${1:-}" != -u ]] || exec "$TEST_REAL_DATE" "$@"' \
-  ': > "$TEST_BARRIER/$$"' \
-  'deadline=$((SECONDS + 5))' \
-  'while (( $(find "$TEST_BARRIER" -type f | wc -l) < 2 )); do' \
-  '  (( SECONDS < deadline )) || exit 124' \
-  'done' \
-  'exec "$TEST_REAL_DATE" "$@"' > "$CONCURRENT_PR_DATE/date"
-chmod +x "$CONCURRENT_PR_DATE/date"
-concurrent_pr_pids=()
-for concurrent_pr_index in 1 2; do
-  (printf '%s' 'gh pr ready 42' | jq -Rs '{tool_input:{command:.}}' \
-    | PATH="$CONCURRENT_PR_DATE:$PATH" \
-        TEST_BARRIER="$CONCURRENT_PR_BARRIER" \
-        TEST_REAL_DATE="$CONCURRENT_PR_REAL_DATE" "$HOOK" \
-        > "$TMP/concurrent-pr-$concurrent_pr_index.out") &
-  concurrent_pr_pids+=("$!")
-done
-concurrent_pr_wait_status=0
-for concurrent_pr_pid in "${concurrent_pr_pids[@]}"; do
-  wait "$concurrent_pr_pid" || concurrent_pr_wait_status=$?
-done
-concurrent_pr_allows=0
-concurrent_pr_denies=0
-for concurrent_pr_index in 1 2; do
-  concurrent_pr_out="$(<"$TMP/concurrent-pr-$concurrent_pr_index.out")"
-  if [[ -z "$concurrent_pr_out" ]]; then
-    concurrent_pr_allows=$((concurrent_pr_allows + 1))
-  elif [[ "$(printf '%s' "$concurrent_pr_out" \
-      | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null)" == deny ]]; then
-    concurrent_pr_denies=$((concurrent_pr_denies + 1))
+# Synchronize retries after target validation and before the request lock.
+consume_env="$TMP/consume-env"
+cat > "$consume_env" <<'CONSUME'
+before_consume() {
+  [[ "${0##*/}" == preflight-pr-review.sh && "$1" == 'timed_user_prompt consume '* ]] || return 0
+  trap - DEBUG
+  if [[ -n "${TEST_REPLACEMENT:-}" ]]; then
+    mv "$TEST_REPLACEMENT" "$TEST_REQUEST"
+    return
   fi
+  : > "$TEST_BARRIER/$$"
+  local deadline=$((SECONDS + 8))
+  while (( $(find "$TEST_BARRIER" -type f | wc -l) < 2 )); do
+    (( SECONDS < deadline )) || exit 124
+    sleep 0.02
+  done
+}
+set -T
+trap 'before_consume "$BASH_COMMAND"' DEBUG
+CONSUME
+write_ack 'reviewed: concurrent acknowledgment'
+mkdir "$TMP/consume-barrier"
+pids=()
+for index in 1 2; do
+  (jq -nc '{tool_input:{command:"gh pr ready 42"}}' |
+    BASH_ENV="$consume_env" TEST_BARRIER="$TMP/consume-barrier" "$HOOK" > "$TMP/consume-$index") &
+  pids+=("$!")
 done
-if [[ "$concurrent_pr_wait_status" -eq 0 \
-   && "$concurrent_pr_allows" -eq 1 && "$concurrent_pr_denies" -eq 1 ]]; then
-  pass=$((pass + 1)); printf '  PASS  one PR acknowledgment authorizes exactly one concurrent command\n'
+consume_failed=0
+for pid in "${pids[@]}"; do wait "$pid" || consume_failed=1; done
+if [[ "$consume_failed" == 0 && "$(ack_status)" == consumed && "$(ls "$TMP/consume-barrier" | wc -l | tr -d ' ')" == 2 ]] \
+   && jq -es 'length==1 and .[0].hookSpecificOutput.permissionDecision=="deny"' "$TMP/consume-1" "$TMP/consume-2" >/dev/null; then
+  pass=$((pass + 1)); printf '  PASS  one request authorizes exactly one concurrent command\n'
 else
-  fail=$((fail + 1)); printf '  FAIL  one PR acknowledgment authorizes exactly one concurrent command (allows=%s denies=%s wait=%s)\n' \
-    "$concurrent_pr_allows" "$concurrent_pr_denies" "$concurrent_pr_wait_status"
+  fail=$((fail + 1)); printf '  FAIL  concurrent retries must consume the request once\n'
 fi
 
-# Compose the two races above: both hooks select the old marker, then a newer marker
-# replaces the canonical path before either consume. A replacement is not proof that
-# either selector spent the old one, so it must never let both commands through.
-write_marker "reviewed: concurrent selected marker"
-jq '.message="reviewed: concurrent replacement marker"' "$TMP/.agents/state/pr-reviewed.json" \
-  > "$TMP/concurrent-replacement-pr-reviewed.json"
-CONCURRENT_REPLACEMENT_BARRIER="$TMP/concurrent-replacement-pr-barrier"
-CONCURRENT_REPLACEMENT_DATE="$TMP/concurrent-replacement-pr-date"
-CONCURRENT_REPLACEMENT_LEADER="$TMP/concurrent-replacement-pr-leader"
-mkdir -p "$CONCURRENT_REPLACEMENT_BARRIER" "$CONCURRENT_REPLACEMENT_DATE"
-# shellcheck disable=SC2016 # These literals are the mock date executable's source.
-printf '%s\n' '#!/usr/bin/env bash' \
-  '[[ "${1:-}" != -u ]] || exec "$TEST_REAL_DATE" "$@"' \
-  ': > "$TEST_BARRIER/$$"' \
-  'deadline=$((SECONDS + 5))' \
-  'while (( $(find "$TEST_BARRIER" -type f | wc -l) < 2 )); do' \
-  '  (( SECONDS < deadline )) || exit 124' \
-  'done' \
-  'if mkdir "$TEST_LEADER" 2>/dev/null; then' \
-  '  mv "$TEST_REPLACEMENT" "$TEST_MARKER"' \
-  'else' \
-  '  sleep 1' \
-  'fi' \
-  'exec "$TEST_REAL_DATE" "$@"' > "$CONCURRENT_REPLACEMENT_DATE/date"
-chmod +x "$CONCURRENT_REPLACEMENT_DATE/date"
-concurrent_replacement_pids=()
-for concurrent_replacement_index in 1 2; do
-  (printf '%s' 'gh pr ready 42' | jq -Rs '{tool_input:{command:.}}' \
-    | PATH="$CONCURRENT_REPLACEMENT_DATE:$PATH" \
-        TEST_BARRIER="$CONCURRENT_REPLACEMENT_BARRIER" \
-        TEST_LEADER="$CONCURRENT_REPLACEMENT_LEADER" \
-        TEST_REPLACEMENT="$TMP/concurrent-replacement-pr-reviewed.json" \
-        TEST_MARKER="$TMP/.agents/state/pr-reviewed.json" \
-        TEST_REAL_DATE="$CONCURRENT_PR_REAL_DATE" "$HOOK" \
-        > "$TMP/concurrent-replacement-pr-$concurrent_replacement_index.out") &
-  concurrent_replacement_pids+=("$!")
-done
-concurrent_replacement_wait_status=0
-for concurrent_replacement_pid in "${concurrent_replacement_pids[@]}"; do
-  wait "$concurrent_replacement_pid" || concurrent_replacement_wait_status=$?
-done
-concurrent_replacement_allows=0
-concurrent_replacement_denies=0
-for concurrent_replacement_index in 1 2; do
-  concurrent_replacement_out="$(<"$TMP/concurrent-replacement-pr-$concurrent_replacement_index.out")"
-  if [[ -z "$concurrent_replacement_out" ]]; then
-    concurrent_replacement_allows=$((concurrent_replacement_allows + 1))
-  elif [[ "$(printf '%s' "$concurrent_replacement_out" \
-      | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null)" == deny ]]; then
-    concurrent_replacement_denies=$((concurrent_replacement_denies + 1))
-  fi
-done
-concurrent_replacement_message="$(jq -r '.message // "missing"' \
-  "$TMP/.agents/state/pr-reviewed.json" 2>/dev/null || echo missing)"
-if [[ "$concurrent_replacement_wait_status" -eq 0 \
-   && "$concurrent_replacement_allows" -le 1 \
-   && "$concurrent_replacement_denies" -ge 1 \
-   && "$concurrent_replacement_message" == "reviewed: concurrent replacement marker" ]]; then
-  pass=$((pass + 1)); printf '  PASS  concurrent replacement cannot double-spend one PR acknowledgment\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  concurrent replacement cannot double-spend one PR acknowledgment (allows=%s denies=%s wait=%s marker=%s)\n' \
-    "$concurrent_replacement_allows" "$concurrent_replacement_denies" \
-    "$concurrent_replacement_wait_status" "$concurrent_replacement_message"
-fi
-rm -rf "$CONCURRENT_REPLACEMENT_LEADER"
-rm -f "$TMP/.agents/state/pr-reviewed.json" "$TMP/concurrent-replacement-pr-reviewed.json"
-
-write_marker "reviewed: interactive edit is unchecked"
+write_ack "reviewed: interactive edit is unchecked"
 run "edit without explicit flags stays denied" "gh pr edit 42"               "deny"
 
-write_marker "reviewed: metadata-only edit"
+write_ack "reviewed: metadata-only edit"
 run "explicit metadata-only edit → allow" "gh pr edit 42 --add-label ready" "passthrough"
 
-write_marker "yes"
+write_ack "yes"
 run "malformed message → deny"          "gh pr ready 42"                    "deny"
 
-write_marker ""
+write_ack ""
 run "empty message → deny"              "gh pr ready 42"                    "deny"
 
-write_marker "reviewed: stale"
-jq --arg h "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" '.head=$h' \
-   "$TMP/.agents/state/pr-reviewed.json" > "$TMP/.agents/state/x.json" \
-   && mv "$TMP/.agents/state/x.json" "$TMP/.agents/state/pr-reviewed.json"
+write_ack "reviewed: stale"
+jq --arg h "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" '.spec.binding.head=$h' \
+   "$REVIEW_STATE" > "$TMP/.agents/state/x.json" \
+   && mv "$TMP/.agents/state/x.json" "$REVIEW_STATE"
 run "HEAD mismatch → deny"              "gh pr ready 42"                    "deny"
 
-write_marker "reviewed: branch test"
-jq --arg b "some-other-branch" '.branch=$b' \
-   "$TMP/.agents/state/pr-reviewed.json" > "$TMP/.agents/state/x.json" \
-   && mv "$TMP/.agents/state/x.json" "$TMP/.agents/state/pr-reviewed.json"
+write_ack "reviewed: branch test"
+jq --arg b "some-other-branch" '.spec.binding.branch=$b' \
+   "$REVIEW_STATE" > "$TMP/.agents/state/x.json" \
+   && mv "$TMP/.agents/state/x.json" "$REVIEW_STATE"
 run "branch mismatch → deny"            "gh pr ready 42"                    "deny"
 
-write_marker "reviewed: old"
-touch -t 202001010000 "$TMP/.agents/state/pr-reviewed.json"
-run "stale mtime (>max_age) → deny"     "gh pr ready 42"                    "deny"
+write_ack "reviewed: old"
+jq '.created_at -= 610 | .deadline -= 610 | .accepted_at -= 610' "$REVIEW_STATE" > "$TMP/stale-request"
+mv "$TMP/stale-request" "$REVIEW_STATE"
+run "stale accepted_at (>600 seconds) → deny"     "gh pr ready 42"                    "deny"
 
 echo
 echo "## PR state paths are bounded stable regular files"
 
-# A valid marker reached through a symlink is still attacker-selected state. The hook
+# A valid acknowledgment reached through a symlink is still attacker-selected state. The hook
 # must reject it instead of following the link and consuming the pathname.
-write_marker "reviewed: symlink marker"
-mv "$TMP/.agents/state/pr-reviewed.json" "$TMP/outside-pr-reviewed.json"
-ln -s "$TMP/outside-pr-reviewed.json" "$TMP/.agents/state/pr-reviewed.json"
-run "symlink acknowledgment marker → deny" "gh pr ready 42" "deny"
-rm -f "$TMP/.agents/state/pr-reviewed.json" "$TMP/outside-pr-reviewed.json"
+write_ack "reviewed: symlink marker"
+mv "$REVIEW_STATE" "$TMP/outside-review-request.json"
+ln -s "$TMP/outside-review-request.json" "$REVIEW_STATE"
+run "symlink review request → deny" "gh pr ready 42" "deny"
+rm -f "$REVIEW_STATE" "$TMP/outside-review-request.json"
 
 # FIFOs are readable according to `test -r`, but opening one without a writer blocks.
 # Exercise the real hook under an alarm so the failure is an observable result, not a
 # suite hang.
-mkfifo "$TMP/.agents/state/pr-reviewed.json"
+mkfifo "$REVIEW_STATE"
 fifo_marker_out="$(printf '%s' 'gh pr ready 42' | jq -Rs '{tool_input:{command:.}}' \
   | perl -e '$SIG{ALRM}=sub{exit 124}; alarm 2; exec @ARGV' "$HOOK" 2>/dev/null)"
 fifo_marker_rc=$?
@@ -558,55 +489,42 @@ fifo_marker_decision="$(printf '%s' "$fifo_marker_out" \
   | jq -r '.hookSpecificOutput.permissionDecision // "parse_error"' 2>/dev/null \
   || echo parse_error)"
 if [[ "$fifo_marker_rc" == 0 && "$fifo_marker_decision" == deny ]]; then
-  pass=$((pass + 1)); printf '  PASS  FIFO acknowledgment marker fails closed without blocking\n'
+  pass=$((pass + 1)); printf '  PASS  FIFO review request fails closed without blocking\n'
 else
-  fail=$((fail + 1)); printf '  FAIL  FIFO acknowledgment marker fails closed without blocking (rc=%s decision=%s)\n' \
+  fail=$((fail + 1)); printf '  FAIL  FIFO review request fails closed without blocking (rc=%s decision=%s)\n' \
     "$fifo_marker_rc" "$fifo_marker_decision"
 fi
-rm -f "$TMP/.agents/state/pr-reviewed.json"
+rm -f "$REVIEW_STATE"
 
-# Replace the canonical marker after its content/freshness was selected but before the
-# allow path consumes it. The newer marker must survive, and the old selection must not
-# authorize because the gate could not atomically spend it at the canonical name.
-write_marker "reviewed: selected marker"
-jq '.message="reviewed: replacement marker"' "$TMP/.agents/state/pr-reviewed.json" \
-  > "$TMP/replacement-pr-reviewed.json"
-DATE_WRAP="$TMP/date-wrap"
-mkdir -p "$DATE_WRAP"
-REAL_DATE="$(command -v date)"
-printf '%s\n' '#!/usr/bin/env bash' \
-  'if [[ "${1:-}" == "+%s" && -e "$TEST_REPLACEMENT" ]]; then' \
-  '  mv "$TEST_REPLACEMENT" "$TEST_MARKER"' \
-  'fi' \
-  'exec "$TEST_REAL_DATE" "$@"' > "$DATE_WRAP/date"
-chmod +x "$DATE_WRAP/date"
-replacement_out="$(printf '%s' 'gh pr ready 42' | jq -Rs '{tool_input:{command:.}}' \
-  | PATH="$DATE_WRAP:$PATH" TEST_REAL_DATE="$REAL_DATE" \
-      TEST_REPLACEMENT="$TMP/replacement-pr-reviewed.json" \
-      TEST_MARKER="$TMP/.agents/state/pr-reviewed.json" "$HOOK")"
-if [[ -z "$replacement_out" ]]; then
-  replacement_decision=passthrough
+# Swap in a different valid request immediately before the old ID is consumed.
+write_ack 'reviewed: original target'
+replacement_spec="$(jq -c '.spec | .binding.target.fixture="replacement"' "$REVIEW_STATE")"
+replacement="$TMP/replacement-request"
+bash "$REPO_ROOT/scripts/timed-user-prompt.sh" request "$replacement" "$replacement_spec" >/dev/null
+record_ack "$replacement" 'replacement remains valid'
+replacement_id="$(jq -r .id "$replacement")"
+replacement_out="$(jq -nc '{tool_input:{command:"gh pr ready 42"}}' |
+  BASH_ENV="$consume_env" TEST_REPLACEMENT="$replacement" TEST_REQUEST="$REVIEW_STATE" "$HOOK")"
+if jq -e '.hookSpecificOutput.permissionDecision=="deny"' <<<"$replacement_out" >/dev/null \
+   && jq -e --arg id "$replacement_id" '.id==$id and .status=="accepted"' "$REVIEW_STATE" >/dev/null; then
+  pass=$((pass + 1)); printf '  PASS  replacement survives and denies the old consume\n'
 else
-  replacement_decision="$(printf '%s' "$replacement_out" \
-    | jq -r '.hookSpecificOutput.permissionDecision // "parse_error"' 2>/dev/null \
-    || echo parse_error)"
+  fail=$((fail + 1)); printf '  FAIL  replacement must survive the old consume\n'
 fi
-replacement_message="$(jq -r '.message // "missing"' \
-  "$TMP/.agents/state/pr-reviewed.json" 2>/dev/null || echo missing)"
-if [[ "$replacement_decision" == deny \
-   && "$replacement_message" == "reviewed: replacement marker" ]]; then
-  pass=$((pass + 1)); printf '  PASS  marker replacement survives and forces a safe retry\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  marker replacement survives and forces a safe retry (decision=%s marker=%s)\n' \
-    "$replacement_decision" "$replacement_message"
-fi
-rm -f "$TMP/.agents/state/pr-reviewed.json" "$TMP/replacement-pr-reviewed.json"
+rm -f "$REVIEW_STATE"
+
+# An approval in the retired marker path cannot authorize a pending request.
+jq -nc '{tool_input:{command:"gh pr ready 42"}}' | "$HOOK" >/dev/null
+jq -nc --arg branch "$BRANCH" --arg head "$HEAD_SHA" --arg request "$(jq -r .id "$REVIEW_STATE")" \
+  '{branch:$branch,head:$head,request:$request,message:"reviewed: old marker"}' > "$TMP/.agents/state/pr-reviewed.json"
+run "legacy marker cannot authorize the command" "gh pr ready 42" "deny"
+rm -f "$TMP/.agents/state/pr-reviewed.json"
 
 echo
 echo "## Title check: every supplied title spelling must be a Conventional-Commit subject <=72"
 TITLE_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\n\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'"$DOC_LINK"
 run_title() {
-  write_marker "reviewed: title case" create
+  write_ack "reviewed: title case" create
   run "$@"
 }
 run_title "bad --title (no type prefix) → deny"  "gh pr create --title \"add a cool thing\" --body '$TITLE_GRAPH'"  "deny"
@@ -629,14 +547,14 @@ run_title "title value named --draft is not a draft flag" \
   "gh pr create --title \"--draft\" --body '$TITLE_GRAPH'" "deny"
 run_title "base before title uses the same canonical target" \
   "gh pr create --base main --title \"feat(api): graph\" --body '$TITLE_GRAPH'" "passthrough"
-write_marker "reviewed: long title case" create
-run "good --title + valid marker → allow"  "gh pr create --title \"feat(api): add a cool thing\" --body '$TITLE_GRAPH'"  "passthrough"
-run "marker consumed after allow → deny"   "gh pr create --title \"feat(api): add a cool thing\" --body '$TITLE_GRAPH'"  "deny"
-write_marker "reviewed: short title case" create
-run "good short title + valid marker → allow" \
+write_ack "reviewed: long title case" create
+run "good --title + valid acknowledgment → allow"  "gh pr create --title \"feat(api): add a cool thing\" --body '$TITLE_GRAPH'"  "passthrough"
+run "acknowledgment consumed after allow → deny"   "gh pr create --title \"feat(api): add a cool thing\" --body '$TITLE_GRAPH'"  "deny"
+write_ack "reviewed: short title case" create
+run "good short title + valid acknowledgment → allow" \
   "gh pr create -t \"feat(api): add a cool thing\" --body '$TITLE_GRAPH'" "passthrough"
-write_marker "reviewed: equals title case" create
-run "good -t= title + valid marker → allow" \
+write_ack "reviewed: equals title case" create
+run "good -t= title + valid acknowledgment → allow" \
   "gh pr create -t=\"feat(api): add a cool thing\" --body '$TITLE_GRAPH'" "passthrough"
 
 # Flags belonging to an earlier simple command or protected segment must not be
@@ -644,11 +562,11 @@ run "good -t= title + valid marker → allow" \
 # marker so only segment-local title/body parsing can make them deny.
 GRAPH_DECOY=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\n\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
 printf '%s\n' "$GRAPH_DECOY" > "$TMP/decoy-body.md"
-write_marker "reviewed: reject unprotected decoys"
+write_ack "reviewed: reject unprotected decoys"
 run "earlier unprotected flags cannot validate a later malformed create" \
   "echo --title \"feat(api): decoy\" -F $TMP/decoy-body.md && gh pr create --title \"not conventional\" --body \"prose\"" \
   "deny"
-write_marker "reviewed: reject chained decoys"
+write_ack "reviewed: reject chained decoys"
 run "earlier protected flags cannot validate a later malformed create" \
   "gh pr edit 7 --title \"feat(api): decoy\" -F $TMP/decoy-body.md && gh pr create --title \"not conventional\" --body \"prose\"" \
   "deny"
@@ -690,7 +608,7 @@ printf 'Adds a thing. Tested locally.\n' > "$TMP/prose.md"
 # A fresh marker for every case ensures content checks, not stale review state,
 # decide whether the body is accepted.
 run_body() {
-  write_marker "reviewed: body cases" "$2"
+  write_ack "reviewed: body cases" "$2"
   run "$@"
 }
 
@@ -715,7 +633,7 @@ run_body "41 Chinese characters → allow" "gh pr create $FEAT --body '$OVER_CHA
 run_body "2000 four-byte characters plus summary → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
 run_body "body over 8,000 characters plus summary → allow" "gh pr create $FEAT --body '$HUGE_BODY'" "passthrough"
 run_body "long body edit → deny" "gh pr edit 42 $FEAT --body '$LONG_BODY'" "deny"
-write_marker "reviewed: shorten description" create
+write_ack "reviewed: shorten description" create
 run "size rejection → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"
 run "size rejection preserves acknowledgment for corrected body" "gh pr create $FEAT --body '$BULLET_BODY'" "passthrough"
 run "corrected body consumes acknowledgment" "gh pr create $FEAT --body '$BULLET_BODY'" "deny"
@@ -736,7 +654,7 @@ run_body "symlink --body-file → deny"          "gh pr create $FEAT --body-file
 rm -f "$TMP/body.md" "$TMP/outside-body.md"
 
 mkfifo "$TMP/body.md"
-write_marker "reviewed: FIFO body"
+write_ack "reviewed: FIFO body"
 fifo_body_out="$(printf '%s' "gh pr create $FEAT --body-file $TMP/body.md" \
   | jq -Rs '{tool_input:{command:.}}' \
   | perl -e '$SIG{ALRM}=sub{exit 124}; alarm 2; exec @ARGV' "$HOOK" 2>/dev/null)"
@@ -750,7 +668,7 @@ else
   fail=$((fail + 1)); printf '  FAIL  FIFO body file fails closed without blocking (rc=%s decision=%s)\n' \
     "$fifo_body_rc" "$fifo_body_decision"
 fi
-rm -f "$TMP/body.md" "$TMP/.agents/state/pr-reviewed.json"
+rm -f "$TMP/body.md" "$REVIEW_STATE"
 
 printf '%s\n' "$GRAPH" > "$TMP/body.md"
 awk 'BEGIN { for (i = 0; i < 1100000; i++) printf "x" }' >> "$TMP/body.md"
@@ -815,13 +733,13 @@ run_body "even inert inline environment is outside the canonical contract" \
   "FOO=bar gh pr create $FEAT --body '$GRAPH'"                                                             "deny"
 run_body "env assignments are outside the canonical contract" \
   "env FOO=bar gh pr create $FEAT --body '$GRAPH'"                                                         "deny"
-write_marker "reviewed: inherited repository target"
+write_ack "reviewed: inherited repository target"
 GH_REPO=other-owner/other-repo run "inherited GH_REPO changes the reviewed destination" \
   "gh pr create $FEAT --body '$GRAPH'"                                                                      "deny"
-write_marker "reviewed: inherited hostname target"
+write_ack "reviewed: inherited hostname target"
 GH_HOST=enterprise.example run "inherited GH_HOST changes the reviewed destination" \
   "gh pr create $FEAT --body '$GRAPH'"                                                                      "deny"
-write_marker "reviewed: inherited git directory"
+write_ack "reviewed: inherited git directory"
 GIT_DIR=$TMP/.git run "inherited GIT_DIR changes the reviewed checkout" \
   "gh pr create $FEAT --body '$GRAPH'"                                                                      "deny"
 run_body "unquoted dynamic metadata cannot inject options" \
@@ -842,10 +760,10 @@ run_body "metadata may consume a body-looking value" \
   "gh pr create $FEAT --body '$GRAPH' --label --body=prose"                                                "passthrough"
 run_body "metadata may consume a body-file-looking value" \
   "gh pr create $FEAT --body '$GRAPH' --label -Fmissing"                                                   "passthrough"
-write_marker "reviewed: dash-prefixed label value" create
+write_ack "reviewed: dash-prefixed label value" create
 run "dash-prefixed metadata value does not exempt the create" \
   "gh pr create $FEAT --body '$GRAPH' --label --draft"                                                     "passthrough"
-run "dash-prefixed metadata value still consumes the marker" \
+run "dash-prefixed metadata value still consumes the acknowledgment" \
   "gh pr create $FEAT --body '$GRAPH' --label --draft"                                                     "deny"
 run_body "CRLF graph body → allow"            "gh pr create $FEAT --body '$GRAPH_CRLF'"                    "passthrough"
 run_body "trailing sections after graph → allow" "gh pr create $FEAT --body '$GRAPH_WITH_TRAILING_SECTION'" "passthrough"
@@ -858,13 +776,13 @@ run_body "fix: concise description + issue → allow"   "gh pr create $FIX --bod
 
 echo
 echo "## Denial reasons are compact but preserve the typed-ack contract"
-rm -f "$TMP/.agents/state/pr-reviewed.json"
+rm -f "$REVIEW_STATE"
 long_tail="$(printf '%04096d' 0 | tr 0 x)"
 ack_reason="$(reason_for "gh pr ready $long_tail")"
 assert_reason_budget "missing-ack reason stays bounded even for a long command" "$ack_reason"
-for contract in "request_user_input_async" "reviewed:" \
-                ".agents/state/pr-reviewed.json" '"branch"' '"head"' '"message"' \
-                "Abort" "Show me the diff" "Never infer" "fabricate"; do
+for contract in "Ask once in plain text" "reviewed:" \
+                "prompt hook records" "same command" \
+                "Keeping draft" "inspecting the diff" "Never infer" "fabricate"; do
   assert_reason_contains "ack reason keeps '$contract'" "$ack_reason" "$contract"
 done
 
@@ -881,45 +799,42 @@ mkdir -p "$LONG_STATE/.agents/state"
 (cd "$LONG_REPO" && bash "$REPO_ROOT/scripts/design-doc.sh" bind "$DESIGN_FIXTURE_URL") >/dev/null
 long_reason="$(reason_for_repo "$LONG_REPO" "$LONG_STATE" 'gh pr ready 42')"
 assert_reason_budget "long-ref fallback stays bounded" "$long_reason"
-for contract in "request_user_input_async" "reviewed:" \
-                ".agents/state/pr-reviewed.json" '"branch"' '"head"' '"message"' \
-                "Then retry" "Never infer" "fabricate"; do
+for contract in "Ask once in plain text" "reviewed:" \
+                "prompt hook records" "same command" \
+                "Never infer" "fabricate"; do
   assert_reason_contains "long-ref fallback keeps '$contract'" "$long_reason" "$contract"
 done
-long_head="$(git -C "$LONG_REPO" rev-parse HEAD)"
-jq -nc --arg branch "$long_branch" --arg head "$long_head" \
-  --arg request "$(jq -r .id "$LONG_STATE/.agents/state/pr-review-request.json")" \
-  '{branch:$branch,head:$head,message:"reviewed: long branch protocol",request:$request}' \
-  > "$LONG_STATE/.agents/state/pr-reviewed.json"
+long_request="$LONG_STATE/.agents/state/pr-review-request.json"
+record_ack "$long_request" 'long branch protocol'
 long_retry="$(printf '%s' 'gh pr ready 42' | jq -Rs '{tool_input:{command:.}}' \
   | (cd "$LONG_REPO" && CLAUDE_PROJECT_DIR="$LONG_STATE" "$HOOK"))"
-if [[ -z "$long_retry" && ! -e "$LONG_STATE/.agents/state/pr-reviewed.json" ]]; then
+if [[ -z "$long_retry" && "$(ack_status "$long_request")" == consumed ]]; then
   pass=$((pass + 1)); printf '  PASS  long-ref fallback protocol reaches a successful retry\n'
 else
   fail=$((fail + 1)); printf '  FAIL  long-ref fallback protocol reaches a successful retry\n'
 fi
 
-write_marker "reviewed: stale head"
-jq '.head="deadbeef"' "$TMP/.agents/state/pr-reviewed.json" \
-  > "$TMP/.agents/state/pr-reviewed.next.json"
-mv "$TMP/.agents/state/pr-reviewed.next.json" "$TMP/.agents/state/pr-reviewed.json"
+write_ack "reviewed: stale head"
+jq '.spec.binding.head="deadbeef"' "$REVIEW_STATE" \
+  > "$TMP/.agents/state/pr-review-request.next.json"
+mv "$TMP/.agents/state/pr-review-request.next.json" "$REVIEW_STATE"
 stale_reason="$(reason_for 'gh pr ready 42')"
 assert_reason_budget "state-mismatch reason stays bounded" "$stale_reason"
-assert_reason_contains "state-mismatch keeps native input route" \
+assert_reason_contains "state-mismatch keeps the typed route" \
   "$stale_reason" "reviewed:"
 assert_reason_contains "state-mismatch keeps typed format" "$stale_reason" "reviewed:"
 
-write_marker "yes"
+write_ack "yes"
 malformed_reason="$(reason_for 'gh pr ready 42')"
-assert_reason_budget "malformed-marker reason stays bounded" "$malformed_reason"
-assert_reason_contains "malformed-marker keeps native input route" \
+assert_reason_budget "malformed-reply reason stays bounded" "$malformed_reason"
+assert_reason_contains "malformed-reply keeps the typed route" \
   "$malformed_reason" "reviewed:"
-assert_reason_contains "malformed-marker keeps typed format" "$malformed_reason" "reviewed:"
+assert_reason_contains "malformed-reply keeps typed format" "$malformed_reason" "reviewed:"
 
 assert_reason_budget "title denial stays bounded" \
   "$(reason_for "gh pr create --title \"add a cool thing\" --body '$TITLE_GRAPH'")"
 
-write_marker "reviewed: concise body"
+write_ack "reviewed: concise body"
 body_reason="$(reason_for "gh pr create $FEAT --body '$LONG_BODY'")"
 assert_reason_budget "size denial stays bounded" "$body_reason"
 assert_reason_contains "size denial names the writing skill" "$body_reason" 'boxlite-writing'
@@ -929,8 +844,8 @@ echo "## Review prompts are loaded at the public hook boundary"
 fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks/pr" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
-cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-target,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
-cp "$REPO_ROOT/.agents/lib/"{pr-size.jq,reply-summary.pl} "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,user-question,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-target,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{pr-size.jq,reply-summary.pl,user-question-policy.jq} "$fixture_plugin/.agents/lib/"
 mkdir -p "$fixture_plugin/.agents/skills/boxlite-writing"
 cp "$REPO_ROOT/.agents/skills/boxlite-writing/SKILL.md" "$fixture_plugin/.agents/skills/boxlite-writing/"
 cp -R "$REPO_ROOT/.agents/prompts/." "$fixture_plugin/.agents/prompts/"
@@ -944,7 +859,7 @@ Fixture acknowledgment: {{review_question}}
 PROMPT
 printf 'Fixture description guidance\n' > "$fixture_plugin/.agents/prompts/pr/pr-description-guidance.md"
 printf 'First review question\n' > "$fixture_plugin/.agents/prompts/pr/pr-review-question.md"
-rm -f "$TMP/.agents/state/pr-reviewed.json"
+rm -f "$REVIEW_STATE"
 assert_reason_contains "hook renders the prompt document" "$(reason_for 'gh pr ready 42')" \
   'Fixture acknowledgment: First review question'
 # shellcheck disable=SC2016 # Prompt text must remain literal when loaded.
@@ -980,17 +895,18 @@ for prompt_file in "$fixture_plugin/.agents/prompts/pr/"{pr-review-ack,pr-review
   prompt_name="${prompt_file#"$fixture_plugin/"}"
   cp "$prompt_file" "$TMP/prompt-backup"
   for invalid in missing empty unresolved; do
+    cp "$TMP/prompt-backup" "$prompt_file"
+    write_ack 'reviewed: preserve this acknowledgment'
     case "$invalid" in
       missing) rm -f "$prompt_file" ;;
       empty) printf ' \n' > "$prompt_file" ;;
       unresolved) printf '{{missing_value}}\n' > "$prompt_file" ;;
     esac
-    write_marker 'reviewed: preserve this acknowledgment'
     jq -nc '{tool_input:{command:"gh pr ready 42"}}' | "$HOOK" \
       > "$TMP/prompt-stdout" 2> "$TMP/prompt-stderr"
     prompt_status=$?
     if [[ "$prompt_status" == 2 && ! -s "$TMP/prompt-stdout" \
-       && -s "$TMP/prompt-stderr" && -f "$TMP/.agents/state/pr-reviewed.json" ]]; then
+       && -s "$TMP/prompt-stderr" && "$(ack_status)" == accepted ]]; then
       pass=$((pass + 1)); printf '  PASS  %s %s fails closed without spending acknowledgment\n' "$invalid" "$prompt_name"
     else
       fail=$((fail + 1)); printf '  FAIL  %s %s must fail closed (exit=%s)\n' "$invalid" "$prompt_name" "$prompt_status"
@@ -999,13 +915,13 @@ for prompt_file in "$fixture_plugin/.agents/prompts/pr/"{pr-review-ack,pr-review
   cp "$TMP/prompt-backup" "$prompt_file"
 done
 
+write_ack 'reviewed: preserve on oversized recovery'
 printf '%01300d\n' 0 > "$fixture_plugin/.agents/prompts/pr/pr-review-ack.md"
-write_marker 'reviewed: preserve on oversized recovery'
 jq -nc '{tool_input:{command:"gh pr ready 42"}}' | "$HOOK" \
   > "$TMP/prompt-stdout" 2> "$TMP/prompt-stderr"
 prompt_status=$?
 if [[ "$prompt_status" == 2 && ! -s "$TMP/prompt-stdout" \
-   && -s "$TMP/prompt-stderr" && -f "$TMP/.agents/state/pr-reviewed.json" ]]; then
+   && -s "$TMP/prompt-stderr" && "$(ack_status)" == accepted ]]; then
   pass=$((pass + 1)); printf '  PASS  oversized recovery fails closed without spending acknowledgment\n'
 else
   fail=$((fail + 1)); printf '  FAIL  oversized recovery must fail closed (exit=%s)\n' "$prompt_status"

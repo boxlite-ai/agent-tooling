@@ -5,26 +5,26 @@
 Read [README](README.md), [Contributing](plugins/boxlite-agent-tooling/CONTRIBUTING.md),
 [Architecture](plugins/boxlite-agent-tooling/ARCHITECTURE.md).
 
-Plugin/reusable code: `plugins/boxlite-agent-tooling/`; consumer bootstraps: `templates/`.
+Plugin code: `plugins/boxlite-agent-tooling/`; consumer bootstraps: `templates/`.
 Aliases: `skills` → `.agents/skills`, `agents` → `.claude/agents`; Codex: `.agents/skills`.
 
 ## Compatibility
 
-Support Claude Code and Codex on macOS, Linux, and Windows. Test affected combinations; report unverified ones.
+Support Claude Code and Codex on macOS, Linux, and Windows. Test affected pairs; report gaps.
 
 ## Tooling choices
 
-- **Capabilities:** Prefer shared agent abilities: read/search/edit files and run commands.
-- **Shell:** Prefer shell scripts when practical; minimize dependencies.
-- **Exceptions:** Add tools/runtimes only for material safety, portability, or maintainability gains.
+- Prefer shared file and shell abilities. Use shell scripts when practical; minimize dependencies.
+- Add tools/runtimes only for material safety, portability, or maintainability gains.
 
 ## Agent-facing docs
 
-Prompts, skills, and all agent-facing docs MUST use minimum prose per `boxlite-writing`; preserve behavior and constraints.
+Prompts, skills, and agent-facing docs MUST minimize prose per `boxlite-writing`; preserve behavior and constraints.
+New or changed user-facing questions, confirmations, and choices MUST use `user_question`.
 
 ## Change safely
 
-- Edits, renames, moves, or deletions of `boxlite-writing` or supporting files require a specific, explicit user request. Skill use, output revisions, or check fixes grant none.
+- Editing, renaming, moving, or deleting `boxlite-writing` or its files requires a specific user request. Skill use, output revisions, and check fixes grant none.
 - Non-trivial Bash: load `boxlite-shell-engineering`; preserve stdin/stdout/stderr/exit behavior.
 - Claude Code: plan mode before touching `.githooks/`.
 - Consumer manifests: declarative, secret-free; invalid profiles/missing dependencies fail closed with clear stderr.
@@ -32,7 +32,7 @@ Prompts, skills, and all agent-facing docs MUST use minimum prose per `boxlite-w
 
 ## Validate
 
-Run from repo root, plus focused tests (`make test:plugin TEST_FILTER=<name>`):
+From repo root, run focused tests (`make test:plugin TEST_FILTER=<name>`) and:
 
 ```sh
 make test:writing test:parity test:architecture

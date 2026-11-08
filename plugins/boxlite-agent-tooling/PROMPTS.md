@@ -9,7 +9,7 @@ Edit runtime instructions and questions in Markdown; code owns routing, serializ
 | Audit tasks, controls, and recovery | `.agents/prompts/audit/` |
 | Design gate | `.agents/prompts/design/` |
 | PR descriptions, review, size, and decomposition | `.agents/prompts/pr/` |
-| Timed questions and interactive rendering | `.agents/prompts/questions/` |
+| Shared questions, timed requests, and legacy cards | `.agents/prompts/questions/` |
 | Writing reminder | `.agents/prompts/reminders/` |
 | API and network recovery | `.agents/prompts/resume/` |
 | Subagent dispatch | `.agents/prompts/subagent/` |
@@ -21,6 +21,9 @@ Edit runtime instructions and questions in Markdown; code owns routing, serializ
 ## Maintenance
 
 Use a qualified name, such as `subagent_prompt audit/commit-push-task "$root" ...`; lookup is relative to the prompt root. Keep templates one directory below that root and update callers, fixtures, and guidance when moving them.
+
+Use `user_question` for human questions. Question policy defines timed choices once. Gates retain their own bindings and effects.
+For conversation, run `bash scripts/user-question.sh QUESTION SAFE_FALLBACK` from the plugin root.
 
 Templates declare `used-by` and `placeholders`.
 
@@ -40,5 +43,5 @@ Lookup has no basename search, implicit Markdown inlining, or embedded Bash fall
 
 - Missing, empty, or unresolved templates block partial dispatch, acknowledgment consumption, and publication.
 - Watch variants retain 1400-byte bounds and exact claim commands. Failure leaves authority with the lease owner. Acknowledgment recovery stays within 1200 bytes.
-- Resume prompts load before wake-budget recording. `.agents/prompts/questions/interactive-question.md` renders validated questions with option commands kept as generated JSON.
+- Resume prompts load before wake-budget recording. The existing native Force pass card uses `.agents/prompts/questions/interactive-question.md`.
 - Standalone reminders copy `.agents/hooks/rule-recency.sh` and `.agents/hooks/rule-recency.md` together without plugin libraries.

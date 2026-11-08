@@ -71,7 +71,7 @@ fresh() {
   state="$repo/.agents/state/design-decision-request.json"
   audit="$repo/.git/agent-tooling-design-audit.json"
   id="$(jq -r .id "$state")"
-  question="$(bash "$timed" question "$state" "$id" | jq -r '.questions[0].question')"
+  answer="design-decision: $id Reflect again Recheck the remaining finding after reflection"
 }
 envelope() {
   printf '<send_user_message_question_reply>\n%s\n</send_user_message_question_reply>\n' \
@@ -89,7 +89,6 @@ unchanged() {
   prompt "$2" "${3:-$session}"
   check "$1" test "$(cat "$state")" = "$before"
 }
-answer='design-decision: Reflect again Recheck the remaining finding after reflection'
 for timing in pending expired; do
   fresh
   if [[ "$timing" == expired ]]; then
@@ -97,8 +96,8 @@ for timing in pending expired; do
     bash "$timed" status "$state" "$id" >/dev/null
     bash "$timed" fallback "$state" "$id" >/dev/null
   fi
-  prompt "$(envelope "$question" "$answer")"
-  check "$timing UI reply records the exact human directive" json --arg answer "$answer" \
+  prompt "$answer"
+  check "$timing typed reply records the exact human directive" json --arg answer "$answer" \
     '.status=="accepted" and .response==$answer and (.fallback_delivered|not)' "$state"
   gate
   check "$timing Reflect again still denies edits" test "$gate_status" = 2
@@ -111,28 +110,16 @@ if [[ "${1:-}" == --reproducer ]]; then
 fi
 
 fresh
-# The actual gate instruction must carry a callable async payload, not just a tool name.
-async="$(sed -n '/^{"questions":/p' "$scratch/gate-err")"
-check 'generated async title preserves canonical request correlation' json --arg question "$question" \
-  '.questions[0].title==$question and (.questions[0].options|length)==3' <<<"$async"
-check 'generated options are complete explicit decisions' json \
-  'all(.questions[0].options[]; test("^design-decision: (Redesign|Reflect again|Overrule) .+"))' <<<"$async"
-valid="$(envelope "$question" "$answer")"
-unchanged 'wrong session cannot answer' "$valid" other-session
-BOXLITE_HOOK_HOST=claude unchanged 'Claude does not accept the Codex wrapper' "$valid"
-unchanged 'unbound legacy question cannot answer' "$(envelope 'How should review continue?' "$answer")"
-unchanged 'different question with current ID is rejected' "$(envelope "Changed question [$id]" "$answer")"
-unchanged 'tool acceptance is not a human decision' '{"accepted":true}'
-unchanged 'bare wrapped label is not a directive with reason' "$(envelope "$question" 'Overrule')"
-unchanged 'multiline wrapped directive is rejected' "$(envelope "$question" "$answer"$'\nOverrule instead')"
-unchanged 'quoted wrapper is ordinary text' "Example: $valid"
-unchanged 'trailing prose makes a wrapper ambiguous' "$valid trailing text"
-unchanged 'malformed JSON does not record a reply' '<send_user_message_question_reply>[</send_user_message_question_reply>'
-items="$(jq -nc --arg question "$question" --arg answer "$answer" '[{questionItemId:"one",question:$question,answer:$answer}]')"
-for mutation in '[]' '. + .' '.[0].answer={}' '.[0].question=null' '.[0].questionItemId=""' '.[0].extra=true'; do
-  unchanged "invalid envelope $mutation is rejected" \
-    "<send_user_message_question_reply>$(jq -c "$mutation" <<<"$items")</send_user_message_question_reply>"
+for choice in Redesign 'Reflect again' Overrule; do
+  check "text includes the bound $choice reply" grep -Fq "design-decision: $id $choice <reason>" "$scratch/gate-err"
 done
+check 'generated design question uses text' grep -Fq 'Ask once in plain text' "$scratch/gate-err"
+valid="$answer"
+unchanged 'wrong session cannot answer' "$valid" other-session
+unchanged 'old asynchronous envelope cannot answer' "$(envelope 'Old question' "$valid")"
+unchanged 'unbound typed choice cannot answer' 'design-decision: Overrule Accept this exact design'
+unchanged 'another request ID cannot answer' "design-decision: 00000000000000000000000000000000 Overrule wrong request"
+unchanged 'tool acceptance is not a human decision' '{"accepted":true}'
 git -C "$repo" checkout -qb another
 unchanged 'another branch cannot answer' "$valid"
 git -C "$repo" checkout -q feature
@@ -151,21 +138,21 @@ cp "$foreign_state" "$state"
 unchanged 'request belonging to another repository is rejected' "$valid"
 cp "$scratch/own-request" "$state"
 
-old_id="$id"; old_reply="$(envelope "$question" "$answer")"
+old_id="$id"; old_reply="$answer"
 publish "$design"$'\n\nChanged scope.'
 gate
 check 'changed design content creates a new request' test "$(jq -r .id "$state")" != "$old_id"
-unchanged 'old card cannot answer replacement request' "$old_reply"
+unchanged 'old typed reply cannot answer replacement request' "$old_reply"
 
 fresh
-old_reply="$(envelope "$question" "$answer")"
+old_reply="$answer"
 prompt "$old_reply"
 gate
 unchanged 'consumed reply cannot be recorded twice' "$old_reply"
 
 for choice in Redesign Overrule; do
   fresh
-  prompt "$(envelope "$question" "design-decision: $choice Use the selected recovery")"
+  prompt "design-decision: $id $choice Use the selected recovery"
   gate
   if [[ "$choice" == Redesign ]]; then
     check 'Redesign requires fresh content' grep -q 'The human chose Redesign' "$scratch/gate-err"
@@ -176,15 +163,9 @@ for choice in Redesign Overrule; do
   check "$choice consumes its request" json '.status=="consumed"' "$state"
 done
 
-fresh
-prompt 'design-decision: Overrule Accept this exact design'
-gate
-check 'legacy plain-text choice remains supported' test "$gate_status" = 0
-check 'legacy plain-text choice records OVERRIDDEN' json '.verdict=="OVERRIDDEN"' "$audit"
-
 # The second provider read inside decide must not authorize different content.
 fresh
-prompt 'design-decision: Overrule Accept this exact design'
+prompt "design-decision: $id Overrule Accept this exact design"
 export DOC_CHANGED="$scratch/changed.json" DESIGN_REPLY_SWAP="$scratch/provider-count"
 jq --arg body "$design"$'\n\nUnapproved change.' '.body=$body' "$DOC_RESPONSE" > "$DOC_CHANGED"
 printf '0\n' > "$DESIGN_REPLY_SWAP"
@@ -198,13 +179,13 @@ check 'rejected substitution does not consume the reply' json '.status=="accepte
 fresh
 cp "$audit" "$scratch/prior-audit"
 cp "$state" "$scratch/prior-request"
-prompt 'design-decision: Overrule Close the first cycle'
+prompt "design-decision: $id Overrule Close the first cycle"
 gate
 record_fail; record_fail
 cp "$audit" "$scratch/later-audit"
 cp "$scratch/prior-audit" "$audit"
 cp "$scratch/prior-request" "$state"
-prompt 'design-decision: Overrule Accept the first cycle only'
+prompt "design-decision: $id Overrule Accept the first cycle only"
 export DESIGN_REPLY_HISTORY="$scratch/later-audit" DESIGN_REPLY_AUDIT="$audit"
 export DESIGN_REPLY_SWAP="$scratch/provider-count"
 cp "$DOC_RESPONSE" "$DOC_CHANGED"

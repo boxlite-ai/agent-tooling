@@ -63,10 +63,16 @@ hook="$plugin/.agents/hooks/preflight-pr-review.sh"
 launcher="$plugin/scripts/gh-pr.sh"
 title='feat: keep the approved description'
 request=.agents/state/pr-review-request.json
-marker=.agents/state/pr-reviewed.json
+reply_to_request() {
+  jq -nc --arg id "$1" --arg session "$(jq -er .spec.binding.session "$request")" '
+    {hook_event_name:"UserPromptSubmit", session_id:$session,
+     prompt:("reviewed: " + $id + " checked PR description")}' |
+    CLAUDE_PROJECT_DIR="$PWD" bash "$plugin/.agents/hooks/cancel-verdict-audit.sh"
+}
 
 approve() {
-  jq -c '{branch:.spec.binding.branch,head:.spec.binding.head,request:.id,message:"reviewed: checked PR description"}' "$request" > "$marker"
+  reply_to_request "$(jq -er .id "$request")" >/dev/null
+  jq -e '.status == "accepted"' "$request" >/dev/null
 }
 
 reject() {
@@ -119,22 +125,24 @@ old_id="$(jq -r .id "$request")"
 [[ "$(jq -r .spec.binding.body_sha256 "$request")" == "$(shasum -a 256 < "$FILE_PR_SOURCE" | awk '{print $1}')" ]]
 approve
 perl -pe 's/exit 99/exit 97/' "$FILE_PR_SOURCE.original" > "$FILE_PR_SOURCE"
-reject 'old request' launch create --title "$title" --body-file "$FILE_PR_SOURCE"
+reject 'reviewed:' launch create --title "$title" --body-file "$FILE_PR_SOURCE"
 [[ "$(jq -r .id "$request")" != "$old_id" ]]
+reply_to_request "$old_id" >/dev/null
+jq -e '.status == "pending"' "$request" >/dev/null
 approve
-CODEX_THREAD_ID=other reject 'old request' launch create --title "$title" --body-file "$FILE_PR_SOURCE"
+CODEX_THREAD_ID=other reject 'reviewed:' launch create --title "$title" --body-file "$FILE_PR_SOURCE"
 reject 'one active' env -u CODEX_THREAD_ID bash "$launcher" create --draft --title "$title" --body-file "$FILE_PR_SOURCE"
 reject 'one active' env CLAUDE_CODE_SESSION_ID=claude-file-pr bash "$launcher" create --draft --title "$title" --body-file "$FILE_PR_SOURCE"
 
 cp "$FILE_PR_SOURCE.original" "$FILE_PR_SOURCE"
-reject 'old request' launch create --title "$title" --body-file "$FILE_PR_SOURCE"
+reject 'reviewed:' launch create --title "$title" --body-file "$FILE_PR_SOURCE"
 approve
 printf 'replacement after the checks start\n' > "$FILE_PR_SOURCE.replace"
 launch create --title "$title" --body-file "$FILE_PR_SOURCE" --label 'keep spaces'
 cmp "$FILE_PR_SOURCE.original" "$FILE_PR_RENDERED"
 cmp "$FILE_PR_SOURCE.original" "$FILE_PR_SENT"
 grep -Fxq 'keep spaces' "$FILE_PR_SENT.args"
-[[ ! -e "$marker" && "$(jq -r .status "$request")" == consumed ]]
+jq -e '.status == "consumed"' "$request" >/dev/null
 [[ "$(< "$FILE_PR_SOURCE")" == 'replacement after the checks start' ]]
 
 cp "$FILE_PR_SOURCE.original" "$FILE_PR_SOURCE"
