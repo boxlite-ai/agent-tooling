@@ -38,8 +38,8 @@ git_audit_checkpoint_result() { # library, validated history, path; typed result
   }
   # shellcheck source=timed-user-prompt.sh
   source "$library/timed-user-prompt.sh" || return 2
-  # shellcheck source=subagent.sh
-  source "$library/subagent.sh" || return 2
+  # shellcheck source=user-question.sh
+  source "$library/user-question.sh" || return 2
   request="$(timed_user_prompt request "$path" "$spec")" || return 2
   git_audit_decision_current "$request" || return 2
   id="$(jq -r .id <<<"$request")"
@@ -56,8 +56,8 @@ git_audit_checkpoint_result() { # library, validated history, path; typed result
       printf '%s\n' '{"action":"continue","reason":""}'; return 0 ;;
     pending)
       instruction="$(timed_user_prompt_instruction "$library/../.." "$request")" || return 2
-      instruction="$(subagent_prompt audit/git-audit-decision "$library/../.." \
-        "prefix=$kind-audit-decision:" "id=$id" "history=$history" "instruction=$instruction")" || return 2
+      instruction="$(user_question render "$library/../.." audit/git-audit-decision \
+        "prefix=$kind-audit-decision:" "history=$history" "instruction=$instruction")" || return 2
       jq -nc --arg reason "$instruction" --arg path "$path" '{action:"wait",reason:$reason,request_path:$path}'
       return ;;
     *) printf 'audit-decision: invalid checkpoint status\n' >&2; return 2 ;;
@@ -74,17 +74,10 @@ git_audit_checkpoint() { # Legacy callers retain stderr and exit 2 for a blocked
 
 git_audit_decision_reply() { # actual UserPromptSubmit payload, repository root, plugin root
   local payload="$1" root="$2" plugin="$3" reply parsed kind id scope path snapshot request
-  # A Codex question answer may arrive in a structured user-message wrapper.
-  # Accept exactly one answer; mixed messages keep ordinary prompt cancellation.
-  reply="$(jq -er '
-    .prompt | strings | gsub("^\\s+|\\s+$";"") |
-    if startswith("<send_user_message_question_reply>") and endswith("</send_user_message_question_reply>")
-    then ltrimstr("<send_user_message_question_reply>") | rtrimstr("</send_user_message_question_reply>")
-      | fromjson | select(type=="array" and length==1) | .[0].answer | strings
-    else . end |
-    select(test("^(commit|push)-audit-decision: [0-9a-f]{32} (Reflect again|Stop)$"))
-  ' <<<"$payload" 2>/dev/null)" || return 1
-  parsed="$(jq -nc --arg reply "$reply" '$reply | capture("^(?<kind>commit|push)-audit-decision: (?<id>[0-9a-f]{32}) ")')" || return 1
+  # shellcheck source=user-question.sh
+  source "$plugin/.agents/lib/user-question.sh" || return 1
+  parsed="$(user_question git-reply "$plugin" "$payload" 2>/dev/null)" || return 1
+  reply="$(jq -er .text <<<"$parsed")" || return 1
   kind="$(jq -r .kind <<<"$parsed")"; id="$(jq -r .id <<<"$parsed")"
   scope="$(verdict_audit_scope_from_hook_payload "$payload" "$root")" || return 1
   path="$root/.agents/state/$kind-audit-decision-request-$scope.json"

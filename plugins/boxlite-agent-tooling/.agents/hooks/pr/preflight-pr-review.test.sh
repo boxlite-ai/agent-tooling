@@ -862,9 +862,9 @@ rm -f "$TMP/.agents/state/pr-reviewed.json"
 long_tail="$(printf '%04096d' 0 | tr 0 x)"
 ack_reason="$(reason_for "gh pr ready $long_tail")"
 assert_reason_budget "missing-ack reason stays bounded even for a long command" "$ack_reason"
-for contract in "request_user_input_async" "reviewed:" \
+for contract in "Ask once in plain text" "reviewed:" \
                 ".agents/state/pr-reviewed.json" '"branch"' '"head"' '"message"' \
-                "Abort" "Show me the diff" "Never infer" "fabricate"; do
+                "Keeping draft" "inspecting the diff" "Never infer" "fabricate"; do
   assert_reason_contains "ack reason keeps '$contract'" "$ack_reason" "$contract"
 done
 
@@ -881,7 +881,7 @@ mkdir -p "$LONG_STATE/.agents/state"
 (cd "$LONG_REPO" && bash "$REPO_ROOT/scripts/design-doc.sh" bind "$DESIGN_FIXTURE_URL") >/dev/null
 long_reason="$(reason_for_repo "$LONG_REPO" "$LONG_STATE" 'gh pr ready 42')"
 assert_reason_budget "long-ref fallback stays bounded" "$long_reason"
-for contract in "request_user_input_async" "reviewed:" \
+for contract in "Ask once in plain text" "reviewed:" \
                 ".agents/state/pr-reviewed.json" '"branch"' '"head"' '"message"' \
                 "Then retry" "Never infer" "fabricate"; do
   assert_reason_contains "long-ref fallback keeps '$contract'" "$long_reason" "$contract"
@@ -929,8 +929,8 @@ echo "## Review prompts are loaded at the public hook boundary"
 fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks/pr" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
-cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-target,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
-cp "$REPO_ROOT/.agents/lib/"{pr-size.jq,reply-summary.pl} "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,user-question,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-target,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{pr-size.jq,reply-summary.pl,user-question-policy.jq} "$fixture_plugin/.agents/lib/"
 mkdir -p "$fixture_plugin/.agents/skills/boxlite-writing"
 cp "$REPO_ROOT/.agents/skills/boxlite-writing/SKILL.md" "$fixture_plugin/.agents/skills/boxlite-writing/"
 cp -R "$REPO_ROOT/.agents/prompts/." "$fixture_plugin/.agents/prompts/"

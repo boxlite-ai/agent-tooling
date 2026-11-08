@@ -176,6 +176,25 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
             self.audit("record", env, {"hook_event_name": event, "session_id": "human", "prompt": prompt})
             self.assertIn("human confirmation required for change " + fingerprint, self.audit("check", env).stderr)
 
+    def test_confirmation_binds_question_policy_and_ignores_copy(self):
+        self.breaking_change()
+        self.assertIn("human confirmation recorded", self.submit_prompt(confirmation() + "\n", {}).stdout)
+
+        copy = self.plugin / ".agents/prompts/questions/api-compatibility.md"
+        copy.write_text(copy.read_text() + "\nUse the current specification.\n")
+        self.assertEqual(self.audit().returncode, 0)
+
+        directive = "api compatibility: override"
+        policy = self.plugin / ".agents/lib/api-question.json"
+        policy.write_text(json.dumps({"directive": directive}))
+        rejected = self.audit()
+        self.assertIn("human confirmation required", rejected.stderr)
+        self.assertIn(directive, rejected.stderr)
+        self.assertNotIn("human confirmation recorded", self.submit_prompt(confirmation(), {}).stdout)
+        self.assertIn("human confirmation required", self.audit().stderr)
+        self.assertIn("human confirmation recorded", self.submit_prompt(directive, {}).stdout)
+        self.assertEqual(self.audit().returncode, 0)
+
     def test_approval_accepts_existing_default_change(self):
         env = {}
         self.body_schema()["properties"]["enabled"]["default"] = True

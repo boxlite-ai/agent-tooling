@@ -12,7 +12,7 @@ request='{"id":"quote\" and newline\n", "spec":{"prefix":"reviewed:","fallback":
 question="$(_timed_user_prompt_question "$request")"
 jq -e '.questions[0].question | contains("quote\" and newline\n")' <<<"$question" >/dev/null
 # Change the shipped question, then call the same production renderer again.
-sed 's/Keep draft/Edited choice/' "$plugin/.agents/prompts/questions/timed-question-review.md" \
+sed 's/{{label_1}}/Edited choice/' "$plugin/.agents/prompts/questions/timed-question-review.md" \
   > "$scratch/plugin/.agents/prompts/questions/timed-question-review.md"
 question="$(_timed_user_prompt_question "$request")"
 jq -e '.questions[0].options[0].label == "Edited choice"' <<<"$question" >/dev/null

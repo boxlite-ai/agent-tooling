@@ -1,7 +1,7 @@
 ---
 name: timed-question-size
 used-by: .agents/lib/timed-user-prompt.sh
-placeholders: prefix, id
+placeholders: prefix, id, label_1, label_2
 ---
 {
   "questions": [
@@ -11,11 +11,11 @@ placeholders: prefix, id
       "multiSelect": false,
       "options": [
         {
-          "label": "Bypass limit",
+          "label": "{{label_1}}",
           "description": "Proceed with this PR without splitting."
         },
         {
-          "label": "Split PR",
+          "label": "{{label_2}}",
           "description": "Break changes into smaller PRs."
         }
       ]

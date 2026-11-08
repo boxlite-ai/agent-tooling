@@ -153,7 +153,9 @@ source "$tooling_root/.agents/lib/git-audit-decision.sh" || exit 2
 git_audit_decision_reply "$payload" "$project_dir" "$tooling_root" && exit 0
 
 # A failed confirmation approves nothing; report it to the session and keep the prompt.
-if [[ "$prompt_text" == 'api compatibility: skip' ]]; then
+# shellcheck source=../lib/user-question.sh
+source "$tooling_root/.agents/lib/user-question.sh" || exit 2
+if user_question api-match "$tooling_root" "$payload" >/dev/null; then
   if compatibility_record="$(printf '%s' "$payload" |
        bash "$tooling_root/scripts/api-compatibility.sh" record "$project_dir" 2>&1)"; then
     printf '%s\n' "$compatibility_record"

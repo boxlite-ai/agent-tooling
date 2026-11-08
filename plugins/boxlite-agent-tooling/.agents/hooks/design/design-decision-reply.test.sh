@@ -111,12 +111,12 @@ if [[ "${1:-}" == --reproducer ]]; then
 fi
 
 fresh
-# The actual gate instruction must carry a callable async payload, not just a tool name.
-async="$(sed -n '/^{"questions":/p' "$scratch/gate-err")"
-check 'generated async title preserves canonical request correlation' json --arg question "$question" \
-  '.questions[0].title==$question and (.questions[0].options|length)==3' <<<"$async"
-check 'generated options are complete explicit decisions' json \
-  'all(.questions[0].options[]; test("^design-decision: (Redesign|Reflect again|Overrule) .+"))' <<<"$async"
+# The gate renders text from the same definition used to match legacy card titles.
+check 'generated text includes the canonical request title' grep -Fq "$question" "$scratch/gate-err"
+for choice in Redesign 'Reflect again' Overrule; do
+  check "text includes the explicit $choice reply" grep -Fq "design-decision: $choice <reason>" "$scratch/gate-err"
+done
+check 'generated design question uses text' grep -Fq 'Ask once in plain text' "$scratch/gate-err"
 valid="$(envelope "$question" "$answer")"
 unchanged 'wrong session cannot answer' "$valid" other-session
 BOXLITE_HOOK_HOST=claude unchanged 'Claude does not accept the Codex wrapper' "$valid"

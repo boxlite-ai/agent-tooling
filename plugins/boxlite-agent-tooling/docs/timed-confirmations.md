@@ -6,7 +6,7 @@ Human confirmations bind a response to a specific request, action, and deadline.
 
 ## Timed confirmations
 
-`.agents/lib/timed-user-prompt.sh` and `scripts/timed-user-prompt.sh` serialize context-bound, random-ID, single-consumption requests without waiting under locks.
+`.agents/lib/user-question.sh` renders questions and decodes replies. `.agents/lib/timed-user-prompt.sh` serializes request transitions without waiting under locks.
 
 | Prefix | Human response | Five-minute fallback |
 | --- | --- | --- |
@@ -22,11 +22,11 @@ New/renewed requests receive 300 seconds; legacy 180-second requests keep their 
 | Choice | Authority |
 | --- | --- |
 | Size | CLI/native exact labels; legacy reasons remain readable; never authorize review. |
-| Review | Bind checkout/branch/HEAD/session/request; timely reply consumed on successful publication; late answers reject. |
+| Review | Bind checkout/branch/HEAD/session/request. Consume the timely reply before allowing the protected command. |
 | Design | `.agents/hooks/design-decision-prompt.sh` accepts human first-line directives/correlated Codex replies, including late replies; CLI `respond` cannot relay them. |
 | Git retry | Managed native or standalone prefix/request/choice; validate session/epoch/branch/HEAD/latest failure; no CLI relay/consume/renew. |
 
-Codex design replies require the exact generated title/directives and one string-valued `questionItemId`/`question`/`answer` item; opaque host IDs authenticate nothing.
+Legacy Codex design replies require the exact generated title/directives and one string-valued `questionItemId`/`question`/`answer` item; opaque host IDs authenticate nothing.
 
 Malformed/mixed/stale/replayed/legacy-unbound answers retain ordinary cancellation; design writers recheck live content/history before mutation without consuming changed replies or serializing independent writers.
 
@@ -44,7 +44,7 @@ CLI human-text relays trust the agent rather than authenticating identity.
 
 Old uncorrelated cards require fresh questions or typed directives.
 
-Questions are agent-opened through `.agents/prompts/questions/timed-user-prompt.md`; request creation starts deadlines; templates receive JSON-escaped values while code owns transitions.
+New managed questions use nonblocking text on Claude Code and Codex. Creation starts the deadline. The renderer and reply validator share one choice definition.
 
 `scripts/continue-timed-prompts.sh` delivers pending/expiry/split continuations once; the agent waits/splits; Git expiry permits reflection, fixes/tests, and fresh review, never PASS; timely Stop persists.
 
@@ -58,10 +58,9 @@ bash plugins/boxlite-agent-tooling/scripts/claude-with-timed-prompts.sh
 
 | Session | Route |
 | --- | --- |
-| Supported local interactive Claude | Require launcher marker `BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1` and bounded timeout; exact generated `AskUserQuestion`. |
-| Remote Control, custom settings, print/background/cloud | Preserve arguments, clear inherited marker, ask nonblocking plain text. |
-| Missing marker/timeout or overriding managed policy | Plain-text fallback; custom `--settings '{}'` can select it. |
-| Codex | Async input. |
+| New managed requests | One nonblocking text question. Expiry applies the gate’s fallback. |
+| Legacy managed cards | Match the request, exact question, and tool call where applicable. Reject timeout results. |
+| Existing native Force pass | Launcher-gated Claude card or typed status. Dismissal keeps waiting. |
 
 The marker is configuration, not authority; hooks bind tool ID/deadline, reject prefilled/`afkTimeoutMs` answers, and write valid review markers.
 

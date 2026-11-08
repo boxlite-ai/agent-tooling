@@ -26,7 +26,8 @@ prior="$(bash "$cli" status "$state" "$prior_id")"
 jq -e --arg id "$prior_id" --argjson deadline "$prior_deadline" \
   '.id==$id and .deadline==$deadline and .question_tool_id==""' <<<"$prior" >/dev/null
 out="$(printf '%s' '{"session_id":"native"}' | bash "$plugin/scripts/continue-timed-prompts.sh")"
-[[ "$out" == *AskUserQuestion* ]] || { printf 'FAIL: Claude timed prompt did not select AskUserQuestion\n' >&2; exit 1; }
+[[ "$out" == *'plain text'* && "$out" != *AskUserQuestion* ]] \
+  || { printf 'FAIL: Claude must present new timed questions as text\n' >&2; exit 1; }
 
 hook="$plugin/.agents/hooks/claude-timed-question.sh"
 id="$(jq -r .id "$state")"
@@ -130,18 +131,19 @@ mv "$scratch/expired" "$state"
 reject call_hook PostToolUse "$(reply 'reviewed: late response')"
 [[ "$(jq -r .id "$state")" == "$id" ]]
 
-# A first real PR denial carries a bounded native question, not only the Stop path.
+# A first real PR denial carries the bounded text question, not only the Stop path.
 rm "$state"
 out="$(printf '%s' '{"session_id":"native","tool_input":{"command":"gh pr ready"}}' \
   | PATH="$scratch/bin:$PATH" bash "$plugin/.agents/hooks/preflight-pr-review.sh")"
 jq -e '.hookSpecificOutput.permissionDecision == "deny" and
-  (.hookSpecificOutput.permissionDecisionReason | contains("AskUserQuestion") and utf8bytelength<=1200)' <<<"$out" >/dev/null
+  (.hookSpecificOutput.permissionDecisionReason | contains("plain text") and
+    (contains("AskUserQuestion") | not) and utf8bytelength<=1200)' <<<"$out" >/dev/null
 
 # Routing is host-scoped; Codex keeps non-blocking input and missing setup avoids a modal.
 routing="$repo/.agents/state/routing.json"
 bash "$cli" request "$routing" "$spec" >/dev/null
 out="$(PLUGIN_ROOT="$plugin" env -u CLAUDE_PLUGIN_ROOT bash -c 'source "$1/.agents/lib/subagent.sh"; source "$1/.agents/lib/timed-user-prompt.sh"; timed_user_prompt_instruction "$1" "$(cat "$2")"' _ "$plugin" "$routing")"
-[[ "$out" == *request_user_input_async* && "$out" != *AskUserQuestion* ]]
+[[ "$out" == *'plain text'* && "$out" != *request_user_input_async* && "$out" != *AskUserQuestion* ]]
 out="$(env -u CLAUDE_AFK_TIMEOUT_MS bash -c 'source "$1/.agents/lib/subagent.sh"; source "$1/.agents/lib/timed-user-prompt.sh"; timed_user_prompt_instruction "$1" "$(cat "$2")"' _ "$plugin" "$routing")"
 [[ "$out" == *'plain text'* && "$out" != *'Call AskUserQuestion'* ]]
 cat > "$scratch/bin/claude" <<'CLAUDE'

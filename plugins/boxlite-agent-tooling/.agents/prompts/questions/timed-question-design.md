@@ -1,7 +1,7 @@
 ---
 name: timed-question-design
 used-by: .agents/lib/timed-user-prompt.sh
-placeholders: prefix, id
+placeholders: prefix, id, label_1, label_2, label_3
 ---
 {
   "questions": [
@@ -11,15 +11,15 @@ placeholders: prefix, id
       "multiSelect": false,
       "options": [
         {
-          "label": "Redesign",
+          "label": "{{label_1}}",
           "description": "Write a fresh draft from the findings and reflection; the FAIL count resets."
         },
         {
-          "label": "Reflect again",
+          "label": "{{label_2}}",
           "description": "One more audit after a reflection; its FAIL stops again."
         },
         {
-          "label": "Overrule",
+          "label": "{{label_3}}",
           "description": "Accept the open findings: OVERRIDDEN BY USER, never PASS."
         }
       ]

@@ -1,7 +1,7 @@
 ---
 name: timed-question-git-audit
 used-by: .agents/lib/timed-user-prompt.sh
-placeholders: prefix, id
+placeholders: prefix, id, label_1, label_2
 ---
 {
   "questions": [{
@@ -9,8 +9,8 @@ placeholders: prefix, id
     "header": "Audit retry",
     "multiSelect": false,
     "options": [
-      {"label": "Reflect again (Recommended)", "description": "Reflect, fix, test, and run one fresh audit; keep all findings."},
-      {"label": "Stop", "description": "Keep Git blocked and report incomplete verification."}
+      {"label": "{{label_1}}", "description": "Reflect, fix, test, and run one fresh audit; keep all findings."},
+      {"label": "{{label_2}}", "description": "Keep Git blocked and report incomplete verification."}
     ]
   }]
 }

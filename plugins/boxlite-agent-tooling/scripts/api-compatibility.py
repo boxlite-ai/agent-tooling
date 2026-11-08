@@ -10,7 +10,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".agents/lib"))
-from api_contract import SKIP_CONFIRMATION, default_changes, git, inspect_specs, load_inputs
+from api_contract import default_changes, git, inspect_specs, load_inputs
 
 
 def write_inspection(root, inputs, reports):
@@ -39,9 +39,15 @@ def evaluate(action, root, base, evidence, revision=None):
     report = {"fingerprint": inputs["fingerprint"], "base": inputs["base"], "errors": [],
               "requires_confirmation": False, "specifications": []}
     approval = evidence.get("approval", {})
+    question = evidence.get("question")
+    definition = Path(__file__).resolve().parents[1] / ".agents/lib/api-question.json"
+    policy = json.loads(definition.read_text())
+    directive = policy.get("directive") if isinstance(policy, dict) else None
+    if not isinstance(directive, str) or not directive or not isinstance(question, str) or not question:
+        raise ValueError("shared API compatibility question is unavailable")
     approved = (isinstance(approval, dict) and approval.get("fingerprint") == inputs["fingerprint"]
                 and approval.get("source") == "UserPromptSubmit"
-                and approval.get("confirmation") == SKIP_CONFIRMATION)
+                and approval.get("confirmation") == directive)
     for spec in inputs["specifications"]:
         name = spec["path"]
         if action == "commit":
@@ -67,8 +73,7 @@ def evaluate(action, root, base, evidence, revision=None):
                 report["errors"].append(f"{name}: existing default changes need human confirmation: " + ", ".join(defaults))
     if report["requires_confirmation"] and not approved:
         report["errors"].append("human confirmation required for change " + inputs["fingerprint"] +
-                                ": recommend discussing these breaking/default changes in a GitHub issue. "
-                                "Do you want to skip this compatibility gate? To confirm, submit exactly: " + SKIP_CONFIRMATION)
+                                ": " + question)
     report["status"] = "FAIL" if report["errors"] else "PASS"
     return report
 

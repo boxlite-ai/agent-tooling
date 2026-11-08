@@ -50,7 +50,7 @@ A missed request field, missing case, or test without a passing `make test...` r
 Tell the user which files contain breaking or existing-default changes and explain their impact.
 
 - Recommend discussing them in a GitHub issue.
-- Ask once whether to discuss or skip the compatibility gate, and do not wait for a reply.
+- Use the shared question from the compatibility check. Ask once and continue without waiting.
 - Until the user replies, keep the gate, continue authorized work that needs no skip, and report the blocked commit or push.
 - Discussion is recommended, not required; no issue/link or Notion token is required.
 - Creating an issue needs separate authorization.
@@ -63,7 +63,9 @@ api compatibility: skip
 
 Other phrasings do not confirm skipping. The hook checks the user event and text, not the user's identity. Never infer confirmation from silence or general implementation instructions.
 
-The UserPromptSubmit hook binds confirmation to all changed paths and their before/after specifications at submission. Physical CRLF and LF are equivalent; other byte changes or a different changed-file set require confirmation again. Unrelated files and pending local edits do not invalidate approval of an unchanged outgoing commit.
+The UserPromptSubmit hook binds confirmation to changed paths, before/after specifications, and acceptance policy. Policy changes require fresh confirmation. Unrelated files and display copy leave approval intact.
+
+CRLF and LF are equivalent. Other specification byte changes or a different changed-file set require fresh confirmation. Pending local edits leave approval of an unchanged outgoing commit intact.
 
 A URL, assistant-generated confirmation, or model PASS cannot approve skipping. Never manufacture a record. Confirmation skips only breaking/default-change enforcement; parsing/tool failures and SDK request-test requirements still block.
 

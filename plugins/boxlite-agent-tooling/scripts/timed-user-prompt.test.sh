@@ -29,6 +29,20 @@ reject_hook() { if hook_run "$@" >"$scratch/out" 2>"$scratch/err"; then printf '
 request="$(run request "$state" "$spec")"
 id="$(jq -r .id <<<"$request")"
 expect "$request" '.status == "pending" and .deadline == 1300'
+for host in claude codex; do
+  instruction="$(BOXLITE_HOOK_HOST="$host" BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1 \
+    CLAUDE_AFK_TIMEOUT_MS=300000 bash -c '
+      source "$1/.agents/lib/subagent.sh"
+      source "$1/.agents/lib/timed-user-prompt.sh"
+      timed_user_prompt_instruction "$1" "$2"
+    ' fixture "$plugin" "$request")"
+  [[ "$instruction" == *"plain text"* && "$instruction" == *"reviewed:"* \
+     && "$instruction" == *"1300"* && "$instruction" != *AskUserQuestion* \
+     && "$instruction" != *request_user_input_async* ]] || {
+    printf 'FAIL: %s must use one timed text question\n' "$host" >&2
+    exit 1
+  }
+done
 printf '1100\n' > "$CONFIRMATION_TEST_CLOCK"
 expect "$(run request "$state" "$spec")" ".id == \"$id\" and .deadline == 1300"
 reject respond "$state" "$id" 'yes'
@@ -177,6 +191,7 @@ fault_plugin="$scratch/fault-plugin"
 mkdir -p "$fault_plugin/scripts" "$fault_plugin/.agents/lib"
 cp "$cli" "$fault_plugin/scripts/"
 cp "$plugin/.agents/lib/"{timed-user-prompt,verdict-audit-state}.sh "$fault_plugin/.agents/lib/"
+cp "$plugin/.agents/lib/user-question-policy.jq" "$fault_plugin/.agents/lib/"
 cat >> "$fault_plugin/.agents/lib/verdict-audit-state.sh" <<'FAULT'
 verdict_audit_write_atomic() {
   [[ "$CONFIRMATION_WRITE_FAULT" != before ]] || return 1

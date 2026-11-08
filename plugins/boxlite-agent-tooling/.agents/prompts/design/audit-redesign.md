@@ -1,10 +1,12 @@
 ---
 name: audit-redesign
 used-by: .agents/hooks/preflight-design-doc.sh
-placeholders:
+placeholders: approval
 ---
 The human chose Redesign:
 
-1. Write a fresh draft from the findings and reflection, not edits to the failed draft.
-2. Get the human's approval of its exact text.
-3. Update the design, then audit it; the FAIL count starts again.
+Write a fresh draft from the findings and reflection.
+
+{{approval}}
+
+After approval, update the design and audit it again. The FAIL count starts over.

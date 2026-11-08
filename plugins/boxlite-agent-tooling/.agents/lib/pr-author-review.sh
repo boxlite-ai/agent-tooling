@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Author review acknowledgment. Source-only; pr_author_review_run is the facade.
 # Requires jq, concise_writing_check_summary, github_writing_check_privacy,
-# subagent_prompt and authenticated gh.
+# user_question and authenticated gh.
 # Comments are the record; commit statuses enforce the record on the base repository.
 
 _pr_review_gh() { "${GH_BIN:-gh}" "$@"; }
@@ -134,15 +134,9 @@ _pr_review_exclusive_head() { # repository, PR number, SHA; 0 unique, 1 shared, 
 
 _pr_review_prompt() { # repository, PR number, SHA, author login, existing prompt, result, tooling root
   local body previous id review_question
-  review_question="$(subagent_prompt pr/pr-review-question "$7")" || return 2
-  [[ "$review_question" == *[![:space:]]* ]] || {
-    _pr_review_error "empty prompt: $7/.agents/prompts/pr/pr-review-question.md"; return 2;
-  }
-  body="$(subagent_prompt pr/pr-author-review "$7" \
+  review_question="$(user_question render "$7" pr/pr-review-question)" || return 2
+  body="$(user_question render "$7" pr/pr-author-review \
     "result=$6" "author=$4" "sha=$3" "review_question=$review_question")" || return 2
-  [[ "$body" == *[![:space:]]* ]] || {
-    _pr_review_error "empty prompt: $7/.agents/prompts/pr/pr-author-review.md"; return 2;
-  }
   github_writing_check_privacy "$body" >&2 || return 2
   concise_writing_check_summary "$body" >&2 || return 2
   # The comment identity is protocol metadata, independent of editable wording.

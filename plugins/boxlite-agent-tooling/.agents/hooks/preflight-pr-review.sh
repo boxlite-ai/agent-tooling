@@ -1745,6 +1745,8 @@ if [[ ! -r "$subagent_lib" ]]; then
 fi
 # shellcheck source=../lib/subagent.sh
 source "$subagent_lib"
+# shellcheck source=../lib/user-question.sh
+source "$tooling_root/.agents/lib/user-question.sh" || exit 2
 timed_lib="$tooling_root/.agents/lib/timed-user-prompt.sh"
 [[ -r "$timed_lib" ]] || { printf 'preflight-pr-review: timed prompt library missing\n' >&2; exit 2; }
 # shellcheck source=../lib/timed-user-prompt.sh
@@ -1759,24 +1761,14 @@ source "$size_lib"
 marker_selection=""
 marker_selected_identity=""
 
-load_review_prompt() { # prompt name, tooling root, optional key=value pairs
-  local rendered
-  rendered="$(subagent_prompt "$@")" || return 2
-  if [[ "$rendered" != *[![:space:]]* ]]; then
-    printf 'preflight-pr-review: empty prompt: %s/.agents/prompts/%s.md\n' "$2" "$1" >&2
-    return 2
-  fi
-  printf '%s' "$rendered"
-}
-
 # Render before selecting or consuming the acknowledgment. The same document handles
 # normal denials and long-ref recovery, so the review question cannot drift out of one.
-review_question="$(load_review_prompt pr/pr-review-question "$tooling_root")" || exit 2
+review_question="$(user_question render "$tooling_root" pr/pr-review-question)" || exit 2
 load_writing_policy
-description_guidance="$(load_review_prompt pr/pr-description-guidance "$tooling_root")" || exit 2
-ack_instruction="$(load_review_prompt pr/pr-review-ack "$tooling_root" \
+description_guidance="$(subagent_prompt pr/pr-description-guidance "$tooling_root")" || exit 2
+ack_instruction="$(user_question render "$tooling_root" pr/pr-review-ack \
   "review_question=$review_question" "context= for gh pr $subcmd; bind $branch@$head")" || exit 2
-bounded_ack_recovery="$(load_review_prompt pr/pr-review-ack "$tooling_root" \
+bounded_ack_recovery="$(user_question render "$tooling_root" pr/pr-review-ack \
   "review_question=$review_question" "context=; the detailed diagnostic exceeded 1200 bytes")" || exit 2
 if (( $(LC_ALL=C printf '%s' "$bounded_ack_recovery" | wc -c) > 1200 )); then
   printf 'preflight-pr-review: rendered pr-review-ack.md recovery exceeds 1200 bytes\n' >&2

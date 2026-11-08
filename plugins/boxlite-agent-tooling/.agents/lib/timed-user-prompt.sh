@@ -40,7 +40,8 @@ timed_user_prompt() { # operation state-path spec-or-request-id [verbatim-respon
 }
 
 _timed_user_prompt_transition() { # same arguments as the facade; lock already held
-  local operation="$1" path="$2" argument="$3" response="${4:-}" record=null snapshot now nonce next archive
+  local operation="$1" path="$2" argument="$3" response="${4:-}" record=null snapshot now nonce next archive library
+  library="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 2
   now="$(date -u +%s)" || return 2
   [[ "$now" =~ ^[0-9]{1,12}$ ]] || return 2
   if [[ -e "$path" || -L "$path" ]]; then
@@ -49,28 +50,25 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
   fi
   nonce="$(perl -e 'open my $f, "<", "/dev/urandom" or exit 2;
     read($f, my $bytes, 16) == 16 or exit 2; print unpack("H*", $bytes)')" || return 2
-  next="$(jq -ce --arg op "$operation" --arg arg "$argument" --arg reply "$response" \
+  next="$(jq -ce -L "$library" --arg op "$operation" --arg arg "$argument" --arg reply "$response" \
     --arg id "$nonce" --argjson now "$now" '
+    include "user-question-policy";
     def line: type == "string" and utf8bytelength <= 4096
       and (explode | all(. >= 32 and . != 127));
     def spec:
       type == "object" and (keys == ["binding","fallback","minimum_words","prefix"])
       and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 8192))
-      and (.fallback | IN("split","keep-draft","keep-blocked","reflect-again"))
-      and (.prefix | IN("reviewed:","pr-size-exception:","design-decision:","commit-audit-decision:","push-audit-decision:"))
-      and ((.prefix == "reviewed:") == (.fallback == "keep-draft"))
-      and ((.prefix == "design-decision:") == (.fallback == "keep-blocked"))
-      and ((.prefix | IN("commit-audit-decision:","push-audit-decision:")) == (.fallback == "reflect-again"))
+      and (.prefix | type == "string")
+      and (user_question_policy(.prefix) as $policy | $policy != null and .fallback == $policy.fallback)
       and (.minimum_words | type == "number" and . >= 1 and . <= 100 and floor == .);
-    # A design decision is a native label, or a typed line naming one with a reason.
-    def decision_line: test("^design-decision: (Redesign|Reflect again|Overrule)\\s+\\S");
-    def git_decision: .prefix | IN("commit-audit-decision:","push-audit-decision:");
+    def git_decision: user_question_policy(.prefix).fallback == "reflect-again";
     def response_ok($s):
-      line and (if $s.prefix == "pr-size-exception:" and . == "Bypass limit" then true
-        elif $s.prefix == "design-decision:"
-        then IN("Redesign","Reflect again","Overrule") or decision_line
-        elif ($s | git_decision) then IN("Reflect again","Reflect again (Recommended)","Stop")
-          or test("^"+$s.prefix+" [0-9a-f]{32} (Reflect again|Stop)$")
+      line and (. as $answer | user_question_policy($s.prefix) as $policy |
+        if $s.prefix == "pr-size-exception:" and . == $policy.choices[0] then true
+        elif $s.prefix == "design-decision:" then
+          ($policy.choices | index($answer) != null) or test(user_question_design_pattern)
+        elif ($s | git_decision) then (($policy.choices + user_question_labels($policy)) | index($answer) != null)
+          or test(user_question_git_pattern($s.prefix; "[0-9a-f]{32}"))
         else startswith($s.prefix + " ")
           and ([.[($s.prefix|length):] | scan("\\S+")] | length) >= $s.minimum_words end);
     def valid:
@@ -87,10 +85,11 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       valid
       and (if .status == "accepted" or .status == "consumed"
         then .spec as $s | .response | response_ok($s)
-        elif .status == "declined" then .spec.prefix == "pr-size-exception:" and .response == "Split PR"
+        elif .status == "declined" then .spec.prefix == "pr-size-exception:"
+          and .response == user_question_policy(.spec.prefix).choices[1]
         else .response == "" end)
       and (. as $record | if (.spec | git_decision) and (.response | startswith($record.spec.prefix))
-        then .response | test("^"+$record.spec.prefix+" "+$record.id+" (Reflect again|Stop)$")
+        then .response | test(user_question_git_pattern($record.spec.prefix; $record.id))
         else true end)
       and (if .fallback_delivered then (.status | IN("expired","declined")) else true end);
     # Older version-one records predate native questions; preserve their deadline.
@@ -125,12 +124,12 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
     elif $op == "prompt-reply" and (.spec | git_decision) then
       .spec as $spec |
       if .status != "pending" or ($reply | line | not)
-        or ($reply | test("^"+$spec.prefix+" "+$arg+" (Reflect again|Stop)$") | not)
+        or ($reply | test(user_question_git_pattern($spec.prefix; $arg)) | not)
       then error("Git audit choice is stale or does not match this request")
       else .status = "accepted" | .response = $reply end
     elif $op == "prompt-reply" then
       # The human supplied a directive; the deadline only ends the agent wait.
-      if .spec.prefix != "design-decision:" or ($reply | line and decision_line | not)
+      if .spec.prefix != "design-decision:" or ($reply | line and test(user_question_design_pattern) | not)
       then error("only an explicit design-decision line from the human prompt counts")
       elif (.status | IN("pending","expired") | not) then error("confirmation no longer accepts replies")
       else .status = "accepted" | .response = $reply | .fallback_delivered = false end
@@ -145,7 +144,7 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
        elif .question_tool_id != "" then error("native replies must come through the question hook")
        else $reply end) as $answer |
       .spec as $s |
-      if $s.prefix == "pr-size-exception:" and $answer == "Split PR"
+      if $s.prefix == "pr-size-exception:" and $answer == user_question_policy($s.prefix).choices[1]
       then .status = "declined" | .response = $answer
       elif ($answer | response_ok($s) | not)
       then error("response does not match this confirmation")
@@ -178,21 +177,11 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
 }
 
 _timed_user_prompt_question() {
-  local root template=questions/timed-question-review prefix id rendered
+  local root
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 2
-  # The locked transition runs in a fresh shell; load its renderer locally.
-  # shellcheck source=subagent.sh
-  source "$root/.agents/lib/subagent.sh" || return 2
-  case "$(jq -r .spec.fallback <<<"$1")" in
-    split) template=questions/timed-question-size ;;
-    keep-blocked) template=questions/timed-question-design ;;
-    reflect-again) template=questions/timed-question-git-audit ;;
-  esac
-  # Insert JSON string contents, never raw data, into the structured question.
-  prefix="$(jq -er '.spec.prefix | tojson | .[1:-1]' <<<"$1")" || return 2
-  id="$(jq -er '.id | tojson | .[1:-1]' <<<"$1")" || return 2
-  rendered="$(subagent_prompt "$template" "$root" "prefix=$prefix" "id=$id")" || return 2
-  jq -ce . <<<"$rendered"
+  # shellcheck source=user-question.sh
+  source "$root/.agents/lib/user-question.sh" || return 2
+  user_question card "$root" "$1"
 }
 
 timed_user_prompt_native_available() {
@@ -202,30 +191,7 @@ timed_user_prompt_native_available() {
 }
 
 timed_user_prompt_instruction() { # tooling-root request-json
-  local deadline fallback instruction route host question
-  # shellcheck source=hook-host.sh
-  source "$1/.agents/lib/hook-host.sh" || return 2
-  host="$(hook_host_kind)"
-  route="$(subagent_prompt questions/timed-route-async "$1")" || return 2
-  if [[ "$host" == codex && "$(jq -r .spec.prefix <<<"$2")" == design-decision: ]]; then
-    question="$(_timed_user_prompt_question "$2")" || return 2
-    question="$(jq -c '{questions:[.questions[0] | {title:.question,
-      options:[.options[] | "design-decision: " + .label + " " + .description]}]}' \
-      <<<"$question")" || return 2
-    route="$(subagent_prompt questions/timed-route-design-async "$1" "question=$question")" || return 2
-  elif [[ "$host" == claude ]]; then
-    if [[ "$(jq -r '.question_tool_id // ""' <<<"$2")" != "" ]]; then
-      route="$(subagent_prompt questions/timed-route-shown "$1")" || return 2
-    elif timed_user_prompt_native_available; then
-      question="$(_timed_user_prompt_question "$2")" || return 2
-      route="$(subagent_prompt questions/timed-route-native "$1" "question=$question")" || return 2
-    else
-      route="$(subagent_prompt questions/timed-route-fallback "$1")" || return 2
-    fi
-  fi
-  deadline="$(jq -er .deadline <<<"$2")" || return 2
-  fallback="$(jq -er .spec.fallback <<<"$2")" || return 2
-  instruction="$(subagent_prompt questions/timed-user-prompt "$1" "deadline=$deadline" "fallback=$fallback" "route=$route")" || return 2
-  [[ "$instruction" == *[![:space:]]* ]] || return 2
-  printf '%s\n' "$instruction"
+  # shellcheck source=user-question.sh
+  source "$1/.agents/lib/user-question.sh" || return 2
+  user_question instruction "$1" "$2"
 }

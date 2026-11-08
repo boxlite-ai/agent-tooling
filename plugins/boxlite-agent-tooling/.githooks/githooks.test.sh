@@ -180,6 +180,8 @@ setup() {
      "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
      "$REPO_ROOT/.agents/lib/timed-user-prompt.sh" \
+     "$REPO_ROOT/.agents/lib/user-question.sh" \
+     "$REPO_ROOT/.agents/lib/user-question-policy.jq" \
      "$REPO_ROOT/.agents/lib/git-audit-decision.sh" \
      "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
   cp -R "$REPO_ROOT/.agents/prompts/." "$d/.agents/prompts/"
@@ -199,6 +201,8 @@ setup() {
      "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
      "$REPO_ROOT/.agents/lib/timed-user-prompt.sh" \
+     "$REPO_ROOT/.agents/lib/user-question.sh" \
+     "$REPO_ROOT/.agents/lib/user-question-policy.jq" \
      "$REPO_ROOT/.agents/lib/git-audit-decision.sh" \
      "$REPO_ROOT/.agents/lib/hook-host.sh" "$plugin/.agents/lib/"
   git -C "$scratch" init -q

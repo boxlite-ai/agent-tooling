@@ -207,10 +207,10 @@ check_code_size 'possibly truncated files fail closed' \
 unset SIZE_TEST_FILES
 [[ "$code_failures" == 0 ]] || exit 1
 rm -f "$scratch/repo/.agents/state/pr-size-request.json" "$scratch/repo/.agents/state/pr-review-request.json"
-long_body="$(printf 'word %.0s' {1..81})"
+long_body="$(printf '## TL;DR\n\nFixture change.\n\n## How it works\n\n'; printf 'word %.0s' {1..81})"
 out="$(call_hook "gh pr create --title 'feat: validate text first' --body '$long_body'")"
-[[ "$out" == *'paragraph'* && "$out" != *'401'* ]] \
-  || { printf 'FAIL: size lookup preceded invalid-body rejection\n' >&2; exit 1; }
+[[ "$out" == *'A sentence has 81 words'* && "$out" != *'401'* ]] \
+  || { printf 'FAIL: size lookup preceded invalid-body rejection\n%s\n' "$out" >&2; exit 1; }
 out="$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
 Fixture change.

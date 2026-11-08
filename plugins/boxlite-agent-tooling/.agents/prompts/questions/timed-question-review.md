@@ -1,7 +1,7 @@
 ---
 name: timed-question-review
 used-by: .agents/lib/timed-user-prompt.sh
-placeholders: prefix, id
+placeholders: prefix, id, label_1, label_2
 ---
 {
   "questions": [
@@ -11,11 +11,11 @@ placeholders: prefix, id
       "multiSelect": false,
       "options": [
         {
-          "label": "Keep draft",
+          "label": "{{label_1}}",
           "description": "Do not approve."
         },
         {
-          "label": "Show diff",
+          "label": "{{label_2}}",
           "description": "Inspect changes."
         }
       ]

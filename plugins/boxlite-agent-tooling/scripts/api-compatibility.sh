@@ -9,8 +9,10 @@ explicit_base="${3:-}"
 revision=''
 prompt=''
 if [[ "$operation" == record ]]; then
-  prompt="$(jq -er 'select(.hook_event_name == "UserPromptSubmit" and (.session_id | type == "string") and (.session_id | length > 0)) | .prompt | strings')" || exit 0
-  [[ "$prompt" == 'api compatibility: skip' ]] || exit 0
+  # shellcheck source=../.agents/lib/user-question.sh
+  source "$plugin_root/.agents/lib/user-question.sh" || exit 1
+  payload="$(cat)"
+  prompt="$(user_question api-match "$plugin_root" "$payload")" || exit 0
 fi
 if [[ "$operation" == push-ref ]]; then
   local_sha="${3:-}"; remote_sha="${4:-}"
@@ -80,7 +82,13 @@ action="$operation"
 if [[ "$operation" == record ]]; then
   action=inspect
 fi
-evidence="$(jq -nc --argjson approval "$approval" '{approval:$approval}')" || exit 1
+# shellcheck source=../.agents/lib/user-question.sh
+declare -F user_question >/dev/null || source "$plugin_root/.agents/lib/user-question.sh" || exit 1
+directive="$(user_question api-directive "$plugin_root")" || exit 1
+question="$(user_question render "$plugin_root" questions/api-compatibility "directive=$directive")" || exit 1
+question="$(user_question ask "$plugin_root" "$question" "")" || exit 1
+evidence="$(jq -nc --argjson approval "$approval" --arg question "$question" \
+  '{approval:$approval, question:$question}')" || exit 1
 args=("$action" "$root")
 [[ -z "$explicit_base" ]] || args+=(--base "$explicit_base")
 [[ -z "$revision" ]] || args+=(--revision "$revision")
