@@ -59,7 +59,7 @@ Apply [size/decomposition policy](guidance/workflow.md#pr-size-and-decomposition
 
 3. Follow the gate's auditor route, then advisor route; show advice to the human, who selects what to adopt.
 4. Read/apply `boxlite-pr-preparation` for drafts/revisions; include the registered full URL and substantive project-documentation link.
-5. Prepare generated text, then pass safely quoted literal inline bodies; backticks in double quotes execute shell substitutions.
+5. Pass safely quoted inline text or use the [guarded PR body-file launcher](docs/design-and-pr-gates.md#pr-body-files).
 
 See [design operations](docs/design-and-pr-gates.md#design-operations), [accepted GitHub inputs](docs/writing-checks.md#github-writing), and [timed confirmations](docs/timed-confirmations.md#timed-confirmations).
 

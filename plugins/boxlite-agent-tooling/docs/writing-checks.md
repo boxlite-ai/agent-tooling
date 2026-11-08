@@ -32,7 +32,7 @@ The scanner supplies literal argv without execution, using per-command gh 2.92.0
 | Input | Decision |
 | --- | --- |
 | Literal inline text | Inspect before publication. |
-| Body file, stdin, editor, generated text, GraphQL mutation | Reject because final text is unavailable. |
+| Direct body file, stdin, editor, generated text, GraphQL mutation | Reject because final text is unavailable. Use the [guarded launcher](design-and-pr-gates.md#pr-body-files) for PR body files. |
 | Read-only / body-preserving command | Pass, including close/reopen without comments. |
 | Unknown option, missing value, invalid boolean | Diagnostic naming option and `gh help`; no writing reminder. |
 | Reached `-h` or final true `--help` | Pass literal argv, including PR create/edit/ready. |

@@ -90,8 +90,8 @@ cat > "$scratch/bin/gh" <<'GH'
 #!/usr/bin/env bash
 if [[ "$1" == repo ]]; then
   printf '%s' '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}'
-elif [[ "$*" == 'api --hostname github.com markdown -f mode=gfm -f text='* ]]; then
-  [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2
+elif [[ "$*" == 'api --hostname github.com markdown --method POST --input - --header Content-Type: application/json; charset=utf-8' ]]; then
+  jq -e 'select(.mode == "gfm") | .text | contains("https://github.com/example/repo/issues/123")' >/dev/null || exit 2
   printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>'
 elif [[ "$*" == 'api --hostname github.com repos/example/repo/compare/'* ]]; then
   jq -nc --arg head "$(git rev-parse HEAD)" \

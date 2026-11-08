@@ -36,8 +36,15 @@
 # Tests: bash .agents/hooks/pr/preflight-pr-review.test.sh
 set -euo pipefail
 
-payload="$(cat)"
-command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // ""')"
+publish_file=0
+publish_body_sha256=""
+if [[ "${1:-}" == --publish-body-file ]]; then
+  publish_file=1
+  shift
+else
+  payload="$(cat)"
+  command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // ""')"
+fi
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 writing_error=""
 writing_error_reminds=1
@@ -68,10 +75,83 @@ load_writing_policy() {
   writing_loaded=1
 }
 
-deny_writing() { # bounded checker diagnostic plus shared prompt text
+reject_pr() {
+  if (( publish_file )); then
+    printf 'error: %s\n' "$1" >&2
+    exit 1
+  fi
   jq -nc --arg reason "$1" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
   exit 0
+}
+
+valid_pr_session() {
+  [[ "$1" =~ ^[a-zA-Z0-9_-]{1,200}$ ]]
+}
+
+prepare_file_publication() {
+  local session operation="${1:-}" path snapshot index
+  local usage='Use gh-pr.sh create [--draft] or edit [selector], followed by --title TITLE --body-file PATH.'
+  case "${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
+    codex:) export BOXLITE_HOOK_HOST=codex; session="$CODEX_THREAD_ID" ;;
+    :claude) export BOXLITE_HOOK_HOST=claude; session="$CLAUDE_CODE_SESSION_ID" ;;
+    *) reject_pr 'A PR body file requires one active Claude Code or Codex session.' ;;
+  esac
+  valid_pr_session "$session" || reject_pr 'The host session ID is invalid.'
+  case "$operation" in create|edit) ;; *) reject_pr "$usage" ;; esac
+  shift
+  publish_args=("$operation")
+  case "$operation:${1:-}" in
+    create:--draft|create:-d|create:--draft=true|create:-d=true|edit:[!-]*)
+      publish_args+=("$1"); shift ;;
+  esac
+  case "${1:-}" in
+    --title|-t) (( $# >= 2 )) || reject_pr "$usage"; publish_args+=("$1" "$2"); shift 2 ;;
+    --title=*|-t?*) publish_args+=("$1"); shift ;;
+    *) reject_pr "$usage" ;;
+  esac
+  case "${1:-}" in
+    --body-file|-F) (( $# >= 2 )) || reject_pr "$usage"; path="$2"; shift 2 ;;
+    --body-file=*|-F=*) path="${1#*=}"; shift ;;
+    -F?*) path="${1#-F}"; shift ;;
+    *) reject_pr "$usage" ;;
+  esac
+  [[ -n "$path" && "$path" != - ]] || reject_pr 'Supply a regular PR body file path.'
+  [[ "$path" != -* ]] || path="./$path"
+
+  # The sentinel retains trailing LFs through command substitution.
+  # shellcheck source=../lib/verdict-audit-state.sh
+  source "$tooling_root/.agents/lib/verdict-audit-state.sh" || exit 2
+  snapshot="$(verdict_audit_read_regular_state "$path" 24576 json && printf '.')" \
+    || reject_pr 'Cannot read PR body file. Use a regular text file of at most 24 KiB without NUL bytes.'
+  publish_body="${snapshot#*$'\n'}"
+  publish_body="${publish_body%.}"
+  publish_body_sha256="$(printf '%s' "$publish_body" | perl -MDigest::SHA=sha256_hex -MEncode=decode,FB_CROAK,LEAVE_SRC -e '
+    binmode STDIN;
+    local $/;
+    my $bytes = <STDIN> // "";
+    eval { decode("UTF-8", $bytes, FB_CROAK | LEAVE_SRC); 1 } or exit 1;
+    print sha256_hex($bytes);
+  ')" || reject_pr 'The PR body file must contain valid UTF-8.'
+
+  # The launcher already has literal argv, so no shell source needs to be built.
+  shell_words=(gh pr "${publish_args[@]}" "--body=$publish_body" "$@")
+  publish_args+=(--body-file=- "$@")
+  for (( index=0; index<${#shell_words[@]}; index++ )); do
+    shell_word_quotes[index]=1
+    shell_word_dynamics[index]=0
+    shell_word_unquoted_dynamics[index]=0
+    shell_word_unquoted_globs[index]=0
+    shell_word_redirections[index]=0
+    shell_word_escapes[index]=0
+  done
+  payload="$(jq -nc --arg session "$session" --arg cwd "$PWD" '{session_id:$session,cwd:$cwd}')"
+}
+
+publish_checked_pr() {
+  if (( publish_file )); then
+    printf '%s' "$publish_body" | command gh pr "${publish_args[@]}"
+  fi
 }
 
 # Bourne-Again, its POSIX mode, the Z shell and Debian Almquist build the same argv
@@ -154,6 +234,7 @@ command_directory=""
 command_directory_count=0
 opaque_protected_count=0
 parsed_simple_count=0
+file_launcher_count=0
 ambiguous_execution_context=0
 recursive_scan_depth=0
 literal_assignment_count=0
@@ -178,6 +259,17 @@ record_literal_assignment() {
   literal_assignment_values[$literal_assignment_count]="${assignment_word#*=}"
   literal_assignment_dynamics[$literal_assignment_count]="$assignment_dynamic"
   literal_assignment_count=$((literal_assignment_count + 1))
+}
+
+record_file_launcher() { # argv index
+  local index="$1"
+  case "${shell_words[index]:-}" in
+    gh-pr.sh|*/gh-pr.sh) ;;
+    preflight-pr-review.sh|*/preflight-pr-review.sh)
+      [[ "${shell_words[index+1]:-}" == --publish-body-file ]] || return 1 ;;
+    *) return 1 ;;
+  esac
+  file_launcher_count=$((file_launcher_count + 1))
 }
 
 redirection_skip_index=0
@@ -559,8 +651,17 @@ inspect_simple_command() {
   fi
 
   executable="${shell_words[$command_index]}"
+  if record_file_launcher "$command_index"; then
+    return 0
+  fi
   case "${executable##*/}" in
-    bash|sh)
+    source|.)
+      if record_file_launcher "$((command_index + 1))"; then
+        unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+      fi
+      return 0
+      ;;
+    bash|sh|dash|zsh)
       if [[ -n "$pending_heredoc_delimiter" ]]; then
         pending_heredoc_executes_body=1
         ambiguous_execution_context=1
@@ -569,7 +670,11 @@ inspect_simple_command() {
       while (( payload_index < word_count )); do
         token="${shell_words[$payload_index]}"
         case "$token" in
-          --) return 0 ;;
+          --)
+            if record_file_launcher "$((payload_index + 1))" && (( payload_index != command_index + 1 )); then
+              unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+            fi
+            return 0 ;;
           --rcfile|--init-file)
             payload_index=$((payload_index + 2))
             ;;
@@ -595,7 +700,11 @@ inspect_simple_command() {
             fi
             payload_index=$((payload_index + 1))
             ;;
-          *) return 0 ;;
+          *)
+            if record_file_launcher "$payload_index" && (( payload_index != command_index + 1 )); then
+              unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+            fi
+            return 0 ;;
         esac
       done
       return 0
@@ -1199,7 +1308,7 @@ finish_shell_word() {
 # one value if it is not intended for execution.
 detect_visible_protected_sequence() {
   local word_count="${#shell_words[@]}" candidate_index=0 noun_index verb_index
-  local executable_index=0 launcher_payload_index=-1
+  local executable_index=0 launcher_payload_index=-1 file_launcher_context=0 launcher_action_index
   local token launcher_basename=""
   while (( executable_index < word_count )) \
      && [[ "${shell_words[$executable_index]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
@@ -1217,12 +1326,24 @@ detect_visible_protected_sequence() {
     timeout)
       launcher_payload_index=$((executable_index + 2))
       ;;
+    source|.|bash|sh|dash|zsh|builtin|command|exec|time)
+      file_launcher_context=1
+      ;;
   esac
   if (( launcher_payload_index >= 0 && launcher_payload_index < word_count )) \
      && [[ "${shell_words[$launcher_payload_index]}" == -- ]]; then
     launcher_payload_index=$((launcher_payload_index + 1))
   fi
   while (( candidate_index < word_count )); do
+    launcher_action_index=$((candidate_index + 1))
+    if (( launcher_action_index < word_count \
+          && (launcher_payload_index >= 0 || file_launcher_context || candidate_index == executable_index) )) \
+       && { [[ "${shell_words[launcher_action_index]}" =~ ^(create|edit|--publish-body-file)$ ]] \
+         || (( shell_word_dynamics[launcher_action_index] || shell_word_unquoted_globs[launcher_action_index] )); } \
+       && record_file_launcher "$candidate_index"; then
+      unsafe_authorization_context_count=$((unsafe_authorization_context_count + 1))
+      return 0
+    fi
     token="${shell_words[$candidate_index]}"
     if [[ "${token##*/}" != gh ]]; then
       if (( candidate_index != executable_index )) \
@@ -1308,11 +1429,12 @@ detect_visible_protected_sequence() {
 
 finish_simple_command() {
   local protected_before="$protected_count" opaque_before="$opaque_protected_count"
-  local writing_before="$writing_inspected_count"
+  local writing_before="$writing_inspected_count" file_launchers_before="$file_launcher_count"
   finish_shell_word
   inspect_simple_command
   if (( protected_count == protected_before \
      && opaque_protected_count == opaque_before \
+     && file_launcher_count == file_launchers_before \
      && writing_inspected_count == writing_before )); then
     detect_visible_protected_sequence
   fi
@@ -1670,14 +1792,32 @@ scan_command_fragment() {
   finish_simple_command
 }
 
-scan_command_fragment "$command"
+if (( publish_file )); then
+  prepare_file_publication "$@"
+  inspect_simple_command
+  (( protected_count == 1 )) || reject_pr 'The PR file launcher requires one checked create or edit.'
+else
+  scan_command_fragment "$command"
+fi
+
+if (( file_launcher_count > 0 )); then
+  launch_session="$(jq -er '.session_id | strings' <<<"$payload")" \
+    || reject_pr 'The PR body-file launcher requires a host session.'
+  inherited_session="${CODEX_THREAD_ID:-${CLAUDE_CODE_SESSION_ID:-$launch_session}}"
+  if (( file_launcher_count != 1 || parsed_simple_count != 1 || ambiguous_execution_context
+    || unsafe_authorization_context_count || command_directory_count || opaque_protected_count )) \
+    || ! valid_pr_session "$launch_session" || [[ "$inherited_session" != "$launch_session" ]]; then
+    reject_pr 'Run the PR body-file launcher directly in the current session, with no context changes or compound commands.'
+  fi
+  exit 0
+fi
 
 # Writing denials never request or consume a human review acknowledgment. An option
 # gh would reject gets its diagnostic alone, without the writing reminder.
 if [[ -n "$writing_error" ]]; then
-  (( writing_error_reminds )) || deny_writing "$writing_error"
+  (( writing_error_reminds )) || reject_pr "$writing_error"
   writing_guidance="$(concise_writing_reminder)" || exit 2
-  deny_writing "$writing_error
+  reject_pr "$writing_error
 
 $writing_guidance"
 fi
@@ -1711,15 +1851,15 @@ fi
 working_directory="$(jq -er --arg fallback "$PWD" '
   first((.tool_input.workdir, .tool_input.cwd, .cwd, $fallback) | select(. != null))
   | strings | select(length > 0 and (index("\u0000") == null))
-' <<<"$payload")" || deny_writing 'The shell working directory is invalid.'
+' <<<"$payload")" || reject_pr 'The shell working directory is invalid.'
 cd -- "$working_directory" 2>/dev/null \
-  || deny_writing 'The shell working directory is unavailable.'
+  || reject_pr 'The shell working directory is unavailable.'
 if [[ -n "$command_directory" ]]; then
   cd -- "$command_directory" 2>/dev/null \
-    || deny_writing 'The explicit env working directory is unavailable.'
+    || reject_pr 'The explicit env working directory is unavailable.'
 fi
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
-  || deny_writing 'The shell working directory is not a Git checkout.'
+  || reject_pr 'The shell working directory is not a Git checkout.'
 project_dir="${CLAUDE_PROJECT_DIR:-$repo_root}"
 if [[ -n "$command_directory" ]] \
     || jq -e '[.tool_input.workdir, .tool_input.cwd, .cwd] | any(. != null)' \
@@ -1772,6 +1912,9 @@ load_review_prompt() { # prompt name, tooling root, optional key=value pairs
 # Render before selecting or consuming the acknowledgment. The same document handles
 # normal denials and long-ref recovery, so the review question cannot drift out of one.
 review_question="$(load_review_prompt pr/pr-review-question "$tooling_root")" || exit 2
+if (( publish_file )); then
+  review_question+=" Review body SHA-256 $publish_body_sha256."
+fi
 load_writing_policy
 description_guidance="$(load_review_prompt pr/pr-description-guidance "$tooling_root")" || exit 2
 ack_instruction="$(load_review_prompt pr/pr-review-ack "$tooling_root" \
@@ -1806,14 +1949,7 @@ $bounded_ack_recovery"
     printf 'preflight-pr-review: combined timed recovery exceeds 1200 bytes\n' >&2
     exit 2
   fi
-  jq -nc --arg r "$reason" '{
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: $r
-    }
-  }'
-  exit 0
+  reject_pr "$reason"
 }
 
 # The acknowledgment binds the current checkout's branch and HEAD. Inline
@@ -1895,14 +2031,13 @@ The gate cannot verify content produced later by an editor or repository templat
 Prepare a concise description, pass it explicitly, and retry."
 fi
 
-# A body-file read is only a pre-execution snapshot: another process can replace
-# it after validation and before gh opens it. The hook cannot bind those bytes to
-# gh, so inline body text is the only authorizable representation.
+# Direct shell calls can reopen a changed body file after the hook returns.
+# The launcher instead checks its buffer as inline text and owns the gh handoff.
 body_index=0
 while (( body_index < protected_body_count )); do
   if [[ "${protected_body_kinds[$body_index]}" == file ]]; then
     deny "A gh pr --body-file snapshot cannot be bound to the bytes gh reads later.
-Pass the complete concise description as one literal inline --body value."
+Use the guarded scripts/gh-pr.sh launcher or pass one literal inline --body value."
   fi
   body_index=$((body_index + 1))
 done
@@ -1937,11 +2072,11 @@ while (( body_index < protected_body_count )); do
   pr_body="${protected_body_values[$body_index]}"
   if ! body_error="$(github_writing_check_body "$pr_body")"; then
     if [[ "$pr_body" != *[![:space:]]* ]]; then
-      deny_writing "$body_error
+      reject_pr "$body_error
 ${description_guidance}"
     fi
     writing_guidance="$(concise_writing_reminder)" || exit 2
-    deny_writing "$body_error
+    reject_pr "$body_error
 
 $writing_guidance"
   fi
@@ -1961,8 +2096,7 @@ size_reason="$(pr_size_check "$size_context" "$pr_target" "${protected_size_args
 if (( size_status )); then
   [[ -n "$size_reason" ]] || size_reason="PR size check failed; nothing was authorized."
   # Size prompts have their own recovery; never replace them with review approval.
-  jq -nc --arg reason "$size_reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
-  exit 0
+  reject_pr "$size_reason"
 fi
 
 for description_library in design-doc.sh pr-description.sh; do
@@ -1979,6 +2113,7 @@ description_reason="$(pr_description_check "$repo_root" "$pr_target" "${protecte
 if (( protected_ack_count == 0 )); then
   current_target="$(pr_target_resolve "${protected_size_args[@]}")" \
     && [[ "$current_target" == "$pr_target" ]] || deny 'PR target changed during validation; retry with the current refs.'
+  publish_checked_pr
   exit 0
 fi
 
@@ -1986,7 +2121,9 @@ mkdir -p "$project_dir/.agents/state" || exit 2
 request_spec="$(jq -nc --arg repo "$repo_root" --arg branch "$branch" --arg head "$head" \
   --argjson target "$(pr_target_binding "$pr_target")" \
   --arg session "$(jq -r '.session_id // ""' <<<"$payload")" \
-  '{binding:{repo:$repo,branch:$branch,head:$head,session:$session,target:$target},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}')"
+  --arg body_sha256 "$publish_body_sha256" \
+  '{binding:{repo:$repo,branch:$branch,head:$head,session:$session,target:$target},prefix:"reviewed:",fallback:"keep-draft",minimum_words:1}
+   | if $body_sha256 != "" then .binding.body_sha256 = $body_sha256 else . end')"
 review_request="$(timed_user_prompt request "$request_file" "$request_spec")" || exit 2
 request_id="$(jq -r .id <<<"$review_request")"
 request_status="$(jq -r .status <<<"$review_request")"
@@ -2074,4 +2211,5 @@ fi
 timed_user_prompt consume "$request_file" "$request_id" >/dev/null \
   || deny "Review confirmation could not be consumed; nothing was authorized."
 cleanup_marker_selection
+publish_checked_pr
 exit 0
