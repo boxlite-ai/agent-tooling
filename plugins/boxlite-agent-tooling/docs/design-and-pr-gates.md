@@ -44,7 +44,13 @@ Specs own input/output; `design-criteria.md` owns steps/entry format (2048-byte 
 
 How it works must open with a one-line overview and a concrete example before the mechanism ([design #418](https://github.com/boxlite-ai/agent-tooling/issues/418)). No overview, or no example before the mechanism, is high; other readability gaps, such as an undefined project-specific term, are low; mechanism and trade-off gaps keep their usual severity.
 
-Related work must open with a best-practice line, sourced or “none established” with evidence, then group cited approaches in one table with the design’s pick row marked Pick, and list failures, constraints and counterevidence under Lessons ([design #424](https://github.com/boxlite-ai/agent-tooling/issues/424)). A missing line or approach grouping is high.
+Related work opens with sourced best practice and stance, or evidence that none is established. It compares methods in one table, marks the chosen row Pick, and closes with cited Lessons. [Design #424](https://github.com/boxlite-ai/agent-tooling/issues/424)
+
+The **Projects** column lists every eligible researched project under its cited methods. The auditor checks the table against the log and sources. A missing best-practice line, column, or eligible project is high severity, as is incorrect method grouping. [Design #458](https://github.com/boxlite-ai/agent-tooling/issues/458)
+
+Design auditors, advisors, and commit or push auditors read the full design and log. Use public evidence or approval that covers every recipient.
+
+In Notion, place the Markdown table in a top-level code block.
 
 `probe-privacy.md` repeats deliberately in both specs; privacy hooks detect addresses/key requests, with address-only WebSearch checks.
 

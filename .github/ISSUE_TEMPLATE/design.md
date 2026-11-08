@@ -17,7 +17,16 @@ about: Describe a problem, researched approach, and validation plan.
 
 ## Related work and lessons
 
-<!-- Start with one line: what is the established best practice for this problem (with sources), or is none established? If there is no prior art, say so. Does the design adopt, adapt, or depart from it, and why? Then group prior work by approach in a table: who uses each, its trade-offs, and whether you adopt, adapt, or reject it. Mark the approach you choose as Pick. Include reusing what exists, simplifying, doing nothing, and any other alternative you considered, and say which trade-off decided it. List failures, constraints, and counterevidence as lessons below the table, each with its citation and effect on the design. -->
+<!-- State the sourced best practice and the design's stance, or give evidence none is established. Say if there is no prior art. -->
+
+| Method | Projects | Trade-offs | Stance |
+| --- | --- | --- | --- |
+| | | | |
+
+<!-- Use one row per method. List every researched project under each cited method, including rejected methods. Include only names and evidence that are public or approved for every reader and delegate. -->
+<!-- Use “No applicable method” for unmatched projects and “None” for empty Projects cells. -->
+<!-- Include reuse, simplification, no change, and other alternatives considered. Mark the chosen row Pick and name the deciding trade-off. -->
+<!-- List failures, constraints, and counterevidence below as Lessons. Cite each and explain its effect on the design. -->
 
 ## How it works
 

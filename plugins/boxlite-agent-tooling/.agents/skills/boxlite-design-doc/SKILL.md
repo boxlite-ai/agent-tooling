@@ -39,6 +39,7 @@ Every design:
 | --- | --- |
 | Fields | Tool, date, query count, stop status |
 | Exact queries | Only for kept items and the stop run |
+| Projects | Projects, evidence, exclusions. Public or approved for all log readers. |
 
 | SOTA | Rule |
 | --- | --- |
@@ -68,10 +69,10 @@ Set hard constraints and decision priorities first; apply `boxlite-clean-code` t
 | Maintenance risk | Prefer options easier to test, diagnose, change, and roll back; consider migration and operational costs. |
 | Lines of code (LOC) | Among equally suitable options, prefer fewer maintained lines without harming correctness, readability, performance, or maintenance. |
 
-- Compare whole solutions, helpers and configuration included; never cut LOC by hiding complexity, compressing formatting, or dropping needed checks or tests.
-- Apply the same criteria to every viable option; record benefits, costs, evidence, and the deciding trade-off in the recommendation.
-- When criteria conflict, explain which task constraint takes priority; resolve decision-changing unknowns before choosing.
-- Popularity is not consensus; never invent consensus; when no industry best practice is established, state that uncertainty and compare the evidence.
+- Compare whole solutions with helpers and configuration. Preserve clarity, formatting, checks, and tests when reducing LOC.
+- Apply the same criteria to viable options. Recommend with benefits, costs, evidence, and the deciding trade-off.
+- Explain which task constraint wins conflicts. Resolve unknowns that could change the decision.
+- Popularity alone cannot establish consensus. State when no industry best practice is established and compare evidence.
 
 ## Design
 
@@ -84,15 +85,17 @@ Outline:
 | TL;DR | Problem → outcome |
 | Problem | Current behavior or unmet need, concrete evidence, and impact |
 | Scope | Constraints, non-goals, acceptance |
-| Related work and lessons | Best-practice line first: sourced established practice and whether the design adopts, adapts, or departs, or none established, with evidence; then one approach table: users, trade-offs, stance, including reuse, simplify, and no change; then Lessons: failures, constraints, and counterevidence, each with its citation and effect on the design; the design’s pick row is marked Pick; comparison and recommendation using the option-selection principles |
-| How it works | Overview line, concrete example, and defined terms first; then approach or mechanism → outcome and trade-offs; secondary changes in their own subsections. Undefined term: a project-specific name used before any definition, link, or plain explanation |
+| Related work and lessons | Sourced best practice and stance first, or evidence none is established. One table, one row per method with Projects, trade-offs, and stance. Compare options per principles, including reuse, simplify, and no change. Mark Pick. Cite Lessons on failures, constraints, counterevidence, and effects. |
+| How it works | Overview line, concrete example, and definitions first. Explain mechanism, outcome, and trade-offs. Give secondary changes subsections. Define, link, or explain project terms before use. |
 | Validation | Claim or risk → check → expected result; observed versus planned; design-specific checks only |
 
-- Audience: human reviewers; apply `boxlite-writing`. Omit the log, search method, decision-irrelevant evidence limits, coding-agent instructions, repository workflow, PR or task bookkeeping, and references to this tooling.
+- In Projects, cite every eligible project under each method it uses or proposes. Count projects assessed from primary sources for methods or relevant lessons. Use “No applicable method” for unmatched projects and “None” for empty cells.
+- Put the table in a top-level Notion code block.
+- Write for humans with `boxlite-writing`. Use public evidence or approval covering every recipient. Omit logs, search methods, irrelevant evidence limits, agent instructions, workflow, PR or task bookkeeping, and tooling references.
 - Form: 1–3 pages before coding; prefer a GitHub issue, then Notion, then a Linear issue; a tracking issue may hold it.
 - Stance: challenge assumptions.
 - Lifecycle: keep it matching the final scope.
 
 ### 5. Gate
 
-Finish research before registering and before any implementation, tests and shell included; never backfill it. Then [register](../../../CONTRIBUTING.md#pull-request-descriptions) the design, store the log, then pass `design-auditor` and record `design-advisor` advice before the first code edit; registering is not research.
+Finish research before registration or implementation, including tests and shell. Never backfill. [Register](../../../CONTRIBUTING.md#pull-request-descriptions), store the log, pass `design-auditor`, and record `design-advisor` advice before code edits. Registration does not replace research.

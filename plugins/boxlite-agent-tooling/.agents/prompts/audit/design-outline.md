@@ -7,14 +7,14 @@ description: Whole-design audit checks (design #335).
 
 ## Whole design
 
-Check every skill outline row; record gaps as Entries.
+Check every outline row. Record gaps as Entries.
 
 | Section | Check |
 | --- | --- |
 | TL;DR | One sentence: problem → outcome |
 | Problem | Current behavior or need, concrete evidence, impact |
 | Scope | Constraints, non-goals, testable acceptance |
-| Related work and lessons | Opens with a best-practice line, sourced or “none established” with evidence, and the design’s stance; approaches grouped in one table, the pick row marked Pick; failures, constraints and counterevidence under Lessons with sources; alternatives include reuse, simplify and no change; comparison and recommendation follow boxlite-design-doc's option-selection principles; a missing line or grouping is high |
-| How it works | Mechanism → outcome; trade-offs; simplest approach meeting acceptance; no overview, or no example before the mechanism, is high; other readability gaps low |
-| Validation | Each claim or risk: a check and expected result; observed apart from planned |
-| Audience | The skill’s Audience rule; a log inside, or none stored, is high |
+| Related work and lessons | Sourced best practice and stance, or evidence none established. One table, one row per method. Projects covers all eligible projects by cited method. Check log and citations. Accept Notion's code-block table. Missing line, column, or project is high. Misgrouping is high. Mark Pick. Compare reuse, simplify, no change per skill. Cite failures, constraints, and counterevidence under Lessons. |
+| How it works | Simplest mechanism meeting acceptance, outcome, trade-offs. Missing opening overview or example is high. Other readability gaps low. |
+| Validation | Check and expected result per claim or risk. Separate observed and planned. |
+| Audience | Apply skill rules. Log inside or absent is high. Delegated reviewers read both inputs. Require public evidence or approval per recipient. |
