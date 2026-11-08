@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 In plugin, edit `guidance/workflow.md`; run
 `bash scripts/sync-guidance.sh <repo-root>` and `bash scripts/sync-guidance.test.sh`.
 
-<!-- agent-tooling:guidance:begin rev=0b91db4fb41b-dirty sha256=754253ba73a0 -->
+<!-- agent-tooling:guidance:begin rev=1f433e122f5d-dirty sha256=c111ec225cda -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -145,6 +145,7 @@ For each test added with a fix, run these steps manually, in order:
 - Verify external findings against the working tree with `git grep` and `git diff` before acting; reviews, lint, and PR comments may reference stale code.
 - Stay inside the ask: do and discuss only what the request needs; "drop X" means drop X.
 - File adjacent bugs, cleanup, or topics in a GitHub/Linear issue or docs note; mention them in one closing line, never a change or section.
+- If SessionStart supplies a follow-up queue, record verified unresolved findings there. Acknowledge the exact pending revisions before Stop, including an empty list.
 - Fix every evidenced site of the same defect in one pass; do not speculate.
 - Different nearby defects are adjacent work; one site does not resolve a systemic bug.
 - When behavior changes, remove superseded code, comments, prose, old-contract tests, and broken references in the same change.
