@@ -196,7 +196,9 @@ node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" release "
 node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" drain
 ```
 
-Use an operator-private state directory outside the checkout and absolute SDK and Claude paths. `enroll consumer` uses the committed consumer profile and matching origin. `opt-out tooling` or `opt-out consumer` revokes enrollment.
+Use an operator-private state directory outside the checkout and absolute SDK and Claude paths. Run `init` with the same directory for every linked worktree. The operator registry binds each clone to one journal.
+
+`enroll consumer` uses the committed consumer profile and matching origin. `opt-out tooling` or `opt-out consumer` revokes enrollment.
 
 The operator reviews the exact title, body, and destination before authorizing public disclosure. `approve` waits for a verified managed close. `release` records the same approval and explicitly releases the revision.
 

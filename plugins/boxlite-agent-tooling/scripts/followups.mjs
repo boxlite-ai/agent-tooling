@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { cloneIdentity, git, openFollowupQueue } from '../.agents/lib/followups.mjs';
@@ -17,7 +18,7 @@ function inside(root, path) {
   return !difference || (!isAbsolute(difference) && difference !== '..' && !difference.startsWith(`..${sep}`));
 }
 
-function isolatedUser(user, cwd, stateRoot, executable) {
+function isolatedUser(user, cwd, stateRoot, registryRoot, executable) {
   if (process.getuid === undefined || process.getuid() === 0 || !/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(user ?? '')) {
     fail('A dedicated unprivileged agent account is required on this host');
   }
@@ -28,11 +29,14 @@ function isolatedUser(user, cwd, stateRoot, executable) {
   const uid = Number(probe('/usr/bin/id', ['-u']));
   if (!Number.isSafeInteger(uid) || uid < 1 || uid === process.getuid()) fail('Agent account is not isolated');
   // Check effective access because filesystem ACLs can override mode bits.
-  probe('/bin/sh', ['-c', 'test ! -r "$1" && test ! -w "$1" && test ! -x "$1"', 'sh', stateRoot]);
-  for (const root of [PLUGIN, dirname(stateRoot), executable].filter(Boolean)) {
-    for (let path = root;; path = dirname(path)) {
+  for (const root of [stateRoot, registryRoot]) {
+    probe('/bin/sh', ['-c', 'test ! -r "$1" && test ! -w "$1" && test ! -x "$1"', 'sh', root]);
+  }
+  const inspected = new Set();
+  for (const root of [PLUGIN, dirname(stateRoot), dirname(registryRoot), executable].filter(Boolean)) {
+    for (let path = root; !inspected.has(path); path = dirname(path)) {
       probe('/bin/sh', ['-c', 'test ! -w "$1"', 'sh', path]);
-      if (dirname(path) === path) break;
+      inspected.add(path);
     }
   }
   const writable = probe('/usr/bin/find', [PLUGIN, '-exec', '/bin/sh', '-c',
@@ -87,19 +91,19 @@ async function main() {
   const statePath = join(realpathSync(dirname(stateRoot)), basename(stateRoot));
   if (inside(cwd, statePath) || inside(common, statePath)) fail('Follow-up authority must be outside the checkout and Git directory');
   const clone = cloneIdentity(cwd);
-  if (action === 'init') {
-    const queue = openFollowupQueue(statePath, clone, { initialize: true });
-    isolatedUser(agentUser, cwd, statePath);
-    return queue.status();
+  const registryRoot = join(userInfo().homedir, '.boxlite-followups');
+  const initialize = action === 'init';
+  if (initialize) {
+    for (const root of [statePath, registryRoot]) mkdirSync(root, { mode: 0o700, recursive: true });
   }
   if (!lstatSync(statePath).isDirectory()) fail('Initialize a private follow-up directory first');
   if (action === 'run' && (!isAbsolute(args[0] ?? '') || !isAbsolute(args[1] ?? ''))) {
     fail('SDK module and Claude executable must be absolute paths');
   }
   const executable = action === 'run' ? realpathSync(args[1]) : undefined;
-  const prefix = isolatedUser(agentUser, cwd, statePath, executable);
-  const queue = openFollowupQueue(statePath, clone);
-  if (action === 'status') return queue.status();
+  const prefix = isolatedUser(agentUser, cwd, statePath, registryRoot, executable);
+  const queue = openFollowupQueue(statePath, clone, { initialize, registryRoot });
+  if (initialize || action === 'status') return queue.status();
   if (action === 'run') {
     return runManagedFollowups(queue, cwd, prefix, args[0], executable, await readInput());
   }

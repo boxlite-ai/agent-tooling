@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { cloneIdentity, openFollowupQueue } from '../.agents/lib/followups.mjs';
@@ -92,6 +92,25 @@ async function managed(queue, cwd, sessionId = 'native-root', runStop = stopGate
   };
   return { hook, pre, capture, presentation, stop, finish, handle, adapter };
 }
+
+test('linked worktrees cannot initialize a second attempt journal for the same clone', t => {
+  const { repo, other } = fixture(t);
+  const root = dirname(repo);
+  const linked = join(root, 'linked');
+  const registryRoot = join(root, 'registry');
+  const first = join(root, 'operator-one');
+  const second = join(root, 'operator-two');
+  execFileSync('git', ['-C', repo, '-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '-q', '--detach', linked]);
+  const clone = cloneIdentity(repo);
+  const linkedClone = cloneIdentity(linked);
+  assert.equal(linkedClone, clone);
+
+  openFollowupQueue(first, clone, { initialize: true, registryRoot });
+  assert.deepEqual(openFollowupQueue(first, linkedClone, { registryRoot }).status(), []);
+  assert.throws(() => openFollowupQueue(second, linkedClone, { initialize: true, registryRoot }),
+    /Clone already uses another follow-up state directory/);
+  assert.deepEqual(openFollowupQueue(second, cloneIdentity(other), { initialize: true, registryRoot }).status(), []);
+});
 
 test('the live handle rejects another session, subagent and clone, then works after compaction', async t => {
   const { repo, other, queue, otherQueue } = fixture(t);

@@ -70,17 +70,45 @@ export function eligibleFollowup(state, draft) {
 
 // The lock database stays reserved while a durable attempt is committed in the state
 // database and the same process owns the transport. A crash releases the lock, not the attempt.
-export function openFollowupQueue(stateRoot, clone, { initialize = false } = {}) {
+export function openFollowupQueue(stateRoot, clone, { initialize = false, registryRoot } = {}) {
   requireValue(/^[a-f0-9]{64}$/.test(clone), 'Invalid clone identity');
   privateDirectory(stateRoot, initialize);
   const root = realpathSync(stateRoot);
   const directory = join(root, clone);
-  if (initialize && !existsSync(directory)) initializeQueue(root, directory, clone);
-  privateDirectory(directory, false);
   const statePath = join(directory, 'queue.sqlite');
   const lockPath = join(directory, 'lock.sqlite');
-  for (const file of [statePath, lockPath]) {
-    requireValue(lstatSync(file).isFile(), 'Follow-up state is missing or unsafe');
+
+  function checkQueue(create) {
+    if (create && !existsSync(directory)) initializeQueue(root, directory, clone);
+    privateDirectory(directory, false);
+    for (const file of [statePath, lockPath]) {
+      requireValue(lstatSync(file).isFile(), 'Follow-up state is missing or unsafe');
+    }
+  }
+
+  if (registryRoot) {
+    privateDirectory(registryRoot, initialize);
+    const registryPath = join(registryRoot, 'roots.sqlite');
+    if (existsSync(registryPath)) requireValue(lstatSync(registryPath).isFile(), 'Follow-up registry is unsafe');
+    const registry = new DatabaseSync(registryPath);
+    try {
+      registry.exec(`PRAGMA busy_timeout = 1000;
+        CREATE TABLE IF NOT EXISTS roots (clone TEXT PRIMARY KEY, path TEXT NOT NULL, identity TEXT NOT NULL);
+        BEGIN IMMEDIATE;`);
+      const bound = registry.prepare('SELECT path, identity FROM roots WHERE clone = ?').get(clone);
+      requireValue(bound || initialize, 'Run init to bind this clone to its follow-up state directory');
+      requireValue(!bound || bound.path === root, 'Clone already uses another follow-up state directory');
+      checkQueue(!bound);
+      const { dev, ino } = statSync(statePath, { bigint: true });
+      const identity = `${dev}:${ino}`;
+      requireValue(!bound || bound.identity === identity, 'Bound follow-up journal was replaced');
+      if (!bound) registry.prepare('INSERT INTO roots VALUES (?, ?, ?)').run(clone, root, identity);
+      registry.exec('COMMIT');
+    } finally {
+      registry.close();
+    }
+  } else {
+    checkQueue(initialize);
   }
 
   function locked(action) {
