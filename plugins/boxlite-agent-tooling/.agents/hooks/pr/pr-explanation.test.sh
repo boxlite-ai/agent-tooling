@@ -33,6 +33,14 @@ cd "$scratch/repo"
 bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 >/dev/null
 pass=0 fail=0
 while IFS= read -r fixture; do
+  # Keep the captured explanation intact and put fixture metadata in a list.
+  fixture="$(jq -c --arg url 'https://github.com/example/repo/issues/1' '
+    .body |= sub("\n\nDesign: [^\n]+\n\n";
+      "\n\n## Links\n\n- Design: " + $url + "\n- Fixture metadata.\n\n")
+    | .html |= sub("\n<p>Design: [^\n]+</p>\n";
+      "\n<h2>Links</h2>\n<ul><li>Design: <a href=\"" + $url + "\">" + $url
+      + "</a></li><li>Fixture metadata.</li></ul>\n")
+  ' <<<"$fixture")"
   printf '%s\n' "$fixture" > "$EXPLANATION_FIXTURE"
   name="$(jq -r .name <<<"$fixture")"
   body="$(jq -r .body <<<"$fixture")"

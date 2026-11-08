@@ -161,7 +161,9 @@ structure fits 0 '' 'One sentence.'
 structure names_skill 1 'Structure limits broken; apply boxlite-writing:' 'One. Two. Three. Four.'
 structure no_hint 1 'Structure limits broken:' 'One. Two. Three. Four.' no-hint
 [[ "$structure_output" != *boxlite-writing* ]] && ok no_hint_omits_skill || bad "no_hint_omits_skill ($structure_output)"
-ten_long="$(for _ in {1..10}; do printf '%s.\n\n' "$(long 'word ' 26)"; done)"
+long_sentence="Word $(long 'word ' 25)"
+long_sentence="${long_sentence% }"
+ten_long="$(for _ in {1..5}; do printf -- '- %s. %s.\n' "$long_sentence" "$long_sentence"; done)"
 structure caps_list 1 '- 5 more not shown' "$ten_long"
 [[ "$structure_output" == *$'\nRewrite in place: keep every fact, number, caveat'* ]] \
   && ok keeps_content || bad "keeps_content ($structure_output)"
