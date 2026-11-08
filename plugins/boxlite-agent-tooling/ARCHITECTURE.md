@@ -120,7 +120,7 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | Location | Owner |
 | --- | --- |
 | [hooks/](hooks/README.md) | Host manifests. |
-| [.agents/hooks/](.agents/hooks/README.md), [audit/](.agents/hooks/audit/README.md) | Stable lifecycle entries, grouped helpers/runners/tests. |
+| [.agents/hooks/](.agents/hooks/README.md), [audit/](.agents/hooks/audit/README.md) | Stable lifecycle hooks, shared helpers, and audit runners. |
 | `.agents/lib/` | Sourced state, host, receipt, rendering, and dispatch libraries. |
 | [`.agents/prompts/`](PROMPTS.md#runtime-contracts) | Runtime Markdown templates. |
 | `.agents/watch/` | Producer, durable intent, pending delivery, consumers. |
