@@ -120,7 +120,7 @@ Shell owners release locks on EXIT/INT/TERM; SIGKILL may prevent cleanup; no hot
 
 | Change | Required action |
 | --- | --- |
-| Release | Bump generic/Claude/Codex manifests and both version fields in Claude/Copilot marketplaces; Codex marketplace follows `main`. |
+| Release | Prepare one bump across the three manifests and two versioned marketplaces. Follow the [release runbook](../../../docs/releases.md). |
 | Auditor task/dossier format | Bump version so stale sessions request reload instead of receiving incompatible tasks. |
 | Host packaging | Run parity, including symlink-free copies; install/reinstall using real CLI in empty isolated Codex home, checking fresh `skills/list` and `hooks/list`. |
 | Consumer adoption | Run `.agent-tooling/install.sh`, refresh host plugin, then reload/start a new task. |

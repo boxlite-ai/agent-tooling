@@ -183,7 +183,7 @@ Publish each layer through guarded commands, then `gh stack link` verified PR UR
 
 ## Author review acknowledgment
 
-Trusted base/default-branch `.github/workflows/author-review.yml` invokes `scripts/pr-author-review.sh` → `.agents/lib/pr-author-review.sh` → `pr_author_review_run` independently of local hooks.
+The write-enabled `.github/workflows/author-review.yml` checks out the repository's trusted default branch. It invokes `scripts/pr-author-review.sh` → `.agents/lib/pr-author-review.sh` → `pr_author_review_run` independently of local hooks.
 
 | Live state | Result |
 | --- | --- |

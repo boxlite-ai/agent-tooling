@@ -8,6 +8,7 @@ API_SHELL := $(P)/scripts/api-compatibility.sh \
 
 .PHONY: test\:subagent test\:verdict test\:architecture test\:parity test\:guidance test\:writing
 .PHONY: test\:api-compatibility test\:plugin test\:api-lint test\:guidance-check test\:bootstrap
+.PHONY: test\:release
 
 test\:bootstrap:
 	@for suite in templates/install.test.sh templates/claude-plugin-bootstrap.test.sh templates/codex-plugin-bootstrap.test.sh; do \
@@ -26,6 +27,8 @@ test\:architecture:
 
 test\:parity:
 	bash $(P)/host-parity.test.sh
+test\:release:
+	bash .github/release/tests/release.test.sh
 
 test\:guidance:
 	bash $(P)/scripts/sync-guidance.test.sh

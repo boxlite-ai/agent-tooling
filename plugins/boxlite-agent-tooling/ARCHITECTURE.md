@@ -44,7 +44,7 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 | Trace a commit or push | [Git hooks](.githooks/README.md#git-gates) and [audit routes](.agents/hooks/audit/architecture.md#audit-producers) |
 | Diagnose a blocked final reply | [Stop gate decisions](.agents/hooks/audit/architecture.md#stop-gate-decisions) and [audit state](.agents/hooks/audit/state.md#state-files) |
 | Check response authority or writing limits | [Timed confirmations](docs/timed-confirmations.md) and [writing checks](docs/writing-checks.md) |
-| Inspect PR watch delivery | [Watcher lifecycle](.agents/watch/consumer-lifecycle.md#producer-and-delivery-contracts) |
+| Inspect PR watch delivery or edit scope | [Watcher lifecycle](.agents/watch/consumer-lifecycle.md#producer-and-delivery-contracts) and [live PR scope](.agents/watch/escalation-policy.md#escalate-instead-of-acting) |
 | Maintain installation or check API changes | [Installation runtime](scripts/README.md#installation-runtime) and [API compatibility](scripts/api-compatibility.md#api-compatibility) |
 
 ### Commit/push attempts

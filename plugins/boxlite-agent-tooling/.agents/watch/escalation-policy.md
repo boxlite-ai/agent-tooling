@@ -24,8 +24,10 @@ Ask once before acting on these, and do not wait for a reply: leave the item unc
 
 1. No code signal: runner OOM, network/cache failures, timeouts, or never-started jobs.
    Report the run; no edits/reruns.
-2. Files **not already in this PR's diff**
-   (`git diff --name-only origin/main...HEAD`).
+2. Files **not already in this PR's diff**. From the watched worktree, run
+   `bash <tooling-root>/.agents/watch/pr-watch-scope.sh PR_URL EXPECTED_HEAD`.
+   Use the installed helper beside this policy.
+   Escalate if the check fails or a path is absent.
 3. `e2e-local` or `e2e-cloud` failures.
 4. Changes under `.githooks/`, `.claude/`, `.codex/`, or `.agents/`.
 5. A review requests design/spec changes or depends on product intent.

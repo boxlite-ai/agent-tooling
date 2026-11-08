@@ -1,0 +1,46 @@
+name: Release candidate
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify release source and bump
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check candidate as Git data
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ && "$PR_HEAD" =~ ^[0-9a-f]{40}$ &&
+             "$PR_BASE" == main && "$PR_REPO" == "$GITHUB_REPOSITORY" ]]
+          git fetch --no-tags origin \
+            refs/heads/main:refs/remotes/origin/main \
+            refs/heads/dev:refs/remotes/origin/dev \
+            "refs/pull/$PR_NUMBER/head:refs/remotes/origin/release-candidate"
+          [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]]
+          [[ "$(git rev-parse origin/release-candidate)" == "$PR_HEAD" ]]
+          bash .github/release/release.sh verify HEAD origin/dev "$PR_HEAD"
+  parity:
+    name: Release host parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: make test:parity

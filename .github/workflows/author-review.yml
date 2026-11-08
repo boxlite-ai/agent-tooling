@@ -32,9 +32,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          # This job can write upstream. Load code from the repository default branch.
+          ref: refs/heads/${{ github.event.repository.default_branch }}
           persist-credentials: false
           fetch-depth: 1
       - name: Reconcile author acknowledgment

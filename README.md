@@ -314,6 +314,8 @@ The host scripts become loaders for the adopted package.
 
 Reusable implementation lives in [`plugins/boxlite-agent-tooling/`](plugins/boxlite-agent-tooling/). Consumer bootstrap files live in [`templates/`](templates/). Start with the [contributor guide](plugins/boxlite-agent-tooling/CONTRIBUTING.md) and [architecture map](plugins/boxlite-agent-tooling/ARCHITECTURE.md#code-map).
 
+Maintainers prepare version bumps and publish releases using the [release runbook](docs/releases.md).
+
 Directory guides: [host hook wiring](plugins/boxlite-agent-tooling/hooks/README.md),
 [hook scripts](plugins/boxlite-agent-tooling/.agents/hooks/README.md),
 [audit gates and runners](plugins/boxlite-agent-tooling/.agents/hooks/audit/README.md),
