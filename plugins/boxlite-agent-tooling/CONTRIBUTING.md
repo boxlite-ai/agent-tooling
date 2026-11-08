@@ -44,6 +44,12 @@ On macOS, set `BOXLITE_FOLLOWUP_SDK` and `BOXLITE_FOLLOWUP_CLAUDE` to the absolu
 
 For releases and upgrades, see [release maintenance](scripts/README.md#release-maintenance). For test setup, see [auditor test isolation](.agents/hooks/audit/README.md#auditor-test-isolation).
 
+### Live agent tests
+
+Test every new or changed agent-facing feature through its normal entry point in real Codex and Claude Code sessions.
+
+Record the scenario, host version, OS, and observed result. Report missing live coverage separately from fixture results.
+
 ## Commit & PR messages
 
 ### Commit messages
