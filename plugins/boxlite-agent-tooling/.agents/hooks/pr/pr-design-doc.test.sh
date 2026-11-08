@@ -15,11 +15,11 @@ export DESIGN_TEST_RENDER_FIXTURES="$plugin/.agents/hooks/pr/fixtures/pr-design-
 cat > "$scratch/bin/gh" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  'api --hostname github.com markdown -f mode=gfm -f text='*)
+  'api --hostname github.com markdown --method POST --input - --header Content-Type: application/json; charset=utf-8')
     [[ "${DESIGN_TEST_RENDER_FAILURE:-0}" == 0 ]] || exit 1
     if [[ "${DESIGN_TEST_RENDER_OVERSIZE:-0}" == 1 ]]; then printf '%65537s' x; exit; fi
     printf '<h2>How it works</h2><p>Verify the document link.</p>\n'
-    body="${8#text=}"
+    body="$(jq -er 'select(.mode == "gfm") | .text')" || exit 2
     jq -er --arg body "${body#"${SUMMARY_PREFIX}"}" 'select(.body == $body) | .html' "$DESIGN_TEST_RENDER_FIXTURES" ;;
   'api --hostname github.com repos/example/repo/issues/1')
     [[ "${DESIGN_TEST_DELETED:-0}" == 0 ]] || exit 1

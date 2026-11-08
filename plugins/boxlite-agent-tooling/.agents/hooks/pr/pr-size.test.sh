@@ -15,7 +15,7 @@ mkdir -p "$scratch/bin" "$scratch/repo/.agents/state"
 cat > "$scratch/bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
-  'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
+  'api --hostname github.com markdown --method POST --input - --header Content-Type: application/json; charset=utf-8') jq -e 'select(.mode == "gfm") | .text | contains("https://github.com/example/repo/issues/123")' >/dev/null || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
   'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
   'repo view --json nameWithOwner,defaultBranchRef,url') printf '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api --hostname github.com repos/example/repo/git/ref/heads/main') jq -nc --arg sha "$SIZE_TEST_BASE" '{object:{type:"commit",sha:$sha}}' ;;
@@ -209,7 +209,8 @@ unset SIZE_TEST_FILES
 rm -f "$scratch/repo/.agents/state/pr-size-request.json" "$scratch/repo/.agents/state/pr-review-request.json"
 long_body="$(printf 'word %.0s' {1..81})"
 out="$(call_hook "gh pr create --title 'feat: validate text first' --body '$long_body'")"
-[[ "$out" == *'paragraph'* && "$out" != *'401'* ]] \
+[[ "$out" == *'TL;DR heading missing'* && "$out" != *'401'* \
+  && ! -e "$scratch/repo/.agents/state/pr-size-request.json" ]] \
   || { printf 'FAIL: size lookup preceded invalid-body rejection\n' >&2; exit 1; }
 out="$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
