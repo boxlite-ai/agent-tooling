@@ -18,6 +18,7 @@ const MAX_RESPONSE = 4 * 1024 * 1024;
 const PAGE_SIZE = 50;
 const BACKOFF_MS = 60_000;
 
+/** Send one GraphQL request and distinguish a proven unsent failure from uncertainty. */
 export function githubClient(timeout = 5000) {
   const token = execFileSync('gh', ['auth', 'token', '--hostname', 'github.com'], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout, maxBuffer: 4096,
@@ -86,6 +87,7 @@ function boundedField(value, bytes) {
   return typeof value === 'string' && value.length > 0 && Buffer.byteLength(JSON.stringify(value)) <= bytes;
 }
 
+/** Require the original repository, author, and marker before accepting a match. */
 function matchingIssue(issue, attempt) {
   return boundedField(issue?.id, 256) && boundedField(issue.url, 512) && ISSUE_URL.test(issue.url) &&
     issue.repository?.id === attempt.target && issue.author?.id === attempt.author &&
@@ -102,6 +104,7 @@ function defer(attempt, error) {
   attempt.nextAt = Math.max(Date.now() + BACKOFF_MS, error?.retryAt ?? 0);
 }
 
+/** Advance a read-only scan for an attempt whose create may have succeeded. */
 async function reconcile(send, draft, attempt, save) {
   let page;
   const size = attempt.pageSize ?? PAGE_SIZE;
@@ -142,6 +145,7 @@ async function reconcile(send, draft, attempt, save) {
   save();
 }
 
+/** Schedule eligible drafts within one shared request and time budget. */
 export async function drainFollowups(queue, client) {
   const deadline = performance.now() + 30_000;
   let requests = 0;

@@ -60,7 +60,9 @@ The optional Claude launcher injects the queue rule and handle through SessionSt
 
 The capture callback waits for the installed Stop gate to allow the turn. It can ask once per prompt for an exact draft acknowledgment, including an empty set. A later tool call or model turn invalidates the seal.
 
-The operator stores clone-keyed SQLite state outside the checkout and beyond the agent account's access. An operator-owned registry binds each clone to one journal across linked worktrees and same-filesystem renames. Finished drafts leave the active queue and keep their deduplication records in SQLite.
+The operator stores clone-keyed SQLite state outside the checkout and beyond the agent account's access. An operator-owned registry binds each clone to one journal across linked worktrees and same-filesystem renames. Finished drafts leave the active queue and keep their deduplication records in SQLite. Status and history read at most 50 completed records per page.
+
+The queue lock covers the version upgrade and archive writes. The upgrade fences older writers and discards legacy handles without a recorded owner. Drafts, approvals, and attempts survive the upgrade.
 
 The operator checks the private SDK installation before loading any of its code. Startup reclaims abandoned handles when their recorded owner process has exited. The active draft size limit leaves room for approvals, close evidence, and retry state.
 

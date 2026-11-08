@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { cloneIdentity, openFollowupQueue } from '../.agents/lib/followups.mjs';
 import { createFollowupSession, QUEUE_TOOL } from '../.agents/lib/followup-session.mjs';
-import { runManagedFollowups, sessionHooks } from '../.agents/lib/followup-claude.mjs';
+import { checkSdk, runManagedFollowups, sessionHooks } from '../.agents/lib/followup-claude.mjs';
 import { drainFollowups } from '../.agents/lib/followup-publisher.mjs';
 
 const GATE = fileURLToPath(new URL('../.agents/hooks/stop-gate.sh', import.meta.url));
@@ -403,16 +404,47 @@ test('retiring a draft removes it from the live queue and preserves deduplicatio
   assert.equal(queue.publish(state => Object.keys(state.drafts).length), 0);
 });
 
-test('an untrusted SDK is refused before evaluating its module', async t => {
+test('the SDK trust policy rejects unsafe installations before evaluation', { skip: process.platform === 'win32' }, async t => {
   const { repo, queue } = fixture(t);
-  const sdk = join(dirname(repo), 'sdk.mjs');
-  writeFileSync(join(dirname(repo), 'package.json'), JSON.stringify({
+  const install = join(dirname(repo), 'private-install');
+  const modules = join(install, 'node_modules');
+  const sdk = join(modules, '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs');
+  mkdirSync(dirname(sdk), { recursive: true });
+  writeFileSync(join(dirname(sdk), 'package.json'), JSON.stringify({
     name: '@anthropic-ai/claude-agent-sdk', version: '0.3.319',
   }));
   writeFileSync(sdk, "throw new Error('SDK code executed');");
-  await assert.rejects(runManagedFollowups(queue, repo, [], sdk, process.execPath, 'Fixture', {
-    verifySdk() { throw new Error('SDK path is untrusted'); },
-  }), /SDK path is untrusted/);
+  const previousNodePath = process.env.NODE_PATH;
+  t.after(() => {
+    if (previousNodePath === undefined) delete process.env.NODE_PATH;
+    else process.env.NODE_PATH = previousNodePath;
+  });
+  let agentCanWrite = false;
+  const run = () => runManagedFollowups(queue, repo, [], sdk, process.execPath, 'Fixture', {
+    verifySdk: path => checkSdk(path, {
+      assertPrivate: root => {
+        assert.equal(root, realpathSync(install));
+        if (agentCanWrite) throw new Error('Agent account can access SDK installation');
+      },
+      inspect: root => assert.equal(root, realpathSync(install)),
+    }),
+  });
+
+  process.env.NODE_PATH = dirname(repo);
+  await assert.rejects(run(), /NODE_PATH unset/);
+  delete process.env.NODE_PATH;
+
+  agentCanWrite = true;
+  await assert.rejects(run(), /Agent account can access SDK installation/);
+  agentCanWrite = false;
+
+  const dependency = join(modules, 'external');
+  symlinkSync(repo, dependency);
+  await assert.rejects(run(), /links outside the private npm installation/);
+  unlinkSync(dependency);
+
+  mkdirSync(join(dirname(repo), 'node_modules'));
+  await assert.rejects(run(), /outside other npm trees/);
 });
 
 test('an unfinished child that ignores TERM is killed before the supervisor returns', async t => {
@@ -447,7 +479,7 @@ test('an unfinished child that ignores TERM is killed before the supervisor retu
     },
     closeTimeout: 250,
   });
-  await run.catch(error => assert.match(error.message, /did not close within the deadline/));
+  await assert.rejects(run, /did not close within the deadline/);
   assert.equal(child.signalCode, 'SIGKILL');
 });
 
@@ -513,4 +545,87 @@ test('a path-keyed journal keeps its approval after migration and checkout renam
   assert.equal(stored.id, draft.id);
   assert.equal(stored.approved, true);
   assert.equal(stored.released, true);
+});
+
+
+test('a renamed legacy clone cannot create another journal before recovery', t => {
+  const { repo } = fixture(t);
+  const root = join(dirname(repo), 'legacy-state');
+  const registryRoot = join(dirname(repo), 'legacy-registry');
+  const oldCommon = execFileSync('git', ['-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+    { encoding: 'utf8' }).trim();
+  const legacyClone = cloneIdentity(repo, { legacy: true });
+  const legacy = openFollowupQueue(root, legacyClone, { initialize: true, registryRoot });
+  legacy.enroll('tooling', DESTINATION);
+  const draft = approveDraft(legacy, 'legacy rename');
+  const registry = new DatabaseSync(join(registryRoot, 'roots.sqlite'));
+  try { registry.prepare('DELETE FROM journal_keys WHERE clone = ?').run(legacyClone); }
+  finally { registry.close(); }
+
+  const renamed = join(dirname(repo), 'renamed');
+  renameSync(repo, renamed);
+  const clone = cloneIdentity(renamed);
+  assert.throws(() => openFollowupQueue(root, clone, {
+    initialize: true, registryRoot, legacyClone: cloneIdentity(renamed, { legacy: true }),
+  }), /previous Git common directory/);
+  assert.throws(() => openFollowupQueue(root, clone, {
+    initialize: true, registryRoot, requireLegacy: true,
+    legacyClone: cloneIdentity(renamed, { legacyPath: join(dirname(repo), 'wrong', '.git') }),
+  }), /Legacy follow-up journal was not found/);
+  const recovered = openFollowupQueue(root, clone, {
+    initialize: true, registryRoot, requireLegacy: true, legacyClone: cloneIdentity(renamed, { legacyPath: oldCommon }),
+  });
+  assert.equal(recovered.status()[0].id, draft.id);
+  assert.equal(recovered.status()[0].approved, true);
+  assert.equal(recovered.status()[0].released, true);
+});
+
+test('upgrading the journal removes ownerless handles and preserves live sessions and attempts', async t => {
+  const { queue, state } = fixture(t);
+  queue.enroll('tooling', DESTINATION);
+  const draft = approveDraft(queue, 'ambiguous legacy create');
+  await drainFollowups(queue, async query => {
+    if (query.includes('viewer')) return { viewer: { id: 'U_original' } };
+    throw new Error('Lost create response');
+  });
+  const old = { root: true, clone: queue.clone, native: 'ownerless', instance: 'old', prompt: 'old', cursor: 0 };
+  const abandoned = queue.start(old);
+  const live = { ...old, native: 'live' };
+  const liveHandle = queue.start(live);
+  const file = join(state, queue.clone, 'queue.sqlite');
+  const db = new DatabaseSync(file);
+  try {
+    const prior = JSON.parse(db.prepare('SELECT document FROM queue WHERE id = 1').get().document);
+    prior.version = 1;
+    delete prior.sessions[abandoned].owner;
+    db.prepare('UPDATE queue SET document = ? WHERE id = 1').run(JSON.stringify(prior));
+  } finally { db.close(); }
+
+  const next = openFollowupQueue(state, queue.clone);
+  assert.throws(() => next.capture(old, { action: 'list', handle: abandoned }), /live root session/);
+  assert.deepEqual(next.capture(live, { action: 'list', handle: liveHandle }), { drafts: [] });
+  assert.equal(next.status()[0].id, draft.id);
+  assert.equal(next.status()[0].attempt.status, 'pending');
+  assert.equal(next.publish(state => state.version), 2);
+});
+
+test('status bounds completed history and older pages retain deduplication', t => {
+  const { queue } = fixture(t);
+  const caller = { root: true, clone: queue.clone, native: 'archive', instance: 'archive', prompt: 'archive', cursor: 0 };
+  const handle = queue.start(caller);
+  const record = index => queue.capture(caller, { ...DRAFT, handle, operation: `history ${index}` });
+  const completed = Array.from({ length: 52 }, (_, index) => {
+    const draft = record(index);
+    queue.capture(caller, { action: 'resolve', handle, id: draft.id, revision: draft.revision });
+    return draft.id;
+  });
+  const active = record(52);
+  assert.deepEqual(queue.status().map(draft => draft.id), [...completed.slice(-50), active.id]);
+  const recent = queue.history();
+  assert.deepEqual(recent.drafts.map(draft => draft.id), completed.slice(-50).reverse());
+  const oldest = queue.history(recent.nextBefore);
+  assert.deepEqual(oldest.drafts.map(draft => draft.id), completed.slice(0, 2).reverse());
+  assert.equal(oldest.nextBefore, null);
+  assert.equal(record(0).status, 'resolved');
+  assert.equal(record(0).id, completed[0]);
 });

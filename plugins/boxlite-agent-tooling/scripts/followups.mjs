@@ -1,55 +1,25 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { cloneIdentity, git, openFollowupQueue } from '../.agents/lib/followups.mjs';
+import { cloneIdentity, containsPath, git, openFollowupQueue } from '../.agents/lib/followups.mjs';
 import { drainFollowups, githubClient, githubRepository } from '../.agents/lib/followup-publisher.mjs';
-import { AGENT_ENV, PLUGIN, runManagedFollowups, SUDO } from '../.agents/lib/followup-claude.mjs';
+import { AGENT_ENV, checkSdk, PLUGIN, runManagedFollowups, SUDO } from '../.agents/lib/followup-claude.mjs';
 
 const TOOLING = 'boxlite-ai/agent-tooling';
 
 function fail(message) { throw new Error(message); }
 
-function inside(root, path) {
-  const difference = relative(root, path);
-  return !difference || (!isAbsolute(difference) && difference !== '..' && !difference.startsWith(`..${sep}`));
-}
-
-function existing(path) {
-  try { return lstatSync(path); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
-}
-
+/** Resolve existing parents while keeping missing path components for init. */
 function canonicalLocation(path) {
-  if (existing(path)) return realpathSync(path);
+  if (lstatSync(path, { throwIfNoEntry: false })) return realpathSync(path);
   return join(canonicalLocation(dirname(path)), basename(path));
 }
 
-function checkSdk(sdkPath, probe, inspect) {
-  const root = dirname(dirname(dirname(dirname(sdkPath))));
-  const modules = join(root, 'node_modules');
-  if (sdkPath !== join(modules, '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs') || process.env.NODE_PATH) {
-    fail('Use a private npm install for the SDK with NODE_PATH unset');
-  }
-  probe('/bin/sh', ['-c', 'test ! -r "$1" && test ! -w "$1" && test ! -x "$1"', 'sh', root]);
-  inspect(root);
-
-  // The SDK and dependencies execute as the operator. Reject external npm links
-  // and fallback search trees that sit outside the private installation.
-  for (const entry of readdirSync(modules, { withFileTypes: true, recursive: true })) {
-    if (entry.isSymbolicLink() && !inside(modules, realpathSync(join(entry.parentPath, entry.name)))) {
-      fail('SDK dependency links outside the private npm installation');
-    }
-  }
-  for (const path of createRequire(sdkPath).resolve.paths('zod')) {
-    if (!inside(modules, path) && existing(path)) fail('SDK install must be outside other npm trees');
-  }
-}
-
+/** Probe effective agent access before opening operator-owned state. */
 function isolatedUser(user, cwd, stateRoot, registryRoot, executable) {
   if (process.getuid === undefined || process.getuid() === 0 || !/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(user ?? '')) {
     fail('A dedicated unprivileged agent account is required on this host');
@@ -61,9 +31,8 @@ function isolatedUser(user, cwd, stateRoot, registryRoot, executable) {
   const uid = Number(probe('/usr/bin/id', ['-u']));
   if (!Number.isSafeInteger(uid) || uid < 1 || uid === process.getuid()) fail('Agent account is not isolated');
   // Check effective access because filesystem ACLs can override mode bits.
-  for (const root of [stateRoot, registryRoot]) {
-    probe('/bin/sh', ['-c', 'test ! -r "$1" && test ! -w "$1" && test ! -x "$1"', 'sh', root]);
-  }
+  const assertPrivate = root => probe('/bin/sh', ['-c', 'test ! -r "$1" && test ! -w "$1" && test ! -x "$1"', 'sh', root]);
+  for (const root of [stateRoot, registryRoot]) assertPrivate(root);
   const inspected = new Set();
   const inspect = root => {
     for (let path = root; !inspected.has(path); path = dirname(path)) {
@@ -75,7 +44,7 @@ function isolatedUser(user, cwd, stateRoot, registryRoot, executable) {
   const writable = probe('/usr/bin/find', [PLUGIN, '-exec', '/bin/sh', '-c',
     'for entry do if test -w "$entry"; then printf "%s\\n" "$entry"; fi; done', 'sh', '{}', '+']);
   if (writable) fail('The agent account can modify the installed plugin');
-  return { prefix, verifySdk: sdkPath => checkSdk(sdkPath, probe, inspect) };
+  return { prefix, verifySdk: sdkPath => checkSdk(sdkPath, { assertPrivate, inspect }) };
 }
 
 function consumerName(cwd) {
@@ -115,17 +84,21 @@ async function readInput() {
   return text;
 }
 
+/** Validate the operator boundary before dispatching a queue command. */
 async function main() {
   const [stateArgument, agentUser, action, ...args] = process.argv.slice(2);
-  if (!stateArgument || !agentUser || !action) fail('Usage: followups.mjs STATE_DIR AGENT_USER init|enroll|opt-out|status|capture|approve|release|drain|run');
+  if (!stateArgument || !agentUser || !action) fail('Usage: followups.mjs STATE_DIR AGENT_USER init|enroll|opt-out|status|history|capture|approve|release|drain|run');
   const cwd = realpathSync(git(process.cwd(), 'rev-parse', '--show-toplevel'));
   const stateRoot = resolve(stateArgument);
   const common = realpathSync(git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'));
   const statePath = join(canonicalLocation(dirname(stateRoot)), basename(stateRoot));
-  if (inside(cwd, statePath) || inside(common, statePath)) fail('Follow-up authority must be outside the checkout and Git directory');
+  if (containsPath(cwd, statePath) || containsPath(common, statePath)) fail('Follow-up authority must be outside the checkout and Git directory');
   const clone = cloneIdentity(cwd);
   const registryRoot = join(userInfo().homedir, '.boxlite-followups');
   const initialize = action === 'init';
+  const previousCommon = initialize ? args[0] : undefined;
+  if (initialize && args.length > 1) fail('Use init [PREVIOUS_GIT_COMMON_DIR]');
+  const legacyClone = cloneIdentity(cwd, { legacy: true, legacyPath: previousCommon });
   if (initialize) {
     for (const root of [statePath, registryRoot]) mkdirSync(root, { mode: 0o700, recursive: true });
   }
@@ -136,9 +109,13 @@ async function main() {
   const executable = action === 'run' ? realpathSync(args[1]) : undefined;
   const { prefix, verifySdk } = isolatedUser(agentUser, cwd, statePath, registryRoot, executable);
   const queue = openFollowupQueue(statePath, clone, {
-    initialize, registryRoot, legacyClone: cloneIdentity(cwd, { legacy: true }),
+    initialize, registryRoot, legacyClone, requireLegacy: previousCommon !== undefined,
   });
   if (initialize || action === 'status') return queue.status();
+  if (action === 'history') {
+    if (args.length > 1 || (args.length && !/^[1-9][0-9]*$/.test(args[0]))) fail('Use history [NEXT_BEFORE]');
+    return queue.history(args.length ? Number(args[0]) : null);
+  }
   if (action === 'run') {
     return runManagedFollowups(queue, cwd, prefix, args[0], executable, await readInput(), { verifySdk });
   }

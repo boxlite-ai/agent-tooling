@@ -200,6 +200,12 @@ node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" drain
 
 Use an operator-private state directory outside the checkout and absolute SDK and Claude paths. Run `init` with the same directory for every linked worktree. The operator registry binds each clone to one journal, including after a same-filesystem rename.
 
+Close older managed runs before upgrading their journals. If a clone moved before its first upgrade, pass its former canonical Git common directory to `init` and reuse the existing state directory. For example, run `init /old/checkout/.git` from the relocated checkout.
+
+Open each existing journal once after upgrading before initializing a new clone.
+
+`status` shows active drafts and the 50 most recent completed records. Use `history` for completed records, then pass the returned `nextBefore` to `history` for the next page.
+
 `enroll consumer` uses the committed consumer profile and matching origin. `opt-out tooling` or `opt-out consumer` revokes enrollment.
 
 The operator reviews the exact title, body, and destination before authorizing public disclosure. `approve` waits for a verified managed close. `release` records the same approval and explicitly releases the revision.

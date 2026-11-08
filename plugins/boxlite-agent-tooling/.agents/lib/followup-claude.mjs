@@ -1,16 +1,40 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFollowupSession, QUEUE_TOOL } from './followup-session.mjs';
 import { drainFollowups } from './followup-publisher.mjs';
+import { containsPath } from './followups.mjs';
 
 export const PLUGIN = realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
 export const SDK_VERSION = '0.3.319';
 export const SUDO = '/usr/bin/sudo';
 export const AGENT_ENV = { PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin' };
+
+/** Validate the installation before any SDK module runs as the operator. */
+export function checkSdk(sdkPath, { assertPrivate, inspect }) {
+  const root = dirname(dirname(dirname(dirname(sdkPath))));
+  const modules = join(root, 'node_modules');
+  if (sdkPath !== join(modules, '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs') || process.env.NODE_PATH) {
+    throw new Error('Use a private npm install for the SDK with NODE_PATH unset');
+  }
+  assertPrivate(root);
+  inspect(root);
+
+  // Reject dependency links and fallback searches outside the operator's installation.
+  for (const entry of readdirSync(modules, { withFileTypes: true, recursive: true })) {
+    if (entry.isSymbolicLink() && !containsPath(modules, realpathSync(join(entry.parentPath, entry.name)))) {
+      throw new Error('SDK dependency links outside the private npm installation');
+    }
+  }
+  for (const path of createRequire(sdkPath).resolve.paths('zod')) {
+    if (!containsPath(modules, path) && lstatSync(path, { throwIfNoEntry: false })) {
+      throw new Error('SDK install must be outside other npm trees');
+    }
+  }
+}
 
 export function queueToolFor(session, tool, z) {
   return tool('queue', 'Record, resolve, list, or acknowledge local follow-up drafts.', {
@@ -54,6 +78,7 @@ export function startupSettings(session, sessionId, cwd) {
   ] }] } };
 }
 
+/** Wait for process and pipe closure within the supplied deadline. */
 async function waitForClose(exit, timeout) {
   let timer;
   try {
@@ -69,6 +94,7 @@ function launchAgent(prefix, { command, args, cwd, signal }) {
     { cwd, signal, detached: true, env: AGENT_ENV, stdio: ['pipe', 'pipe', 'inherit'] });
 }
 
+/** Force teardown on timeout and withhold release even if teardown succeeds. */
 async function closeAgent(child, exit, stop, timeout) {
   if (!exit) return;
   const status = await waitForClose(exit, timeout);
@@ -85,6 +111,7 @@ async function closeAgent(child, exit, stop, timeout) {
   throw new Error('Managed Claude did not close within the deadline');
 }
 
+/** Publish only after the managed session and native child both close cleanly. */
 export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFile, prompt, {
   launch, github, verifySdk, closeTimeout = 5000,
 } = {}) {
