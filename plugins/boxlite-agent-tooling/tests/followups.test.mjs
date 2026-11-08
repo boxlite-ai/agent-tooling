@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { cloneIdentity, openFollowupQueue } from '../.agents/lib/followups.mjs';
 import { createFollowupSession, QUEUE_TOOL } from '../.agents/lib/followup-session.mjs';
-import { sessionHooks } from '../.agents/lib/followup-claude.mjs';
+import { checkSdk, runManagedFollowups, sessionHooks } from '../.agents/lib/followup-claude.mjs';
 import { drainFollowups } from '../.agents/lib/followup-publisher.mjs';
 
 const GATE = fileURLToPath(new URL('../.agents/hooks/stop-gate.sh', import.meta.url));
@@ -183,7 +184,8 @@ test('later model work, failed host close and old revisions cannot release a dra
   root.presentation('final', 'Saved.');
   await root.stop({ last_assistant_message: 'Saved.' });
   root.presentation('continued', 'More work.');
-  assert.equal(await root.finish({ terminal_reason: 'interrupted' }), 0);
+  assert.match((await root.stop({ last_assistant_message: 'More work.' })).reason, /missed follow-ups/);
+  assert.equal(await root.finish(), 0);
   assert.equal(queue.status()[0].released, false);
 
   const restarted = await managed(queue, repo);
@@ -267,7 +269,11 @@ test('a lost create holds later revisions and reconciles a closed issue with the
       return { node: { id: 'R_original', issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'page-2' } } } };
     }
     assert.equal(variables.cursor, 'page-2');
-    return { node: { id: 'R_original', issues: { nodes: [created], pageInfo: { hasNextPage: false } } } };
+    return { node: { id: 'R_original', issues: { nodes: [
+      { ...created, id: 'I_wrong_author', author: { id: 'U_wrong' } },
+      { ...created, id: 'I_wrong_target', repository: { id: 'R_wrong' } },
+      created,
+    ], pageInfo: { hasNextPage: false } } } };
   });
   assert.equal(pageCount, 2);
   assert.equal(queue.status()[0].url, created.url);
@@ -301,4 +307,365 @@ test('a proven unsent request waits for backoff and checks the current approval 
   await drainFollowups(queue, client);
   assert.equal(attempts, 2);
   assert.equal(queue.status()[0].status, 'filed');
+});
+
+
+test('a renamed checkout keeps its journal and draft identity', t => {
+  const { repo, state, queue } = fixture(t);
+  const caller = { root: true, clone: queue.clone, native: 'old', instance: 'old', prompt: 'old', cursor: 0 };
+  const handle = queue.start(caller);
+  const draft = queue.capture(caller, { ...DRAFT, handle });
+  const moved = join(dirname(repo), 'renamed');
+  renameSync(repo, moved);
+  const reopened = openFollowupQueue(state, cloneIdentity(moved));
+  assert.equal(reopened.status()[0]?.id, draft.id);
+});
+
+test('starting a supervisor fences handles left by a dead process', t => {
+  const { state, queue } = fixture(t);
+  const module = new URL('../.agents/lib/followups.mjs', import.meta.url).href;
+  const old = { root: true, clone: queue.clone, native: 'abandoned', instance: 'abandoned', prompt: 'old', cursor: 0 };
+  const handle = execFileSync(process.execPath, ['--input-type=module', '-e',
+    `import { openFollowupQueue } from ${JSON.stringify(module)};
+    const queue = openFollowupQueue(process.argv[1], process.argv[2]);
+    console.log(queue.start(JSON.parse(process.argv[3])));`,
+    state, queue.clone, JSON.stringify(old)], { encoding: 'utf8' }).trim();
+  const live = { ...old, native: 'live' };
+  const liveHandle = queue.start(live);
+  assert.throws(() => queue.capture(old, { action: 'list', handle }), /live root session/);
+  assert.deepEqual(queue.capture(live, { action: 'list', handle: liveHandle }), { drafts: [] });
+});
+
+function approveDraft(queue, operation) {
+  const caller = { root: true, clone: queue.clone, native: 'owner', instance: 'owner', prompt: 'owner', cursor: 0 };
+  const handle = queue.start(caller);
+  const draft = queue.capture(caller, { ...DRAFT, operation, handle });
+  queue.approve(draft.id, queue.review(draft.id).digest, true);
+  return draft;
+}
+
+test('an oversized reconciliation page retries a smaller read without creating again', async t => {
+  const { queue } = fixture(t);
+  t.mock.timers.enable({ apis: ['Date'], now: 1000 });
+  queue.enroll('tooling', DESTINATION);
+  approveDraft(queue, 'oversized page');
+  let issue;
+  await drainFollowups(queue, async (query, variables) => {
+    if (query.includes('viewer')) return { viewer: { id: 'U_original' } };
+    issue = issueFor(variables.input);
+    throw new Error('GitHub committed but the response was lost');
+  });
+  t.mock.timers.tick(60_000);
+  const reads = [];
+  await drainFollowups(queue, async (query, variables) => {
+    assert.match(query, /OPEN,CLOSED/);
+    reads.push([variables.cursor, variables.size]);
+    if (reads.length === 1) throw Object.assign(new Error('Response limit'), { responseTooLarge: true });
+    return { node: { id: 'R_original', issues: { nodes: [issue], pageInfo: { hasNextPage: false } } } };
+  });
+  assert.deepEqual(reads, [[null, 50], [null, 25]]);
+  assert.equal(queue.status()[0].status, 'filed');
+});
+
+test('the next drain gives a waiting draft a turn after a full read budget', async t => {
+  const { queue } = fixture(t);
+  t.mock.timers.enable({ apis: ['Date'], now: 1000 });
+  queue.enroll('tooling', DESTINATION);
+  for (let index = 0; index < 11; index++) {
+    approveDraft(queue, `operation ${index}`);
+    await drainFollowups(queue, async query => {
+      if (query.includes('viewer')) return { viewer: { id: 'U_original' } };
+      throw new Error('GitHub response was lost');
+    });
+  }
+  t.mock.timers.tick(60_000);
+  const reads = [];
+  const github = async (query, variables) => {
+    assert.match(query, /OPEN,CLOSED/);
+    reads.push(variables.cursor);
+    return { node: { id: 'R_original', issues: { nodes: [],
+      pageInfo: { hasNextPage: true, endCursor: `page-${reads.length}` } } } };
+  };
+  await drainFollowups(queue, github);
+  assert.deepEqual(reads, Array(10).fill(null));
+  await drainFollowups(queue, github);
+  assert.equal(reads[10], null);
+});
+
+
+test('retiring a draft removes it from the live queue and preserves deduplication', t => {
+  const { queue } = fixture(t);
+  const caller = { root: true, clone: queue.clone, native: 'owner', instance: 'owner', prompt: 'owner', cursor: 0 };
+  const handle = queue.start(caller);
+  const draft = queue.capture(caller, { ...DRAFT, handle });
+  queue.capture(caller, { action: 'resolve', handle, id: draft.id, revision: draft.revision });
+  assert.equal(queue.status()[0].status, 'resolved');
+  assert.deepEqual(queue.capture(caller, { ...DRAFT, handle }), { ...draft, status: 'resolved' });
+  assert.equal(queue.publish(state => Object.keys(state.drafts).length), 0);
+});
+
+test('the SDK trust policy rejects unsafe installations before evaluation', { skip: process.platform === 'win32' }, async t => {
+  const { repo, queue } = fixture(t);
+  const install = join(dirname(repo), 'private-install');
+  const modules = join(install, 'node_modules');
+  const sdk = join(modules, '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs');
+  mkdirSync(dirname(sdk), { recursive: true });
+  writeFileSync(join(dirname(sdk), 'package.json'), JSON.stringify({
+    name: '@anthropic-ai/claude-agent-sdk', version: '0.3.319',
+  }));
+  writeFileSync(sdk, "throw new Error('SDK code executed');");
+  const previousNodePath = process.env.NODE_PATH;
+  t.after(() => {
+    if (previousNodePath === undefined) delete process.env.NODE_PATH;
+    else process.env.NODE_PATH = previousNodePath;
+  });
+  let agentCanWrite = false;
+  const run = () => runManagedFollowups(queue, repo, [], sdk, process.execPath, 'Fixture', {
+    verifySdk: path => checkSdk(path, {
+      assertPrivate: root => {
+        assert.equal(root, realpathSync(install));
+        if (agentCanWrite) throw new Error('Agent account can access SDK installation');
+      },
+      inspect: root => assert.equal(root, realpathSync(install)),
+    }),
+  });
+
+  process.env.NODE_PATH = dirname(repo);
+  await assert.rejects(run(), /NODE_PATH unset/);
+  delete process.env.NODE_PATH;
+
+  agentCanWrite = true;
+  await assert.rejects(run(), /Agent account can access SDK installation/);
+  agentCanWrite = false;
+
+  const dependency = join(modules, 'external');
+  symlinkSync(repo, dependency);
+  await assert.rejects(run(), /links outside the private npm installation/);
+  unlinkSync(dependency);
+
+  mkdirSync(join(dirname(repo), 'node_modules'));
+  await assert.rejects(run(), /outside other npm trees/);
+});
+
+function fixtureSdk(repo, queryBody) {
+  const root = dirname(repo);
+  const sdk = join(root, 'sdk.mjs');
+  mkdirSync(join(root, 'node_modules', 'zod'), { recursive: true });
+  writeFileSync(join(root, 'node_modules', 'zod', 'index.js'), `
+    const schema = { optional() { return this; }, int() { return this; }, max() { return this; } };
+    exports.z = new Proxy({}, { get: () => () => schema });
+  `);
+  writeFileSync(join(root, 'package.json'), JSON.stringify({
+    name: '@anthropic-ai/claude-agent-sdk', version: '0.3.319',
+  }));
+  writeFileSync(sdk, `
+    export const tool = () => {};
+    export const createSdkMcpServer = () => {};
+    export async function* query({ options }) {
+      ${queryBody}
+    }
+  `);
+  return sdk;
+}
+
+test('an unfinished child that ignores TERM is killed before the supervisor returns', async t => {
+  const { repo, queue } = fixture(t);
+  const sdk = fixtureSdk(repo, `
+    const abort = new AbortController();
+    const child = options.spawnClaudeCodeProcess({ signal: abort.signal });
+    await new Promise(resolve => child.stdout.once('data', resolve));
+    abort.abort();
+  `);
+  let child;
+  const run = runManagedFollowups(queue, repo, [], sdk, process.execPath, 'Fixture', {
+    launch({ signal }) {
+      child = spawn(process.execPath, ['-e',
+        "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000);"], { signal });
+      t.after(() => child.kill('SIGKILL'));
+      return child;
+    },
+    closeTimeout: 250,
+  });
+  await assert.rejects(run, /did not close within the deadline/);
+  assert.equal(child.signalCode, 'SIGKILL');
+});
+
+
+test('a final root result starts the deadline while the SDK still waits for stdout', async t => {
+  const { repo, queue } = fixture(t);
+  const sdk = fixtureSdk(repo, `
+    const child = options.spawnClaudeCodeProcess({});
+    await new Promise(resolve => child.stdout.once('data', resolve));
+    yield { type: 'result', session_id: options.sessionId, subtype: 'success', terminal_reason: 'completed' };
+    await new Promise(resolve => child.stdout.once('close', resolve));
+  `);
+  let child;
+  let limit;
+  let githubCalls = 0;
+  const run = runManagedFollowups(queue, repo, [], sdk, process.execPath, 'Fixture', {
+    launch() {
+      child = spawn(process.execPath, ['-e',
+        "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000);"]);
+      t.after(() => child.kill('SIGKILL'));
+      return child;
+    },
+    github() { githubCalls += 1; },
+    closeTimeout: 250,
+  });
+  try {
+    const fixtureLimit = new Promise((_, reject) => {
+      limit = setTimeout(() => reject(new Error('Fixture stdout stayed open after the result')), 1500);
+    });
+    await assert.rejects(Promise.race([run, fixtureLimit]), /did not close within the deadline/);
+    assert.equal(child.signalCode, 'SIGKILL');
+    assert.equal(githubCalls, 0);
+  } finally {
+    clearTimeout(limit);
+  }
+});
+
+test('a missing nested state path under an alias to the checkout is rejected before initialization', { skip: process.platform === 'win32' }, t => {
+  const { repo } = fixture(t);
+  const alias = join(dirname(repo), 'alias');
+  symlinkSync(repo, alias);
+  const cli = fileURLToPath(new URL('../scripts/followups.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, [cli, join(alias, 'not-created', 'state'), 'agent', 'init'],
+    { cwd: repo, encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /authority must be outside the checkout/);
+});
+
+test('a full capture queue still has room to approve and send an accepted draft', async t => {
+  const { queue } = fixture(t);
+  queue.enroll('tooling', DESTINATION);
+  const caller = { root: true, clone: queue.clone, native: 'owner', instance: 'owner', prompt: 'owner', cursor: 0 };
+  const handle = queue.start(caller);
+  const first = queue.capture(caller, { ...DRAFT, handle });
+  const overhead = queue.publish(state => {
+    const record = state.drafts[first.id];
+    return Buffer.byteLength(JSON.stringify({ [record.id]: record })) - 2 -
+      Buffer.byteLength(DRAFT.body) - Buffer.byteLength(record.evidence) + 1;
+  });
+  for (let index = 0; ; index++) {
+    const bytes = queue.publish(state => Buffer.byteLength(JSON.stringify(state)));
+    const available = 8 * 1024 * 1024 - bytes - overhead;
+    if (available < 2) break;
+    const size = Math.min(16384, available - 1);
+    try {
+      queue.capture(caller, { ...DRAFT, handle, operation: `fill queue ${index}`, body: 'x'.repeat(size),
+        evidence: 'x'.repeat(Math.min(8192, available - size)) });
+    } catch (error) {
+      assert.match(error.message, /Follow-up (state|queue) is full/);
+      break;
+    }
+  }
+  assert.throws(() => queue.capture(caller, { ...DRAFT, handle, operation: 'one more draft',
+    body: 'x'.repeat(16384), evidence: 'x'.repeat(8192) }), /Follow-up (state|queue) is full/);
+  queue.approve(first.id, queue.review(first.id).digest, true);
+  await drainFollowups(queue, async (query, variables) => query.includes('viewer')
+    ? { viewer: { id: 'U_original' } }
+    : { createIssue: { issue: issueFor(variables.input) } });
+  assert.equal(queue.status().find(draft => draft.id === first.id)?.status, 'filed');
+});
+
+
+test('a path-keyed journal keeps its approval after migration and checkout rename', t => {
+  const { repo } = fixture(t);
+  const root = join(dirname(repo), 'legacy-state');
+  const registryRoot = join(dirname(repo), 'legacy-registry');
+  const legacyClone = cloneIdentity(repo, { legacy: true });
+  const legacy = openFollowupQueue(root, legacyClone, { initialize: true, registryRoot });
+  legacy.enroll('tooling', DESTINATION);
+  const draft = approveDraft(legacy, 'legacy fixture');
+  const clone = cloneIdentity(repo);
+  openFollowupQueue(root, clone, { legacyClone, registryRoot });
+  const renamed = join(dirname(repo), 'renamed');
+  renameSync(repo, renamed);
+  const [stored] = openFollowupQueue(root, cloneIdentity(renamed), { registryRoot }).status();
+  assert.equal(stored.id, draft.id);
+  assert.equal(stored.approved, true);
+  assert.equal(stored.released, true);
+});
+
+
+test('a renamed legacy clone cannot create another journal before recovery', t => {
+  const { repo } = fixture(t);
+  const root = join(dirname(repo), 'legacy-state');
+  const registryRoot = join(dirname(repo), 'legacy-registry');
+  const oldCommon = execFileSync('git', ['-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+    { encoding: 'utf8' }).trim();
+  const legacyClone = cloneIdentity(repo, { legacy: true });
+  const legacy = openFollowupQueue(root, legacyClone, { initialize: true, registryRoot });
+  legacy.enroll('tooling', DESTINATION);
+  const draft = approveDraft(legacy, 'legacy rename');
+  const registry = new DatabaseSync(join(registryRoot, 'roots.sqlite'));
+  try { registry.prepare('DELETE FROM journal_keys WHERE clone = ?').run(legacyClone); }
+  finally { registry.close(); }
+
+  const renamed = join(dirname(repo), 'renamed');
+  renameSync(repo, renamed);
+  const clone = cloneIdentity(renamed);
+  assert.throws(() => openFollowupQueue(root, clone, {
+    initialize: true, registryRoot, legacyClone: cloneIdentity(renamed, { legacy: true }),
+  }), /previous Git common directory/);
+  assert.throws(() => openFollowupQueue(root, clone, {
+    initialize: true, registryRoot, requireLegacy: true,
+    legacyClone: cloneIdentity(renamed, { legacyPath: join(dirname(repo), 'wrong', '.git') }),
+  }), /Legacy follow-up journal was not found/);
+  const recovered = openFollowupQueue(root, clone, {
+    initialize: true, registryRoot, requireLegacy: true, legacyClone: cloneIdentity(renamed, { legacyPath: oldCommon }),
+  });
+  assert.equal(recovered.status()[0].id, draft.id);
+  assert.equal(recovered.status()[0].approved, true);
+  assert.equal(recovered.status()[0].released, true);
+});
+
+test('upgrading the journal removes ownerless handles and preserves live sessions and attempts', async t => {
+  const { queue, state } = fixture(t);
+  queue.enroll('tooling', DESTINATION);
+  const draft = approveDraft(queue, 'ambiguous legacy create');
+  await drainFollowups(queue, async query => {
+    if (query.includes('viewer')) return { viewer: { id: 'U_original' } };
+    throw new Error('Lost create response');
+  });
+  const old = { root: true, clone: queue.clone, native: 'ownerless', instance: 'old', prompt: 'old', cursor: 0 };
+  const abandoned = queue.start(old);
+  const live = { ...old, native: 'live' };
+  const liveHandle = queue.start(live);
+  const file = join(state, queue.clone, 'queue.sqlite');
+  const db = new DatabaseSync(file);
+  try {
+    const prior = JSON.parse(db.prepare('SELECT document FROM queue WHERE id = 1').get().document);
+    prior.version = 1;
+    delete prior.sessions[abandoned].owner;
+    db.prepare('UPDATE queue SET document = ? WHERE id = 1').run(JSON.stringify(prior));
+  } finally { db.close(); }
+
+  const next = openFollowupQueue(state, queue.clone);
+  assert.throws(() => next.capture(old, { action: 'list', handle: abandoned }), /live root session/);
+  assert.deepEqual(next.capture(live, { action: 'list', handle: liveHandle }), { drafts: [] });
+  assert.equal(next.status()[0].id, draft.id);
+  assert.equal(next.status()[0].attempt.status, 'pending');
+  assert.equal(next.publish(state => state.version), 2);
+});
+
+test('status bounds completed history and older pages retain deduplication', t => {
+  const { queue } = fixture(t);
+  const caller = { root: true, clone: queue.clone, native: 'archive', instance: 'archive', prompt: 'archive', cursor: 0 };
+  const handle = queue.start(caller);
+  const record = index => queue.capture(caller, { ...DRAFT, handle, operation: `history ${index}` });
+  const completed = Array.from({ length: 52 }, (_, index) => {
+    const draft = record(index);
+    queue.capture(caller, { action: 'resolve', handle, id: draft.id, revision: draft.revision });
+    return draft.id;
+  });
+  const active = record(52);
+  assert.deepEqual(queue.status().map(draft => draft.id), [...completed.slice(-50), active.id]);
+  const recent = queue.history();
+  assert.deepEqual(recent.drafts.map(draft => draft.id), completed.slice(-50).reverse());
+  const oldest = queue.history(recent.nextBefore);
+  assert.deepEqual(oldest.drafts.map(draft => draft.id), completed.slice(0, 2).reverse());
+  assert.equal(oldest.nextBefore, null);
+  assert.equal(record(0).status, 'resolved');
+  assert.equal(record(0).id, completed[0]);
 });

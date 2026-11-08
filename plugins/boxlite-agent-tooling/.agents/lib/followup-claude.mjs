@@ -1,16 +1,41 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFollowupSession, QUEUE_TOOL } from './followup-session.mjs';
 import { drainFollowups } from './followup-publisher.mjs';
+import { containsPath } from './followups.mjs';
 
 export const PLUGIN = realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
 export const SDK_VERSION = '0.3.319';
 export const SUDO = '/usr/bin/sudo';
+const CLOSE_TIMEOUT_MESSAGE = 'Managed Claude did not close within the deadline';
 export const AGENT_ENV = { PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin' };
+
+/** Validate the installation before any SDK module runs as the operator. */
+export function checkSdk(sdkPath, { assertPrivate, inspect }) {
+  const root = dirname(dirname(dirname(dirname(sdkPath))));
+  const modules = join(root, 'node_modules');
+  if (sdkPath !== join(modules, '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs') || process.env.NODE_PATH) {
+    throw new Error('Use a private npm install for the SDK with NODE_PATH unset');
+  }
+  assertPrivate(root);
+  inspect(root);
+
+  // Reject dependency links and fallback searches outside the operator's installation.
+  for (const entry of readdirSync(modules, { withFileTypes: true, recursive: true })) {
+    if (entry.isSymbolicLink() && !containsPath(modules, realpathSync(join(entry.parentPath, entry.name)))) {
+      throw new Error('SDK dependency links outside the private npm installation');
+    }
+  }
+  for (const path of createRequire(sdkPath).resolve.paths('zod')) {
+    if (!containsPath(modules, path) && lstatSync(path, { throwIfNoEntry: false })) {
+      throw new Error('SDK install must be outside other npm trees');
+    }
+  }
+}
 
 export function queueToolFor(session, tool, z) {
   return tool('queue', 'Record, resolve, list, or acknowledge local follow-up drafts.', {
@@ -54,17 +79,49 @@ export function startupSettings(session, sessionId, cwd) {
   ] }] } };
 }
 
+/** Wait for process and pipe closure within the supplied deadline. */
+async function waitForClose(exit, timeout) {
+  let timer;
+  try {
+    return await Promise.race([exit, new Promise(done => { timer = setTimeout(done, timeout); })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Give the isolated process its own group and omit the operator environment. */
+function launchAgent(prefix, { command, args, cwd, signal }) {
+  return spawn(SUDO, [...prefix, '/usr/bin/env', 'CLAUDE_CODE_ENTRYPOINT=sdk-ts', command, ...args],
+    { cwd, signal, detached: true, env: AGENT_ENV, stdio: ['pipe', 'pipe', 'inherit'] });
+}
+
+/** Force teardown on timeout and withhold release even if teardown succeeds. */
+async function closeAgent(child, exit, stop, timeout, closeBy) {
+  if (!exit) return;
+  const remaining = closeBy === undefined ? timeout : Math.max(0, closeBy - performance.now());
+  const status = await waitForClose(exit, remaining);
+  if (status) return status;
+
+  try {
+    stop(child);
+  } finally {
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    if (!await waitForClose(exit, timeout)) child.unref();
+  }
+  throw new Error(CLOSE_TIMEOUT_MESSAGE);
+}
+
+/** Publish only after the managed session and native child both close cleanly. */
 export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFile, prompt, {
-  launch = ({ command, args, cwd: childCwd, signal }) =>
-    // Keep operator credentials out of the agent account's environment.
-    spawn(SUDO, [...prefix, '/usr/bin/env', 'CLAUDE_CODE_ENTRYPOINT=sdk-ts', command, ...args],
-      { cwd: childCwd, signal, env: AGENT_ENV, stdio: ['pipe', 'pipe', 'inherit'] }),
-  github,
+  launch, github, verifySdk, closeTimeout = 5000,
 } = {}) {
   if (!isAbsolute(sdkFile ?? '') || !isAbsolute(claudeFile ?? '')) {
     throw new Error('SDK module and Claude executable must be absolute paths');
   }
   const sdkPath = realpathSync(sdkFile);
+  verifySdk?.(sdkPath);
   const sdkPackage = JSON.parse(readFileSync(join(dirname(sdkPath), 'package.json'), 'utf8'));
   if (sdkPackage.name !== '@anthropic-ai/claude-agent-sdk' || sdkPackage.version !== SDK_VERSION) {
     throw new Error(`Use Claude Agent SDK ${SDK_VERSION} for managed follow-ups`);
@@ -75,10 +132,15 @@ export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFil
   const session = createFollowupSession(queue, { sessionId });
   let child;
   let exit;
+  let stream;
+  let deadline;
+  let closeBy;
+  let timer;
+  let expired = false;
   let streamComplete = false;
   let released = 0;
   try {
-    const stream = query({
+    stream = query({
       prompt,
       options: {
         cwd, sessionId, pathToClaudeCodeExecutable: claudeFile,
@@ -87,32 +149,61 @@ export async function runManagedFollowups(queue, cwd, prefix, sdkFile, claudeFil
         includeHookEvents: true, includePartialMessages: true, allowedTools: [QUEUE_TOOL],
         mcpServers: { boxlite_followups: createSdkMcpServer({ name: 'boxlite_followups', tools: [queueToolFor(session, tool, z)] }) },
         hooks: sessionHooks(session),
+        /** Track the single child through pipe closure, even if it emits an abort error first. */
         spawnClaudeCodeProcess: options => {
           if (exit) throw new Error('Expected one supervised Claude process');
-          child = launch(options);
+          child = launch ? launch(options) : launchAgent(prefix, options);
           exit = new Promise(done => {
             child.once('close', (code, exitSignal) => done({ code, signal: exitSignal }));
-            child.once('error', () => done({ code: null, signal: null }));
+            child.on('error', () => {});
           });
           return child;
         },
       },
     });
-    for await (const message of stream) {
+    const messages = stream[Symbol.asyncIterator]();
+    while (true) {
+      const next = messages.next();
+      const { done, value: message } = deadline ? await Promise.race([next, deadline]) : await next;
+      if (done) break;
       session.observe(message);
+      if (!deadline && message.type === 'result' && message.session_id === sessionId) {
+        closeBy = performance.now() + closeTimeout;
+        deadline = new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            expired = true;
+            reject(new Error(CLOSE_TIMEOUT_MESSAGE));
+          }, closeTimeout);
+        });
+      }
       if (message.type === 'assistant' && message.parent_tool_use_id === null) {
         for (const part of message.message.content) if (part.type === 'text') process.stdout.write(`${part.text}\n`);
       }
     }
     streamComplete = true;
   } finally {
-    let timer;
-    const unknown = { code: null, signal: null };
-    const timeout = new Promise(done => { timer = setTimeout(() => done(unknown), 5000); });
-    const status = exit ? await Promise.race([exit, timeout]) : unknown;
     clearTimeout(timer);
-    if (status === unknown) child?.kill();
-    released = session.finish({ ...status, streamComplete, platform: process.platform });
+    let status;
+    try {
+      status = await closeAgent(child, exit, process => {
+        if (!launch && process.pid) {
+          try {
+            execFileSync(SUDO, [...prefix, '/bin/kill', '-KILL', '--', `-${process.pid}`],
+              { cwd, env: AGENT_ENV, stdio: 'ignore', timeout: 1000 });
+          } finally {
+            process.kill('SIGKILL');
+          }
+        } else process.kill('SIGKILL');
+      }, closeTimeout, closeBy);
+    } finally {
+      try {
+        if (expired) stream.close?.();
+      } finally {
+        released = session.finish({
+          ...(status ?? { code: null, signal: null }), streamComplete, platform: process.platform,
+        });
+      }
+    }
   }
   return released ? { released, ...await drainFollowups(queue, github) } : { released };
 }

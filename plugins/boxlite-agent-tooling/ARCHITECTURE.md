@@ -60,13 +60,17 @@ The optional Claude launcher injects the queue rule and handle through SessionSt
 
 The capture callback waits for the installed Stop gate to allow the turn. It can ask once per prompt for an exact draft acknowledgment, including an empty set. A later tool call or model turn invalidates the seal.
 
-The operator stores clone-keyed SQLite state outside the checkout and beyond the agent account's access. An operator-owned registry binds each clone to one journal across linked worktrees.
+The operator stores clone-keyed SQLite state outside the checkout and beyond the agent account's access. An operator-owned registry binds each clone to one journal across linked worktrees and same-filesystem renames. Finished drafts leave the active queue and keep their deduplication records in SQLite. Status and history read at most 50 completed records per page.
 
-The qualified macOS one-shot launcher requires an allowed final Stop, a completed root result, SDK stream exhaustion, and clean child exit. If Claude omits SessionEnd, the launcher records the close after observing those signals.
+The queue lock covers the version upgrade and archive writes. The upgrade fences older writers and discards legacy handles without a recorded owner. Drafts, approvals, and attempts survive the upgrade.
+
+The operator checks the private SDK installation before loading any of its code. Startup reclaims abandoned handles when their recorded owner process has exited. The active draft size limit leaves room for approvals, close evidence, and retry state.
+
+The qualified macOS one-shot launcher requires an allowed final Stop, a completed root result, SDK stream exhaustion, and clean child exit. If Claude omits SessionEnd, the launcher records the close after observing those signals. The root result starts one deadline for SDK exhaustion and child closure. A timeout forces teardown and holds the drafts.
 
 Enrollment pins a GitHub repository ID. The operator grants public disclosure for the exact revision and destination, including the embedded marker. A clone lock spans the durable attempt and the single create request.
 
-After an ambiguous create, drains read open and closed issues in the original repository for the recorded author and marker. They retain pagination across drains and repeat unmatched sweeps without creating again. Each drain allows 30 seconds, 10 requests, and up to five seconds per request.
+After an ambiguous create, drains read open and closed issues in the original repository for the recorded author and marker. Drains resume scheduling after the last serviced draft and reduce oversized pages at the same cursor. Unmatched sweeps repeat without another create. Each drain allows 30 seconds, 10 requests, and up to five seconds per request.
 
 ## Boundaries
 
