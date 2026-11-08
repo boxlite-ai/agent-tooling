@@ -43,7 +43,7 @@
 # * De-dup is by a stable key per observation, persisted next to the log, so a
 #   restarted watcher does not replay the whole history.
 #
-# Tests: bash .agents/watch/pr-watch.test.sh
+# Tests: bash tests/watch/pr-watch.test.sh
 set -uo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

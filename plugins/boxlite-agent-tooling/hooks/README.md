@@ -69,8 +69,8 @@ or shell callers, rather than registered as lifecycle hooks.
 Run from the repository root after changing either manifest:
 
 ```sh
-bash plugins/boxlite-agent-tooling/host-parity.test.sh
-bash plugins/boxlite-agent-tooling/architecture.test.sh
+bash plugins/boxlite-agent-tooling/tests/host-parity.test.sh
+bash plugins/boxlite-agent-tooling/tests/architecture.test.sh
 ```
 
 Parity checks cover event support, command paths, host differences, and plugin

@@ -1,6 +1,6 @@
 ## TL;DR
 
-This directory holds the Stop-stage verdict gate, both headless audit runners, the commit/push dossier schema, and the audit test suites.
+This directory holds the Stop-stage verdict gate, both headless audit runners, and the commit/push dossier schema. [Audit tests](../../../tests/audit/) live in the plugin test tree.
 
 ## Files
 
@@ -218,25 +218,25 @@ After three FAIL/ERROR rounds, choose **Reflect again (Recommended)** or **Stop*
 Run from the repository root, for example:
 
 ```sh
-bash plugins/boxlite-agent-tooling/.agents/hooks/audit/preflight-verdict-check.test.sh
-bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.test.sh
+bash plugins/boxlite-agent-tooling/tests/audit/preflight-verdict-check.test.sh
+bash plugins/boxlite-agent-tooling/tests/audit/run-commit-push-audit.test.sh
 ```
 
 | Suite | Covers |
 | --- | --- |
-| [full-transcript.test.sh](full-transcript.test.sh) | Parent-context handoff without a transcript path, known/unknown hosts, complete evidence access through stubs, bounded history, and cleanup. |
-| [audit-runtime.test.sh](audit-runtime.test.sh) | Child failures, bounded diagnostics, user proxy configuration, and equivalent count wording through public script boundaries. |
-| [audit-retention.test.sh](audit-retention.test.sh) | Status prompts retain unchanged work; changed bindings cancel; old results cannot approve new turns. |
-| [preflight-verdict-check.test.sh](preflight-verdict-check.test.sh) | Verdict gate: triage, dossier bindings, consumption, and re-entry. |
-| [run-verdict-audit.test.sh](run-verdict-audit.test.sh) | Verdict runner: auditor selection, exit codes, freshness, and cancellation. |
-| [stop-host-routing.test.sh](stop-host-routing.test.sh) | Both Stop stages: host selection, overrides, unavailable providers, and bounded Codex discovery. |
-| [run-verdict-audit-retry.test.sh](run-verdict-audit-retry.test.sh) | Same-generation retries with history and publication interference. |
-| [run-commit-push-audit.test.sh](run-commit-push-audit.test.sh) | Commit/push runner: sandbox flags; malformed or unbound answers land on FAIL. |
-| [preflight-commit-push.test.sh](preflight-commit-push.test.sh) | [../preflight-commit-push.sh](../preflight-commit-push.sh): command matching and dossier checks. |
-| [commit-push-attempt.test.sh](commit-push-attempt.test.sh) | Hook-prepared commit/push attempts and the `SubagentStop` check that closes them. |
-| [cancel-verdict-audit.test.sh](cancel-verdict-audit.test.sh) | [../cancel-verdict-audit.sh](../cancel-verdict-audit.sh): new-prompt revocation, unsafe requests, and internal notifications. |
-| [auditor-override.test.sh](auditor-override.test.sh) | [../auditor-control.sh](../auditor-control.sh): auditor escalation and prompt-scoped overrides. |
-| [record-test-run.test.sh](record-test-run.test.sh) | [../record-test-run.sh](../record-test-run.sh): which commands leave test-run receipts. |
+| [full-transcript.test.sh](../../../tests/audit/full-transcript.test.sh) | Parent-context handoff without a transcript path, known/unknown hosts, complete evidence access through stubs, bounded history, and cleanup. |
+| [audit-runtime.test.sh](../../../tests/audit/audit-runtime.test.sh) | Child failures, bounded diagnostics, user proxy configuration, and equivalent count wording through public script boundaries. |
+| [audit-retention.test.sh](../../../tests/audit/audit-retention.test.sh) | Status prompts retain unchanged work; changed bindings cancel; old results cannot approve new turns. |
+| [preflight-verdict-check.test.sh](../../../tests/audit/preflight-verdict-check.test.sh) | Verdict gate: triage, dossier bindings, consumption, and re-entry. |
+| [run-verdict-audit.test.sh](../../../tests/audit/run-verdict-audit.test.sh) | Verdict runner: auditor selection, exit codes, freshness, and cancellation. |
+| [stop-host-routing.test.sh](../../../tests/audit/stop-host-routing.test.sh) | Both Stop stages: host selection, overrides, unavailable providers, and bounded Codex discovery. |
+| [run-verdict-audit-retry.test.sh](../../../tests/audit/run-verdict-audit-retry.test.sh) | Same-generation retries with history and publication interference. |
+| [run-commit-push-audit.test.sh](../../../tests/audit/run-commit-push-audit.test.sh) | Commit/push runner: sandbox flags; malformed or unbound answers land on FAIL. |
+| [preflight-commit-push.test.sh](../../../tests/audit/preflight-commit-push.test.sh) | [../preflight-commit-push.sh](../preflight-commit-push.sh): command matching and dossier checks. |
+| [commit-push-attempt.test.sh](../../../tests/audit/commit-push-attempt.test.sh) | Hook-prepared commit/push attempts and the `SubagentStop` check that closes them. |
+| [cancel-verdict-audit.test.sh](../../../tests/audit/cancel-verdict-audit.test.sh) | [../cancel-verdict-audit.sh](../cancel-verdict-audit.sh): new-prompt revocation, unsafe requests, and internal notifications. |
+| [auditor-override.test.sh](../../../tests/audit/auditor-override.test.sh) | [../auditor-control.sh](../auditor-control.sh): auditor escalation and prompt-scoped overrides. |
+| [record-test-run.test.sh](../../../tests/audit/record-test-run.test.sh) | [../record-test-run.sh](../record-test-run.sh): which commands leave test-run receipts. |
 
 ### Auditor test isolation
 
@@ -244,4 +244,4 @@ bash plugins/boxlite-agent-tooling/.agents/hooks/audit/run-commit-push-audit.tes
 - Integration cases provide fake CLIs; absent-runner cases omit them; unavailable `CODEX_BIN` disables desktop discovery, and sentinels catch unintended model calls.
 - Select each newly created receipt by invocation; keep selection state ignored, because timestamp/PID sorting can choose old receipts or tracked helpers alter bindings.
 - Wait for `watch_start` before TERM; preserve FIFO's two-second replacement bound and give the next audit its own deadline/published-finding assertion.
-- Render complete composed prompts within budgets; run `subagent.test.sh` and `claude-timed-prompts.test.sh` when changing shared prompt composition.
+- Check prompt composition and budgets with [subagent](../../../tests/lib/subagent.test.sh) and [runtime prompt](../../../tests/scripts/runtime-prompts.test.sh) tests.

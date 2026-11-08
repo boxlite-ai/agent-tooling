@@ -31,7 +31,7 @@
 # * One-shot consumption: the request transition is locked, so each gh pr
 #   command needs a fresh acknowledgment, even at the same HEAD.
 #
-# Tests: bash .agents/hooks/pr/preflight-pr-review.test.sh
+# Tests: bash tests/pr/preflight-pr-review.test.sh
 set -euo pipefail
 
 publish_file=0

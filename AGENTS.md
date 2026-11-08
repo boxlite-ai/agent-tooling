@@ -45,8 +45,8 @@ Host parity: after manifest/marketplace/symlink/hook-JSON changes and before rel
 ## Maintain instructions
 
 Local rules above block; `CLAUDE.md` import-only.
-In plugin, edit `guidance/workflow.md`; run
-`bash scripts/sync-guidance.sh <repo-root>` and `bash scripts/sync-guidance.test.sh`.
+Edit `guidance/workflow.md`. Run `bash scripts/sync-guidance.sh <repo-root>` in plugin.
+Run `make test:guidance` from root.
 
 <!-- agent-tooling:guidance:begin rev=1f433e122f5d-dirty sha256=c111ec225cda -->
 

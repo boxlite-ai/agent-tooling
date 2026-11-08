@@ -35,7 +35,7 @@
 #   gh cases exist to re-attach a Monitor in a session that pushed earlier, or
 #   where the push happened outside this session.
 #
-# Tests: bash .agents/hooks/watch/post-remote-write-watch.test.sh
+# Tests: bash tests/watch/hooks/post-remote-write-watch.test.sh
 set -euo pipefail
 
 payload="$(cat)"

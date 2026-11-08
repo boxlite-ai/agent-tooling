@@ -118,7 +118,7 @@ candidate() { # PASS|FAIL -> production-bound candidate file
     .attempts[-1].input.binding + {verdict:$verdict,advisories:["low: unchecked at deadline: execution records remain unread"],
       findings:(if $verdict=="FAIL" then ["high: confirmed defect: observed failing assertion"] else [] end)}
     + (if $kind=="verdict" then {proof:[]} else {commit_subject_hash:""} end)' "$history" > "$scratch/candidate"
-  bash "$plugin/scripts/fixtures/audit-history-result.sh" \
+  bash "$plugin/tests/audit/fixtures/audit-history-result.sh" \
     "$(jq -nc --arg path "$history" '{history_path:$path}')" "$scratch/candidate" bind
   jq '.history_review.coverage |= {reviewed:[],unread:(.reviewed + .unread)}' \
     "$scratch/candidate" > "$scratch/unread"

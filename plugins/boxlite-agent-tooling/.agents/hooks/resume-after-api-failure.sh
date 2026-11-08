@@ -2,7 +2,7 @@
 # shellcheck source-path=SCRIPTDIR
 # StopFailure hook, Claude Code only, wired with asyncRewake: resume a turn an API error
 # cut off, instead of leaving the session idle until someone types "continue".
-# Tests: bash .agents/hooks/resume/resume-after-api-failure.test.sh
+# Tests: bash tests/resume/resume-after-api-failure.test.sh
 #
 # Why a hook can do this at all
 # -----------------------------

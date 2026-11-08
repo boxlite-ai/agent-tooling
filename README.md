@@ -357,8 +357,8 @@ Run these repository checks, then the focused tests for the area you changed:
 
 ```sh
 bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .
-bash plugins/boxlite-agent-tooling/host-parity.test.sh
-bash plugins/boxlite-agent-tooling/architecture.test.sh
+bash plugins/boxlite-agent-tooling/tests/host-parity.test.sh
+bash plugins/boxlite-agent-tooling/tests/architecture.test.sh
 ```
 
 The optional [GitHub author-review workflow](.github/workflows/author-review.yml) enforces acknowledgments on PRs. Adopt it separately using a reviewed, immutable tooling revision, then require `Author reviewed the PR` in branch rules. Never run PR-head code in that privileged workflow.

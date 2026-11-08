@@ -17,7 +17,7 @@
 # Runs the framework-managed hook first (prek installs into .git/hooks/pre-commit),
 # then validates the final staged index against the audit.
 #
-# Tests: bash .githooks/githooks.test.sh
+# Tests: bash tests/git/githooks.test.sh
 set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"

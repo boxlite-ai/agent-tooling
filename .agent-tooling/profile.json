@@ -13,11 +13,11 @@
     },
     {
       "name": "host-parity",
-      "command": "bash plugins/boxlite-agent-tooling/host-parity.test.sh"
+      "command": "bash plugins/boxlite-agent-tooling/tests/host-parity.test.sh"
     },
     {
       "name": "sync-guidance",
-      "command": "bash plugins/boxlite-agent-tooling/scripts/sync-guidance.test.sh"
+      "command": "bash plugins/boxlite-agent-tooling/tests/scripts/sync-guidance.test.sh"
     }
   ]
 }
