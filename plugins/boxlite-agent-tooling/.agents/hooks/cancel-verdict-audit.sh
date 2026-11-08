@@ -93,13 +93,34 @@ fi
 prompt_text="$(printf '%s' "$payload" | jq -r '
   if (.prompt | type) == "string" then .prompt else "" end
 ')"
+# The Claude module binds the native origin to the exact text. Validate the
+# complete Bash frame before either accepting it or considering auditor credits.
+bash_notice=""
+if [[ "${BOXLITE_HOOK_HOST:-}" == claude ]]; then
+  bash_notice="$(jq -r '
+    .prompt as $text
+    | select($text | type == "string" and utf8bytelength <= 8192)
+    | select($text | test([
+        "\\A<task-notification>",
+        "<task-id>[A-Za-z0-9][A-Za-z0-9._-]{0,127}</task-id>",
+        "<tool-use-id>[A-Za-z0-9][A-Za-z0-9_-]{0,255}</tool-use-id>",
+        "<output-file>[^<[:cntrl:]]+</output-file>",
+        "<status>(completed|failed)</status>",
+        "<summary>Background command \"[^<[:cntrl:]]*\" (completed \\(exit code 0\\)|failed with exit code [0-9]+)</summary>",
+        "</task-notification>\\z"
+      ] | join("\n")))
+    | if .boxlite_verified_bash_notice == $text then "verified" else "unverified" end
+  ' <<< "$payload")"
+  [[ "$bash_notice" != verified ]] || exit 0
+fi
 # Spend one completion credit for a generation; status 0 means the prompt is internal.
 spend_completion() {  # generation
   [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
   CLAUDE_PROJECT_DIR="$project_dir" bash "$tooling_root/.agents/hooks/auditor-control.sh" \
     consume-completion "$session_scope" "$1" >/dev/null 2>&1
 }
-if [[ "$prompt_text" == '<task-notification>'$'\n'*$'\n</task-notification>' ]]; then
+if [[ "$bash_notice" != unverified &&
+      "$prompt_text" == '<task-notification>'$'\n'*$'\n</task-notification>' ]]; then
   completion_generation="$(printf '%s' "$prompt_text" | jq -Rer '
     capture("<task-id>(?<generation>[A-Za-z0-9][A-Za-z0-9._-]{0,127})</task-id>").generation
   ' 2>/dev/null || true)"

@@ -336,8 +336,8 @@ done
 for pair in "claude:$CLAUDE_HOOKS:asyncRewake" "codex:$CODEX_HOOKS:async" "unknown:$GENERIC_HOOKS:async"; do
   label="${pair%%:*}"; rest="${pair#*:}"; file="${rest%%:*}"; async_key="${rest##*:}"
   jq -e . "$file" >/dev/null 2>&1 && ok "$label: valid JSON" || bad "$label: valid JSON"
-  unknown="$(jq -r --arg async_key "$async_key" '
-    [ (keys_unsorted[] | select(. != "hooks")),
+  unknown="$(jq -r --arg async_key "$async_key" --arg host "$label" '
+    [ (keys_unsorted[] | select(. != "hooks" and ($host != "claude" or . != "modules"))),
       (.hooks | keys_unsorted[] | select(test("^[A-Z][A-Za-z]*$") | not)),
       (.hooks[][] | keys_unsorted[] | select(IN("hooks","matcher") | not)),
       (.hooks[][].hooks[] | keys_unsorted[]
@@ -352,6 +352,12 @@ for pair in "claude:$CLAUDE_HOOKS:asyncRewake" "codex:$CODEX_HOOKS:async" "unkno
   [ "$nontype" = "0" ] && ok "$label: every hook object is type command" \
                        || bad "$label: every hook object is type command ($nontype are not)"
 done
+if jq -e '.modules == ["./claude-prompt-origin.mjs"]' "$CLAUDE_HOOKS" >/dev/null \
+  && [[ -f "$PLUGIN/hooks/claude-prompt-origin.mjs" ]]; then
+  ok "Claude manifest loads the native prompt-origin module"
+else
+  bad "Claude manifest loads the native prompt-origin module"
+fi
 # Codex's hook-event set is closed (HookEventsToml in the shipped binary). Held here as
 # data so a newly wired event is checked against it without needing a Codex install:
 # getting this wrong does not disable one hook, it disables all of them.
@@ -402,10 +408,10 @@ else
   bad "native question capture is wired only for Claude"
 fi
 
-# Twin comparison, with the Claude-only events and tool matcher removed: everything Codex CAN run
-# must still be byte-identical after host-entry and async normalization.
+# Compare shared hooks after removing the Claude-only module, events and matcher.
 claude_normalized="$(jq -Sc --argjson claude_only "$claude_only_json" '
-  .hooks |= with_entries(select(.key as $k | $claude_only | index($k) | not))
+  del(.modules)
+  | .hooks |= with_entries(select(.key as $k | $claude_only | index($k) | not))
   | .hooks |= with_entries(.value |= map(select(.matcher != "AskUserQuestion")))
   | .hooks.SubagentStart[].hooks[] |=
     (if has("asyncRewake") then .async = .asyncRewake | del(.asyncRewake) else . end)

@@ -175,6 +175,8 @@ Some native Codex output lacks exit metadata and stays unobserved; recorder rema
 - Auditor wakes last 300 seconds after escalation or stop; foreground delivery may wait for stop.
 - Closed escalations survive 3660 seconds for late stops; later session prompts retire them after expiry within the three-second lock.
 - Claude completion gets two credits for 300 seconds (`agent-message` and `task-notification`), or one after a pre-stop hand-back.
+- Claude Bash completions preserve the epoch when the [native module](../../../hooks/claude-prompt-origin.mjs) verifies their origin. A spent dispatch tag may appear in the synthetic transcript and model input.
+- If the host skips the module or its classic callback, the shell hook revokes on Bash notices. A pasted notice also revokes.
 - Replays, uncredited senders, and column-zero frame lines count as real prompts; prompt cancellation never signals workspace-selected PIDs.
 
 ## Stop gate decisions
