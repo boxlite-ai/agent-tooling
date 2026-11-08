@@ -88,7 +88,7 @@ valid_pr_session() {
 }
 
 prepare_file_publication() {
-  local session operation="${1:-}" path snapshot index
+  local session operation="${1:-}" path index
   local usage='Use gh-pr.sh create [--draft] or edit [selector], followed by --title TITLE --body-file PATH.'
   case "${CODEX_THREAD_ID:+codex}:${CLAUDE_CODE_SESSION_ID:+claude}" in
     codex:) export BOXLITE_HOOK_HOST=codex; session="$CODEX_THREAD_ID" ;;
@@ -114,23 +114,13 @@ prepare_file_publication() {
     -F?*) path="${1#-F}"; shift ;;
     *) reject_pr "$usage" ;;
   esac
-  [[ -n "$path" && "$path" != - ]] || reject_pr 'Supply a regular PR body file path.'
-  [[ "$path" != -* ]] || path="./$path"
-
-  # The sentinel retains trailing LFs through command substitution.
   # shellcheck source=../lib/verdict-audit-state.sh
   source "$tooling_root/.agents/lib/verdict-audit-state.sh" || exit 2
-  snapshot="$(verdict_audit_read_regular_state "$path" 24576 json && printf '.')" \
-    || reject_pr 'Cannot read PR body file. Use a regular text file of at most 24 KiB without NUL bytes.'
-  publish_body="${snapshot#*$'\n'}"
-  publish_body="${publish_body%.}"
-  publish_body_sha256="$(printf '%s' "$publish_body" | perl -MDigest::SHA=sha256_hex -MEncode=decode,FB_CROAK,LEAVE_SRC -e '
-    binmode STDIN;
-    local $/;
-    my $bytes = <STDIN> // "";
-    eval { decode("UTF-8", $bytes, FB_CROAK | LEAVE_SRC); 1 } or exit 1;
-    print sha256_hex($bytes);
-  ')" || reject_pr 'The PR body file must contain valid UTF-8.'
+  # shellcheck source=../lib/github-body-file.sh
+  source "$tooling_root/.agents/lib/github-body-file.sh" || exit 2
+  github_body_file_read "$path" 'PR body file' || reject_pr "$github_body_file_error"
+  publish_body="$github_body_file_text"
+  publish_body_sha256="$github_body_file_sha256"
 
   # The launcher already has literal argv, so no shell source needs to be built.
   shell_words=(gh pr "${publish_args[@]}" "--body=$publish_body" "$@")

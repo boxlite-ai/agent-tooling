@@ -32,7 +32,7 @@ The scanner supplies literal argv without execution, using per-command gh 2.92.0
 | Input | Decision |
 | --- | --- |
 | Literal inline text | Inspect before publication. |
-| Direct body file, stdin, editor, generated text, GraphQL mutation | Reject because final text is unavailable. Use the [guarded launcher](design-and-pr-gates.md#pr-body-files) for PR body files. |
+| Direct body file, stdin, editor, generated text, GraphQL mutation | Reject because final text is unavailable. Use a guarded file launcher when supported. |
 | Read-only / body-preserving command | Pass, including close/reopen without comments. |
 | Unknown option, missing value, invalid boolean | Diagnostic naming option and `gh help`; no writing reminder. |
 | Reached `-h` or final true `--help` | Pass literal argv, including PR create/edit/ready. |
@@ -42,6 +42,20 @@ The scanner supplies literal argv without execution, using per-command gh 2.92.0
 Escapes remain tracked (`\2>&1` stays argv); GraphQL detection skips strings/comments and recognizes ignored separators; new gh options require regenerated specs.
 
 Other clients, script files, browser writes, and later bot edits remain outside this hook.
+
+### Guarded text files
+
+Use `gh-write.sh` for issue create, edit, and comment, PR comment and review, and release create and edit. Put the file flag immediately after the operation, then add the usual selectors and metadata.
+
+```sh
+bash /path/to/plugin/scripts/gh-write.sh issue edit --body-file ./issue.md 42
+bash /path/to/plugin/scripts/gh-write.sh release create --notes-file ./notes.md v1.2.3 --draft
+```
+
+- Use `--body-file` or `--notes-file` as applicable, or `-F`. Supply a regular UTF-8 file up to 24 KiB.
+- The launcher checks one snapshot and sends those exact bytes to GitHub CLI over stdin.
+- Release writes accept one tag. Release assets and other text sources are outside this launcher.
+- Use [`gh-pr.sh` for PR create and edit](design-and-pr-gates.md#pr-body-files).
 
 ### Writing ownership
 
