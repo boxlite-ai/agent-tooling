@@ -181,6 +181,29 @@ Monitoring intent and pending events survive execution-session replacement.
 
 For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh) retries recorded transient failures within bounded budgets. It requires `claude`, `jq`, `curl`, the failure-recording hook, and a matching `CLAUDE_PROJECT_DIR`.
 
+### Queue follow-up issues
+
+The opt-in [follow-up launcher](plugins/boxlite-agent-tooling/scripts/followups.mjs) gives a managed Claude run a local queue. SessionStart supplies the queue handle and capture rule. Stop can request one more pass to save missed findings and acknowledge their revisions.
+
+Use Node.js 24, Claude Agent SDK `0.3.319`, Git, and an authenticated operator `gh`. Run from the target checkout with a dedicated agent account available through noninteractive `sudo`. Give that account access to the checkout, its own Claude credentials, and read-only access to the plugin.
+
+```sh
+node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" init
+node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" enroll tooling
+node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" run "$sdk_module" "$claude_binary" < prompt.txt
+node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" status
+node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" release "$draft_id"
+node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" drain
+```
+
+Use an operator-private state directory outside the checkout and absolute SDK and Claude paths. `enroll consumer` uses the committed consumer profile and matching origin. `opt-out tooling` or `opt-out consumer` revokes enrollment.
+
+The operator reviews the exact title, body, and destination before authorizing public disclosure. `approve` waits for a verified managed close. `release` records the same approval and explicitly releases the revision.
+
+Claude Code `2.1.319` can omit SessionEnd in one-shot mode. On macOS, the launcher checks the final Stop, completed result, SDK stream exhaustion, and clean child exit before releasing drafts. Other platforms and versions leave drafts pending for foreground review.
+
+Use `capture` with JSON on stdin for foreground capture. The fields are `repository`, `operation`, `failure`, `route`, `title`, `body`, and `evidence`.
+
 ### Shell engineering
 
 Use `boxlite-shell-engineering` to establish the interpreter, supported platforms,

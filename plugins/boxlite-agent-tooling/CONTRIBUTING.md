@@ -33,6 +33,8 @@ API changes also require `make test:api-compatibility test:api-lint` with oasdif
 
 Test affected Claude/Codex and OS combinations; report unverified coverage; Copilot installs remain unverified.
 
+On macOS, set `BOXLITE_FOLLOWUP_SDK` and `BOXLITE_FOLLOWUP_CLAUDE` to the absolute SDK and Claude paths before running `make test:plugin TEST_FILTER=followups`. The native fixture uses a loopback model endpoint and simulated GitHub responses.
+
 For releases and upgrades, see [release maintenance](scripts/README.md#release-maintenance). For test setup, see [auditor test isolation](.agents/hooks/audit/README.md#auditor-test-isolation).
 
 ## Commit & PR messages

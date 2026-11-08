@@ -54,6 +54,18 @@ See [attempt ownership and next actions](.agents/hooks/audit/architecture.md#com
 
 See [auditor deadlines and recording windows](.agents/hooks/audit/architecture.md#timed-subagents).
 
+## Follow-up capture
+
+The optional Claude launcher injects the queue rule and handle through SessionStart. The SDK binds queue calls to the native root, prompt, and Git common directory. A PreToolUse callback inserts a one-use permit after checking that binding.
+
+The capture callback waits for the installed Stop gate to allow the turn. It can ask once per prompt for an exact draft acknowledgment, including an empty set. A later tool call or model turn invalidates the seal.
+
+The operator stores clone-keyed SQLite state outside the checkout and beyond the agent account's access. The qualified macOS one-shot launcher requires an allowed final Stop, a completed root result, SDK stream exhaustion, and clean child exit. If Claude omits SessionEnd, the launcher records the close after observing those signals.
+
+Enrollment pins a GitHub repository ID. The operator grants public disclosure for the exact revision and destination, including the embedded marker. A clone lock spans the durable attempt and the single create request.
+
+After an ambiguous create, drains read open and closed issues in the original repository for the recorded author and marker. They retain pagination across drains and repeat unmatched sweeps without creating again. Each drain allows 30 seconds, 10 requests, and up to five seconds per request.
+
 ## Boundaries
 
 Local gates are workflow checks; unsupported routes and writable state prevent sandbox/server-policy guarantees.
