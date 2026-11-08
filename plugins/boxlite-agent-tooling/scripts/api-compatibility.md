@@ -48,7 +48,9 @@ Example: deleting an endpoint in a commit, then restoring and staging the origin
 
 ## Approval
 
-Follow [human confirmation](../guidance/api-compatibility.md#human-confirmation): show breaking/default changes, recommend GitHub issue discussion, and ask once whether to skip without waiting; silence keeps the gate. Only the exact user prompt `api compatibility: skip` records that choice. No discussion link is required; do not create an issue without permission.
+Follow [human confirmation](../guidance/api-compatibility.md#human-confirmation). Show the breaking or default changes and recommend GitHub issue discussion. Use the check's shared question once and continue without waiting.
+
+Only the exact user prompt `api compatibility: skip` records that choice. Silence keeps the gate. Discussion links are optional and issue creation requires permission.
 
 Approvals live in the worktree Git directory and bind the sorted set of changed paths and their before/after content.
 

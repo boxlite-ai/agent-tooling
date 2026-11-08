@@ -1,24 +1,9 @@
 ---
 name: timed-question-review
-used-by: .agents/lib/timed-user-prompt.sh
-placeholders: prefix, id
+used-by: .agents/lib/user-question.sh
+placeholders: prefix, id, label_1, label_2
 ---
-{
-  "questions": [
-    {
-      "question": "{{prefix}} <what changed> [{{id}}]",
-      "header": "Review",
-      "multiSelect": false,
-      "options": [
-        {
-          "label": "Keep draft",
-          "description": "Do not approve."
-        },
-        {
-          "label": "Show diff",
-          "description": "Inspect changes."
-        }
-      ]
-    }
-  ]
-}
+Type `{{prefix}} {{id}} <what changed>` after reviewing the diff.
+
+- **{{label_1}}** — Do not approve.
+- **{{label_2}}** — Inspect changes.

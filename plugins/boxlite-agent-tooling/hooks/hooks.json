@@ -77,16 +77,6 @@
         ]
       },
       {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "^(Read|Bash|Write|WebFetch|WebSearch|apply_patch|TaskStop)$",
         "hooks": [
           {
@@ -113,16 +103,6 @@
             "type": "command",
             "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/record-test-run.sh\"",
             "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/claude-timed-question.sh\"",
-            "timeout": 10
           }
         ]
       }

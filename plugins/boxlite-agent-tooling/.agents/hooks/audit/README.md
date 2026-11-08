@@ -1,6 +1,6 @@
 ## TL;DR
 
-This directory holds the Stop-stage verdict gate, both headless audit runners, the commit/push dossier schema, and the audit test suites.
+This directory holds the Stop-stage verdict gate, both headless audit runners, and the commit/push dossier schema. [Audit tests](../../../tests/audit/) live in the plugin test tree.
 
 ## Files
 
@@ -244,4 +244,4 @@ bash plugins/boxlite-agent-tooling/tests/audit/run-commit-push-audit.test.sh
 - Integration cases provide fake CLIs; absent-runner cases omit them; unavailable `CODEX_BIN` disables desktop discovery, and sentinels catch unintended model calls.
 - Select each newly created receipt by invocation; keep selection state ignored, because timestamp/PID sorting can choose old receipts or tracked helpers alter bindings.
 - Wait for `watch_start` before TERM; preserve FIFO's two-second replacement bound and give the next audit its own deadline/published-finding assertion.
-- Render complete composed prompts within budgets; run `subagent.test.sh` and `claude-timed-prompts.test.sh` when changing shared prompt composition.
+- Check prompt composition and budgets with [subagent](../../../tests/lib/subagent.test.sh) and [runtime prompt](../../../tests/scripts/runtime-prompts.test.sh) tests.

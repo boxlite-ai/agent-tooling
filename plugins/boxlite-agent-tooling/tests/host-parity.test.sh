@@ -400,19 +400,19 @@ else
   bad "no claude-only event reaches the Codex twin (found: $leaked)"
 fi
 
-# AskUserQuestion is a Claude-native tool; Codex uses its own asynchronous input.
-if jq -e '[.hooks.PreToolUse[],.hooks.PostToolUse[]] | map(select(.matcher=="AskUserQuestion")) | length==2' "$CLAUDE_HOOKS" >/dev/null \
-  && jq -e '[.hooks[][] | select(.matcher=="AskUserQuestion")] | length==0' "$CODEX_HOOKS" >/dev/null; then
-  ok "native question capture is wired only for Claude"
-else
-  bad "native question capture is wired only for Claude"
-fi
+# Managed timed questions share the typed prompt receiver on both hosts.
+for manifest in "$CLAUDE_HOOKS" "$CODEX_HOOKS" "$GENERIC_HOOKS"; do
+  if jq -e '[.hooks[][] | select(.matcher=="AskUserQuestion")] | length==0' "$manifest" >/dev/null; then
+    ok "managed question capture uses the prompt hook in $(basename "$manifest")"
+  else
+    bad "managed question capture uses the prompt hook in $(basename "$manifest")"
+  fi
+done
 
-# Compare shared hooks after removing the Claude-only module, events and matcher.
+# Compare shared hooks after removing the Claude-only module and events.
 claude_normalized="$(jq -Sc --argjson claude_only "$claude_only_json" '
   del(.modules)
   | .hooks |= with_entries(select(.key as $k | $claude_only | index($k) | not))
-  | .hooks |= with_entries(.value |= map(select(.matcher != "AskUserQuestion")))
   | .hooks.SubagentStart[].hooks[] |=
     (if has("asyncRewake") then .async = .asyncRewake | del(.asyncRewake) else . end)
   | (.hooks[][].hooks[].command) |=

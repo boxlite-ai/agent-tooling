@@ -84,6 +84,14 @@ Consumers float on `tooling.ref`, run recorded `.git/agent-tooling/current`, and
 
 `.git/agent-tooling/.refresh.lock` serializes refresh; busy skips; hour-old abandoned locks warn through verification without automatic removal.
 
+### Interrupted installation
+
+On supported local macOS and Linux filesystems, setup inherits the installation lock. A retry can recover after the last writer exits.
+
+- Keep `.install.guard` in place. The installer uses `.install.lock` as a hard link to the guard so older installers see an occupied path.
+- Windows, network mounts, and unidentified filesystems use the directory lock. Before moving a stale legacy directory aside, verify the installer and any setup children have stopped.
+- The bootstrap delegates to the cached runtime when present, preserving its update deadline.
+
 ### Lifecycle environment
 
 `.agents/lib/git-environment.sh` clears repository-local Git variables and `GIT_NAMESPACE` after capturing consumer root, before sync/refresh enters it.
@@ -182,7 +190,7 @@ See [state contracts](../.agents/hooks/audit/state.md#state-files) and the
 
 | Script / arguments | Responsibility and effects |
 | --- | --- |
-| [timed-user-prompt.sh](timed-user-prompt.sh) `request\|status\|question\|respond\|renew\|consume\|fallback STATE SPEC_OR_ID [HUMAN_TEXT]` | Persist confirmation deadlines, exact human responses, consumption, and expiry; renewal requires the user's explicit instruction. |
+| [timed-user-prompt.sh](timed-user-prompt.sh) `request\|status\|renew\|consume\|fallback STATE SPEC_OR_ID [RENEWAL_INSTRUCTION]` | Persist confirmation deadlines, exact human responses, consumption, and expiry; renewal requires the user's explicit instruction. |
 | [claude-with-timed-prompts.sh](claude-with-timed-prompts.sh) `[claude args...]` | Launch Claude with this plugin; configure native question timeout for supported local sessions and disable Remote Control there. |
 | [continue-timed-prompts.sh](continue-timed-prompts.sh) | Called by the Stop gate with hook JSON on stdin; emit a continuation for pending confirmations or their timeout fallback. |
 | [resume-on-network-error.sh](resume-on-network-error.sh) `[--max-restarts N] [--max-wait SECONDS] [--probe-url URL] [--] <prompt> [claude args...]` | Supervise `claude -p`, retry eligible API failures within budgets, and print final result JSON. |

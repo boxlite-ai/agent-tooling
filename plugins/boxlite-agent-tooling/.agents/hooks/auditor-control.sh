@@ -8,7 +8,6 @@ verdict_state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
 override_state_lib="$tooling_root/.agents/lib/auditor-override-state.sh"
 control_state_lib="$tooling_root/.agents/lib/auditor-control-state.sh"
 interactive_prompt_lib="$tooling_root/.agents/lib/hook-interactive-prompt.sh"
-timed_prompt_lib="$tooling_root/.agents/lib/timed-user-prompt.sh"
 host_lib="$tooling_root/.agents/lib/hook-host.sh"
 for required in jq perl git shasum; do
   command -v "$required" >/dev/null 2>&1 || {
@@ -18,7 +17,7 @@ for required in jq perl git shasum; do
 done
 [[ -r "$verdict_state_lib" && -r "$override_state_lib" \
    && -r "$control_state_lib" && -r "$interactive_prompt_lib" \
-   && -r "$timed_prompt_lib" && -r "$host_lib" ]] || {
+   && -r "$host_lib" ]] || {
   printf 'auditor-control.sh: shared state libraries are unavailable.\n' >&2
   exit 2
 }
@@ -30,8 +29,6 @@ source "$override_state_lib"
 source "$control_state_lib"
 # shellcheck source=../lib/hook-interactive-prompt.sh
 source "$interactive_prompt_lib"
-# shellcheck source=../lib/timed-user-prompt.sh
-source "$timed_prompt_lib"
 # shellcheck source=../lib/hook-host.sh
 source "$host_lib"
 # shellcheck source=../lib/subagent.sh
@@ -861,7 +858,7 @@ case "$event" in
       if [[ "$(hook_host_kind)" == claude ]]; then
         # Remote Control keeps native questions open, so only launcher sessions get the
         # card; other sessions wake with the typed status and its default, keep waiting (#334).
-        if ! timed_user_prompt_native_available; then
+        if ! hook_interactive_prompt_claude_available; then
           message="$(subagent_prompt audit/auditor-wait-status "$tooling_root" "auditor=$auditor")" || exit 2
           printf '%s [auditor-wake:%s]\n' "$message" "$wake_nonce" >&2
           exit 2

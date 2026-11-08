@@ -6,10 +6,10 @@ plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 for dependency in git jq perl date; do command -v "$dependency" >/dev/null || exit 2; done
 # shellcheck source=../.agents/lib/verdict-audit-state.sh
 source "$plugin/.agents/lib/verdict-audit-state.sh"
-# shellcheck source=../.agents/lib/subagent.sh
-source "$plugin/.agents/lib/subagent.sh"
 # shellcheck source=../.agents/lib/timed-user-prompt.sh
 source "$plugin/.agents/lib/timed-user-prompt.sh"
+# shellcheck source=../.agents/lib/user-question.sh
+source "$plugin/.agents/lib/user-question.sh"
 payload="$(cat)"
 repo="$(git -C "${CLAUDE_PROJECT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || exit 0
 names=(pr-size-request pr-review-request design-decision-request)
@@ -26,8 +26,7 @@ branch="$(git -C "$repo" branch --show-current)" || exit 2
 for name in "${names[@]}"; do
   path="$repo/.agents/state/$name.json"
   [[ -e "$path" || -L "$path" ]] || continue
-  snapshot="$(verdict_audit_read_regular_state "$path" 16384 json)" || exit 2
-  request="${snapshot#*$'\n'}"
+  request="$(timed_user_prompt_read "$path")" || exit 2
   request_session="$session"
   if [[ "$(jq -r .spec.fallback <<<"$request")" == reflect-again ]]; then
     # shellcheck source=../.agents/lib/git-audit-decision.sh
@@ -44,21 +43,23 @@ for name in "${names[@]}"; do
   status="$(jq -r .status <<<"$request")"
   case "$status" in
     pending)
-      reason="$(timed_user_prompt_instruction "$plugin" "$request")" || exit 2
-      reason="$(subagent_prompt questions/timed-continue-pending "$plugin" \
+      reason="$(user_question instruction "$plugin" "$request")" || exit 2
+      reason="$(user_question render "$plugin" questions/timed-continue-pending \
         "name=${name%-request}" "instruction=$reason")" || exit 2 ;;
     declined)
       [[ "$(jq -r .fallback_delivered <<<"$request")" == false ]] || continue
-      reason="$(subagent_prompt pr/pr-size-declined "$plugin" \
+      reason="$(user_question render "$plugin" pr/pr-size-declined \
         "request_id=$id" "state=$path" "tooling=$plugin")" || exit 2
       timed_user_prompt fallback "$path" "$id" >/dev/null || exit 2 ;;
     expired)
       [[ "$(jq -r .fallback_delivered <<<"$request")" == false ]] || continue
       case "$(jq -r .spec.fallback <<<"$request")" in
-        split) reason="$(subagent_prompt questions/timed-continue-expired-size "$plugin")" || exit 2 ;;
-        keep-blocked) reason="$(subagent_prompt questions/timed-continue-expired-design "$plugin")" || exit 2 ;;
-        reflect-again) reason="$(subagent_prompt questions/timed-continue-expired-git-audit "$plugin")" || exit 2 ;;
-        *) reason="$(subagent_prompt questions/timed-continue-expired-review "$plugin")" || exit 2 ;;
+        split) reason="$(user_question render "$plugin" questions/timed-continue-expired-size)" || exit 2 ;;
+        keep-blocked)
+          approval="$(user_question redesign-approval "$plugin")" || exit 2
+          reason="$(user_question render "$plugin" questions/timed-continue-expired-design "approval=$approval")" || exit 2 ;;
+        reflect-again) reason="$(user_question render "$plugin" questions/timed-continue-expired-git-audit)" || exit 2 ;;
+        *) reason="$(user_question render "$plugin" questions/timed-continue-expired-review)" || exit 2 ;;
       esac
       timed_user_prompt fallback "$path" "$id" >/dev/null || exit 2 ;;
     *) continue ;;

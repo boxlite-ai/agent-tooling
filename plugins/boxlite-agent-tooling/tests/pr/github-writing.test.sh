@@ -401,13 +401,16 @@ check 'read-only REST does not publish private parameters' \
 mkdir -p .agents/state
 jq -nc --arg command "gh pr create --title 'fix: validation' --body '$structured'" \
   '{tool_input:{command:$command}}' | bash "$HOOK" >/dev/null
-request_id="$(jq -r .id .agents/state/pr-review-request.json)"
-marker="$(jq -nc --arg head "$(git rev-parse HEAD)" --arg request "$request_id" \
-  '{branch:"feature",head:$head,message:"reviewed: fixture validation",request:$request}')"
-printf '%s\n' "$marker" > .agents/state/pr-reviewed.json
+review_state=.agents/state/pr-review-request.json
+request_id="$(jq -r .id "$review_state")"
+bash -c '
+  source "$1/.agents/lib/timed-user-prompt.sh"
+  timed_user_prompt prompt-reply "$2" "$3" "reviewed: $3 fixture validation"
+' fixture "$PLUGIN" "$review_state" "$request_id" >/dev/null
+cp "$review_state" "$scratch/review-before"
 check 'privacy denial precedes acknowledgment consumption' \
   "gh pr create --title 'fix: validation' --body '$private_body'" deny 'private context'
-if [[ -f .agents/state/pr-reviewed.json && "$(cat .agents/state/pr-reviewed.json)" == "$marker" ]]; then
+if cmp -s "$review_state" "$scratch/review-before"; then
   pass=$((pass + 1))
 else
   fail=$((fail + 1)); printf 'FAIL privacy denial changed acknowledgment\n'
@@ -416,7 +419,7 @@ check 'safe rewrite can still consume the preserved acknowledgment' \
   "gh pr create --title 'fix: validation' --body '## TL;DR
 
 Fix validation. https://github.com/example/repo/issues/123'" allow
-if [[ ! -e .agents/state/pr-reviewed.json ]]; then
+if jq -e '.status=="consumed"' "$review_state" >/dev/null; then
   pass=$((pass + 1))
 else
   fail=$((fail + 1)); printf 'FAIL safe rewrite did not consume acknowledgment\n'

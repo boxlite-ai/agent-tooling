@@ -521,11 +521,15 @@ for rule in \
   'Never infer confirmation from silence'; do
   check "compatibility ask: $rule" "$rule" "$compatibility_text"
 done
-expired_rendered="$(subagent_prompt design/audit-expired "$PLUGIN_ROOT" \
-  'findings=- high: example finding' | tr '\n' ' ')"
+# shellcheck source=user-question.sh
+source "$PLUGIN_ROOT/.agents/lib/user-question.sh"
+approval_question="$(user_question redesign-approval "$PLUGIN_ROOT")"
+expired_rendered="$(user_question render "$PLUGIN_ROOT" design/audit-expired \
+  'findings=- high: example finding' "approval=$approval_question" | tr '\n' ' ')"
 for rule in \
-  'Ask the human once to approve its exact text, and do not wait for a reply' \
-  'Until they approve, keep it unposted, report it, and keep edits blocked' \
+  'Ask once in plain text' \
+  'Approve the exact redesign text before posting' \
+  'Keep the draft unposted, report it, and keep edits blocked' \
   'Silence never overrules or approves'; do
   check "expired design ask: $rule" "$rule" "$expired_rendered"
 done

@@ -207,11 +207,11 @@ check_code_size 'possibly truncated files fail closed' \
 unset SIZE_TEST_FILES
 [[ "$code_failures" == 0 ]] || exit 1
 rm -f "$scratch/repo/.agents/state/pr-size-request.json" "$scratch/repo/.agents/state/pr-review-request.json"
-long_body="$(printf 'word %.0s' {1..81})"
+long_body="$(printf '## TL;DR\n\nFixture change.\n\n## How it works\n\n'; printf 'word %.0s' {1..81})"
 out="$(call_hook "gh pr create --title 'feat: validate text first' --body '$long_body'")"
-[[ "$out" == *'TL;DR heading missing'* && "$out" != *'401'* \
-  && ! -e "$scratch/repo/.agents/state/pr-size-request.json" ]] \
-  || { printf 'FAIL: size lookup preceded invalid-body rejection\n' >&2; exit 1; }
+[[ "$out" == *'A sentence has 81 words'* && "$out" != *'401'* \
+   && ! -e "$scratch/repo/.agents/state/pr-size-request.json" ]] \
+  || { printf 'FAIL: size lookup preceded invalid-body rejection\n%s\n' "$out" >&2; exit 1; }
 out="$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
 Fixture change.
@@ -246,14 +246,20 @@ Retry failed calls once. https://github.com/example/repo/issues/123"')"
 state="$scratch/repo/.agents/state/pr-size-request.json"
 id="$(jq -r .id "$state")"
 deadline="$(jq -r .deadline "$state")"
-bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" 'Split PR' >/dev/null
+record_size() {
+  bash -c '
+    source "$1/.agents/lib/timed-user-prompt.sh"
+    timed_user_prompt prompt-reply "$2" "$3" "pr-size-exception: $3 $4"
+  ' fixture "$plugin" "$state" "$1" "$2"
+}
+record_size "$id" 'Split PR' >/dev/null
 out="$(call_hook "$plain_context_command")"
 [[ "$out" == *'chose Split PR'* && "$(jq -r .id "$state")" == "$id" ]]
 renewed="$(bash "$plugin/scripts/timed-user-prompt.sh" renew "$state" "$id" 'Ask whether to bypass again.')"
 id="$(jq -r .id <<<"$renewed")"
 deadline="$(jq -r .deadline <<<"$renewed")"
 reason='Bypass limit'
-"$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" >/dev/null
+record_size "$id" "$reason" >/dev/null
 [[ -z "$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
 Fixture change.
@@ -264,7 +270,7 @@ Retry failed calls once. https://github.com/example/repo/issues/123"')" ]]
 [[ "$(jq -r .deadline "$state")" == "$deadline" ]]
 out="$(call_hook 'gh pr ready')"
 [[ "$out" == *'Bypass limit'* && "$(jq -r .id "$state")" != "$id" ]]
-bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$(jq -r .id "$state")" 'Bypass limit' >/dev/null
+record_size "$(jq -r .id "$state")" 'Bypass limit' >/dev/null
 out="$(call_hook 'gh pr ready')"
 [[ "$out" == *'reviewed:'* && "$out" != *'Bypass limit'* ]] || {
   printf 'FAIL: size bypass did not preserve the separate review gate\n' >&2; exit 1;
@@ -292,7 +298,7 @@ Retry failed calls once. https://github.com/example/repo/issues/123"')"
 [[ "$out" == *'deadline expired'* && "$out" == *'split'* ]]
 [[ "$out" == *'one tracking issue'* && "$out" == *'checklist'* ]] \
   || { printf 'FAIL: expired size denial must default to one tracking issue with a checklist\n' >&2; exit 1; }
-if bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" 2>/dev/null; then
+if record_size "$id" "$reason" 2>/dev/null; then
   printf 'FAIL: a late exception was accepted\n' >&2; exit 1
 fi
 [[ "$(jq -r .id "$state")" == "$id" ]]
@@ -308,10 +314,10 @@ Fixture change.
 Retry failed calls once. https://github.com/example/repo/issues/123"')"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]]
 [[ "$out" == *"$next_id"* && "$next_id" != "$id" ]]
-if bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$id" "$reason" 2>/dev/null; then
+if record_size "$id" "$reason" 2>/dev/null; then
   printf 'FAIL: superseded exception was accepted after renewal\n' >&2; exit 1
 fi
-bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$next_id" "$reason" >/dev/null
+record_size "$next_id" "$reason" >/dev/null
 [[ -z "$(call_hook 'gh pr create --draft --title wip --body "## TL;DR
 
 Fixture change.

@@ -1,16 +1,9 @@
 ---
 name: timed-question-git-audit
-used-by: .agents/lib/timed-user-prompt.sh
-placeholders: prefix, id
+used-by: .agents/lib/user-question.sh
+placeholders: prefix, id, label_1, label_2
 ---
-{
-  "questions": [{
-    "question": "{{prefix}} Three failed rounds stopped the audit loop. Choose the next step; after five minutes, Reflect again applies. [{{id}}]",
-    "header": "Audit retry",
-    "multiSelect": false,
-    "options": [
-      {"label": "Reflect again (Recommended)", "description": "Reflect, fix, test, and run one fresh audit; keep all findings."},
-      {"label": "Stop", "description": "Keep Git blocked and report incomplete verification."}
-    ]
-  }]
-}
+Three failed rounds stopped the audit loop. After five minutes, Reflect again applies.
+
+- `{{prefix}} {{id}} {{label_1}}` — Reflect, fix, test, and run one fresh audit. Keep all findings.
+- `{{prefix}} {{id}} {{label_2}}` — Keep Git blocked and report incomplete verification.

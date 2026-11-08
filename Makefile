@@ -50,6 +50,7 @@ test\:plugin:
 	  relative=$${suite#$(PLUGIN_TESTS)/}; \
 	  case "$$relative" in \
 	    pr/fork-target.test.sh) legacy=.agents/hooks/pr/tests/fork-target.test.sh ;; \
+	    pr/gh-write.test.sh|pr/guarded-pr-watch.test.sh) legacy=tests/$$relative ;; \
 	    watch/hooks/*) legacy=.agents/hooks/watch/$${relative##*/} ;; \
 	    audit/*|design/*|pr/*|resume/*|session/*) legacy=.agents/hooks/$$relative ;; \
 	    lib/*|watch/*) legacy=.agents/$$relative ;; \

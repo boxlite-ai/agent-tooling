@@ -44,7 +44,24 @@ command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cm
 normalized="${command//$'\n'/;}"
 work="${normalized#"${normalized%%[![:space:]]*}"}"
 remote_write_kind=""
-if [[ "$work" =~ (^|[[:space:]]*(\&\&|\|\||\;|\||\&|\$\(|\(|\`)[[:space:]]*)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*git[[:space:]]+push([[:space:]]|$) ]]; then
+guarded_launcher=""
+if [[ "$command" == *gh-pr.sh* ]]; then
+  # Recognize a direct, literal launcher call without evaluating shell text.
+  guarded_launcher="$(perl -0777 -ne '
+    my $single = qr/\x27[^\x27\r\n]*\x27/;
+    my $double = qr/"[^\x22\x5c\x24\x60\r\n]*"/;
+    my $bare = qr{[A-Za-z0-9._/:=@+%,-]++};
+    my $literal = qr/(?:$single|$double|$bare)/;
+    if (/\A[ \t]*bash[ \t]+(?:--[ \t]+)?($literal)[ \t]+(?:create|edit)(?:[ \t]+$literal++)*[ \t]*\n?\z/) {
+      my $path = $1;
+      $path =~ s/\A(["\x27])(.*)\1\z/$2/;
+      print $path;
+    }
+  ' <<<"$command")"
+fi
+if [[ -n "$guarded_launcher" ]]; then
+  remote_write_kind="gh_pr_file"
+elif [[ "$work" =~ (^|[[:space:]]*(\&\&|\|\||\;|\||\&|\$\(|\(|\`)[[:space:]]*)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*git[[:space:]]+push([[:space:]]|$) ]]; then
   remote_write_kind="git_push"
 elif [[ "$work" =~ (^|[[:space:]]*(\&\&|\|\||\;|\||\&|\$\(|\(|\`)[[:space:]]*)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*gh[[:space:]]+pr[[:space:]]+(create|edit|ready|comment|review)([[:space:]]|$) ]]; then
   remote_write_kind="gh_pr"
@@ -86,7 +103,16 @@ if [[ "$response" =~ $failure_re ]]; then
   exit 0
 fi
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [[ "$remote_write_kind" == gh_pr_file ]]; then
+  command_dir="$(jq -er --arg fallback "$PWD" '
+    first((.tool_input.workdir, .tool_input.cwd, .cwd, $fallback) | select(. != null))
+    | strings | select(length > 0 and index("\u0000") == null)
+  ' <<<"$payload")" || exit 0
+  cd -- "$command_dir" 2>/dev/null || exit 0
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+else
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+fi
 # The stream script and the escalation policy live in the TOOLING tree (this
 # script's own plugin), never at the consumer's repo root — an installed
 # consumer carries only .agent-tooling/ and the pinned cache under .git/. An
@@ -121,6 +147,24 @@ command -v shasum >/dev/null 2>&1 || {
 state_dir="$(git -C "$repo_root" rev-parse --git-path pr-watch 2>/dev/null || echo '')"
 [[ -z "$state_dir" ]] && exit 0
 [[ "$state_dir" != /* ]] && state_dir="$repo_root/$state_dir"
+
+guarded_pr_url=""
+if [[ "$remote_write_kind" == gh_pr_file ]]; then
+  [[ "$guarded_launcher" -ef "$tooling_root/scripts/gh-pr.sh" ]] || exit 0
+  guarded_result="$(jq -er '
+    def lines: gsub("\r\n"; "\n") | sub("\n+\\z"; "");
+    .tool_response | if type == "string" then lines
+      elif type == "object" then
+        (.stdout // .output | strings | lines) as $out
+        | (.stderr // "" | strings | lines) as $err
+        | if $err == "" then $out else $out + "\n" + $err end
+      else empty end
+  ' <<<"$payload")" || exit 0
+  guarded_pr_url="${guarded_result%%$'\n'*}"
+  pr_watch_url_is_valid "$guarded_pr_url" || exit 0
+  checkout="$(pr_watch_checkout_digest "$repo_root")" || exit 0
+  [[ "$guarded_result" == "$guarded_pr_url"$'\n'"boxlite-pr-write $checkout $guarded_pr_url" ]] || exit 0
+fi
 
 attachment_body=""
 attachment_claim=""
@@ -898,11 +942,21 @@ fi
 
 slug="$(git -C "$repo_root" remote get-url origin 2>/dev/null \
         | sed -e 's#^git@[^:]*:##' -e 's#^[a-z+]*://[^/]*/##' -e 's#\.git$##')"
-pr_number="$(printf '%s' "$response" \
-  | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p' | head -1)"
-if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
-  lookup_pr_number_bounded "$slug" "$branch" || true
-  pr_number="$bounded_pr_number"
+if [[ -n "$guarded_pr_url" ]]; then
+  origin="$(git -C "$repo_root" remote get-url origin 2>/dev/null)" || exit 0
+  case "$origin" in
+    git@github.com:*|https://github.com/*|ssh://git@github.com/*) ;;
+    *) exit 0 ;;
+  esac
+  [[ "$guarded_pr_url" == "https://github.com/$slug/pull/"* ]] || exit 0
+  pr_number="${guarded_pr_url##*/}"
+else
+  pr_number="$(printf '%s' "$response" \
+    | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p' | head -1)"
+  if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
+    lookup_pr_number_bounded "$slug" "$branch" || true
+    pr_number="$bounded_pr_number"
+  fi
 fi
 
 # All potentially slow work is complete. Consume the manifest only when this
@@ -927,7 +981,23 @@ else
     exit 1
   }
   event_log="$state_dir/${branch_key}.jsonl"
-  printf -v stream_command 'bash %q %q' "$stream_script" "$event_log"
+  if [[ -n "$guarded_pr_url" ]]; then
+    owner_dir="$state_dir/$branch_key.lock"
+    owner_identity="$(pr_watch_state_directory_identity "$owner_dir")" || exit 0
+    owner="$(verdict_audit_read_json_snapshot "$owner_dir/owner.json" 2>/dev/null)" || exit 0
+    owner="${owner#*$'\n'}"
+    owner_pid="$(jq -er '.pid | numbers | select(. > 0 and floor == .)' <<<"$owner")" || exit 0
+    owner_token="$(verdict_audit_process_start_token "$owner_pid" 2>/dev/null)" || exit 0
+    watch_id="$(jq -er --arg token "$owner_token" \
+      'select(.schema == 1 and .ready == true and .start_token == $token) | .watch_id | strings' \
+      <<<"$owner")" || exit 0
+    pr_watch_id_is_valid "$watch_id" || exit 0
+    [[ "$(pr_watch_state_directory_identity "$owner_dir")" == "$owner_identity" ]] || exit 0
+    printf -v stream_command 'bash %q %q --watch-id %q --expect-pr-url %q' \
+      "$stream_script" "$event_log" "$watch_id" "$guarded_pr_url"
+  else
+    printf -v stream_command 'bash %q %q' "$stream_script" "$event_log"
+  fi
 fi
 policy_path_json="$(jq -Rn --arg path "$policy_path" '$path')"
 
@@ -950,6 +1020,10 @@ schedule_prompt_path_json="$(jq -Rn --arg path "$tooling_root/.agents/prompts/wa
 codex_attach_line="$(subagent_prompt watch/watch-attach-codex "$tooling_root" \
   "schedule_prompt_path_json=$schedule_prompt_path_json")" || exit 1
 codex_compact_line="$(subagent_prompt watch/watch-attach-codex-compact "$tooling_root")" || exit 1
+if [[ -n "$guarded_pr_url" ]]; then
+  codex_attach_line='Codex: run the stream in the active shell session. Drain it as the task continues.'
+  codex_compact_line="$codex_attach_line"
+fi
 host_kind="$(hook_host_kind)"
 case "$host_kind" in
   claude)

@@ -22,6 +22,8 @@ Report every comment/review, including bots.
 
 Ask once before acting on these, and do not wait for a reply: leave the item unchanged, keep watching, and report it. Silence never approves.
 
+Render the question with `bash scripts/user-question.sh QUESTION SAFE_FALLBACK` from the plugin root.
+
 1. No code signal: runner OOM, network/cache failures, timeouts, or never-started jobs.
    Report the run; no edits/reruns.
 2. Files **not already in this PR's diff**

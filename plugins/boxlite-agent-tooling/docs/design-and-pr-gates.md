@@ -44,7 +44,13 @@ Specs own input/output; `design-criteria.md` owns steps/entry format (2048-byte 
 
 How it works must open with a one-line overview and a concrete example before the mechanism ([design #418](https://github.com/boxlite-ai/agent-tooling/issues/418)). No overview, or no example before the mechanism, is high; other readability gaps, such as an undefined project-specific term, are low; mechanism and trade-off gaps keep their usual severity.
 
-Related work must open with a best-practice line, sourced or “none established” with evidence, then group cited approaches in one table with the design’s pick row marked Pick, and list failures, constraints and counterevidence under Lessons ([design #424](https://github.com/boxlite-ai/agent-tooling/issues/424)). A missing line or approach grouping is high.
+Related work opens with sourced best practice and stance, or evidence that none is established. It compares methods in one table, marks the chosen row Pick, and closes with cited Lessons. [Design #424](https://github.com/boxlite-ai/agent-tooling/issues/424)
+
+The **Projects** column lists every eligible researched project under its cited methods. The auditor checks the table against the log and sources. A missing best-practice line, column, or eligible project is high severity, as is incorrect method grouping. [Design #458](https://github.com/boxlite-ai/agent-tooling/issues/458)
+
+Design auditors, advisors, and commit or push auditors read the full design and log. Use public evidence or approval that covers every recipient.
+
+In Notion, place the Markdown table in a top-level code block.
 
 `probe-privacy.md` repeats deliberately in both specs; privacy hooks detect addresses/key requests, with address-only WebSearch checks.
 
@@ -70,7 +76,7 @@ Reject severity labels/unresolved local anchors; outside evidence remains unchec
 | Overrule | Record `OVERRIDDEN`; retained `overruled:` findings are not re-raised. |
 | No answer after five minutes | Keep edits blocked. |
 
-Only managed question hooks, correlated Codex replies, or a human's first-line `design-decision: <choice> <reason>` record decisions.
+The prompt hook records the human's first-line `design-decision: <request-id> <choice> <reason>` after checking the current request.
 
 Neither design agent has a force-pass card; they gate edits, not turn completion or commits.
 
@@ -104,7 +110,7 @@ The design gate allows a native commit/push or verdict auditor to save its assig
 | --- | --- |
 | Audit | `design-doc.sh verdict`, default 900 seconds; only critical/high gaps FAIL; content edits need fresh review. |
 | Advice | `design-doc.sh advice`; advice never changes verdict. |
-| Repeated FAIL | Submit `design-doc.sh reflect` or answer first-line `design-decision: <Redesign\|Reflect again\|Overrule> <reason>`. |
+| Repeated FAIL | Submit `design-doc.sh reflect` or answer first-line `design-decision: <request-id> <Redesign\|Reflect again\|Overrule> <reason>`. |
 | Codex question | Exact async payload/request-ID title; matching late answers count, silence blocks, changed design/history needs new request. |
 | Provider auth | GitHub `gh`; Notion `NOTION_TOKEN`; Linear `LINEAR_API_KEY`; environment only. |
 | Binding/content | Re-register after branch changes; Notion text must use top-level blocks. |

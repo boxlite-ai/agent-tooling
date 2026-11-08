@@ -167,13 +167,19 @@ change_target() {
     pr_number) export FORK_TEST_NUMBER=43 ;;
   esac
 }
+record_reply() {
+  bash -c '
+    source "$1/.agents/lib/timed-user-prompt.sh"
+    timed_user_prompt prompt-reply "$2" "$3" "$4"
+  ' fixture "$plugin" "$1" "$2" "$3" >/dev/null
+}
 for dimension in owner repository host base_ref base_commit; do
   reset_target
   rm -f "$state"
   check "fork above cap asks before $dimension change" "$draft -Rupstream/project -Halice:feature" 'Bypass limit'
   [[ -f "$state" ]] || continue
   old="$(jq -r .id "$state")"
-  bash "$plugin/scripts/timed-user-prompt.sh" respond "$state" "$old" 'Bypass limit' >/dev/null
+  record_reply "$state" "$old" "pr-size-exception: $old Bypass limit"
   check 'exact fork bypass passes' "$draft -Rupstream/project -Halice:feature" ''
   change_target "$dimension"
   check "different $dimension needs new bypass" "$draft -R$FORK_TEST_HOST/$FORK_TEST_REPO -H$FORK_TEST_OWNER:feature -B$FORK_TEST_BASE_REF" 'Bypass limit'
@@ -188,23 +194,21 @@ for dimension in owner repository host base_ref base_commit pr_number; do
   check "ready creates review request before $dimension change" 'gh pr ready -Rupstream/project' 'reviewed:'
   [[ -f "$review_state" ]] || continue
   old="$(jq -r .id "$review_state")"
-  jq -nc --arg branch feature --arg head "$FORK_TEST_HEAD" --arg request "$old" \
-    '{branch:$branch,head:$head,request:$request,message:"reviewed: exact fork target"}' > .agents/state/pr-reviewed.json
+  record_reply "$review_state" "$old" "reviewed: $old exact fork target"
   change_target "$dimension"
-  check "different $dimension invalidates review" "gh pr ready -R$FORK_TEST_HOST/$FORK_TEST_REPO" 'old request'
-  [[ "$(jq -r .id "$review_state")" != "$old" && -f .agents/state/pr-reviewed.json ]] || fail=$((fail+1))
-  rm .agents/state/pr-reviewed.json
+  check "different $dimension invalidates review" "gh pr ready -R$FORK_TEST_HOST/$FORK_TEST_REPO" 'reviewed:'
+  jq -e --arg id "$old" '.id!=$id and .status=="pending"' "$review_state" >/dev/null || fail=$((fail+1))
 done
 reset_target
 check 'ready primes final revalidation' 'gh pr ready -Rupstream/project' 'reviewed:'
 if [[ -f "$review_state" ]]; then
-  jq -nc --arg branch feature --arg head "$FORK_TEST_HEAD" --arg request "$(jq -r .id "$review_state")" \
-    '{branch:$branch,head:$head,request:$request,message:"reviewed: exact fork target"}' > .agents/state/pr-reviewed.json
+  id="$(jq -r .id "$review_state")"
+  record_reply "$review_state" "$id" "reviewed: $id exact fork target"
   export FORK_TEST_MOVE_ON_RENDER=1
-  check 'head movement after review preserves marker and denies' 'gh pr ready -Rupstream/project' 'changed after review'
-  [[ -f .agents/state/pr-reviewed.json ]] || fail=$((fail+1))
+  check 'head movement after review preserves request and denies' 'gh pr ready -Rupstream/project' 'changed after review'
+  jq -e --arg id "$id" '.id==$id and .status=="accepted"' "$review_state" >/dev/null || fail=$((fail+1))
   unset FORK_TEST_MOVE_ON_RENDER
-  rm -f "$FORK_TEST_MOVED" .agents/state/pr-reviewed.json
+  rm -f "$FORK_TEST_MOVED" "$review_state"
 fi
 
 # The public hook must see the literal expansion spelling.

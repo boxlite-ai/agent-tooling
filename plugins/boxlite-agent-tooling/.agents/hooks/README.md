@@ -15,7 +15,6 @@ See [host wiring](../../hooks/README.md) for events and host differences,
 | [preflight-design-doc.sh](preflight-design-doc.sh) | Editor/patch `PreToolUse` JSON | Require a current design, audit PASS, and advice before repository edits; exempt an active auditor's exact task-bound report write. |
 | [preflight-commit-push.sh](preflight-commit-push.sh) | Shell `PreToolUse` or delegated Git payload | Require matching commit/push evidence; delegate to installed Git gates. |
 | [preflight-pr-review.sh](preflight-pr-review.sh) | Shell `PreToolUse` JSON | Inspect GitHub writing and PR design, explanation, size, and review acknowledgment. |
-| [claude-timed-question.sh](claude-timed-question.sh) | Claude `AskUserQuestion` pre/post JSON | Validate a managed question and capture the user's timely typed response. |
 | [post-remote-write-watch.sh](post-remote-write-watch.sh) | Shell `PostToolUse` JSON | Connect successful remote writes and pending events to the host's watch consumer. |
 | [stop-gate.sh](stop-gate.sh) | `Stop` JSON | Sequence timed confirmations, writing checks, and verdict validation. |
 | [preflight-verdict-check.sh](audit/preflight-verdict-check.sh) | Stop payload forwarded by `stop-gate.sh` | Inspect the whole final turn and validate a dossier or request an independent audit. |
@@ -47,7 +46,7 @@ Additional suites cover GitHub writing, PR design/explanations/size, TL;DR check
 
 - Pass `fast` to the [TL;DR suite](../../tests/session/tldr-gates.test.sh) to check denials in under a minute. Its full matrix takes over ten minutes.
 - Set `TLDR_GATES_CASES=<label>,…` to run only those cases, for example a fix's new ones within a foreground time limit; a label that runs no case fails the suite.
-- Managed questions also use [`tests/scripts/claude-timed-prompts.test.sh`](../../tests/scripts/claude-timed-prompts.test.sh).
+- [PR question replies](../../tests/scripts/pr-question-reply.test.sh) cover managed answers on both host routes.
 - [PR fixtures](../../tests/pr/fixtures/) hold recorded test inputs.
 
 ## How it works

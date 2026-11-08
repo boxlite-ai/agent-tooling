@@ -12,15 +12,15 @@ for dependency in jq perl "${GH_BIN:-gh}"; do
   }
 done
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" || exit 2
-for library in subagent pr-author-review reply-summary concise-writing github-writing; do
+for library in subagent user-question pr-author-review reply-summary concise-writing github-writing; do
   [[ -r "$plugin_root/.agents/lib/$library.sh" ]] || {
     printf 'pr-author-review: missing library: %s/.agents/lib/%s.sh\n' "$plugin_root" "$library" >&2
     exit 2
   }
 done
 # shellcheck source-path=SCRIPTDIR
-# shellcheck source=../.agents/lib/subagent.sh
-source "$plugin_root/.agents/lib/subagent.sh"
+# shellcheck source=../.agents/lib/user-question.sh
+source "$plugin_root/.agents/lib/user-question.sh" || exit 2
 # shellcheck source=../.agents/lib/reply-summary.sh
 source "$plugin_root/.agents/lib/reply-summary.sh" || exit 2
 # shellcheck source=../.agents/lib/concise-writing.sh

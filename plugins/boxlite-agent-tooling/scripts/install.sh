@@ -27,6 +27,8 @@ command -v perl >/dev/null 2>&1 || { printf 'agent-tooling: perl is required\n' 
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # shellcheck source=../.agents/lib/tooling-command.sh
 source "$plugin_root/.agents/lib/tooling-command.sh"
+# shellcheck source=../.agents/lib/install-lock.sh
+source "$plugin_root/.agents/lib/install-lock.sh"
 update_deadline="${AGENT_TOOLING_UPDATE_DEADLINE:-$(( $(date +%s) + 120 ))}"
 
 tooling_repo="$(jq -er '.tooling.repository | select(type == "string" and length > 0)' "$profile_file")" || {
@@ -57,6 +59,41 @@ common_git_dir="$(git -C "$repo_root" rev-parse --git-common-dir)"
 cache_parent="$common_git_dir/agent-tooling"
 record_file="$cache_parent/current"
 mkdir -p "$cache_parent"
+
+lock_dir="$cache_parent/.install.lock"
+lease_held=0
+lock_unavailable() {
+  printf 'agent-tooling: another installation is already in progress or the lock is unavailable: %s\n' "$lock_dir" >&2
+  exit 1
+}
+if [[ "${1:-}" == --install-lease-held ]]; then
+  shift
+  install_lock_native "$cache_parent" && install_lock_lease verify "$cache_parent" || lock_unavailable
+  lease_held=1
+elif install_lock_native "$cache_parent"; then
+  install_lock_lease enter "$cache_parent" bash -- "$0" --install-lease-held "$@" || lock_unavailable
+  exit 0
+else
+  mkdir "$lock_dir" 2>/dev/null || lock_unavailable
+fi
+
+scratch=""
+cleanup() {
+  if [[ -n "$scratch" && -d "$scratch" && "$scratch" == "$cache_parent"/.install.* ]]; then
+    rm -rf -- "$scratch"
+  fi
+  if (( lease_held )); then
+    exec 9>&-
+    install_lock_lease release "$cache_parent" || true
+  else
+    rm -f -- "$lock_dir/pid"
+    rmdir "$lock_dir" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+(( lease_held )) || printf '%s\n' "$$" > "$lock_dir/pid"
 
 recorded_sha() {
   local rec
@@ -96,25 +133,6 @@ else
     fi
   fi
 fi
-
-lock_dir="$cache_parent/.install.lock"
-if ! mkdir "$lock_dir" 2>/dev/null; then
-  printf 'agent-tooling: another installation is already in progress: %s\n' "$lock_dir" >&2
-  exit 1
-fi
-printf '%s\n' "$$" > "$lock_dir/pid"
-
-scratch=""
-cleanup() {
-  if [[ -n "$scratch" && -d "$scratch" && "$scratch" == "$cache_parent"/.install.* ]]; then
-    rm -rf -- "$scratch"
-  fi
-  rm -f -- "$lock_dir/pid"
-  rmdir "$lock_dir" 2>/dev/null || true
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 # Git exports GIT_DIR to every hook it runs in a linked worktree, pointing at
 # .git/worktrees/<name> — and the lifecycle hooks reach this bootstrap through

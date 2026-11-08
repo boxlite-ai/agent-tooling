@@ -160,7 +160,11 @@ Publish before deduplication, acknowledge exact IDs; full capacity stops polling
 
 ### PR delivery
 
-`.agents/hooks/post-remote-write-watch.sh` requests one ten-minute schedule/chat using `.agents/prompts/watch/pr-watch-schedule.md`; the agent verifies saved bindings.
+`.agents/hooks/post-remote-write-watch.sh` requests one ten-minute schedule/chat after push or direct PR commands. The agent verifies saved bindings using `.agents/prompts/watch/pr-watch-schedule.md`.
+
+A direct Bash call to the installed `gh-pr.sh` can attach an active session after a confirmed create or edit. The hook matches the checkout and existing watch, and the stream waits for that generation to identify the same PR URL.
+
+Claude uses Monitor. Codex drains the stream through its active shell session. Existing schedules keep their own delivery state.
 
 | Component | Contract |
 | --- | --- |

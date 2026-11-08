@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Pure renderer for host-native interactive-question instructions.
+# Host-native interactive question capability and rendering.
+
+hook_interactive_prompt_claude_available() {
+  [[ "${BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS:-}" == 1 \
+    && "${CLAUDE_AFK_TIMEOUT_MS:-}" =~ ^[1-9][0-9]{0,5}$ ]] \
+    && (( CLAUDE_AFK_TIMEOUT_MS <= 300000 ))
+}
 
 hook_interactive_prompt_render_claude() {  # prompt-spec JSON
   local spec="$1" question header multi_select option_count index option root payload commands

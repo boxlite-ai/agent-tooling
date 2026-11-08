@@ -20,7 +20,8 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 
 | Event | Script | Contract |
 | --- | --- | --- |
-| `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Revoke old authority; unchanged audit work may finish as prior evidence. |
+| `UserPromptSubmit` | `.agents/hooks/cancel-verdict-audit.sh` | Record typed PR replies and revoke old authority. Unchanged audit work may finish as prior evidence. |
+| Typed design decision | `.agents/hooks/design-decision-prompt.sh` | Record a reply bound to the current request and session. |
 | Opt-in `UserPromptSubmit` | `.agents/hooks/rule-recency.sh` | Reference workflow and writing skill; absent from plugin manifests. |
 | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | Track workers, escalation, completion, overrides, and Git attempt closure. |
 | Auditor/advisor start, tool, stop | `.agents/hooks/audit-deadline.sh` | Publish native dossier-worker ownership, enforce deadlines, and clean up owned tasks. |
@@ -29,7 +30,7 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 | Commit/push `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | Delegate to installed Git gates; deny with an explicit next action. |
 | GitHub/PR shell `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Check writing, privacy, design, description, size, and human review acknowledgment. |
 | PR body file | `scripts/gh-pr.sh` | Run the same PR checks and publish the checked snapshot over stdin. |
-| Claude question pre/post tool | `.agents/hooks/claude-timed-question.sh` | Validate managed presentation and timely answers; expiry grants no authority. |
+| Issue, comment, review, and release text file | `scripts/gh-write.sh` | Apply GitHub writing checks to a bounded snapshot and pass it over stdin. |
 | Remote-write `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Attach successful writes to PR monitoring. |
 | Test `PostToolUse`; Claude failure event | `.agents/hooks/record-test-run.sh` | Record supported completed `make test...` results in ignored test-run receipts. |
 | `Stop` | `.agents/hooks/stop-gate.sh` | Continue timed requests, check writing, then execute verdict checking. |
@@ -54,6 +55,24 @@ See [attempt ownership and next actions](.agents/hooks/audit/architecture.md#com
 ### Timed subagents
 
 See [auditor deadlines and recording windows](.agents/hooks/audit/architecture.md#timed-subagents).
+
+## Follow-up capture
+
+The optional Claude launcher injects the queue rule and handle through SessionStart. The SDK binds queue calls to the native root, prompt, and Git common directory. A PreToolUse callback inserts a one-use permit after checking that binding.
+
+The capture callback waits for the installed Stop gate to allow the turn. It can ask once per prompt for an exact draft acknowledgment, including an empty set. A later tool call or model turn invalidates the seal.
+
+The operator stores clone-keyed SQLite state outside the checkout and beyond the agent account's access. An operator-owned registry binds each clone to one journal across linked worktrees and same-filesystem renames. Finished drafts leave the active queue and keep their deduplication records in SQLite. Status and history read at most 50 completed records per page.
+
+The queue lock covers the version upgrade and archive writes. The upgrade fences older writers and discards legacy handles without a recorded owner. Drafts, approvals, and attempts survive the upgrade.
+
+The operator checks the private SDK installation before loading any of its code. Startup reclaims abandoned handles when their recorded owner process has exited. The active draft size limit leaves room for approvals, close evidence, and retry state.
+
+The qualified macOS one-shot launcher requires an allowed final Stop, a completed root result, SDK stream exhaustion, and clean child exit. If Claude omits SessionEnd, the launcher records the close after observing those signals. The root result starts one deadline for SDK exhaustion and child closure. A timeout forces teardown and holds the drafts.
+
+Enrollment pins a GitHub repository ID. The operator grants public disclosure for the exact revision and destination, including the embedded marker. A clone lock spans the durable attempt and the single create request.
+
+After an ambiguous create, drains read open and closed issues in the original repository for the recorded author and marker. Drains resume scheduling after the last serviced draft and reduce oversized pages at the same cursor. Unmatched sweeps repeat without another create. Each drain allows 30 seconds, 10 requests, and up to five seconds per request.
 
 ## Boundaries
 
