@@ -13,8 +13,8 @@ export EXPLANATION_FIXTURE="$scratch/render.json"
 cat > "$scratch/bin/gh" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  'api --hostname github.com markdown -f mode=gfm -f text='*)
-    jq -er --arg body "${8#text=}" 'select(.body == $body) | .html' "$EXPLANATION_FIXTURE" ;;
+  'api --hostname github.com markdown --method POST --input - --header Content-Type: application/json; charset=utf-8')
+    jq -er --slurpfile fixture "$EXPLANATION_FIXTURE" 'select(.mode == "gfm" and .text == $fixture[0].body) | $fixture[0].html' ;;
   'api --hostname github.com repos/example/repo/issues/1')
     jq -nc '{html_url:"https://github.com/example/repo/issues/1",body:"## TL;DR\n\nDesign the change."}' ;;
   'repo view --json nameWithOwner,defaultBranchRef,url') printf '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}' ;;
@@ -33,6 +33,14 @@ cd "$scratch/repo"
 bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 >/dev/null
 pass=0 fail=0
 while IFS= read -r fixture; do
+  # Keep the captured explanation intact and put fixture metadata in a list.
+  fixture="$(jq -c --arg url 'https://github.com/example/repo/issues/1' '
+    .body |= sub("\n\nDesign: [^\n]+\n\n";
+      "\n\n## Links\n\n- Design: " + $url + "\n- Fixture metadata.\n\n")
+    | .html |= sub("\n<p>Design: [^\n]+</p>\n";
+      "\n<h2>Links</h2>\n<ul><li>Design: <a href=\"" + $url + "\">" + $url
+      + "</a></li><li>Fixture metadata.</li></ul>\n")
+  ' <<<"$fixture")"
   printf '%s\n' "$fixture" > "$EXPLANATION_FIXTURE"
   name="$(jq -r .name <<<"$fixture")"
   body="$(jq -r .body <<<"$fixture")"

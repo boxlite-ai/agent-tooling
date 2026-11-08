@@ -95,8 +95,9 @@ pr_description_check() { # root, resolved target, create|edit|ready, validated g
   fi
   # GitHub owns Markdown semantics; inspect its sanitized HTML, not source tokens.
   # API contract: https://docs.github.com/en/rest/markdown/markdown#render-a-markdown-document
-  response="$(perl -e 'alarm 20; exec @ARGV' gh api --hostname "$(jq -r .host <<<"$target")" markdown \
-    -f mode=gfm -f "text=$body" | head -c 65537 | \
+  response="$(printf '%s' "$body" | jq -bRs '{mode:"gfm",text:.}' | \
+    perl -e 'alarm 20; exec @ARGV' gh api --hostname "$(jq -r .host <<<"$target")" markdown \
+      --method POST --input - --header 'Content-Type: application/json; charset=utf-8' | head -c 65537 | \
     perl -0777 -ne 'length($_) <= 65536 or exit 1; print')" || {
     printf 'Cannot render the PR body to verify its design doc link.'; return 1;
   }

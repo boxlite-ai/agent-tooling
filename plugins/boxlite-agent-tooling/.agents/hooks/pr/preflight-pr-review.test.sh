@@ -40,7 +40,7 @@ mkdir "$TMP/gh-bin"
 cat > "$TMP/gh-bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
-  'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
+  'api --hostname github.com markdown --method POST --input - --header Content-Type: application/json; charset=utf-8') jq -e 'select(.mode == "gfm") | .text | contains("https://github.com/example/repo/issues/123")' >/dev/null || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
   'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
   'repo view --json nameWithOwner,defaultBranchRef,url') printf '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api --hostname github.com repos/example/repo/git/ref/heads/main') jq -nc --arg sha "$(git rev-parse HEAD)" '{object:{type:"commit",sha:$sha}}' ;;
@@ -55,7 +55,7 @@ GH
 chmod +x "$TMP/gh-bin/gh"
 export PATH="$TMP/gh-bin:$PATH"
 DESIGN_FIXTURE_URL=https://github.com/example/repo/issues/123
-DOC_LINK=$'\n\n## TL;DR\n\nSummary.\n\n## How it works\n\nRetry failed calls once.\n\n'"$DESIGN_FIXTURE_URL"
+DOC_LINK=$'\n\n## TL;DR\n\nSummary.\n\n## How it works\n\n- Retry failed calls once.\n- '"$DESIGN_FIXTURE_URL"
 bash "$REPO_ROOT/scripts/design-doc.sh" bind "$DESIGN_FIXTURE_URL" >/dev/null
 
 pass=0
@@ -587,10 +587,10 @@ TABLE_BODY=$'| Trigger | Matrix |\n| --- | --- |\n| PR | Focused |\n| Weekly | F
 LEGACY_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
 LONG_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
 LONG_UNSPACED_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
-# Short sentences keep these long bodies inside the structure limits (#419).
-LIMIT_WORDS_BODY="$(printf 'Ten short words keep each paragraph of this body compliant.\n\n%.0s' {1..12})"
+# Six 20-word items keep these long bodies inside the structure limits.
+LIMIT_WORDS_BODY="$(printf -- '- Each of these list items contains twenty words and keeps this example within the writing limits for a review summary.\n%.0s' {1..6})"
 LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<40; i++) printf "字"}')"
-OVER_WORDS_BODY="$LIMIT_WORDS_BODY"$'\n\nx'
+OVER_WORDS_BODY="${LIMIT_WORDS_BODY% review summary.} brief review summary."
 OVER_CHARS_BODY="${LIMIT_CHARS_BODY}字"
 EMOJI_BODY="$(awk 'BEGIN {for (i=0; i<2000; i++) printf "😀"}')"
 HUGE_BODY="$(awk 'BEGIN {for (i=0; i<8001; i++) printf "x"}')"
@@ -624,8 +624,8 @@ WHITESPACE_BODY=$' \n\t'
 run_body "whitespace body → deny" "gh pr create $FEAT --body '$WHITESPACE_BODY'" "deny"
 run_body "oversized description with valid legacy graph → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"
 run_body "unspaced text cannot evade the size limit → deny" "gh pr create $FEAT --body '$LONG_UNSPACED_BODY'" "deny"
-run_body "120 words in short paragraphs → allow" "gh pr create $FEAT --body '$LIMIT_WORDS_BODY'" "passthrough"
-run_body "121 words in short paragraphs → allow" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
+run_body "120 words in a list → allow" "gh pr create $FEAT --body '$LIMIT_WORDS_BODY'" "passthrough"
+run_body "121 words in a list → allow" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
 run_body "long structured body edit → allow" "gh pr edit 42 $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
 run_body "40 Chinese characters at the paragraph boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
 # The 40-word density cap is gone, and Chinese sentences skip the word limit (#419).

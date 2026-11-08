@@ -65,8 +65,11 @@ Context: `repo_root`, `session`, `epoch`, `branch`, `gate`; limits: eight failur
 
 - `last-verdict.json`: consumed turn dossier.
 - `last-verdict.prev.json`: parked FAIL for fresh review.
+- `last-verdict-index.json`: session-scoped checkpoint written after PASS consumption. Stores the generation, message ID, optional host turn ID, and optional native range from the accepted attempt.
 - `verdict-decisions.log`: elapsed time, rung, outcome.
 - `audit-diagnostics.jsonl`: bounded execution diagnostics, never approval.
+
+The [index reader](../../../scripts/read-verdict-index.sh) returns an offset only for a valid checkpoint on the same transcript with bytes beyond it. Missing, malformed, stale, or unwritable state leaves verdict decisions independent of the checkpoint.
 
 ### Prompt state
 

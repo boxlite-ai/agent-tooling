@@ -22,11 +22,11 @@ dossier: `command`, `status`, `exit_code`, `head`, `tree`.
 
 ## Native records
 
-Use optional `parent_session_id`, `parent_host`, `audit_started_at` hints; follow discovery, boundary/envelope/execution-linkage rules in `../../skills/boxlite-verdict-audit/references/transcripts.md` (relative).
+Use task hints and `../../skills/boxlite-verdict-audit/references/transcripts.md` only for discovery, formats, and execution linkage.
 
-- Verify parent/repo identity, link invocation/completion, revalidate before delivery.
-- No transcript path; missing context needs verified host linkage, never your session.
-- Standalone: receipts or safe reruns.
+- Bind evidence through the Git request, even in an open turn.
+- Verify file identity and range hashes or ordered API IDs and content. Recheck before delivery.
+- Without verified parent linkage, use receipts or safe reruns.
 
 ## Choose proof by contract
 

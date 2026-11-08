@@ -49,7 +49,7 @@ elif [[ "$1 $2" == 'pr view' ]]; then
 elif [[ "$*" == 'api --hostname github.com repos/example/repo/issues/1' ]]; then
   jq -nc '{html_url:"https://github.com/example/repo/issues/1",body:"## TL;DR\n\nResolve fork targets."}'
 elif [[ "$1 $2 $3 $4" == "api --hostname $FORK_TEST_HOST markdown" ]]; then
-  [[ "$*" == *https://github.com/example/repo/issues/1* ]] || exit 2
+  jq -e 'select(.mode == "gfm") | .text | contains("https://github.com/example/repo/issues/1")' >/dev/null || exit 2
   printf '<h2>How it works</h2><p>Resolve forks.</p><a href="https://github.com/example/repo/issues/1">Design</a>'
   [[ "${FORK_TEST_MOVE_ON_RENDER:-0}" == 0 ]] || touch "$FORK_TEST_MOVED"
 elif [[ "$1 $2 $3" == "api --hostname $FORK_TEST_HOST" && $# == 4 ]]; then

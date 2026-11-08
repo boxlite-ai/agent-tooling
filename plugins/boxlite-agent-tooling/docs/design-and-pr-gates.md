@@ -124,6 +124,26 @@ The design gate allows a native commit/push or verdict auditor to save its assig
 
 Hidden source URLs do not count; direct API/browser writes bypass this CLI boundary; example accuracy and relevance remain human review responsibilities.
 
+### PR body files
+
+Run the launcher from a Claude Code or Codex shell in the PR checkout. Use the plugin's installed path in place of `/path/to/plugin`.
+
+```sh
+bash /path/to/plugin/scripts/gh-pr.sh create --draft --title 'fix: keep approved text' --body-file ./pr.md
+bash /path/to/plugin/scripts/gh-pr.sh edit 42 --title 'fix: keep approved text' --body-file ./pr.md
+```
+
+Omit `--draft` for a non-draft create. Put metadata and target flags after the title and body file.
+
+| Boundary | Contract |
+| --- | --- |
+| Input | One regular UTF-8 file, up to 24 KiB. Reject symlinks, special files, stdin, and NUL bytes. |
+| Checks | Apply the same writing, privacy, design, size, target, and review rules as inline PR text. |
+| Review | When required, match the SHA-256 shown in the diagnostic to the reviewed file. A different body or session needs a fresh acknowledgment. |
+| Publication | Pass the checked bytes to `gh` through stdin, including trailing newlines. |
+
+Use a direct launcher call with the host's session environment. Direct `gh` commands require inline bodies.
+
 ## PR size and stacks
 
 `.agents/lib/pr-target.sh` resolves one target for size, design, and review; `.agents/lib/pr-size.sh`/`.agents/lib/pr-size.jq` measure published GitHub comparisons.

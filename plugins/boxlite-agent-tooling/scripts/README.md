@@ -155,6 +155,7 @@ Transcript discovery and runner contracts: [audit configuration](../.agents/hook
 | [audit-reflection.sh](audit-reflection.sh) `prepare\|record\|status\|submit\|checkpoint STATE` | Read bounded request JSON; persist audit transitions or check the Git retry decision, returning cycle JSON on stdout. |
 | [audit-reflection-gate.sh](audit-reflection-gate.sh) `CONTEXT OPERATION [ATTEMPT_ID]` | Adapt audit history to scoped gates: validate context, snapshot evidence, and reconcile outcomes; payload JSON arrives on stdin. |
 | [validate-audit-dossier.sh](validate-audit-dossier.sh) `verdict\|commit\|push HISTORY [DOSSIER]` | Read-only candidate validation; `-` means no history or dossier on stdin; writes no audit state or approval. |
+| [read-verdict-index.sh](read-verdict-index.sh) `REPO_ROOT SESSION_ID TRANSCRIPT` | Read-only checkpoint lookup for a resolved source. Exit 0 prints a tentative offset, 1 means no usable hint, and 2 means invocation or setup failed. |
 
 Before delivery, run the validator with the task's immutable history input and candidate.
 

@@ -130,8 +130,9 @@ Prompt tests establish delivery, not model compliance or recall.
 `boxlite-verdict-audit` owns discovery/proof/output; thin native specs and all runner routes load it explicitly; missing skill/discovery guide denies.
 
 - Supply `parent_session_id`, `parent_host`, `audit_started_at`, repository/dossier binding; no transcript path or claim JSON required.
-- Discover full evidence using known-host hints or available tools/metadata; verify parent/repository/turn, including legacy parent linkage.
-- File proof rechecks identity plus prefix length/digest; API proof rechecks ordered IDs and content/version through a fixed complete boundary.
+- Verify parent/repository/turn, then review only the selected turn. Look up older records for identity, specific claims, or required retry checks.
+- File proof rechecks identity and the digests of used ranges. API proof rechecks complete ordered records and their content or immutable version.
+- Native snapshots with a user boundary supply exact byte ranges to the auditor. A consumed PASS attempts to persist the session's last index as a discovery hint.
 - Unresolved identity/completeness FAIL; native records use ≤64 KiB outputs without cumulative read cap, subject to deadline.
 
 ### Final-turn bookkeeping reader

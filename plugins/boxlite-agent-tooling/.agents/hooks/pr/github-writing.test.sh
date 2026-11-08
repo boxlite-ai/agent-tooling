@@ -13,7 +13,7 @@ mkdir -p "$scratch/bin"
 cat > "$scratch/bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
-  'api --hostname github.com markdown -f mode=gfm -f text='*) [[ "${8#text=}" == *https://github.com/example/repo/issues/123* ]] || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
+  'api --hostname github.com markdown --method POST --input - --header Content-Type: application/json; charset=utf-8') jq -e 'select(.mode == "gfm") | .text | contains("https://github.com/example/repo/issues/123")' >/dev/null || exit 2; printf '<h2>How it works</h2><p>The handler retries a failed call once.</p><a href="https://github.com/example/repo/issues/123">Design</a>' ;;
   'api --hostname github.com repos/example/repo/issues/123') printf '{"html_url":"https://github.com/example/repo/issues/123","body":"## TL;DR\\n\\nDesign and validation."}' ;;
   'repo view --json nameWithOwner,defaultBranchRef,url') printf '{"nameWithOwner":"example/repo","url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}' ;;
   'api --hostname github.com repos/example/repo/git/ref/heads/main') jq -nc --arg sha "$(git rev-parse HEAD)" '{object:{type:"commit",sha:$sha}}' ;;
@@ -47,14 +47,14 @@ check() {
 dense="$(printf 'word %.0s' {1..41})"
 long="$(printf 'word %.0s' {1..121})"
 bullet="- $(printf 'word %.0s' {1..41})"
-ten_word_paragraphs="$(printf 'Ten words keep each paragraph of this body short enough.\n\n%.0s' {1..6})"
+details_list="$(printf -- '- Ten words keep each item of this list short enough.\n%.0s' {1..6})"
 structured="## TL;DR
 
 Allow complete structured documents.
 
 ## How it works
 
-$ten_word_paragraphs
+$details_list
 
 https://github.com/example/repo/issues/123"
 # A leading TL;DR no longer exempts the details from the structure limits (#419).
@@ -149,7 +149,7 @@ check '40-word summary' "gh issue create --title Bug --body '## TL;DR
 $(printf 'word %.0s' {1..40})'" deny 'TL;DR has 40 words (limit 39)'
 # A comment of 80 words or fewer reads whole, so it needs no TL;DR; documents and
 # longer comments keep the summary (#265). Structure limits apply at any length (#419).
-eighty="$(printf 'Ten more words keep this comment body under the exemption.\n\n%.0s' {1..8})"
+eighty="$(printf -- '- Each of these list items contains twenty words and keeps the whole comment under the limit for requiring a summary.\n%.0s' {1..4})"
 check 'short comment needs no summary' "gh issue comment 7 --body 'Fixed in #263.'" allow
 check '80-word comment needs no summary' "gh pr comment 7 --body '$eighty'" allow
 check '81-word comment needs a summary' "gh issue comment 7 --body '$eighty
