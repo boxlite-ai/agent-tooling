@@ -31,7 +31,7 @@ make test:plugin TEST_FILTER=<name>
 
 API changes also require `make test:api-compatibility test:api-lint` with oasdiff 1.33.0 or `OASDIFF_BIN`.
 
-Test affected Claude/Codex and OS combinations; report unverified coverage; Copilot installs remain unverified.
+Follow the [live agent test rule](guidance/workflow.md#live-agent-tests) and test affected OS combinations. Report unverified coverage. Copilot installs remain unverified.
 
 For releases and upgrades, see [release maintenance](scripts/README.md#release-maintenance). For test setup, see [auditor test isolation](.agents/hooks/audit/README.md#auditor-test-isolation).
 

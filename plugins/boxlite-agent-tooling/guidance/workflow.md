@@ -58,6 +58,11 @@ Classify each behavioral claim against its base contract:
 | Wholly new contracts | Verify base/source evidence of no equivalent prior contract; run positive, negative, and boundary tests against the implementation; mark full-revert defect proof not applicable with a reason; new security APIs also need allowed/denied checks at real security boundaries |
 | Mixed changes | Apply both standards, defect proof and new-contract proof, per claim |
 
+#### Live agent tests
+
+- Test every new or changed agent-facing feature through its normal entry point in real Codex and Claude Code sessions, at minimum.
+- Record each scenario, host version, OS, and observed result. Report missing live coverage separately from fixture results.
+
 #### Defect proof
 
 For each test added with a fix, run these steps manually, in order:
