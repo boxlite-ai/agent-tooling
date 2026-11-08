@@ -147,9 +147,33 @@ prepare_file_publication() {
 }
 
 publish_checked_pr() {
-  if (( publish_file )); then
-    printf '%s' "$publish_body" | command gh pr "${publish_args[@]}"
+  (( publish_file )) || return 0
+  local arg output url status=0 gh_status checkout
+  for arg in "${publish_args[@]}"; do
+    case "$arg" in
+      --dry-run|--dry-run=*)
+        printf '%s' "$publish_body" | exec gh pr "${publish_args[@]}"
+        return $? ;;
+    esac
+  done
+  output="$(
+    gh_status=0
+    printf '%s' "$publish_body" | exec gh pr "${publish_args[@]}" || gh_status=$?
+    printf '.'
+    exit "$gh_status"
+  )" || status=$?
+  output="${output%.}"
+  printf '%s' "$output"
+  url="${output%$'\n'}"
+  if (( status == 0 )) && [[ "${BOXLITE_PR_WATCH:-1}" != 0 ]]; then
+    # shellcheck source=../lib/pr-watch-state.sh
+    if source "$tooling_root/.agents/lib/pr-watch-state.sh" \
+       && pr_watch_url_is_valid "$url" \
+       && checkout="$(pr_watch_checkout_digest "$repo_root")"; then
+      printf 'boxlite-pr-write %s %s\n' "$checkout" "$url" >&2
+    fi
   fi
+  return "$status"
 }
 
 # Bourne-Again, its POSIX mode, the Z shell and Debian Almquist build the same argv
