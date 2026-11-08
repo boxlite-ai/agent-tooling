@@ -139,9 +139,10 @@ keeps_triage_note() { [[ "$(field "$1" '.systemMessage')" == *"triage: NO"* ]]; 
 audit_ran() { [[ -e "$1/.agents/state/SYNC_AUDIT_RAN" ]]; }
 
 # Long fixtures keep the structure limits, so only the TL;DR rule applies to them.
-long_reply="$(printf 'Nine words in each short sentence keep this compliant.\n\n%.0s' {1..9})"
+short_sentence='Nine words in each short sentence keep this compliant.'
+long_reply="$(for _ in {1..3}; do printf -- '- %s %s %s\n' "$short_sentence" "$short_sentence" "$short_sentence"; done)"
 short_reply="Done: the gate checks the summary. Say go to commit."
-long_claim="$(printf 'More context words fill this reply past the limit.\n\n%.0s' {1..14})The root cause is the stale index."
+long_claim="$long_reply"$'\n\nThe root cause is the stale index.'
 
 check_writing_continuations() {
   local host S R payload out

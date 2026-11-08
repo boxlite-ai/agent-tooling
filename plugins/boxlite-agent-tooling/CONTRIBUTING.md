@@ -82,9 +82,8 @@ Choose the smallest useful illustration. The example below is hypothetical. [Ill
 
 Run fewer SDK jobs per PR while retaining the full matrix weekly.
 
-Design doc: https://github.com/example/repo/issues/123
-
-Documentation: [SDK matrix](docs/ci.md#sdk-matrix).
+- Design doc: https://github.com/example/repo/issues/123
+- Documentation: [SDK matrix](docs/ci.md#sdk-matrix).
 
 ## How it works
 

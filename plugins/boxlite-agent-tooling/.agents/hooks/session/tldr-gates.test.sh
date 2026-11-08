@@ -36,9 +36,9 @@ run_hook() { # host, event, script basename; stdin is the native hook payload
     "$root=$plugin" bash -c "$command"
 }
 # Comment and Stop gates exempt text of 80 words or fewer (#265), so matrix bodies get a
-# 90-word tail of short paragraphs under their own heading and every gate applies the
+# 90-word list under its own heading and every gate applies the
 # TL;DR rules. check_short covers the exempt text itself.
-matrix_padding="$(printf 'Ten more words keep this matrix body past the exemption.\n\n%.0s' {1..9})"
+matrix_padding="$(printf -- '- These fifteen words keep the padded fixture long enough to require a summary during validation.\n%.0s' {1..6})"
 matrix_short=
 design_expected=  # Overrides the design gate's expectation; registration checks no structure.
 check() { # label, text, expected allow|deny, optional reply/design expectation, denial text
@@ -119,7 +119,8 @@ check chinese_40 $'## TL;DR\n\n'"$(printf '字%.0s' {1..40})" deny deny 'has 40 
 # Follow the denial literally: keep the summary, move supporting text under a peer heading.
 details="$(printf 'Ten more words keep each paragraph of the details short.\n\n%.0s' {1..4})"
 check explanation_counted $'## TL;DR\n\nRetry failed requests once.\n\n'"$details" deny deny 'has 44 words (limit 39)'
-check corrected_explanation $'## TL;DR\n\nRetry failed requests once.\n\n## Details\n\n'"$details" allow
+details_list="$(printf -- '- Ten more words keep each paragraph of the details short.\n%.0s' {1..4})"
+check corrected_explanation $'## TL;DR\n\nRetry failed requests once.\n\n## Details\n\n'"$details_list" allow
 check nested_heading $'## TL;DR\n\nRetry failed requests once.\n\n### Details\n\n'"$details" \
   deny deny 'same-level heading like `## Details`'
 check table_after $'## TL;DR\n\nA concise answer.\n\n| Gate | Result |\n|---|---|\n'"$(printf '| stop gate | denied the reply |\n%.0s' {1..10})" \
@@ -139,7 +140,7 @@ check_short() { # label, text, design denial
 }
 check_short short_missing 'A concise answer.' 'TL;DR heading missing'
 check_short short_bold_label '**TL;DR:** A concise answer.' '`## TL;DR`, one short sentence'
-check_short short_80_words "$(printf 'Ten more words keep this short reply under the exemption.\n\n%.0s' {1..8})" \
+check_short short_80_words "$(printf -- '- Each of these list items contains twenty words and keeps the whole reply under the limit for requiring a summary.\n%.0s' {1..4})" \
   'TL;DR heading missing'
 
 for host in claude codex; do
