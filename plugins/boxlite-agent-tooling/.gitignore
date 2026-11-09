@@ -1,7 +1,1 @@
 .agents/state/
-.claude/.last-audit.json
-.claude/.last-audit-handoff.json
-.claude/.last-verdict.json
-.claude/.pr-reviewed.json
-.claude/.verdict-last-uuid
-.claude/.verdict-decisions.log

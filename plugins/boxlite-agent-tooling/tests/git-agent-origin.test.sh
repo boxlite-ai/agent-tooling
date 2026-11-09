@@ -79,7 +79,7 @@ PS
       --arg command "$(printf '%s' "$command" | hash)" \
       --arg subject "$(printf 'test: change' | hash)" \
       '{branch:$branch,head:$head,command_kind:"commit",diff_hash:$diff,
-        command_hash:$command,commit_subject_hash:$subject,verdict:"PASS",findings:[]}' \
+        command_hash:$command,commit_subject_hash:$subject,verdict:"PASS",findings:[],advisories:[]}' \
       > .agents/state/last-audit.json
   fi
 

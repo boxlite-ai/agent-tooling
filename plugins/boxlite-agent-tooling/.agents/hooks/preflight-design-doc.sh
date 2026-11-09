@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# PreToolUse: verify the current design, an independent audit verdict for its exact
-# content, and advice on that verdict (design #335), before repository edits except
-# active auditors writing their assigned reports (#403).
+# PreToolUse: before repository edits, require the current design, an independent
+# audit verdict for its exact content, and advice on that verdict. Active auditors
+# may write their assigned reports.
 # Native tool names/denials: openai/codex codex-rs/hooks/src/events/pre_tool_use.rs:30-44.
 set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -19,9 +19,10 @@ case "$tool" in
   Write|Edit|MultiEdit|NotebookEdit|apply_patch) ;;
   *) deny 'unrecognized tool at the code-edit boundary' ;;
 esac
-cwd="$(jq -er --arg fallback "${CLAUDE_PROJECT_DIR:-$PWD}" \
-  '.tool_input.workdir // .tool_input.cwd // .cwd // $fallback | strings | select(length > 0)' \
-  <<<"$payload")" || deny 'invalid working directory'
+# shellcheck source=../lib/hook-host.sh
+source "$plugin_root/.agents/lib/hook-host.sh" || deny 'hook payload library unavailable'
+cwd="$(hook_payload_workdir "$payload" "${CLAUDE_PROJECT_DIR:-$PWD}")" \
+  || deny 'invalid working directory'
 [[ -d "$cwd" ]] || deny 'working directory is unavailable'
 
 # shellcheck source=../lib/edit-scope.sh
@@ -132,8 +133,8 @@ if [[ "$(jq -r .reflection_due <<<"$request")" == true ]]; then
     "findings=$(listed open_findings)")" || deny 'audit instruction unavailable'
   deny "$message"
 fi
-# After any #309 stop, a recorded PASS or FAIL waits for one fresh advisor run, before
-# findings are shown. Advice never changes the verdict (design #335).
+# After any audit-loop stop, a recorded PASS or FAIL waits for one fresh advisor run
+# before findings are shown. Advice never changes the verdict.
 if [[ "$(jq -r .advice_due <<<"$request")" == true ]]; then
   advice_input="$(jq -c '{repo_root, design_url, content_sha256, verdict, findings, advisories}' \
     <<<"$request")" || deny 'advice request unreadable'
@@ -158,12 +159,12 @@ if ! task_input="$(jq -c '{repo_root, design_url, content_sha256}
    || ! findings="$(listed findings)"; then
   deny 'audit request unreadable'
 fi
-# The task states the deadline that audit-deadline.sh enforces (#328).
+# The task states the deadline that audit-deadline.sh enforces.
 deadline="$(design_doc_audit_task "$(jq -r .repo_root <<<"$request")" \
   "$(jq -r .design_url <<<"$request")" "$(jq -r .content_sha256 <<<"$request")")" \
   || deny 'design audit deadline unavailable'
-# The outline checks sit beside the criteria, which keep their 2,048-byte cap (design #335);
-# the probe rule rides in the task too, because Codex receives the spec only by path (#327).
+# The outline checks sit beside the criteria, which keep their 2,048-byte cap; the
+# probe rule rides in the task too, because Codex receives the spec only by path.
 if ! criteria="$(subagent_prompt audit/design-criteria "$plugin_root" "plugin_root=$plugin_root")" \
    || ! outline="$(subagent_prompt audit/design-outline "$plugin_root")" \
    || ! privacy="$(subagent_prompt audit/probe-privacy "$plugin_root")" \

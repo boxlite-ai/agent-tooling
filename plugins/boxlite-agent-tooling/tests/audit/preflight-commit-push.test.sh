@@ -17,6 +17,8 @@ set -uo pipefail
 # one shipped beside these tests, and a two-side check reports a false pass.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$REPO_ROOT/.agents/hooks/preflight-commit-push.sh"
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -25,6 +27,16 @@ trap 'rm -rf "$TMP"' EXIT
 # branch/HEAD detection — that's fine, we read the same values for assertions.
 export CLAUDE_PROJECT_DIR="$TMP"
 mkdir -p "$TMP/.agents/state"
+# Direct runner calls name a parent session; lifecycle() writes its current epoch.
+AUDITOR_SESSION_SCOPE="git-$(printf '%s' preflight-commit-push-test | git hash-object --stdin)"
+AUDITOR_PROMPT_EPOCH=1301-1302-1
+TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/tests/audit/fixtures/audit-history-result.sh"
+export AUDITOR_SESSION_SCOPE AUDITOR_PROMPT_EPOCH TEST_HISTORY_RESULT_HELPER
+lifecycle() {  # repo
+  mkdir -p "$1/.agents/state" "$1/.agents/hooks"
+  cp "$REPO_ROOT/.agents/hooks/auditor-control.sh" "$1/.agents/hooks/"
+  printf '%s\n' "$AUDITOR_PROMPT_EPOCH" > "$1/.agents/state/verdict-prompt-epoch.$AUDITOR_SESSION_SCOPE"
+}
 # GITHOOK_DELEGATED and GITHOOK_KEEP_AUDIT are the git-level gate's handshake with
 # this hook. Inherited from the caller they rewrite the answer wholesale — set,
 # they took the suite to 30/5 and 32/3, including cases that assert the opposite.
@@ -59,9 +71,6 @@ stage_lib() {  # $1 = fake repo root
   cp -R "$REPO_ROOT/.agents/prompts/." "$1/.agents/prompts/"
   cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$1/.agents/lib/"
 }
-
-pass=0
-fail=0
 
 hash_stdin() {
   shasum -a 256 | awk '{print $1}'
@@ -126,19 +135,17 @@ run() {
         .hookSpecificOutput.permissionDecisionReason |
         test("^Next action: (audit|recover|reflect|wait|stop)\\n") and
         contains("Owner:") and contains("Next step:") and contains("Resume when:")' <<<"$out" >/dev/null; then
-      fail=$((fail + 1)); printf '  FAIL  %s: denial lacks an explicit action contract\n' "$desc"
+      bad "$desc" 'denial lacks an explicit action contract'
       return
     fi
-    pass=$((pass + 1))
-    printf '  PASS  %s\n' "$desc"
+    ok "$desc"
   else
-    fail=$((fail + 1))
-    printf '  FAIL  %s  (got=%s expected=%s)\n' "$desc" "$decision" "$expect"
+    badf "$desc" 'got=%s expected=%s' "$decision" "$expect"
   fi
 }
 
-# $5 omitted by default, NOT defaulted to [], so existing cases keep exercising the
-# pre-advisories shape — defaulting here would quietly stop testing it.
+# $5 omitted by default, NOT defaulted to [], so other cases keep exercising a
+# dossier without `advisories` — defaulting here would quietly stop testing it.
 write_audit() {
   local verdict="$1" findings_json="$2" kind="$3" command="${4:-}" advisories_json="${5:-}"
   if [[ -z "$command" ]]; then
@@ -154,9 +161,8 @@ write_audit() {
         --arg ch "$(command_hash_for "$command")" \
         --arg csh "$(subject_hash_for "$command")" \
         --argjson f "$findings_json" \
-        --argjson a "${advisories_json:-null}" \
-        '{branch:$b, head:$h, command_kind:$k, diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:$v, findings:$f}
-         + (if $a == null then {} else {advisories:$a} end)' \
+        --argjson a "${advisories_json:-[]}" \
+        '{branch:$b, head:$h, command_kind:$k, diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:$v, findings:$f, advisories:$a}' \
         > "$TMP/.agents/state/last-audit.json"
 }
 
@@ -167,9 +173,9 @@ hook_raw() {  # command -> hook stdout
 }
 check_raw() {  # desc  actual  expected
   if [[ "$2" == "$3" ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$1"
+    ok "$1"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s  (got=%s expected=%s)\n' "$1" "$2" "$3"
+    badf "$1" 'got=%s expected=%s' "$2" "$3"
   fi
 }
 
@@ -261,9 +267,9 @@ for concurrent_audit_index in 1 2; do
 done
 if [[ "$concurrent_audit_wait_status" -eq 0 \
    && "$concurrent_audit_allows" -eq 1 && "$concurrent_audit_denies" -eq 1 ]]; then
-  pass=$((pass + 1)); printf '  PASS  one audit dossier authorizes exactly one concurrent command\n'
+  ok 'one audit dossier authorizes exactly one concurrent command'
 else
-  fail=$((fail + 1)); printf '  FAIL  one audit dossier authorizes exactly one concurrent command (allows=%s denies=%s wait=%s)\n' \
+  badf 'one audit dossier authorizes exactly one concurrent command' 'allows=%s denies=%s wait=%s' \
     "$concurrent_audit_allows" "$concurrent_audit_denies" "$concurrent_audit_wait_status"
 fi
 
@@ -312,13 +318,13 @@ perl -e 'utime($ARGV[0], $ARGV[0], $ARGV[1]) or exit 1' "$(( $(date +%s) - 120 )
 mkdir -p "$TMP/.agents/state/test-runs"
 printf '{}\n' > "$TMP/.agents/state/test-runs/$(date +%s)-1-1.json"
 reaudit_reason="$(hook_raw "$GC -m foo" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')"
-check_raw "a legacy FAIL with newer receipts requires a bound lifecycle" \
+check_raw "an unscoped FAIL with newer receipts requires a bound lifecycle" \
   "$([[ "$reaudit_reason" == 'Next action: recover'* && "$reaudit_reason" == *'session-bound retry lifecycle'* ]] \
     && echo recover || echo "$reaudit_reason")" recover
 rm -f "$TMP/.agents/state/test-runs/"*.json
 rmdir "$TMP/.agents/state/test-runs"
 stale_reason="$(hook_raw "$GC -m foo" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')"
-check_raw "a legacy FAIL without newer receipts requires the same bound lifecycle" \
+check_raw "an unscoped FAIL without newer receipts requires the same bound lifecycle" \
   "$([[ "$stale_reason" == 'Next action: recover'* && "$stale_reason" == *'session-bound retry lifecycle'* ]] \
     && echo recover || echo "$stale_reason")" recover
 
@@ -328,7 +334,7 @@ for matrix_case in valid pass-findings fail-empty no-advisories null-history wro
   case "$matrix_case" in
     pass-findings) matrix_filter='.findings=["high: unresolved"]'; expected=1 ;;
     fail-empty) matrix_filter='.verdict="FAIL"'; expected=1 ;;
-    no-advisories) matrix_filter='del(.advisories)' ;;
+    no-advisories) matrix_filter='del(.advisories)'; expected=1 ;;
     null-history) matrix_filter='.history_review=null | .reflection_review=null' ;;
     wrong-kind) matrix_filter='.command_kind="push"'; expected=1 ;;
   esac
@@ -364,9 +370,9 @@ fifo_decision="$(printf '%s' "$fifo_out" \
   | jq -r '.hookSpecificOutput.permissionDecision // "parse_error"' 2>/dev/null \
   || echo parse_error)"
 if [[ "$fifo_rc" == 0 && "$fifo_decision" == deny ]]; then
-  pass=$((pass + 1)); printf '  PASS  FIFO dossier fails closed without blocking\n'
+  ok 'FIFO dossier fails closed without blocking'
 else
-  fail=$((fail + 1)); printf '  FAIL  FIFO dossier fails closed without blocking (rc=%s decision=%s)\n' \
+  badf 'FIFO dossier fails closed without blocking' 'rc=%s decision=%s' \
     "$fifo_rc" "$fifo_decision"
 fi
 rm -f "$TMP/.agents/state/last-audit.json"
@@ -400,16 +406,16 @@ if [[ "$(printf '%s' "$oversized_adv_out" \
        | jq -r '.hookSpecificOutput.permissionDecision // "none"')" == deny ]] \
    && (( oversized_adv_bytes == 0 )) \
    && [[ "$oversized_adv_out" != *"END_UNBOUNDED_ADVISORY"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  oversized native advisories fail closed without outputting their bytes\n'
+  ok 'oversized native advisories fail closed without outputting their bytes'
 else
-  fail=$((fail + 1)); printf '  FAIL  oversized native advisories did not fail closed (context=%s bytes)\n' "$oversized_adv_bytes"
+  badf 'oversized native advisories fail closed without outputting their bytes' 'context=%s bytes' "$oversized_adv_bytes"
 fi
 
 # Advisories must not launder a real finding into a note: a FAIL still denies.
 write_audit "FAIL" '["Test: missing"]' "commit" "" '["Implement: comment wraps awkwardly"]'
 run "FAIL + advisories → still deny"    "$GC -m foo"                  "deny"
 deny_out="$(hook_raw "$GC -m foo")"
-# Findings are claim-checked (#407): the reason counts them and names the saved copy.
+# Findings are claim-checked: the reason counts them and names the saved copy.
 deny_reason="$(printf '%s' "$deny_out" | jq -r '.hookSpecificOutput.permissionDecisionReason')"
 saved_findings="$(printf '%s\n' "$deny_reason" | sed -n 's/.*saved in \([^ ]*\.md\)\..*/\1/p' | head -1)"
 check_raw "deny reason counts findings and advisories" \
@@ -418,10 +424,9 @@ check_raw "saved findings mark advisories non-blocking" \
   "$([[ -f "$saved_findings" ]] && grep -q 'NOT blocking' "$saved_findings" \
      && grep -q 'comment wraps awkwardly' "$saved_findings" && echo yes)" "yes"
 
-# Issue #393: findings have no count limit, so pasting them overflowed the 8,192-byte
-# cap and replaced the reason with a generic message. The dossier's own maximum, 32
-# findings and 32 advisories of 1,000 bytes each, must still yield a small reason that
-# counts them (#407); without a session this is the recover path.
+# Findings have no count limit. The dossier's own maximum, 32 findings and 32
+# advisories of 1,000 bytes each, must still yield a reason under the 8,192-byte cap
+# that counts them; without a session this is the recover path.
 many_lines() { jq -nc --arg kind "$1" '[range(32) | $kind + ": check \(.): " + ("e" * 980)]'; }
 write_audit "FAIL" "$(many_lines high)" "commit" "" "$(many_lines nit)"
 many_reason="$(hook_raw "$GC -m foo" | jq -r '.hookSpecificOutput.permissionDecisionReason')"
@@ -430,10 +435,9 @@ check_raw "a maximal FAIL dossier yields a counted reason under 4 KB" \
   "$( (( many_bytes < 4096 )) && [[ "$many_reason" == *"32 finding(s) and 32 advisory(ies)"* \
       && "$many_reason" != *"safety limit"* ]] && echo yes)" "yes"
 
-# Backward compatibility: a dossier from a producer that predates the split has no
-# `advisories` key at all. It must allow exactly as before — silently, no stdout.
+# `advisories` is optional: a PASS dossier without the key allows silently, no stdout.
 write_audit "PASS" "[]" "commit"
-check_raw "pre-split dossier (no advisories key) → silent allow" \
+check_raw "dossier without advisories key → silent allow" \
   "$(hook_raw "$GC -m foo")" ""
 
 write_audit "PASS" "[]" "commit"
@@ -479,13 +483,7 @@ jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" \
 synthetic_push="$GP --pre-push-hook remote=origin remote_url_sha256=0000000000000000000000000000000000000000000000000000000000000000 ref_updates_sha256=0000000000000000000000000000000000000000000000000000000000000000 pushed_diff_sha256=$pushed_hash"
 out=$(printf '%s' "$synthetic_push" | jq -Rs '{tool_input:{command:.}}' | GITHOOK_DELEGATED=1 "$HOOK")
 decision=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null || echo "parse_error")
-if [[ "$decision" == "deny" ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  delegated push ignores generic handoff hash\n'
-else
-  fail=$((fail + 1))
-  printf '  FAIL  delegated push ignores generic handoff hash  (got=%s expected=deny)\n' "$decision"
-fi
+check_eq 'delegated push ignores generic handoff hash' "$decision" "deny"
 rm -f "$TMP/.agents/state/last-audit-handoff.json"
 
 echo
@@ -519,22 +517,14 @@ deleg_decision() {  # -> passthrough | allow | deny | parse_error
 
 # Configured, delegate absent: nothing downstream will gate, so this layer must.
 got="$(deleg_decision)"
-if [[ "$got" == "deny" ]]; then
-  pass=$((pass + 1)); printf '  PASS  hooksPath set but delegate missing still gates here\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  hooksPath set but delegate missing still gates here  (got=%s)\n' "$got"
-fi
+check_eq 'hooksPath set but delegate missing still gates here' "$got" "deny"
 
-# Legacy-marked delegation: the git-level gate owns it. Markerless manifest
+# Marked delegation: the git-level gate owns it. Markerless manifest
 # handoff and old-hook rejection are covered by tests/git-agent-origin.test.sh.
 printf '#!/usr/bin/env bash\nexit 0\n' > "$DELEG_REPO/.githooks/pre-commit"
 chmod +x "$DELEG_REPO/.githooks/pre-commit"
 got="$(deleg_decision)"
-if [[ "$got" == "passthrough" ]]; then
-  pass=$((pass + 1)); printf '  PASS  hooksPath set with the delegate present defers\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  hooksPath set with the delegate present defers  (got=%s)\n' "$got"
-fi
+check_eq 'hooksPath set with the delegate present defers' "$got" "passthrough"
 
 # Tooling installed mid-session: the git hooks run a newer plugin than the session
 # loaded, so the loaded auditors would reject the delegated gate's audit task.
@@ -551,18 +541,14 @@ skew_reason="$(printf 'git commit -m x' | jq -Rs '{tool_input:{command:.}}' \
   | jq -r 'select(.hookSpecificOutput.permissionDecision == "deny")
            | .hookSpecificOutput.permissionDecisionReason' 2>/dev/null)"
 if [[ "$skew_reason" == *"loaded agent-tooling 0.1.27"*"run 0.1.28"*"/reload-plugins"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  a plugin older than the git hooks is told to reload\n'
+  ok 'a plugin older than the git hooks is told to reload'
 else
-  fail=$((fail + 1)); printf '  FAIL  a plugin older than the git hooks is told to reload  (got=%s)\n' "$skew_reason"
+  badf 'a plugin older than the git hooks is told to reload' 'got=%s' "$skew_reason"
 fi
 
 printf '{"version":"0.1.28"}\n' > "$DELEG_REPO/plugin.json"
 got="$(deleg_decision)"
-if [[ "$got" == "passthrough" ]]; then
-  pass=$((pass + 1)); printf '  PASS  matching plugin and git-hook versions still defer\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  matching plugin and git-hook versions still defer  (got=%s)\n' "$got"
-fi
+check_eq 'matching plugin and git-hook versions still defer' "$got" "passthrough"
 rm -rf "$ADOPTED"
 rm -rf "$DELEG_REPO"
 
@@ -593,21 +579,21 @@ gate_local() {
 out="$(gate_local)"
 if [[ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // "none"' 2>/dev/null)" == "deny" ]] \
    && [[ ! -e "$CODEX_REPO/.agents/state/last-audit.json" ]]; then
-  pass=$((pass + 1)); printf '  PASS  no artifact yet → deny, and none manufactured\n'
+  ok 'no artifact yet → deny, and none manufactured'
 else
-  fail=$((fail + 1)); printf '  FAIL  no artifact yet → deny, and none manufactured  (out=%s)\n' "${out:-EMPTY}"
+  badf 'no artifact yet → deny, and none manufactured' 'out=%s' "${out:-EMPTY}"
 fi
 
 # Stand in for the auditor the agent spawns from the deny reason.
+lifecycle "$CODEX_REPO"
 ( cd "$CODEX_REPO" && CLAUDE_PROJECT_DIR="$CODEX_REPO" CODEX_COMMIT_PUSH_AUDIT_MODE=local \
     bash "$CODEX_REPO/.agents/hooks/audit/run-commit-push-audit.sh" commit "$LOCAL_CMD" ) >/dev/null 2>&1 || true
 
 out="$(gate_local)"
 if [[ -z "$out" && ! -e "$CODEX_REPO/.agents/state/last-audit.json" ]]; then
-  pass=$((pass + 1)); printf '  PASS  retry after the auditor ran allows and consumes\n'
+  ok 'retry after the auditor ran allows and consumes'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  retry after the auditor ran allows and consumes  (out=%s audit_exists=%s)\n' "${out:-EMPTY}" "$([[ -e "$CODEX_REPO/.agents/state/last-audit.json" ]] && echo yes || echo no)"
+  badf 'retry after the auditor ran allows and consumes' 'out=%s audit_exists=%s' "${out:-EMPTY}" "$([[ -e "$CODEX_REPO/.agents/state/last-audit.json" ]] && echo yes || echo no)"
 fi
 rm -rf "$CODEX_REPO"
 
@@ -693,15 +679,18 @@ command_hash="$(printf '%s' "$command" | shasum -a 256 | awk '{print $1}')"
 commit_subject="$(printf '%s' "$command" | sed -n "s/.* -m '\([^']*\)'.*/\1/p" | head -1)"
 commit_subject_hash="$(printf '%s' "$commit_subject" | shasum -a 256 | awk '{print $1}')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" --arg csh "$commit_subject_hash" \
-  '{branch:$b, head:$h, command_kind:"commit", diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"commit", diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[], advisories:[]}' \
   > "$output"
+history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
+[[ -z "$history" ]] || bash "$TEST_HISTORY_RESULT_HELPER" "$history" "$output"
 FAKE_CODEX
 chmod +x "$AGENTIC_REPO/bin/codex"
 
-# Driven through the producer directly. The gate no longer runs it — it denies and
+# Driven through the producer directly. The gate does not run it — it denies and
 # names the routes — but what these assertions are actually about is the producer's
 # own contract: the sandbox flags, and that every secret shape in the staged diff is
 # redacted before any of it leaves the machine.
+lifecycle "$AGENTIC_REPO"
 out="$( ( cd "$AGENTIC_REPO" && CLAUDE_PROJECT_DIR="$AGENTIC_REPO" CODEX_COMMIT_PUSH_AUDIT_MODE=agentic \
           CODEX_BIN="$AGENTIC_REPO/bin/codex" \
           bash "$AGENTIC_REPO/.agents/hooks/audit/run-commit-push-audit.sh" \
@@ -732,11 +721,9 @@ grep -q '<redacted-secret-assignment>' "$AGENTIC_REPO/evidence-snapshot.txt" || 
 grep -q '<redacted-url-credentials>@' "$AGENTIC_REPO/evidence-snapshot.txt" || check_agentic=no
 grep -q '<redacted-query-secret>' "$AGENTIC_REPO/evidence-snapshot.txt" || check_agentic=no
 if [[ "$check_agentic" == "yes" ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  Codex preflight agentic audit uses codex exec contract\n'
+  ok 'Codex preflight agentic audit uses codex exec contract'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  Codex preflight agentic audit uses codex exec contract  (out=%s checks=%s args=%s dossier=%s)\n' \
+  badf 'Codex preflight agentic audit uses codex exec contract' 'out=%s checks=%s args=%s dossier=%s' \
     "${out:-EMPTY}" "$check_agentic" \
     "$(tr '\n' ' ' < "$AGENTIC_REPO/fake-codex.args" 2>/dev/null || true)" \
     "$(jq -c . "$AGENTIC_REPO/.agents/state/last-audit.json" 2>/dev/null || true)"
@@ -783,16 +770,15 @@ jq -nc '{branch:1, verdict:"PASS", findings:"not an array"}' > "$output"
 BAD_FAKE_CODEX
 chmod +x "$BAD_REPO/bin/codex"
 
+lifecycle "$BAD_REPO"
 ( cd "$BAD_REPO" && CLAUDE_PROJECT_DIR="$BAD_REPO" CODEX_BIN="$BAD_REPO/bin/codex" CODEX_COMMIT_PUSH_AUDIT_MODE=agentic bash "$BAD_REPO/.agents/hooks/audit/run-commit-push-audit.sh" commit "git commit -m 'test(hooks): reject bad audit'" >/dev/null 2>"$BAD_REPO/err.txt" )
 bad_rc=$?
 bad_verdict="$(jq -r '.verdict' "$BAD_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 bad_finding="$(jq -r '.findings[0] // ""' "$BAD_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 if [[ "$bad_rc" != 0 && "$bad_verdict" == "FAIL" && "$bad_finding" == *"malformed JSON"* ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  malformed Codex audit output fails closed\n'
+  ok 'malformed Codex audit output fails closed'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  malformed Codex audit output fails closed  (rc=%s verdict=%s finding=%s)\n' "$bad_rc" "$bad_verdict" "$bad_finding"
+  badf 'malformed Codex audit output fails closed' 'rc=%s verdict=%s finding=%s' "$bad_rc" "$bad_verdict" "$bad_finding"
 fi
 rm -rf "$BAD_REPO"
 
@@ -800,8 +786,8 @@ echo
 echo "## Codex: the audit temp dir survives no exit path"
 # run_agentic_audit stages the Codex stderr log — and, once Codex writes one, its
 # verdict artifact — in `mktemp -d`. A RETURN trap does not fire on `exit`, so
-# the write_fail paths downstream of that mktemp used to leave the directory
-# behind, one per failed audit. (The prompt carrying the diff goes to Codex on
+# the write_fail paths downstream of that mktemp must remove the directory
+# themselves, or each failed audit leaves one behind. (The prompt carrying the diff goes to Codex on
 # stdin and is never written there.) mktemp on macOS ignores TMPDIR (it honours
 # _CS_DARWIN_USER_TEMP_DIR), so the directory cannot be redirected into TMP for
 # the check: locate it where mktemp actually puts it and identify it by the
@@ -848,6 +834,7 @@ LEAK_FAKE_CODEX
 chmod +x "$LEAK_REPO/bin/codex"
 
 leak_before="$(audit_tmp_leaks)"
+lifecycle "$LEAK_REPO"
 ( cd "$LEAK_REPO" && CLAUDE_PROJECT_DIR="$LEAK_REPO" CODEX_BIN="$LEAK_REPO/bin/codex" \
     CODEX_COMMIT_PUSH_AUDIT_MODE=agentic \
     bash "$LEAK_REPO/.agents/hooks/audit/run-commit-push-audit.sh" commit \
@@ -861,17 +848,15 @@ new_leaks="$(comm -13 <(printf '%s\n' "$leak_before") <(printf '%s\n' "$leak_aft
 new_leaks_squashed="${new_leaks//[[:space:]]/}"
 
 if [[ ! -e "$LEAK_REPO/stub-ran" || "$leak_rc" == 0 ]]; then
-  fail=$((fail + 1))
-  printf '  FAIL  leak probe never reached the scratch dir  (rc=%s, probe is inert)\n' "$leak_rc"
+  badf 'a failed agentic audit leaves no temp dir behind' \
+    'probe never reached the scratch dir: rc=%s' "$leak_rc"
 elif [[ -z "$new_leaks_squashed" ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  a failed agentic audit leaves no temp dir behind\n'
+  ok 'a failed agentic audit leaves no temp dir behind'
 else
   # Report the path, never delete it. This scans the shared system temp dir, so
   # a concurrent agentic audit can land in the diff — removing it would destroy
   # a live run's scratch on the strength of a suspicion.
-  fail=$((fail + 1))
-  printf '  FAIL  a failed agentic audit leaves no temp dir behind  (leaked:%s)\n' \
+  badf 'a failed agentic audit leaves no temp dir behind' 'leaked:%s' \
     "$(printf '%s' "$new_leaks" | tr '\n' ' ' | sed 's/  */ /g')"
 fi
 rm -rf "$LEAK_REPO"
@@ -900,16 +885,15 @@ key_end+='PRIVATE KEY-----'
   printf '%s\n' "$key_end"
 } > "$KEY_REPO/key.pem"
 git -C "$KEY_REPO" add -A
+lifecycle "$KEY_REPO"
 ( cd "$KEY_REPO" && CLAUDE_PROJECT_DIR="$KEY_REPO" CODEX_COMMIT_PUSH_AUDIT_MODE=agentic bash "$KEY_REPO/.agents/hooks/audit/run-commit-push-audit.sh" commit "git commit -m 'test(hooks): reject private key'" >/dev/null 2>"$KEY_REPO/err.txt" )
 key_rc=$?
 key_verdict="$(jq -r '.verdict' "$KEY_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 key_finding="$(jq -r '.findings[0] // ""' "$KEY_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 if [[ "$key_rc" != 0 && "$key_verdict" == "FAIL" && "$key_finding" == *"secret-like token"* ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  private key diff fails local precheck\n'
+  ok 'private key diff fails local precheck'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  private key diff fails local precheck  (rc=%s verdict=%s finding=%s)\n' "$key_rc" "$key_verdict" "$key_finding"
+  badf 'private key diff fails local precheck' 'rc=%s verdict=%s finding=%s' "$key_rc" "$key_verdict" "$key_finding"
 fi
 rm -rf "$KEY_REPO"
 
@@ -934,16 +918,15 @@ bearer+='rawbearervalue123'
   printf 'Authorization: %s\n' "$bearer"
 } > "$AUTH_REPO/auth.txt"
 git -C "$AUTH_REPO" add -A
+lifecycle "$AUTH_REPO"
 ( cd "$AUTH_REPO" && CLAUDE_PROJECT_DIR="$AUTH_REPO" CODEX_COMMIT_PUSH_AUDIT_MODE=agentic bash "$AUTH_REPO/.agents/hooks/audit/run-commit-push-audit.sh" commit "git commit -m 'test(hooks): reject auth secret'" >/dev/null 2>"$AUTH_REPO/err.txt" )
 auth_rc=$?
 auth_verdict="$(jq -r '.verdict' "$AUTH_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 auth_finding="$(jq -r '.findings[0] // ""' "$AUTH_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 if [[ "$auth_rc" != 0 && "$auth_verdict" == "FAIL" && "$auth_finding" == *"secret-like token"* ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  auth credential diff fails local precheck\n'
+  ok 'auth credential diff fails local precheck'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  auth credential diff fails local precheck  (rc=%s verdict=%s finding=%s)\n' "$auth_rc" "$auth_verdict" "$auth_finding"
+  badf 'auth credential diff fails local precheck' 'rc=%s verdict=%s finding=%s' "$auth_rc" "$auth_verdict" "$auth_finding"
 fi
 rm -rf "$AUTH_REPO"
 
@@ -963,25 +946,19 @@ git -C "$MARKER_REPO" add -A
 git -C "$MARKER_REPO" commit -qm base
 printf '.claude/.pr-reviewed.json\n' > "$MARKER_REPO/.gitignore"
 git -C "$MARKER_REPO" add .gitignore
+lifecycle "$MARKER_REPO"
 ( cd "$MARKER_REPO" && CLAUDE_PROJECT_DIR="$MARKER_REPO" CODEX_COMMIT_PUSH_AUDIT_MODE=local bash "$MARKER_REPO/.agents/hooks/audit/run-commit-push-audit.sh" commit "git commit -m 'test(hooks): ignore review marker'" >/dev/null 2>&1 )
 ignore_verdict="$(jq -r '.verdict' "$MARKER_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
-if [[ "$ignore_verdict" == "PASS" ]]; then
-  pass=$((pass + 1)); printf '  PASS  an ignore rule naming the marker is allowed\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  an ignore rule naming the marker is allowed  (verdict=%s)\n' "$ignore_verdict"
-fi
+check_eq 'an ignore rule naming the marker is allowed' "$ignore_verdict" "PASS"
 git -C "$MARKER_REPO" reset -q
 rm -f "$MARKER_REPO/.gitignore"
 mkdir -p "$MARKER_REPO/.claude"
 printf 'reviewed: unsafe fixture\n' > "$MARKER_REPO/.claude/.pr-reviewed.json"
 git -C "$MARKER_REPO" add .claude/.pr-reviewed.json
+lifecycle "$MARKER_REPO"
 ( cd "$MARKER_REPO" && CLAUDE_PROJECT_DIR="$MARKER_REPO" CODEX_COMMIT_PUSH_AUDIT_MODE=local bash "$MARKER_REPO/.agents/hooks/audit/run-commit-push-audit.sh" commit "git commit -m 'test(hooks): reject review marker'" >/dev/null 2>&1 )
 marker_verdict="$(jq -r '.verdict' "$MARKER_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
-if [[ "$marker_verdict" == "FAIL" ]]; then
-  pass=$((pass + 1)); printf '  PASS  a staged review marker is rejected\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  a staged review marker is rejected  (verdict=%s)\n' "$marker_verdict"
-fi
+check_eq 'a staged review marker is rejected' "$marker_verdict" "FAIL"
 rm -rf "$MARKER_REPO"
 
 echo
@@ -1006,26 +983,23 @@ git -C "$PUSH_REPO" push -q origin main
 printf 'change\n' >> "$PUSH_REPO/f"
 git -C "$PUSH_REPO" add -A
 git -C "$PUSH_REPO" commit -qm "test(hooks): exercise push audit"
+lifecycle "$PUSH_REPO"
 ( cd "$PUSH_REPO" && CLAUDE_PROJECT_DIR="$PUSH_REPO" CODEX_COMMIT_PUSH_AUDIT_MODE=agentic bash "$PUSH_REPO/.agents/hooks/audit/run-commit-push-audit.sh" push "git push origin main" >/dev/null 2>"$PUSH_REPO/err.txt" )
 push_rc=$?
 push_verdict="$(jq -r '.verdict' "$PUSH_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 push_kind="$(jq -r '.command_kind' "$PUSH_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 push_finding="$(jq -r '.findings[0] // ""' "$PUSH_REPO/.agents/state/last-audit.json" 2>/dev/null || echo missing)"
 if [[ "$push_rc" != 0 && "$push_verdict" == "FAIL" && "$push_kind" == "push" && "$push_finding" == *"synthetic pre-push command"* ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  non-synthetic push audit fails closed\n'
+  ok 'non-synthetic push audit fails closed'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  non-synthetic push audit fails closed  (rc=%s verdict=%s kind=%s finding=%s)\n' "$push_rc" "$push_verdict" "$push_kind" "$push_finding"
+  badf 'non-synthetic push audit fails closed' 'rc=%s verdict=%s kind=%s finding=%s' "$push_rc" "$push_verdict" "$push_kind" "$push_finding"
 fi
 rm -rf "$PUSH_REPO" "$PUSH_REMOTE"
 
 echo
 echo "## handoff marker in a tree without the state dir"
-# .agents/state/ is gitignored, so a fresh clone does not have it. Before the
-# marker moved this could not bite: the old parent, .claude/, is always present.
-# Now the writer has to create it, or the redirect fails and the commit path
-# loses its handoff silently.
+# .agents/state/ is gitignored, so a fresh clone does not have it. The writer has
+# to create it, or the commit path loses its handoff silently.
 STATE_REPO="$(mktemp -d)"
 git init -q "$STATE_REPO"
 git -C "$STATE_REPO" config user.email t@t.test
@@ -1044,51 +1018,21 @@ rm -rf "$STATE_REPO/.agents/state"
   && printf '%s' 'git commit -m x' | jq -Rs '{tool_input:{command:.}}' \
      | CLAUDE_PROJECT_DIR="$STATE_REPO" CLAUDECODE=1 bash "$STATE_REPO/.agents/hooks/$(basename "$HOOK")" >/dev/null 2>&1 )
 [[ -r "$STATE_REPO/.agents/state/last-audit-handoff.json" ]] && handoff=written || handoff=MISSING
-if [[ "$handoff" == "written" ]]; then
-  pass=$((pass + 1)); printf '  PASS  handoff is written when the state dir does not exist yet\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  handoff is written when the state dir does not exist yet  (got=%s)\n' "$handoff"
-fi
+check_eq 'handoff is written when the state dir does not exist yet' "$handoff" "written"
 # The delegated gate later recovers this text to name the real re-audit target; the
 # schema must accept exactly what this layer writes (command bound to command_hash).
 handoff_command="$(jq -r '.command' "$STATE_REPO/.agents/state/last-audit-handoff.json" 2>/dev/null)"
 handoff_command_hash="$(jq -r '.command_hash' "$STATE_REPO/.agents/state/last-audit-handoff.json" 2>/dev/null)"
 if [[ "$handoff_command" == "git commit -m x" \
    && "$(printf '%s' "$handoff_command" | shasum -a 256 | awk '{print $1}')" == "$handoff_command_hash" ]]; then
-  pass=$((pass + 1)); printf '  PASS  handoff records the PreToolUse command bound to command_hash\n'
+  ok 'handoff records the PreToolUse command bound to command_hash'
 else
-  fail=$((fail + 1)); printf '  FAIL  handoff records the PreToolUse command bound to command_hash  (got=%s)\n' "$handoff_command"
-fi
-
-# The legacy mirror is a transition convenience, so a legacy location that cannot
-# be written must not fail the gate. mirror_to_legacy returns non-zero on failure
-# and is the LAST command in write_command_handoff, which the defer path calls
-# unguarded under `set -e` — so without a guard the whole hook exits 1 instead of
-# 0. Note this asserts the EXIT STATUS: the case above discards it, which is how
-# the bug stayed invisible while the suite was green.
-# Make the mirror deterministically impossible: a FILE where .claude/ must be a
-# directory, so mirror_to_legacy's `mkdir -p` fails. chmod 500 on the directory
-# is not enough — the earlier case already created a writable
-# .claude/.last-audit-handoff.json, and overwriting an existing writable file
-# needs no write permission on its parent, so the mirror would still succeed and
-# the test would pass with the guard removed.
-rm -rf "$STATE_REPO/.claude"
-printf '' > "$STATE_REPO/.claude"
-( cd "$STATE_REPO" && printf '%s' 'git commit -m x' | jq -Rs '{tool_input:{command:.}}' \
-     | CLAUDE_PROJECT_DIR="$STATE_REPO" CLAUDECODE=1 bash "$STATE_REPO/.agents/hooks/$(basename "$HOOK")" >/dev/null 2>&1 )
-mirror_rc=$?
-rm -f "$STATE_REPO/.claude"
-[[ -r "$STATE_REPO/.agents/state/last-audit-handoff.json" ]] && real_marker=written || real_marker=MISSING
-if [[ "$mirror_rc" == "0" && "$real_marker" == "written" ]]; then
-  pass=$((pass + 1)); printf '  PASS  an unwritable legacy mirror does not fail the gate\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  an unwritable legacy mirror does not fail the gate  (rc=%s real_marker=%s)\n' "$mirror_rc" "$real_marker"
+  badf 'handoff records the PreToolUse command bound to command_hash' 'got=%s' "$handoff_command"
 fi
 
 echo
 echo "## Handoff writes do not follow unsafe destination paths"
-rm -rf "$STATE_REPO/.claude"
-mkdir -p "$STATE_REPO/.claude" "$STATE_REPO/.agents/state"
+mkdir -p "$STATE_REPO/.agents/state"
 handoff_path="$STATE_REPO/.agents/state/last-audit-handoff.json"
 outside_handoff="$STATE_REPO/outside-handoff.json"
 printf 'outside sentinel\n' > "$outside_handoff"
@@ -1101,9 +1045,9 @@ handoff_symlink_rc=$?
 outside_handoff_body="$(cat "$outside_handoff")"
 if [[ "$handoff_symlink_rc" == 0 && -f "$handoff_path" && ! -L "$handoff_path" \
    && "$outside_handoff_body" == "outside sentinel" ]]; then
-  pass=$((pass + 1)); printf '  PASS  handoff writer atomically replaces a symlink without following it\n'
+  ok 'handoff writer atomically replaces a symlink without following it'
 else
-  fail=$((fail + 1)); printf '  FAIL  handoff writer atomically replaces a symlink without following it (rc=%s outside=%s link=%s)\n' \
+  badf 'handoff writer atomically replaces a symlink without following it' 'rc=%s outside=%s link=%s' \
     "$handoff_symlink_rc" "$outside_handoff_body" "$([[ -L "$handoff_path" ]] && echo yes || echo no)"
 fi
 
@@ -1122,9 +1066,9 @@ fifo_handoff_out="$(printf '%s' 'git commit -m x' | jq -Rs '{tool_input:{command
         "$STATE_REPO/.agents/hooks/$(basename "$HOOK")") 2>/dev/null)"
 fifo_handoff_rc=$?
 if [[ "$fifo_handoff_rc" == 0 && -f "$handoff_path" && ! -p "$handoff_path" ]]; then
-  pass=$((pass + 1)); printf '  PASS  handoff writer replaces a FIFO without blocking\n'
+  ok 'handoff writer replaces a FIFO without blocking'
 else
-  fail=$((fail + 1)); printf '  FAIL  handoff writer replaces a FIFO without blocking (rc=%s output=%s)\n' \
+  badf 'handoff writer replaces a FIFO without blocking' 'rc=%s output=%s' \
     "$fifo_handoff_rc" "$fifo_handoff_out"
 fi
 rm -rf "$STATE_REPO"
@@ -1150,9 +1094,9 @@ fifo_read_decision="$(printf '%s' "$fifo_read_out" \
   | jq -r '.hookSpecificOutput.permissionDecision // "parse_error"' 2>/dev/null \
   || echo parse_error)"
 if [[ "$fifo_read_rc" == 0 && "$fifo_read_decision" == deny ]]; then
-  pass=$((pass + 1)); printf '  PASS  delegated FIFO handoff fails closed without blocking\n'
+  ok 'delegated FIFO handoff fails closed without blocking'
 else
-  fail=$((fail + 1)); printf '  FAIL  delegated FIFO handoff fails closed without blocking (rc=%s decision=%s)\n' \
+  badf 'delegated FIFO handoff fails closed without blocking' 'rc=%s decision=%s' \
     "$fifo_read_rc" "$fifo_read_decision"
 fi
 rm -f "$handoff_path"
@@ -1169,25 +1113,45 @@ owner_token="$(verdict_audit_process_start_token "$$")"
 gb_token="$(LANG=en_GB.UTF-8 verdict_audit_process_start_token "$$")"
 c_token="$(LANG=C verdict_audit_process_start_token "$$")"
 if [[ -n "$gb_token" && "$gb_token" == "$c_token" ]]; then
-  pass=$((pass + 1)); printf '  PASS  process start token ignores the caller locale\n'
+  ok 'process start token ignores the caller locale'
 else
-  fail=$((fail + 1)); printf '  FAIL  process start token ignores the caller locale (en_GB=%s C=%s)\n' \
+  badf 'process start token ignores the caller locale' 'en_GB=%s C=%s' \
     "$gb_token" "$c_token"
 fi
-write_bridge_state() { # destination
+write_bridge_state() { # destination; a complete handoff, as the PreToolUse layer writes it
   jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" \
-    --arg dh "$(diff_hash_for commit)" --arg ch "$bridge_hash" \
+    --arg dh "$(diff_hash_for commit)" --arg ch "$bridge_hash" --arg c "$bridge_command" \
     --argjson owner_pid "$$" --arg owner_token "$owner_token" \
-    '{branch:$b,head:$h,command_kind:"commit",diff_hash:$dh,command_hash:$ch,
+    '{branch:$b,head:$h,command_kind:"commit",diff_hash:$dh,command_hash:$ch,command:$c,
       owner:{pid:$owner_pid,start_token:$owner_token},override:null,lifecycle:null}' > "$1"
 }
 write_bridge_audit() {
   jq -nc --arg b "$BRANCH" --arg h "$HEAD_SHA" \
     --arg dh "$(diff_hash_for commit)" --arg ch "$bridge_hash" \
     '{branch:$b,head:$h,command_kind:"commit",diff_hash:$dh,command_hash:$ch,
-      commit_subject_hash:"",verdict:"PASS",findings:[]}' \
+      commit_subject_hash:"",verdict:"PASS",findings:[],advisories:[]}' \
     > "$TMP/.agents/state/last-audit.json"
 }
+
+delegated_bridge_decision() { # -> passthrough | allow | deny | parse_error
+  local out
+  out="$(printf '%s' "$delegated_command" | jq -Rs '{tool_input:{command:.}}' \
+    | (cd "$REPO_ROOT" && GITHOOK_DELEGATED=1 GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='' "$HOOK") 2>/dev/null)"
+  [[ -n "$out" ]] || { printf 'passthrough'; return; }
+  printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // "parse_error"' \
+    2>/dev/null || printf 'parse_error'
+}
+
+# Control: the same fixture at the canonical regular path does authorize, so the
+# symlink and replacement denials below come from the property each one names.
+write_bridge_audit
+write_bridge_state "$handoff_path"
+regular_bridge_decision="$(delegated_bridge_decision)"
+check_raw "a regular bound handoff authorizes the delegated command bridge" \
+  "$regular_bridge_decision:$([[ -e "$handoff_path" || -e "$TMP/.agents/state/last-audit.json" ]] && echo left || echo spent)" \
+  "passthrough:spent"
+rm -f "$handoff_path" "$TMP/.agents/state/last-audit.json"
 
 write_bridge_audit
 write_bridge_state "$TMP/outside-handoff.json"
@@ -1203,9 +1167,9 @@ else
   symlink_bridge_decision=passthrough
 fi
 if [[ "$symlink_bridge_decision" == deny ]]; then
-  pass=$((pass + 1)); printf '  PASS  symlink handoff cannot authorize a delegated command bridge\n'
+  ok 'symlink handoff cannot authorize a delegated command bridge'
 else
-  fail=$((fail + 1)); printf '  FAIL  symlink handoff cannot authorize a delegated command bridge (decision=%s)\n' \
+  badf 'symlink handoff cannot authorize a delegated command bridge' 'decision=%s' \
     "$symlink_bridge_decision"
 fi
 rm -f "$handoff_path" "$TMP/outside-handoff.json" "$TMP/.agents/state/last-audit.json"
@@ -1237,23 +1201,88 @@ else
     || echo parse_error)"
 fi
 if [[ "$replacement_bridge_decision" == deny && -f "$handoff_path" ]]; then
-  pass=$((pass + 1)); printf '  PASS  replacement handoff survives and forces a safe retry\n'
+  ok 'replacement handoff survives and forces a safe retry'
 else
-  fail=$((fail + 1)); printf '  FAIL  replacement handoff survives and forces a safe retry (decision=%s remains=%s)\n' \
+  badf 'replacement handoff survives and forces a safe retry' 'decision=%s remains=%s' \
     "$replacement_bridge_decision" "$([[ -f "$handoff_path" ]] && echo yes || echo no)"
 fi
 rm -f "$handoff_path" "$TMP/replacement-handoff.json" "$TMP/.agents/state/last-audit.json"
 
+# A handoff unlink conflict after the PASS is spent retries once with the reloaded
+# handoff. A fresh bound PASS published before that retry may authorize the command,
+# but only by spending the reloaded handoff with it.
+HANDOFF_RETRY_BIN="$TMP/handoff-retry-bin"
+mkdir -p "$HANDOFF_RETRY_BIN"
+REAL_GIT="$(command -v git)"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'if [[ -e "$TEST_FRESH_AUDIT" && ! -e "$TEST_AUDIT" ]]; then' \
+  '  mv "$TEST_FRESH_AUDIT" "$TEST_AUDIT"' \
+  'fi' \
+  'exec "$TEST_REAL_GIT" "$@"' > "$HANDOFF_RETRY_BIN/git"
+cp "$DATE_WRAP/date" "$HANDOFF_RETRY_BIN/date"
+chmod +x "$HANDOFF_RETRY_BIN/git"
+write_bridge_audit
+cp "$TMP/.agents/state/last-audit.json" "$TMP/fresh-audit.json"
+write_bridge_audit
+write_bridge_state "$handoff_path"
+write_bridge_state "$TMP/replacement-handoff.json"
+retry_handoff_out="$(printf '%s' "$delegated_command" | jq -Rs '{tool_input:{command:.}}' \
+  | (cd "$REPO_ROOT" && PATH="$HANDOFF_RETRY_BIN:$PATH" TEST_REAL_DATE="$REAL_DATE" \
+      TEST_REAL_GIT="$REAL_GIT" TEST_FRESH_AUDIT="$TMP/fresh-audit.json" \
+      TEST_AUDIT="$TMP/.agents/state/last-audit.json" \
+      TEST_REPLACEMENT="$TMP/replacement-handoff.json" TEST_HANDOFF="$handoff_path" \
+      GITHOOK_DELEGATED=1 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath \
+      GIT_CONFIG_VALUE_0='' "$HOOK") 2>"$TMP/retry-handoff-err")"
+retry_handoff_status=$?
+retry_handoff_left="$(find "$TMP/.agents/state" -maxdepth 1 \
+  \( -name 'last-audit.json*' -o -name 'last-audit-handoff.json*' \) | wc -l | tr -d ' ')"
+if [[ "$retry_handoff_status" == 0 && -z "$retry_handoff_out" \
+      && ! -e "$TMP/fresh-audit.json" && "$retry_handoff_left" == 0 \
+      && ! -s "$TMP/retry-handoff-err" ]]; then
+  ok 'handoff conflict retry spends each PASS once with its reloaded handoff'
+else
+  badf 'handoff conflict retry spends each PASS once with its reloaded handoff' 'rc=%s out=%s fresh_pending=%s state_left=%s stderr=%s' \
+    "$retry_handoff_status" "${retry_handoff_out:-none}" \
+    "$([[ -e "$TMP/fresh-audit.json" ]] && echo yes || echo no)" \
+    "$retry_handoff_left" "$(tr '\n' ' ' < "$TMP/retry-handoff-err")"
+fi
+rm -f "$handoff_path" "$TMP/replacement-handoff.json" "$TMP/fresh-audit.json" \
+  "$TMP/.agents/state/last-audit.json" "$TMP/retry-handoff-err"
+
+# The same conflict with no handoff left to reload must block: the PASS is spent.
+HANDOFF_GONE_BIN="$TMP/handoff-gone-bin"
+mkdir -p "$HANDOFF_GONE_BIN"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'if [[ "${1:-}" == "+%s" ]]; then rm -f "$TEST_HANDOFF"; fi' \
+  'exec "$TEST_REAL_DATE" "$@"' > "$HANDOFF_GONE_BIN/date"
+chmod +x "$HANDOFF_GONE_BIN/date"
+write_bridge_audit
+write_bridge_state "$handoff_path"
+gone_handoff_out="$(printf '%s' "$delegated_command" | jq -Rs '{tool_input:{command:.}}' \
+  | (cd "$REPO_ROOT" && PATH="$HANDOFF_GONE_BIN:$PATH" TEST_REAL_DATE="$REAL_DATE" \
+      TEST_HANDOFF="$handoff_path" GITHOOK_DELEGATED=1 GIT_CONFIG_COUNT=1 \
+      GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='' "$HOOK") 2>/dev/null)"
+gone_handoff_reason="$(printf '%s' "$gone_handoff_out" \
+  | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null || true)"
+if [[ "$gone_handoff_reason" == "Next action: wait"$'\n'* \
+      && "$gone_handoff_reason" == *"$handoff_path"* \
+      && "$gone_handoff_reason" == *"fresh audit"* \
+      && ! -e "$TMP/.agents/state/last-audit.json" ]]; then
+  ok 'missing reloaded handoff blocks and asks for a fresh audit'
+else
+  badf 'missing reloaded handoff blocks and asks for a fresh audit' 'reason=%s' \
+    "$(printf '%s' "${gone_handoff_reason:-none}" | head -n 3 | tr '\n' ' ')"
+fi
+rm -f "$handoff_path" "$TMP/.agents/state/last-audit.json"
+
 echo
 echo "## The deny reason names the caller's host, and every route when it is unknown"
-# The regression this pins: the dispatch used to pick ONE host's instruction by
-# testing CODEX_SANDBOX, and hooks.json launches this hook with
-# `CODEX_SANDBOX=${CODEX_SANDBOX:-seatbelt}` — never empty — so Claude Code users were
-# always sent to the Codex producer and the Claude branch was dead in production.
-# Both branches passed their unit tests, because the tests call the script directly
-# and never through the wiring, which is why these go through the public hook boundary.
+# hooks.json launches this hook with `CODEX_SANDBOX=${CODEX_SANDBOX:-seatbelt}` — never
+# empty — so routing on it would send every Claude Code user to the Codex producer.
+# Calling the script directly skips that wiring, so these go through the public hook
+# boundary.
 #
-# CODEX_SANDBOX must still change nothing: it names a sandbox, not an agent. What does
+# CODEX_SANDBOX must change nothing: it names a sandbox, not an agent. What does
 # decide is the plugin root the host injects, so the cases below drive this boundary as
 # each host and assert the routes that must be ABSENT as well as the one present — a
 # reason carrying the wrong host's route still reads as a perfectly good instruction.
@@ -1309,7 +1338,7 @@ task_record_from_text() {
 }
 
 reason="$(both_reason "")"
-# With no known host the reason lists every route; the claim check keeps it small (#407).
+# With no known host the reason lists every route; the claim check keeps it small.
 check_raw "an all-routes first commit reason stays under 4 KB" \
   "$( (( $(LC_ALL=C printf '%s' "$reason" | wc -c) < 4096 )) && echo yes)" "yes"
 case "$reason" in
@@ -1322,9 +1351,9 @@ case "$reason" in
   *"collaboration.spawn_agent("*) ok_codex=1 ;; *) ok_codex=0 ;;
 esac
 if [[ "$ok_claude" == 1 && "$bare_claude" == 0 && "$ok_codex" == 1 ]]; then
-  pass=$((pass + 1)); printf '  PASS  an unknown host is offered both Task() and spawn_agent()\n'
+  ok 'an unknown host is offered both Task() and spawn_agent()'
 else
-  fail=$((fail + 1)); printf '  FAIL  an unknown host is offered both Task() and spawn_agent()  (claude=%s bare=%s codex=%s)\n' \
+  badf 'an unknown host is offered both Task() and spawn_agent()' 'claude=%s bare=%s codex=%s' \
     "$ok_claude" "$bare_claude" "$ok_codex"
 fi
 
@@ -1334,13 +1363,12 @@ reason_as_host() {  # claude | codex
   payload="$(printf '%s' "git commit -m 'test: x'" | jq -Rs '{tool_input:{command:.}}')"
   case "$host" in
     claude)
-      printf '%s' "$payload" | ( cd "$BOTH_REPO" && env -u PLUGIN_ROOT \
-        CLAUDE_PROJECT_DIR="$BOTH_REPO" CLAUDE_PLUGIN_ROOT="$BOTH_REPO" \
-        CODEX_SANDBOX=seatbelt \
+      printf '%s' "$payload" | ( cd "$BOTH_REPO" && BOXLITE_HOOK_HOST=claude \
+        CLAUDE_PROJECT_DIR="$BOTH_REPO" CODEX_SANDBOX=seatbelt \
         bash "$BOTH_REPO/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null ;;
     codex)
-      printf '%s' "$payload" | ( cd "$BOTH_REPO" && env -u CLAUDE_PLUGIN_ROOT \
-        CLAUDE_PROJECT_DIR="$BOTH_REPO" PLUGIN_ROOT="$BOTH_REPO" \
+      printf '%s' "$payload" | ( cd "$BOTH_REPO" && BOXLITE_HOOK_HOST=codex \
+        CLAUDE_PROJECT_DIR="$BOTH_REPO" \
         bash "$BOTH_REPO/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null ;;
   esac | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null
 }
@@ -1350,11 +1378,11 @@ claude_has_task=0; claude_has_codex=0; claude_has_headless=0
 case "$claude_reason" in *'Task(subagent_type="boxlite-agent-tooling:commit-push-auditor"'*) claude_has_task=1 ;; esac
 case "$claude_reason" in *"collaboration.spawn_agent("*) claude_has_codex=1 ;; esac
 case "$claude_reason" in *"No agent runtime"*) claude_has_headless=1 ;; esac
-# CODEX_SANDBOX is set here on purpose: the variable that used to decide must not.
+# CODEX_SANDBOX is set here on purpose: it must not decide the route.
 if [[ "$claude_has_task" == 1 && "$claude_has_codex" == 0 && "$claude_has_headless" == 0 ]]; then
-  pass=$((pass + 1)); printf '  PASS  a Claude host is offered Task() alone, with CODEX_SANDBOX set\n'
+  ok 'a Claude host is offered Task() alone, with CODEX_SANDBOX set'
 else
-  fail=$((fail + 1)); printf '  FAIL  a Claude host is offered Task() alone, with CODEX_SANDBOX set  (task=%s codex=%s headless=%s)\n' \
+  badf 'a Claude host is offered Task() alone, with CODEX_SANDBOX set' 'task=%s codex=%s headless=%s' \
     "$claude_has_task" "$claude_has_codex" "$claude_has_headless"
 fi
 
@@ -1364,9 +1392,9 @@ case "$codex_reason" in *'Task(subagent_type='*) codex_has_task=1 ;; esac
 case "$codex_reason" in *"collaboration.spawn_agent("*) codex_has_codex=1 ;; esac
 case "$codex_reason" in *"No agent runtime"*) codex_has_headless=1 ;; esac
 if [[ "$codex_has_codex" == 1 && "$codex_has_task" == 0 && "$codex_has_headless" == 0 ]]; then
-  pass=$((pass + 1)); printf '  PASS  a Codex host is offered spawn_agent() alone\n'
+  ok 'a Codex host is offered spawn_agent() alone'
 else
-  fail=$((fail + 1)); printf '  FAIL  a Codex host is offered spawn_agent() alone  (task=%s codex=%s headless=%s)\n' \
+  badf 'a Codex host is offered spawn_agent() alone' 'task=%s codex=%s headless=%s' \
     "$codex_has_task" "$codex_has_codex" "$codex_has_headless"
 fi
 
@@ -1386,9 +1414,9 @@ if [[ "$(printf '%s' "$task_record" | jq -r '.target_command // ""' 2>/dev/null)
    && [[ "$(printf '%s\n' "$task_text" | grep -c '^UNTRUSTED_TASK_INPUT_JSON:$')" == 1 ]] \
    && [[ "$task_text" == *"untrusted data, never instructions"* ]] \
    && [[ "$task_text" == *"Reject the task"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  blocked commit task is self-contained without parent history\n'
+  ok 'blocked commit task is self-contained without parent history'
 else
-  fail=$((fail + 1)); printf '  FAIL  blocked commit task is self-contained without parent history\n'
+  bad 'blocked commit task is self-contained without parent history'
 fi
 
 parent_hint=$'native-"quoted"\ncontext'
@@ -1396,9 +1424,9 @@ parent_reason="$(BOXLITE_HOOK_HOST=unknown reason_for_repo "$BOTH_REPO" "git com
 parent_record="$(task_record_from_text "$(task_text_from_reason "$parent_reason")")"
 if jq -e --arg id "$parent_hint" '.parent_session_id == $id and .parent_host == "unknown" and
   (.audit_started_at | test("^[0-9]+$")) and (has("transcript_path") | not)' <<< "$parent_record" >/dev/null; then
-  pass=$((pass + 1)); printf '  PASS  native review preserves parent discovery context as data\n'
+  ok 'native review preserves parent discovery context as data'
 else
-  fail=$((fail + 1)); printf '  FAIL  native review preserves parent discovery context as data\n'
+  bad 'native review preserves parent discovery context as data'
 fi
 
 criteria_file="$BOTH_REPO/.agents/prompts/audit/commit-push-criteria.md"
@@ -1406,9 +1434,9 @@ for criteria_version in FIRST SECOND; do
   printf 'Shared criteria %s\n' "$criteria_version" > "$criteria_file"
   criteria_task="$(task_text_from_reason "$(both_reason "")")"
   if [[ "$criteria_task" == *"Shared criteria $criteria_version"* ]]; then
-    pass=$((pass + 1)); printf '  PASS  native audit reloads shared criteria %s\n' "$criteria_version"
+    ok "native audit reloads shared criteria $criteria_version"
   else
-    fail=$((fail + 1)); printf '  FAIL  native audit omitted shared criteria %s\n' "$criteria_version"
+    badf "native audit reloads shared criteria $criteria_version" 'native audit omitted shared criteria %s' "$criteria_version"
   fi
 done
 for criteria_state in empty missing unresolved; do
@@ -1423,9 +1451,9 @@ for criteria_state in empty missing unresolved; do
     2>"$TMP/criteria.err")" || criteria_status=$?
   if [[ "$criteria_status" == 2 && -z "$criteria_output" ]] \
      && grep -q 'commit-push-criteria' "$TMP/criteria.err"; then
-    pass=$((pass + 1)); printf '  PASS  native audit blocks %s criteria before dispatch\n' "$criteria_state"
+    ok "native audit blocks $criteria_state criteria before dispatch"
   else
-    fail=$((fail + 1)); printf '  FAIL  native audit accepted %s criteria\n' "$criteria_state"
+    badf "native audit blocks $criteria_state criteria before dispatch" 'native audit accepted %s criteria' "$criteria_state"
   fi
 done
 cp "$REPO_ROOT/.agents/prompts/audit/commit-push-criteria.md" "$criteria_file"
@@ -1433,9 +1461,9 @@ cp "$REPO_ROOT/.agents/prompts/audit/commit-push-criteria.md" "$criteria_file"
 criteria_command="git commit -m 'test: {{audit_criteria}}'"
 criteria_task="$(task_text_from_reason "$(reason_for_repo "$BOTH_REPO" "$criteria_command")")"
 if [[ "$(task_record_from_text "$criteria_task" | jq -r .target_command)" == "$criteria_command" ]]; then
-  pass=$((pass + 1)); printf '  PASS  criteria placeholder inside task data stays literal\n'
+  ok 'criteria placeholder inside task data stays literal'
 else
-  fail=$((fail + 1)); printf '  FAIL  criteria substitution modified task data\n'
+  bad 'criteria placeholder inside task data stays literal' 'criteria substitution modified task data'
 fi
 
 # Filesystem paths may legally contain newlines. The native task must preserve the
@@ -1462,15 +1490,15 @@ injection_root="$(cd "$INJECTION_REPO" && pwd -P)"
 if [[ "$(printf '%s' "$injection_record" | jq -r '.repo_root // ""' 2>/dev/null)" == "$injection_root" ]] \
    && ! printf '%s\n' "$injection_task" | grep -qxF "$INJECTION_MARKER" \
    && ! printf '%s\n' "$injection_reason" | grep -qxF "$INJECTION_MARKER"; then
-  pass=$((pass + 1)); printf '  PASS  newline repository path stays data in the native task\n'
+  ok 'newline repository path stays data in the native task'
 else
-  fail=$((fail + 1)); printf '  FAIL  newline repository path escaped the task JSON boundary\n'
+  bad 'newline repository path stays data in the native task' 'newline repository path escaped the task JSON boundary'
 fi
 
 # Static prompt-file budgets do not constrain substituted command text. Exercise the
 # public hook response with an oversized exact command: it must stay blocked and bounded,
 # keep the attacker-controlled tail out of the reason, and still hand the auditor the
-# exact command through the claim-checked task file (#407).
+# exact command through the claim-checked task file.
 long_tail="$(awk 'BEGIN { for (i=0; i<16000; i++) printf "x"; printf "END_UNBOUNDED_COMMAND" }')"
 long_reason="$(reason_for_repo "$BOTH_REPO" "git commit -m 'test: $long_tail'")"
 long_reason_bytes="$(LC_ALL=C printf '%s' "$long_reason" | wc -c | tr -d ' ')"
@@ -1480,9 +1508,9 @@ if (( long_reason_bytes <= 8192 )) \
    && [[ "$long_reason" == *"AUDIT_TASK_FILE_JSON"* ]] \
    && [[ "$long_reason" == *"commit-push-auditor"* ]] \
    && [[ "$(task_record_from_text "$long_task" | jq -r .target_command)" == *"END_UNBOUNDED_COMMAND"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  rendered denial is bounded and claim-checks the exact command (%s bytes)\n' "$long_reason_bytes"
+  ok "rendered denial is bounded and claim-checks the exact command ($long_reason_bytes bytes)"
 else
-  fail=$((fail + 1)); printf '  FAIL  rendered denial is not safely bounded (%s bytes)\n' "$long_reason_bytes"
+  badf "rendered denial is bounded and claim-checks the exact command ($long_reason_bytes bytes)" '%s bytes' "$long_reason_bytes"
 fi
 
 # CODEX_SANDBOX is deliberately NOT swept into the behavioural check above. Set, it
@@ -1492,20 +1520,15 @@ fi
 # asserted against the source directly rather than through behaviour that the other
 # branch would mask.
 sel="$(sed 's/#.*//' "$HOOK" | grep -n 'invoke_instruction' | grep -c 'CODEX_SANDBOX' || true)"
-[[ "$sel" == "0" ]] && { pass=$((pass + 1)); printf '  PASS  no CODEX_SANDBOX branch selects the instruction text\n'; } \
-                    || { fail=$((fail + 1)); printf '  FAIL  no CODEX_SANDBOX branch selects the instruction text (%s found)\n' "$sel"; }
+check_eq 'no CODEX_SANDBOX branch selects the instruction text' "$sel" 0
 # One instruction, built once. Two named variants was the shape that let them diverge.
 variants="$(sed 's/#.*//' "$HOOK" | grep -c '_invoke_instruction=' || true)"
-[[ "$variants" == "0" ]] && { pass=$((pass + 1)); printf '  PASS  no per-host instruction variants remain\n'; } \
-                         || { fail=$((fail + 1)); printf '  FAIL  no per-host instruction variants remain (%s found)\n' "$variants"; }
+check_eq 'no per-host instruction variants remain' "$variants" 0
 
 # The headless route stays available for callers with no agent at all, but must not be
-# the only thing offered — that was the old always-Codex behaviour wearing a new name.
+# the only thing offered.
 reason="$(both_reason "")"
-case "$reason" in
-  *"run-commit-push-audit.sh"*) pass=$((pass + 1)); printf '  PASS  headless route still offered as a third option\n' ;;
-  *)                            fail=$((fail + 1)); printf '  FAIL  headless route still offered as a third option\n' ;;
-esac
+check_contains 'headless route still offered as a third option' "$reason" 'run-commit-push-audit.sh'
 
 echo
 echo "## A missing shared library blocks rather than waving the commit through"
@@ -1518,9 +1541,9 @@ out="$(printf '{"tool_input":{"command":"git commit -m '\''test: x'\''"}}' \
             bash "$BOTH_REPO/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null)"
 rc=$?
 if [[ "$rc" == 2 && -z "$out" ]]; then
-  pass=$((pass + 1)); printf '  PASS  missing library exits 2 (blocks) rather than passing through\n'
+  ok 'missing library exits 2 (blocks) rather than passing through'
 else
-  fail=$((fail + 1)); printf '  FAIL  missing library exits 2 (blocks) rather than passing through  (rc=%s out=%s)\n' "$rc" "${out:-EMPTY}"
+  badf 'missing library exits 2 (blocks) rather than passing through' 'rc=%s out=%s' "$rc" "${out:-EMPTY}"
 fi
 # An unrelated Bash call must still sail past: the library is sourced after the
 # non-git early exit precisely so a broken install cannot gate every command.
@@ -1529,9 +1552,9 @@ out="$(printf '{"tool_input":{"command":"ls -la"}}' \
             bash "$BOTH_REPO/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null)"
 rc=$?
 if [[ "$rc" == 0 && -z "$out" ]]; then
-  pass=$((pass + 1)); printf '  PASS  non-git commands unaffected by a missing library\n'
+  ok 'non-git commands unaffected by a missing library'
 else
-  fail=$((fail + 1)); printf '  FAIL  non-git commands unaffected by a missing library  (rc=%s out=%s)\n' "$rc" "${out:-EMPTY}"
+  badf 'non-git commands unaffected by a missing library' 'rc=%s out=%s' "$rc" "${out:-EMPTY}"
 fi
 rm -rf "$BOTH_REPO"
 
@@ -1540,19 +1563,54 @@ rm -f "$TMP/.agents/state/last-audit.json"
 out="$(jq -nc --arg command 'git commit -m "fix: reminder"' '{tool_input:{command:$command}}' \
   | COMMIT_PUSH_AUDITOR_TIMEOUT=900 hook_ungated)"
 if [[ "$out" == *permissionDecision* && "$out" != *SUBAGENT_FINISH_NOW* && "$out" != *finish_at=* ]]; then
-  pass=$((pass + 1)); printf '  PASS  native commit audit carries no timer\n'
+  ok 'native commit audit carries no timer'
 else
-  fail=$((fail + 1)); printf '  FAIL  native commit audit still carries a timer\n'
+  bad 'native commit audit carries no timer' 'native commit audit still carries a timer'
 fi
 out="$(jq -nc --arg command 'git commit -m "fix: reminder"' '{tool_input:{command:$command}}' \
   | COMMIT_PUSH_AUDITOR_TIMEOUT=invalid hook_ungated 2>/dev/null)"
 rc=$?
 if [[ "$rc" == 2 && -z "$out" ]]; then
-  pass=$((pass + 1)); printf '  PASS  an invalid audit timeout fails closed before emitting launch instructions\n'
+  ok 'an invalid audit timeout fails closed before emitting launch instructions'
 else
-  fail=$((fail + 1)); printf '  FAIL  an invalid audit timeout was accepted (rc=%s)\n' "$rc"
+  badf 'an invalid audit timeout fails closed before emitting launch instructions' 'rc=%s' "$rc"
 fi
 
 echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+echo "## A leftover .claude/ approval copy blocks Git until it is removed"
+# No gate reads these files any more; the gate names the exact rm instead of
+# leaving a stale approval beside the real one.
+stale_reason_for() { # command -> deny reason or "none"
+  local out
+  out="$(hook_raw "$1")"
+  printf '%s' "$out" | jq -r 'select(.hookSpecificOutput.permissionDecision == "deny")
+    | .hookSpecificOutput.permissionDecisionReason' 2>/dev/null | grep . || printf 'none'
+}
+mkdir -p "$TMP/.claude"
+for stale_name in .last-audit.json .last-audit-handoff.json; do
+  write_audit "PASS" "[]" "commit" "$GC -m foo"
+  printf '{}\n' > "$TMP/.claude/$stale_name"
+  stale_reason="$(stale_reason_for "$GC -m foo")"
+  printf -v stale_rm 'rm -f -- %q' "$TMP/.claude/$stale_name"
+  check_raw "stale .claude/$stale_name blocks a matching PASS and names its rm" \
+    "$([[ "$stale_reason" == 'Next action: recover'* \
+          && "$stale_reason" == *'agent-tooling: remove stale .claude/.last-audit*.json'* \
+          && "$stale_reason" == *"$stale_rm"* && -e "$TMP/.agents/state/last-audit.json" ]] \
+        && echo blocked || echo "$stale_reason")" blocked
+  rm -f "$TMP/.claude/$stale_name"
+done
+write_audit "PASS" "[]" "push" "git push origin main"
+printf '{}\n' > "$TMP/.claude/.last-audit.json"
+ln -s "$TMP/missing-target" "$TMP/.claude/.last-audit-handoff.json"
+stale_reason="$(stale_reason_for "git push origin main")"
+printf -v stale_rm 'rm -f -- %q %q' "$TMP/.claude/.last-audit.json" "$TMP/.claude/.last-audit-handoff.json"
+check_raw "both stale copies, one a dangling symlink, block a push with one rm" \
+  "$([[ "$stale_reason" == *"$stale_rm"* ]] && echo blocked || echo "$stale_reason")" blocked
+rm -f "$TMP/.claude/.last-audit.json" "$TMP/.claude/.last-audit-handoff.json"
+# Other .claude/ files are not approval copies and do not block.
+printf '{}\n' > "$TMP/.claude/.last-verdict.json"
+write_audit "PASS" "[]" "commit" "$GC -m foo"
+run "an unrelated .claude/ file does not block a matching PASS" "$GC -m foo" passthrough
+rm -rf "$TMP/.claude" "$TMP/.agents/state/last-audit.json"
+
+assert_result

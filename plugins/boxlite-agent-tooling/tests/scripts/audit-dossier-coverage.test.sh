@@ -13,7 +13,7 @@ scratch="$(cd "$scratch" && pwd -P)"
 context="$(jq -nc --arg root "$scratch" \
   '{repo_root:$root,session:"s",epoch:"1",branch:"main",gate:"verdict"}')"
 request="$(audit_reflection_gate "$context" prepare a1 \
-  '{"binding":{"head":"h"},"snapshot":{"transcript":[],"tree":"t"}}')"
+  '{"binding":{"head":"h"},"snapshot":{"transcript":[],"tree":"t"},"deadline":4102444800}')"
 history="$(jq -r .history_path <<<"$request")"
 dossier="$(jq '{head:.attempts[-1].input.binding.head,verdict:"IN_PROGRESS",findings:["waiting"],
   history_review:{attempt_id:.attempts[-1].id,history_hash,dispositions:[],findings:[],

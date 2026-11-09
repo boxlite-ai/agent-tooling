@@ -1,51 +1,20 @@
 #!/usr/bin/env bash
-# Which coding agent is invoking this hook right now.
-# Source this file; it performs no work on load.
+# Host identity and shared payload parsing for hooks. Source only; no work on load.
 #
-# Each host manifest sets BOXLITE_HOOK_HOST on every command, replacing inherited
-# markers. Codex exports both plugin-root names as aliases; roots alone cannot
-# distinguish that from nesting. Claude's manifest prefers its own root when loading
-# scripts. Generic hooks explicitly identify as unknown. This is routing metadata,
-# not authorization or runtime attestation.
+# Each host manifest exports BOXLITE_HOOK_HOST on every command. Without that marker
+# the host is `unknown`, which offers every route. This is routing metadata, not
+# authorization or runtime attestation.
 #
-# Legacy callers without a marker retain single-root inference. Both roots remain
-# unknown there: equal roots can mean either aliases or same-installation nesting.
-#
-# Signals that look right and are not
-# -----------------------------------
-# Each of these is session-scoped and exported, so it reports what launched the process
-# tree rather than who is calling this hook:
-#
-#   CLAUDECODE       inherited by every child. run-commit-push-audit.sh spawns the
-#                    Codex CLI from inside a hook; that process reads it as "Claude".
-#   AI_AGENT         deliberately preserves a foreign agent's value instead of
-#                    overwriting it, so under nesting it names the OUTERMOST agent.
-#   CODEX_SANDBOX    names the active sandbox, not the agent. Routing on it is the bug
-#                    this accessor exists to make unreachable: the wiring that launched
-#                    that gate forced it non-empty, so it picked wrong on every host.
-#   CODEX_COMPANION  set by the openai-codex plugin FOR Claude Code, so it marks a
-#                    Claude session as Codex.
-#
-# Probing PATH for a vendor binary is the same mistake — both CLIs can be installed at
-# once. subagent.test.sh greps for every name above.
+# Signals that look right and are not: CLAUDECODE and AI_AGENT are inherited by
+# nested agents, CODEX_SANDBOX names a sandbox, CODEX_COMPANION marks Claude
+# sessions, and PATH probes fail when both CLIs are installed. subagent.test.sh
+# rejects routing code that reads any of them.
 #
 # Tests: bash tests/lib/hook-host.test.sh
 
-# Exported AND non-empty:
-#   exported  — only the environment carries a host's answer. A same-named shell
-#               variable is whatever the caller named its own local, and PLUGIN_ROOT is
-#               generic enough that this repository already uses it that way
-#               (subagent.test.sh:22, lifecycle.test.sh:4); reading the shell's
-#               variable table would let any of those silently reroute a gate.
-#   non-empty — a name exported empty says nothing, and the root expression skips an
-#               empty PLUGIN_ROOT for the same reason.
-#
-# Asked of THIS name's own declaration, never of the serialized export table. Values
-# are attacker-shaped text: one exported variable holding a newline followed by
-# `declare -x PLUGIN_ROOT=` forges that marker inside a whole-table scan, and a caller
-# with an unexported local of the same name is then routed as the wrong host. A single
-# `declare -p NAME` cannot be forged that way — the value can only appear after the
-# attribute field, never in front of it.
+# Exported and non-empty. Ask this name's own `declare -p`: a whole-table scan can be
+# forged by another variable's multiline value, and an unexported shell variable is
+# the caller's local, not the host's answer.
 hook_host_is_env_value() {  # $1 = variable name
   local declaration attributes
   [[ -n "${!1:-}" ]] || return 1
@@ -57,24 +26,33 @@ hook_host_is_env_value() {  # $1 = variable name
 }
 
 hook_host_kind() {  # -> claude | codex | unknown
-  local codex_root=false claude_root=false
   if hook_host_is_env_value BOXLITE_HOOK_HOST; then
     case "$BOXLITE_HOOK_HOST" in
-      claude|codex) printf '%s' "$BOXLITE_HOOK_HOST" ;;
-      *) printf 'unknown' ;;
+      claude|codex) printf '%s' "$BOXLITE_HOOK_HOST"; return 0 ;;
     esac
-    return 0
   fi
-  hook_host_is_env_value PLUGIN_ROOT && codex_root=true
-  hook_host_is_env_value CLAUDE_PLUGIN_ROOT && claude_root=true
-  if [[ "$codex_root" == true && "$claude_root" == true ]]; then
-    # No manifest marker: aliases and nesting are indistinguishable.
-    printf 'unknown'
-  elif [[ "$codex_root" == true ]]; then
-    printf 'codex'
-  elif [[ "$claude_root" == true ]]; then
-    printf 'claude'
-  else
-    printf 'unknown'
-  fi
+  printf 'unknown'
+}
+
+# Print the verb when COMMAND runs PROGRAM at the start of the command or of any
+# chain segment (after &&, ||, ;, |, &, $(, (, `, or a newline), after optional
+# NAME=value assignments. PROGRAM is an ERE with exactly one capture group, the verb.
+# Quoted mentions such as `echo "git push"` do not sit at a segment start. Newlines
+# become `;`, so a verb on its own heredoc line may match: a false match fails closed.
+hook_command_segment_verb() {  # command program-ere
+  local normalized="${1//$'\n'/;}" work pattern
+  work="${normalized#"${normalized%%[![:space:]]*}"}"
+  pattern='(^|[[:space:]]*(&&|\|\||;|\||&|\$\(|\(|`)[[:space:]]*)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*'"$2"'([[:space:]]|$)'
+  [[ "$work" =~ $pattern ]] || return 1
+  printf '%s' "${BASH_REMATCH[4]}"
+}
+
+# Print the tool's working directory: the first present of tool_input.workdir,
+# tool_input.cwd, and cwd, else FALLBACK. Fails unless it is a non-empty string
+# without NUL.
+hook_payload_workdir() {  # payload fallback
+  jq -er --arg fallback "$2" '
+    first((.tool_input.workdir, .tool_input.cwd, .cwd, $fallback) | select(. != null))
+    | strings | select(length > 0 and index("\u0000") == null)
+  ' <<<"$1"
 }

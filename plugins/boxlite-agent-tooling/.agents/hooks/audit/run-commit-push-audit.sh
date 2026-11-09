@@ -131,8 +131,8 @@ cleanup_runner() {
       auditor_settings="$(audit_diagnostic_auditor "$auditor_model" "$auditor_effort" \
         table unobserved "")" || auditor_settings=null
     fi
-    audit_diagnostic_record "$project_dir" "${AUDITOR_SESSION_SCOPE:--}" "$kind" \
-      "${auditor_generation:-legacy}" "${history_id:-$$}" "$audit_execution_route" "$audit_started_at" \
+    audit_diagnostic_record "$project_dir" "$AUDITOR_SESSION_SCOPE" "$kind" \
+      "${auditor_generation:--}" "${history_id:-$$}" "$audit_execution_route" "$audit_started_at" \
       "${codex_group_exit_status:-null}" "$original_status" "$outcome" \
       "$audit_tmp_dir/codex-stderr.log" "$auditor_settings" || true
     rm -rf "$audit_tmp_dir"
@@ -173,11 +173,11 @@ bound_commit_subject=""
 bound_commit_subject_hash=""
 
 hash_stdin() {
-  shasum -a 256 | awk '{print $1}'
+  verdict_audit_sha256
 }
 
 hash_file() {
-  shasum -a 256 < "$1" | awk '{print $1}'
+  verdict_audit_sha256 <"$1"
 }
 
 command_field() {
@@ -262,28 +262,28 @@ write_fail() {
   exit 1
 }
 
+# Every run belongs to one parent session: the scope names its state files, and the
+# prompt epoch binds its lifecycle control and audit history.
+require_auditor_lifecycle_context() {
+  if [[ ! "${AUDITOR_SESSION_SCOPE:-}" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ \
+       || ! "${AUDITOR_PROMPT_EPOCH:-}" =~ ^[1-9][0-9]*-[1-9][0-9]*-[0-9]+$ ]]; then
+    write_fail "Internal: AUDITOR_SESSION_SCOPE and AUDITOR_PROMPT_EPOCH must name the parent session's audit scope and prompt epoch; run the headless command the commit/push gate printed"
+  fi
+}
+
 start_auditor_control() {
-  local configured_scope="${AUDITOR_SESSION_SCOPE:-}"
-  local configured_epoch="${AUDITOR_PROMPT_EPOCH:-}" current_epoch
-  if [[ -z "$configured_scope" && -z "$configured_epoch" ]]; then
-    return 0
-  fi
-  if [[ ! "$configured_scope" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ \
-       || ! "$configured_epoch" =~ ^[1-9][0-9]*-[1-9][0-9]*-[0-9]+$ \
-       || ! -r "$verdict_state_lib" || ! -r "$auditor_control" ]]; then
-    write_fail "Internal: invalid or unavailable auditor lifecycle context"
-  fi
-  # shellcheck source=../../lib/verdict-audit-state.sh
-  source "$verdict_state_lib"
+  local current_epoch
+  [[ -r "$auditor_control" ]] \
+    || write_fail "Internal: auditor lifecycle control is unavailable at $auditor_control"
   current_epoch="$(verdict_audit_read_single_record \
-    "$project_dir/.agents/state/verdict-prompt-epoch.$configured_scope" 2>/dev/null)" \
+    "$project_dir/.agents/state/verdict-prompt-epoch.$AUDITOR_SESSION_SCOPE" 2>/dev/null)" \
     || write_fail "Internal: auditor lifecycle prompt epoch is unavailable"
-  [[ "$current_epoch" == "$configured_epoch" ]] \
+  [[ "$current_epoch" == "$AUDITOR_PROMPT_EPOCH" ]] \
     || write_fail "Internal: auditor lifecycle prompt epoch is stale"
   auditor_generation="$command_hash"
   if ! CLAUDE_PROJECT_DIR="$project_dir" bash "$auditor_control" external-start \
-      commit-push-auditor "$auditor_generation" "$configured_scope" \
-      "$configured_epoch" >/dev/null 2>&1; then
+      commit-push-auditor "$auditor_generation" "$AUDITOR_SESSION_SCOPE" \
+      "$AUDITOR_PROMPT_EPOCH" >/dev/null 2>&1; then
     write_fail "Internal: could not start auditor lifecycle control"
   fi
   auditor_control_started=true
@@ -1179,6 +1179,57 @@ MKTEMP
   return "$codex_group_exit_status"
 }
 
+prepare_audit_history() {  # sanitized evidence file; needs investigation_deadline
+  local evidence_file="$1"
+  # shellcheck source=../../lib/audit-reflection.sh
+  source "$tooling_root/.agents/lib/audit-reflection.sh" || exit 2
+  # shellcheck source=../../lib/audit-reflection-gate.sh
+  source "$tooling_root/.agents/lib/audit-reflection-gate.sh" || exit 2
+  reflection_context="$(jq -nc --arg root "$(cd "$repo_root" && pwd -P)" \
+    --arg session "$AUDITOR_SESSION_SCOPE" --arg epoch "$AUDITOR_PROMPT_EPOCH" \
+    --arg branch "${branch:-HEAD}" --arg kind "$kind" \
+    '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:$kind}')"
+  local history_input history_request worker recovery_action recovery_step
+  if ! history_request="$(audit_reflection_gate "$reflection_context" next-action 2>&1)"; then
+    printf 'Next action: wait\nOwner: parent agent\nReason: history cannot be validated: %s\nNext step: restore access or verified history evidence; preserve counters.\nResume when: the same history validates.\n' "$history_request" >&2
+    exit 1
+  fi
+  recovery_action="$(jq -r .action <<<"$history_request")"
+  if [[ "$recovery_action" != continue ]]; then
+    recovery_step="$(jq -r .reason <<<"$history_request")"
+    case "$recovery_action" in
+      stop) recovery_step="End this retry chain; report unresolved findings from $(jq -r .state_path <<<"$history_request"). Do not launch or reset history." ;;
+      reflect) recovery_step="$(subagent_prompt audit/commit-push-reflection-required "$tooling_root" \
+        "history_path=$(jq -r .state_path <<<"$history_request")" "tooling_root=$tooling_root")" || exit 1 ;;
+      wait) ;;
+      *) recovery_action='wait'; recovery_step='Restore the checkpoint adapter and validate its result without resetting history.' ;;
+    esac
+    printf 'Next action: %s\nOwner: parent agent\nReason: %s\nNext step: %s\nResume when: the existing lifecycle permits another attempt; Stop requires explicit user direction.\n' \
+      "$recovery_action" "$(jq -r .reason <<<"$history_request")" "$recovery_step" >&2
+    exit 1
+  fi
+  # A direct headless invocation must preserve the same native-worker exclusion.
+  if ! worker="$(CLAUDE_PROJECT_DIR="$repo_root" bash "$auditor_control" \
+      inspect-scope "$AUDITOR_SESSION_SCOPE" commit-push-auditor 2>&1)" \
+      || [[ "$(jq -r '.state // empty' <<<"$worker" 2>/dev/null)" != idle ]]; then
+    printf 'Next action: wait\nOwner: parent agent\nReason: unfinished or unverifiable auditor lifecycle: %s\nNext step: finish or reconcile the existing worker through its host lifecycle; preserve the task link and history.\nResume when: the same-scope lifecycle is idle.\n' "$worker" >&2
+    exit 1
+  fi
+  # The preflight prepares an attempt on each deny; running this producer replaces it.
+  audit_reflection_cancel_open "$reflection_context" "Superseded by the headless runner" \
+    || write_fail "Audit history requires recovery; inspect the reported state path and .agents/prompts/audit/audit-reflection.md"
+  history_input="$(jq -nc --arg branch "$branch" --arg head "$head" --arg kind "$kind" \
+    --arg diff "$diff_hash" --arg command "$command_hash" --arg subject "$bound_commit_subject_hash" \
+    --argjson deadline "$investigation_deadline" --rawfile evidence "$evidence_file" \
+    '{binding:{branch:$branch,head:$head,command_kind:$kind,
+      diff_hash:$diff,command_hash:$command,commit_subject_hash:$subject},snapshot:{evidence:$evidence},deadline:$deadline}')"
+  history_id="$$-$(date +%s)-${RANDOM:-0}"
+  history_request="$(audit_reflection_gate "$reflection_context" prepare "$history_id" "$history_input")" \
+    || write_fail "Audit history requires recovery; inspect the reported state path and .agents/prompts/audit/audit-reflection.md"
+  reflection_pending=true
+  history_path="$(jq -r .history_path <<<"$history_request")"
+}
+
 run_agentic_audit() {
   # shellcheck source=../../lib/audit-network.sh
   source "$tooling_root/.agents/lib/audit-network.sh" || exit 2
@@ -1197,10 +1248,7 @@ run_agentic_audit() {
   fi
   findings=()
 
-  # Constrains ONLY codex's structured output below, never a dossier on disk — which is
-  # why `advisories` is `required` there despite the gate accepting dossiers without it:
-  # strict structured-output modes reject optional properties. Backward compatibility
-  # lives in the gate's `.advisories[]?`.
+  # Constrains codex's structured output; the dossier contract requires the same keys.
   if [[ ! -r "$schema_file" ]]; then
     write_fail "Internal: Codex audit schema is missing at ${schema_file}"
   fi
@@ -1241,55 +1289,7 @@ run_agentic_audit() {
     write_fail "Internal: could not hash the private sanitized evidence file"
   fi
   investigation_deadline="$(( $(date +%s) + audit_timeout_seconds ))"
-  if [[ -n "${AUDITOR_SESSION_SCOPE:-}" && -n "${AUDITOR_PROMPT_EPOCH:-}" ]]; then
-    # shellcheck source=../../lib/audit-reflection.sh
-    source "$tooling_root/.agents/lib/audit-reflection.sh" || exit 2
-    # shellcheck source=../../lib/audit-reflection-gate.sh
-    source "$tooling_root/.agents/lib/audit-reflection-gate.sh" || exit 2
-    reflection_context="$(jq -nc --arg root "$(cd "$repo_root" && pwd -P)" \
-      --arg session "$AUDITOR_SESSION_SCOPE" --arg epoch "$AUDITOR_PROMPT_EPOCH" \
-      --arg branch "${branch:-HEAD}" --arg kind "$kind" \
-      '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:$kind}')"
-    local history_input history_request worker recovery_action recovery_step
-    if ! history_request="$(audit_reflection_gate "$reflection_context" next-action 2>&1)"; then
-      printf 'Next action: wait\nOwner: parent agent\nReason: history cannot be validated: %s\nNext step: restore access or verified history evidence; preserve counters.\nResume when: the same history validates.\n' "$history_request" >&2
-      exit 1
-    fi
-    recovery_action="$(jq -r .action <<<"$history_request")"
-    if [[ "$recovery_action" != continue ]]; then
-      recovery_step="$(jq -r .reason <<<"$history_request")"
-      case "$recovery_action" in
-        stop) recovery_step="End this retry chain; report unresolved findings from $(jq -r .state_path <<<"$history_request"). Do not launch or reset history." ;;
-        reflect) recovery_step="$(subagent_prompt audit/commit-push-reflection-required "$tooling_root" \
-          "history_path=$(jq -r .state_path <<<"$history_request")" "tooling_root=$tooling_root")" || exit 1 ;;
-        wait) ;;
-        *) recovery_action='wait'; recovery_step='Restore the checkpoint adapter and validate its result without resetting history.' ;;
-      esac
-      printf 'Next action: %s\nOwner: parent agent\nReason: %s\nNext step: %s\nResume when: the existing lifecycle permits another attempt; Stop requires explicit user direction.\n' \
-        "$recovery_action" "$(jq -r .reason <<<"$history_request")" "$recovery_step" >&2
-      exit 1
-    fi
-    # A direct headless invocation must preserve the same native-worker exclusion.
-    if ! worker="$(CLAUDE_PROJECT_DIR="$repo_root" bash "$auditor_control" \
-        inspect-scope "$AUDITOR_SESSION_SCOPE" commit-push-auditor 2>&1)" \
-        || [[ "$(jq -r '.state // empty' <<<"$worker" 2>/dev/null)" != idle ]]; then
-      printf 'Next action: wait\nOwner: parent agent\nReason: unfinished or unverifiable auditor lifecycle: %s\nNext step: finish or reconcile the existing worker through its host lifecycle; preserve the task link and history.\nResume when: the same-scope lifecycle is idle.\n' "$worker" >&2
-      exit 1
-    fi
-    # The preflight prepares an attempt on each deny; running this producer replaces it.
-    audit_reflection_cancel_open "$reflection_context" "Superseded by the headless runner" \
-      || write_fail "Audit history requires recovery; inspect the reported state path and .agents/prompts/audit/audit-reflection.md"
-    history_input="$(jq -nc --arg branch "$branch" --arg head "$head" --arg kind "$kind" \
-      --arg diff "$diff_hash" --arg command "$command_hash" --arg subject "$bound_commit_subject_hash" \
-      --argjson deadline "$investigation_deadline" --rawfile evidence "$evidence_file" \
-      '{binding:{branch:$branch,head:$head,command_kind:$kind,
-        diff_hash:$diff,command_hash:$command,commit_subject_hash:$subject},snapshot:{evidence:$evidence},deadline:$deadline}')"
-    history_id="$$-$(date +%s)-${RANDOM:-0}"
-    history_request="$(audit_reflection_gate "$reflection_context" prepare "$history_id" "$history_input")" \
-      || write_fail "Audit history requires recovery; inspect the reported state path and .agents/prompts/audit/audit-reflection.md"
-    reflection_pending=true
-    history_path="$(jq -r .history_path <<<"$history_request")"
-  fi
+  prepare_audit_history "$evidence_file"
   local codex_bin
   if ! codex_bin="$(find_codex_bin)"; then
     write_fail "Internal: working Codex CLI not found; set CODEX_BIN to the Codex binary"
@@ -1348,6 +1348,7 @@ run_agentic_audit() {
   normalize_agentic_output "$raw_file"
 }
 
+require_auditor_lifecycle_context
 case "${CODEX_COMMIT_PUSH_AUDIT_MODE:-agentic}" in
   agentic)
     run_agentic_audit

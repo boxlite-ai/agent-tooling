@@ -39,12 +39,8 @@ CLAUDE_HOOKS="$PLUGIN/hooks/hooks.json"
 CODEX_HOOKS="$PLUGIN/hooks/codex-hooks.json"
 GENERIC_HOOKS="$PLUGIN/hooks/generic-hooks.json"
 
-pass=0
-fail=0
-# Increment pass counter and print a PASS line.  # $1 = test name
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-# Increment fail counter and print a FAIL line.  # $1 = test name
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=lib/assert.sh
+source "$PLUGIN/tests/lib/assert.sh"
 
 command -v jq >/dev/null 2>&1 || { printf 'jq is required to run these tests\n' >&2; exit 2; }
 for doc in "${DOCS[@]}"; do
@@ -137,5 +133,4 @@ while IFS= read -r term; do
   if in_sources -E "$pattern"; then ok "glossary term in source: $term"; else bad "glossary term not used by any source: $term"; fi
 done <<<"$glossary_terms"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+assert_result

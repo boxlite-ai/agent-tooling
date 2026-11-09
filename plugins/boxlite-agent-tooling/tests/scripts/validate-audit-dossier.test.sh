@@ -40,11 +40,11 @@ prepare() { # kind, epoch
       {tree_hash:("b"*40),generation:"g"} else
       {command_kind:$kind,diff_hash:("c"*64),command_hash:("d"*64),commit_subject_hash:""} end')"
   request="$(audit_reflection_gate "$context" prepare first "$(jq -nc --argjson binding "$binding" \
-    '{binding:$binding,snapshot:{transcript:[],tree:"captured tree"}}')")"
+    '{binding:$binding,snapshot:{transcript:[],tree:"captured tree"},deadline:4102444800}')")"
   history="$(jq -r .history_path <<<"$request")"
   state="$(jq -r .state_path <<<"$request")"
   candidate="$repo/candidate.json"
-  jq '.attempts[-1].input.binding + {verdict:"PASS",findings:[],
+  jq '.attempts[-1].input.binding + {verdict:"PASS",findings:[],advisories:[],
       history_review:{attempt_id:.attempts[-1].id,history_hash,dispositions:[],findings:[],
         coverage:{reviewed:(.attempts[-1].input.snapshot|keys),unread:[]}}} |
       if has("tree_hash") then .proof=[] else . end' "$history" >"$candidate"
@@ -63,10 +63,14 @@ for kind in verdict commit push; do
       /bin/bash "$cli" "$kind" "$history" - <"$candidate"
   fi
   [[ "$(snapshot)" == "$before" ]]
-  for mutation in '.advisories=[]' '.reflection_review=null' 'del(.advisories)'; do
+  for mutation in '.advisories=["low: note"]' '.reflection_review=null'; do
     change "$mutation"
     expect 0 '' bash "$cli" "$kind" "$history" "$scratch/changed.json"
   done
+  # Verdict dossiers may omit advisories; Git dossiers always carry them.
+  change 'del(.advisories)'
+  expect "$([[ "$kind" == verdict ]] && echo 0 || echo 1)" '' \
+    bash "$cli" "$kind" "$history" "$scratch/changed.json"
   for mutation in '.findings=["high: unresolved"]' '.verdict="FAIL"' '.unexpected=true'; do
     change "$mutation"
     expect 1 '' bash "$cli" "$kind" "$history" "$scratch/changed.json"
@@ -122,7 +126,7 @@ change '.verdict="FAIL" | .findings=["high: missing proof"] |
     origin_evidence:"first audit",review_gap:"",review_change:"",reopening:null,conflict:null,criterion_change:null}]'
 expect 0 '' bash "$cli" verdict "$history" "$scratch/changed.json"
 audit_reflection_gate "$context" record first "$(cat "$scratch/changed.json")" >/dev/null
-input="$(jq -c '.attempts[-1].input|{binding,snapshot}' "$history")"
+input="$(jq -c '.attempts[-1].input|{binding,snapshot,deadline}' "$history")"
 request="$(audit_reflection_gate "$context" prepare retry "$input")"
 history="$(jq -r .history_path <<<"$request")"
 jq --slurpfile h "$history" '.history_review.attempt_id="retry" | .history_review.history_hash=$h[0].history_hash |
@@ -167,7 +171,7 @@ expect 1 'checksum' bash "$cli" verdict "$scratch/corrupt-history" "$candidate"
 expect 2 'usage:' bash "$cli" wrong -
 
 # Two real ERROR transitions require an independent reflection assessment on retry.
-retry_input="$(jq -c '.attempts[-1].input|{binding,snapshot}' "$history")"
+retry_input="$(jq -c '.attempts[-1].input|{binding,snapshot,deadline}' "$history")"
 audit_reflection_gate "$context" error first '"transport"' >/dev/null
 audit_reflection_gate "$context" prepare second "$retry_input" >/dev/null
 audit_reflection_gate "$context" error second '"transport"' >/dev/null

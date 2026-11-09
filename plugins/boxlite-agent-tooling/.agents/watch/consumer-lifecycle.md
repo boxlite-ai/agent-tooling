@@ -96,8 +96,7 @@ The hook requests setup; the agent registers and verifies it.
 - Save verified worktree/branch/PR targets and the keepalive command path.
 - Without scheduling support, retain foreground delivery and reconciliation.
 
-Update older keepalive-only prompts when reusing a schedule; preserve status and
-notification preferences. The command calls `pr_watch_schedule_tick` from
+When reusing a schedule, preserve status and notification preferences. The command calls `pr_watch_schedule_tick` from
 `../lib/pr-watch-schedule.sh`. Default mode still returns active/stopped counts.
 
 `pr-watch-keepalive.sh --events TARGETS_JSON` reconciles 1–32 targets and emits JSON lines containing `target`, `status`, and up to 16 events per target.

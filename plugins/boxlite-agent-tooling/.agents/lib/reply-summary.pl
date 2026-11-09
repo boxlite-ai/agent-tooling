@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Markdown measurements behind reply-summary.sh; UTF-8 text on stdin (#419).
+# Markdown measurements behind reply-summary.sh; UTF-8 text on stdin.
 #   total -> the word count of the whole text
 #   structure MAX_SENTENCES MAX_WORDS MIN_ITEMS MAX_ITEMS MIN_SUBITEMS MAX_SUBITEMS
 #             MAX_DEPTH MIN_COLUMNS MAX_COLUMNS
@@ -97,7 +97,7 @@ sub structure {
     my @found = sentences($block->{text});
     $flag->($block->{kind}, scalar @found, $max_sentences, $block->{text}) if @found > $max_sentences;
     for my $sentence (@found) {
-      # The TL;DR keeps its own word limit (#349); unspaced scripts count characters.
+      # The TL;DR keeps its own word limit; unspaced scripts count characters.
       next if $block->{summary} || $sentence =~ $unspaced;
       my $words = count_words($sentence);
       $flag->('sentence', $words, $max_words, $sentence) if $words > $max_words;

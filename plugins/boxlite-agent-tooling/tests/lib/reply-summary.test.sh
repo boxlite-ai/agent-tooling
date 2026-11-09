@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercise the shared word counter (#259) and the structure limits (#419).
+# Exercise the shared word counter and the structure limits.
 # shellcheck disable=SC2016 # Markdown backticks in fixtures are literal.
 set -uo pipefail
 
@@ -7,10 +7,8 @@ LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.agents/lib" && pwd)"
 # shellcheck source=../../.agents/lib/reply-summary.sh
 source "$LIB_DIR/reply-summary.sh"
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=assert.sh
+source "$LIB_DIR/../../tests/lib/assert.sh"
 expect() { # name, expected total, Markdown
   local actual status=0
   actual="$(reply_summary_word_count "$3")" || status=$?
@@ -165,5 +163,4 @@ timed close_runs       '' "$(perl -e 'print "](" x 50000')"
 timed broken_links     '' "$(perl -e 'print "[a](" x 25000')"
 timed star_rule        '' "$(perl -e 'print "*" x 100000')"
 
-printf '\nRESULT: %s passed, %s failed\n' "$pass" "$fail"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

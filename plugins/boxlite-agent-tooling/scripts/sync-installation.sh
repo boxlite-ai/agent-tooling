@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
-# Opportunistic synchronization the Git lifecycle hooks run. Two duties:
-#
-#   1. A broken or superseded installation (record missing, hold not adopted,
-#      hooksPath astray) is repaired in the FOREGROUND via the consumer's committed
-#      install.sh — the state is wrong right now and the very next commit would be
-#      rejected, so waiting is worse than blocking.
-#   2. A healthy installation gets a BACKGROUND refresh attempt, throttled by the
-#      last-check stamp, so the recorded revision follows tooling.ref without ever
-#      putting a network wait inside a checkout, merge, or rebase. The refresh's own
-#      lock keeps concurrent lifecycle events from piling up.
-#
-# Every failure path exits 0: synchronization is opportunistic, and the fail-closed
-# enforcement lives in the commit and push gates, not here.
+# Lifecycle-hook synchronization: repair an invalid installation in the foreground
+# through the consumer's install.sh, else spawn a throttled background refresh.
+# Always exits 0; the commit and push gates enforce installation state.
 set -uo pipefail
 
 [[ "${AGENT_TOOLING_SYNC_ACTIVE:-}" != "1" ]] || exit 0

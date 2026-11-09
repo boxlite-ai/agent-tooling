@@ -26,6 +26,8 @@ POLICY="$REPO_ROOT/.agents/watch/escalation-policy.md"
 source "$REPO_ROOT/.agents/lib/pr-watch-state.sh"
 # shellcheck source=../../../.agents/lib/verdict-audit-state.sh
 source "$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
+# shellcheck source=../../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -57,9 +59,6 @@ git -C "$REPO" remote add origin git@github.com:acme/widget.git
 git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 cd "$REPO" || exit 1
 
-pass=0
-fail=0
-
 # Feed a PostToolUse payload; report "armed" when the hook injects context.
 run() {
   local desc="$1" cmd="$2" resp="$3" expect="$4" out decision
@@ -73,11 +72,7 @@ run() {
   else
     decision="parse_error"
   fi
-  if [[ "$decision" == "$expect" ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
-  else
-    fail=$((fail + 1)); printf '  FAIL  %s  (got=%s expected=%s)\n' "$desc" "$decision" "$expect"
-  fi
+  check_eq "$desc" "$decision" "$expect"
 }
 
 export STUB_PR_NUMBER=42
@@ -124,9 +119,9 @@ echo "## Opt-out"
 out=$(jq -nc '{tool_input:{command:"git push"}, tool_response:{stdout:"",stderr:""}}' \
       | BOXLITE_PR_WATCH=0 "$HOOK" 2>/dev/null)
 if [[ -z "$out" ]]; then
-  pass=$((pass + 1)); printf '  PASS  BOXLITE_PR_WATCH=0 passes through\n'
+  ok 'BOXLITE_PR_WATCH=0 passes through'
 else
-  fail=$((fail + 1)); printf '  FAIL  BOXLITE_PR_WATCH=0 passes through (got output)\n'
+  bad 'BOXLITE_PR_WATCH=0 passes through' 'got output'
 fi
 
 echo
@@ -138,13 +133,13 @@ echo "## PR resolution"
 # the suite runs. The fallback has its own cases, reached through a long link.
 SHORT_ROOT="$TMP/t"
 ln -s "$REPO_ROOT" "$SHORT_ROOT"
-# Both plugin roots are cleared so the default is genuinely the unknown host. Running
-# the suite from inside a hook would otherwise leave a real root exported, and every
+# The host marker is cleared so the default is genuinely the unknown host. Running
+# the suite from inside a hook would otherwise leave a real marker exported, and every
 # case built on this would quietly exercise that host's route instead.
 ctx_via() {  # tooling-root, command, response
   jq -nc --arg c "$2" --arg r "$3" \
      '{tool_input:{command:$c}, tool_response:{stdout:$r, stderr:""}}' \
-   | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT \
+   | env -u BOXLITE_HOOK_HOST \
        "$1/.agents/hooks/post-remote-write-watch.sh" 2>/dev/null \
    | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
@@ -222,6 +217,8 @@ attachment_claim_from_command() { # rendered-command
   sed -n '3p' "$args_file"
 }
 
+# Stand in for a finished attach: overwrite the exact claim inode with the
+# `consumed:` tombstone that pr-watch-attach.sh leaves behind.
 consume_attachment_claim() { # claim-path
   local claim="$1" identity snapshot body body_hash
   identity="$(verdict_audit_path_identity "$claim" 2>/dev/null)" || return 1
@@ -230,7 +227,16 @@ consume_attachment_claim() { # claim-path
   body="${snapshot#*$'\n'}"
   body_hash="$(LC_ALL=C printf '%s' "$body" | shasum -a 256 | awk '{print $1}')" \
     || return 1
-  pr_watch_consume_regular_file "$claim" "$identity" "$body_hash" 2>/dev/null
+  perl -MFcntl=:DEFAULT,:flock -e '
+    my ($path, $identity, $hash) = @ARGV;
+    sysopen(my $fh, $path, O_RDWR | O_NOFOLLOW) or exit 1;
+    flock($fh, LOCK_EX | LOCK_NB) or exit 1;
+    my @st = stat($fh);
+    exit 1 unless "$st[0]:$st[1]" eq $identity;
+    truncate($fh, 0) or exit 1;
+    syswrite($fh, "consumed:$identity:$hash\n") or exit 1;
+    close($fh) or exit 1;
+  ' "$claim" "$identity" "$body_hash"
 }
 
 echo
@@ -263,9 +269,9 @@ if [[ "$other_status" -eq 0 \
    && "$other_ack" == yes && -z "$other_replay_context" \
    && "$other_identity" \
       == "refs/heads/other:other:watch-111111111111111111111111:$OTHER_LOG" ]]; then
-  pass=$((pass + 1)); printf '  PASS  explicit local:other attaches once to the armed remote generation\n'
+  ok 'explicit local:other attaches once to the armed remote generation'
 else
-  fail=$((fail + 1)); printf '  FAIL  explicit local:other attaches once to the armed remote generation (status=%s args=%s stable=%s replay=%s claim=%s)\n' \
+  badf 'explicit local:other attaches once to the armed remote generation' 'status=%s args=%s stable=%s replay=%s claim=%s' \
     "$other_status" "$(tr '\n' '|' < "$other_args" 2>/dev/null)" \
     "$([[ -e "$OTHER_MANIFEST" ]] && echo present || echo missing)" \
     "$([[ -n "$other_replay_context" ]] && echo armed || echo rejected)" "$other_claim"
@@ -299,9 +305,9 @@ if [[ "$multi_status" -eq 0 \
    && "$multi_claim" != "$MULTI_MANIFEST" && -e "$MULTI_MANIFEST" \
    && "$multi_ack" == yes && -z "$multi_replay_context" \
    && "$multi_identity" == "refs/heads/remote-one:watch-222222222222222222222222|refs/heads/remote-two:watch-333333333333333333333333" ]]; then
-  pass=$((pass + 1)); printf '  PASS  one push attaches both exact remote generations once\n'
+  ok 'one push attaches both exact remote generations once'
 else
-  fail=$((fail + 1)); printf '  FAIL  one push attaches both exact remote generations once (status=%s args=%s replay=%s identity=%s)\n' \
+  badf 'one push attaches both exact remote generations once' 'status=%s args=%s replay=%s identity=%s' \
     "$multi_status" "$(tr '\n' '|' < "$multi_args" 2>/dev/null)" \
     "$([[ -n "$multi_replay_context" ]] && echo armed || echo rejected)" "$multi_identity"
 fi
@@ -320,9 +326,9 @@ stale_epoch_path="$(verdict_audit_state_path \
 printf '2-2-0\n' | verdict_audit_write_atomic "$stale_epoch_path"
 stale_context="$(ctx_session_at "$REPO" "$STALE_SESSION" "$STALE_COMMAND" "")"
 if [[ -z "$stale_context" && -e "$STALE_MANIFEST" ]]; then
-  pass=$((pass + 1)); printf '  PASS  attachment from an older prompt epoch is ignored without consumption\n'
+  ok 'attachment from an older prompt epoch is ignored without consumption'
 else
-  fail=$((fail + 1)); printf '  FAIL  attachment from an older prompt epoch is ignored without consumption (context=%.80s stable=%s)\n' \
+  badf 'attachment from an older prompt epoch is ignored without consumption' 'context=%.80s stable=%s' \
     "$stale_context" "$([[ -e "$STALE_MANIFEST" ]] && echo present || echo consumed)"
 fi
 
@@ -369,9 +375,9 @@ fi
 if [[ -n "$revoked_claim_command" && "$revoked_claim_status" -ne 0 \
    && "$revoked_claim_events" == 0 && "$revoked_claim_consumed" == no \
    && -s "$TMP/revoked-rendered-claim.err" ]]; then
-  pass=$((pass + 1)); printf '  PASS  rendered claim rechecks prompt-epoch revocation before consumption\n'
+  ok 'rendered claim rechecks prompt-epoch revocation before consumption'
 else
-  fail=$((fail + 1)); printf '  FAIL  rendered claim rechecks prompt-epoch revocation before consumption (command=%s status=%s events=%s consumed=%s stderr=%.120s)\n' \
+  badf 'rendered claim rechecks prompt-epoch revocation before consumption' 'command=%s status=%s events=%s consumed=%s stderr=%.120s' \
     "$([[ -n "$revoked_claim_command" ]] && echo present || echo missing)" \
     "$revoked_claim_status" "$revoked_claim_events" "$revoked_claim_consumed" \
     "$(tr '\n' ' ' < "$TMP/revoked-rendered-claim.err" 2>/dev/null)"
@@ -407,28 +413,21 @@ jq -nc --arg id "$RACE_CLAIM_ID" \
   '{kind:"watch_end",watch_id:$id,reason:"racing claim must not run"}' \
   >> "$RACE_CLAIM_LOG"
 
-RACE_CLAIM_BIN="$TMP/rendered-claim-race-bin"
-RACE_CLAIM_REAL_SHASUM="$(command -v shasum)"
-RACE_CLAIM_COUNT="$TMP/rendered-claim-race.count"
+RACE_CLAIM_ENV="$TMP/rendered-claim-race.env"
 RACE_CLAIM_BLOCKED="$TMP/rendered-claim-race.blocked"
 RACE_CLAIM_RELEASE="$TMP/rendered-claim-race.release"
-mkdir -p "$RACE_CLAIM_BIN"
-cat > "$RACE_CLAIM_BIN/shasum" <<'EOF'
-#!/usr/bin/env bash
-count=0
-[[ ! -r "$RACE_CLAIM_COUNT" ]] || read -r count < "$RACE_CLAIM_COUNT"
-count=$((count + 1))
-printf '%s\n' "$count" > "$RACE_CLAIM_COUNT"
-if [[ "$count" -eq 2 ]]; then
+# Pause the attach consumer at its final lifecycle hash, after branch validation
+# and before the one-shot consume.
+cat > "$RACE_CLAIM_ENV" <<'EOF'
+set -T
+trap 'if [[ "$BASH_COMMAND" == current_hash=* ]]; then
+  trap - DEBUG
   : > "$RACE_CLAIM_BLOCKED"
   while [[ ! -e "$RACE_CLAIM_RELEASE" ]]; do sleep 0.01; done
-fi
-exec "$RACE_CLAIM_REAL_SHASUM" "$@"
+fi' DEBUG
 EOF
-chmod +x "$RACE_CLAIM_BIN/shasum"
-PATH="$RACE_CLAIM_BIN:$PATH" \
-RACE_CLAIM_REAL_SHASUM="$RACE_CLAIM_REAL_SHASUM" \
-RACE_CLAIM_COUNT="$RACE_CLAIM_COUNT" RACE_CLAIM_BLOCKED="$RACE_CLAIM_BLOCKED" \
+BASH_ENV="$RACE_CLAIM_ENV" \
+RACE_CLAIM_BLOCKED="$RACE_CLAIM_BLOCKED" \
 RACE_CLAIM_RELEASE="$RACE_CLAIM_RELEASE" PR_WATCH_STREAM_WAIT=1 \
   /bin/bash -c "$race_claim_command" \
   >"$TMP/rendered-claim-race.out" 2>"$TMP/rendered-claim-race.err" &
@@ -456,9 +455,9 @@ fi
 if [[ "$race_claim_barrier" == hit && "$race_claim_status" -ne 0 \
    && "$race_claim_events" == 0 && "$race_claim_consumed" == no \
    && -s "$TMP/rendered-claim-race.err" ]]; then
-  pass=$((pass + 1)); printf '  PASS  rendered claim closes revocation race at consumption\n'
+  ok 'rendered claim closes revocation race at consumption'
 else
-  fail=$((fail + 1)); printf '  FAIL  rendered claim closes revocation race at consumption (barrier=%s status=%s events=%s consumed=%s stderr=%.120s)\n' \
+  badf 'rendered claim closes revocation race at consumption' 'barrier=%s status=%s events=%s consumed=%s stderr=%.120s' \
     "$race_claim_barrier" "$race_claim_status" "$race_claim_events" \
     "$race_claim_consumed" \
     "$(tr '\n' ' ' < "$TMP/rendered-claim-race.err" 2>/dev/null)"
@@ -504,9 +503,9 @@ fi
 if [[ -n "$expired_claim_command" && "$expired_claim_status" -ne 0 \
    && "$expired_claim_events" == 0 && "$expired_claim_consumed" == no \
    && -s "$TMP/expired-rendered-claim.err" ]]; then
-  pass=$((pass + 1)); printf '  PASS  rendered claim rechecks its 600-second lease before consumption\n'
+  ok 'rendered claim rechecks its 600-second lease before consumption'
 else
-  fail=$((fail + 1)); printf '  FAIL  rendered claim rechecks its 600-second lease before consumption (command=%s status=%s events=%s consumed=%s stderr=%.120s)\n' \
+  badf 'rendered claim rechecks its 600-second lease before consumption' 'command=%s status=%s events=%s consumed=%s stderr=%.120s' \
     "$([[ -n "$expired_claim_command" ]] && echo present || echo missing)" \
     "$expired_claim_status" "$expired_claim_events" "$expired_claim_consumed" \
     "$(tr '\n' ' ' < "$TMP/expired-rendered-claim.err" 2>/dev/null)"
@@ -548,9 +547,9 @@ consumed_slot_fresh_context="$(ctx_session_at "$REPO" "$CONSUMED_SLOT_SESSION" \
 consumed_slot_fresh_command="$(printf '%s' "$consumed_slot_fresh_context" \
   | stream_command_from_context)"
 if [[ "$consumed_slot_setup" == "yes" && -n "$consumed_slot_fresh_command" ]]; then
-  pass=$((pass + 1)); printf '  PASS  consumed attachment claims are reusable without a 600-second wait\n'
+  ok 'consumed attachment claims are reusable without a 600-second wait'
 else
-  fail=$((fail + 1)); printf '  FAIL  consumed attachment claims are reusable without a 600-second wait (setup=%s fresh=%s)\n' \
+  badf 'consumed attachment claims are reusable without a 600-second wait' 'setup=%s fresh=%s' \
     "$consumed_slot_setup" "$([[ -n "$consumed_slot_fresh_command" ]] && echo armed || echo exhausted)"
 fi
 
@@ -633,9 +632,9 @@ fi
 if [[ "$live_slot_setup" == "yes" && -n "$live_slot_fresh_command" \
    && "$live_slot_reused_path" == "yes" && "$live_slot_old_status" -ne 0 \
    && "$live_slot_fresh_status" -eq 0 ]]; then
-  pass=$((pass + 1)); printf '  PASS  expired live claims recover without old-command ABA consumption\n'
+  ok 'expired live claims recover without old-command ABA consumption'
 else
-  fail=$((fail + 1)); printf '  FAIL  expired live claims recover without old-command ABA consumption (setup=%s fresh=%s reused=%s old_status=%s fresh_status=%s)\n' \
+  badf 'expired live claims recover without old-command ABA consumption' 'setup=%s fresh=%s reused=%s old_status=%s fresh_status=%s' \
     "$live_slot_setup" "$([[ -n "$live_slot_fresh_command" ]] && echo armed || echo exhausted)" \
     "$live_slot_reused_path" "$live_slot_old_status" "$live_slot_fresh_status"
 fi
@@ -708,9 +707,9 @@ CLAIM_RETIRE_RACE_REPLACEMENT=gone
   && CLAIM_RETIRE_RACE_REPLACEMENT=preserved
 if [[ "$CLAIM_RETIRE_RACE_BARRIER/$CLAIM_RETIRE_RACE_REPLACEMENT" \
    == "hit/preserved" ]]; then
-  pass=$((pass + 1)); printf '  PASS  claim retirement preserves a post-validation pathname replacement\n'
+  ok 'claim retirement preserves a post-validation pathname replacement'
 else
-  fail=$((fail + 1)); printf '  FAIL  claim retirement removed a post-validation pathname replacement (barrier=%s rc=%s replacement=%s)\n' \
+  badf 'claim retirement preserves a post-validation pathname replacement' 'barrier=%s rc=%s replacement=%s' \
     "$CLAIM_RETIRE_RACE_BARRIER" "$CLAIM_RETIRE_RACE_RC" \
     "$CLAIM_RETIRE_RACE_REPLACEMENT"
 fi
@@ -878,9 +877,9 @@ if [[ "$CANCEL_CLAIM_BARRIER" == hit \
         || "$CANCEL_CLAIM_STATE/$CANCEL_CLAIM_MANIFEST_STATE" \
         == authoritative/retry ) \
    && "$CANCEL_CLAIM_RECOVERABLE" == yes ]]; then
-  pass=$((pass + 1)); printf '  PASS  TERM preserves bounded retry authority and context\n'
+  ok 'TERM preserves bounded retry authority and context'
 else
-  fail=$((fail + 1)); printf '  FAIL  TERM stranded an unpublished attachment claim (barrier=%s hook_rc=%s elapsed=%ss hook_live=%s lookup_live=%s claim=%s manifest=%s recoverable=%s)\n' \
+  badf 'TERM preserves bounded retry authority and context' 'barrier=%s hook_rc=%s elapsed=%ss hook_live=%s lookup_live=%s claim=%s manifest=%s recoverable=%s' \
     "$CANCEL_CLAIM_BARRIER" "$CANCEL_CLAIM_HOOK_RC" \
     "$CANCEL_CLAIM_TERM_ELAPSED" "$CANCEL_CLAIM_HOOK_LIVE" \
     "$CANCEL_CLAIM_LOOKUP_LIVE" "$CANCEL_CLAIM_STATE" \
@@ -970,9 +969,9 @@ fi
 if [[ -e "$LOOKUP_FORK_ROOT/gap.ready" && "$LOOKUP_FORK_RC" -eq 143 \
    && "$LOOKUP_FORK_LEADER_PID" =~ ^[1-9][0-9]*$ \
    && "$LOOKUP_FORK_GROUP_LIVE/$LOOKUP_FORK_CHILD_LIVE" == no/no ]]; then
-  pass=$((pass + 1)); printf '  PASS  TERM at lookup fork publication reaps the process group\n'
+  ok 'TERM at lookup fork publication reaps the process group'
 else
-  fail=$((fail + 1)); printf '  FAIL  TERM at lookup fork publication leaked work (barrier=%s rc=%s leader=%s pgid=%s group_live=%s child=%s child_live=%s commands=%s)\n' \
+  badf 'TERM at lookup fork publication reaps the process group' 'barrier=%s rc=%s leader=%s pgid=%s group_live=%s child=%s child_live=%s commands=%s' \
     "$([[ -e "$LOOKUP_FORK_ROOT/gap.ready" ]] && echo hit || echo missed)" \
     "$LOOKUP_FORK_RC" "$LOOKUP_FORK_LEADER_PID" "$LOOKUP_FORK_CHILD_PGID" \
     "$LOOKUP_FORK_GROUP_LIVE" "$LOOKUP_FORK_CHILD_PID" \
@@ -1043,9 +1042,9 @@ PUBLISH_EXIT_RECOVERABLE=no
 [[ -n "$PUBLISH_EXIT_RETRY_CONTEXT" ]] && PUBLISH_EXIT_RECOVERABLE=yes
 if [[ -e "$PUBLISH_EXIT_ROOT/gap.ready" && "$PUBLISH_EXIT_RC" -eq 143 \
    && "$PUBLISH_EXIT_RENDERED/$PUBLISH_EXIT_RECOVERABLE" == yes/yes ]]; then
-  pass=$((pass + 1)); printf '  PASS  non-zero exit after rendering preserves identical retry context\n'
+  ok 'non-zero exit after rendering preserves identical retry context'
 else
-  fail=$((fail + 1)); printf '  FAIL  non-zero exit after rendering consumed retry authority (barrier=%s rc=%s rendered=%s recoverable=%s manifest=%.40s)\n' \
+  badf 'non-zero exit after rendering preserves identical retry context' 'barrier=%s rc=%s rendered=%s recoverable=%s manifest=%.40s' \
     "$([[ -e "$PUBLISH_EXIT_ROOT/gap.ready" ]] && echo hit || echo missed)" \
     "$PUBLISH_EXIT_RC" "$PUBLISH_EXIT_RENDERED" "$PUBLISH_EXIT_RECOVERABLE" \
     "$(cat "$PUBLISH_EXIT_MANIFEST" 2>/dev/null || true)"
@@ -1104,9 +1103,9 @@ if [[ "$LOOKUP_INGRESS_RC" -eq 0 \
    && "$LOOKUP_INGRESS_PROGRESS" -le 4096 \
    && "$LOOKUP_INGRESS_ELAPSED" -le 3 \
    && "$LOOKUP_INGRESS_GROUP_LIVE/$LOOKUP_INGRESS_RENDERED" == no/yes ]]; then
-  pass=$((pass + 1)); printf '  PASS  PR lookup caps ingress near 128 bytes and terminates immediately\n'
+  ok 'PR lookup caps ingress near 128 bytes and terminates immediately'
 else
-  fail=$((fail + 1)); printf '  FAIL  PR lookup exceeded its ingress budget (rc=%s progress=%sB elapsed=%ss pid=%s pgid=%s group_live=%s rendered=%s)\n' \
+  badf 'PR lookup caps ingress near 128 bytes and terminates immediately' 'rc=%s progress=%sB elapsed=%ss pid=%s pgid=%s group_live=%s rendered=%s' \
     "$LOOKUP_INGRESS_RC" "$LOOKUP_INGRESS_PROGRESS" \
     "$LOOKUP_INGRESS_ELAPSED" "$LOOKUP_INGRESS_PID" \
     "$LOOKUP_INGRESS_PGID" "$LOOKUP_INGRESS_GROUP_LIVE" \
@@ -1268,9 +1267,9 @@ if [[ -e "$RECOVERY_SYNC_ROOT/term.ready" \
    && "$RECOVERY_SYNC_AT_BARRIER" -le 1 \
    && "$RECOVERY_SYNC_AFTER_FAILURE" -le 1 \
    && "$RECOVERY_SYNC_RECOVERABLE" == yes ]]; then
-  pass=$((pass + 1)); printf '  PASS  every durable recovery transition has at most one authority\n'
+  ok 'every durable recovery transition has at most one authority'
 else
-  fail=$((fail + 1)); printf '  FAIL  recovery exposed duplicate or lost authority (term=%s sync=%s rc=%s perl=%s at_barrier=%s after_failure=%s recoverable=%s path=%s)\n' \
+  badf 'every durable recovery transition has at most one authority' 'term=%s sync=%s rc=%s perl=%s at_barrier=%s after_failure=%s recoverable=%s path=%s' \
     "$([[ -e "$RECOVERY_SYNC_ROOT/term.ready" ]] && echo hit || echo missed)" \
     "$RECOVERY_SYNC_BARRIER" "$RECOVERY_SYNC_RC" \
     "$RECOVERY_SYNC_PERL_PID" "$RECOVERY_SYNC_AT_BARRIER" \
@@ -1385,9 +1384,9 @@ if [[ -e "$RECOVERY_RACE_ROOT/prime.ready" \
    && "$RECOVERY_RACE_READY_COUNT" -eq 2 \
    && "$RECOVERY_RACE_RC_1" -eq 0 && "$RECOVERY_RACE_RC_2" -eq 0 \
    && "$RECOVERY_RACE_PUBLICATIONS" -eq 1 ]]; then
-  pass=$((pass + 1)); printf '  PASS  concurrent retry hooks publish one recovery capability\n'
+  ok 'concurrent retry hooks publish one recovery capability'
 else
-  fail=$((fail + 1)); printf '  FAIL  concurrent retry hooks duplicated publication (prime=%s ready=%s rc=%s/%s publications=%s marker=%.100s)\n' \
+  badf 'concurrent retry hooks publish one recovery capability' 'prime=%s ready=%s rc=%s/%s publications=%s marker=%.100s' \
     "$RECOVERY_RACE_PRIME_RC" "$RECOVERY_RACE_READY_COUNT" \
     "$RECOVERY_RACE_RC_1" "$RECOVERY_RACE_RC_2" \
     "$RECOVERY_RACE_PUBLICATIONS" \
@@ -1503,9 +1502,9 @@ if [[ "$LEASE_REPLACE_PRIME_RC" -eq 143 \
    && "$LEASE_REPLACE_SWAPPED" == true \
    && "$LEASE_REPLACE_OLD_PUBLISHED" == false \
    && "$LEASE_REPLACE_NEW_PUBLISHED" == true ]]; then
-  pass=$((pass + 1)); printf '  PASS  lease replacement revokes the displaced recovery owner\n'
+  ok 'lease replacement revokes the displaced recovery owner'
 else
-  fail=$((fail + 1)); printf '  FAIL  lease replacement left two publishers (prime=%s swapped=%s ready=%s/%s rc=%s/%s published=%s/%s marker=%.120s)\n' \
+  badf 'lease replacement revokes the displaced recovery owner' 'prime=%s swapped=%s ready=%s/%s rc=%s/%s published=%s/%s marker=%.120s' \
     "$LEASE_REPLACE_PRIME_RC" "$LEASE_REPLACE_SWAPPED" \
     "$([[ -e "$LEASE_REPLACE_ROOT/ready.old" ]] && echo yes || echo no)" \
     "$([[ -e "$LEASE_REPLACE_ROOT/ready.new" ]] && echo yes || echo no)" \
@@ -1593,9 +1592,9 @@ if [[ -e "$RECOVERY_DEATH_ROOT/prime.ready" \
    && "$RECOVERY_DEATH_RC" -eq 137 \
    && "$RECOVERY_DEATH_MARKER" == recovering:* \
    && -n "$RECOVERY_DEATH_RETRY_CONTEXT" ]]; then
-  pass=$((pass + 1)); printf '  PASS  dead recovery owner releases its exact generation\n'
+  ok 'dead recovery owner releases its exact generation'
 else
-  fail=$((fail + 1)); printf '  FAIL  dead recovery owner stranded its generation (prime=%s pid=%s/%s rc=%s marker=%.100s retry=%s)\n' \
+  badf 'dead recovery owner releases its exact generation' 'prime=%s pid=%s/%s rc=%s marker=%.100s retry=%s' \
     "$RECOVERY_DEATH_PRIME_RC" "$RECOVERY_DEATH_PID" \
     "$RECOVERY_DEATH_JOB" "$RECOVERY_DEATH_RC" \
     "$RECOVERY_DEATH_MARKER" \
@@ -1668,9 +1667,9 @@ if [[ -e "$CLAIM_CRASH_ROOT/ready" && "$CLAIM_CRASH_RC" -eq 137 \
    && -n "$CLAIM_CRASH_RETRY_CONTEXT" \
    && "$CLAIM_CRASH_ACK" == yes \
    && -z "$CLAIM_CRASH_REPLAY_CONTEXT" ]]; then
-  pass=$((pass + 1)); printf '  PASS  SIGKILL after claim acquisition remains exactly-once retryable\n'
+  ok 'SIGKILL after claim acquisition remains exactly-once retryable'
 else
-  fail=$((fail + 1)); printf '  FAIL  SIGKILL stranded an acquired claim (barrier=%s rc=%s bytes=%s retry=%s replay=%s manifest=%.100s)\n' \
+  badf 'SIGKILL after claim acquisition remains exactly-once retryable' 'barrier=%s rc=%s bytes=%s retry=%s replay=%s manifest=%.100s' \
     "$([[ -e "$CLAIM_CRASH_ROOT/ready" ]] && echo hit || echo missed)" \
     "$CLAIM_CRASH_RC" "$CLAIM_CRASH_OUTPUT_BYTES" \
     "$([[ -n "$CLAIM_CRASH_RETRY_CONTEXT" ]] && echo yes || echo no)" \
@@ -1781,9 +1780,9 @@ if [[ -e "$TRANSITION_CRASH_ROOT/ready" \
    && "$TRANSITION_CRASH_RC" -eq 143 \
    && "$TRANSITION_CRASH_SIZE" =~ ^[1-9][0-9]*$ \
    && -n "$TRANSITION_CRASH_RETRY" ]]; then
-  pass=$((pass + 1)); printf '  PASS  transition crash preserves an atomic recoverable marker\n'
+  ok 'transition crash preserves an atomic recoverable marker'
 else
-  fail=$((fail + 1)); printf '  FAIL  transition crash destroyed stable recovery (barrier=%s rc=%s size=%s retry=%s)\n' \
+  badf 'transition crash preserves an atomic recoverable marker' 'barrier=%s rc=%s size=%s retry=%s' \
     "$([[ -e "$TRANSITION_CRASH_ROOT/ready" ]] && echo hit || echo missed)" \
     "$TRANSITION_CRASH_RC" "$TRANSITION_CRASH_SIZE" \
     "$([[ -n "$TRANSITION_CRASH_RETRY" ]] && echo yes || echo no)"
@@ -1851,9 +1850,9 @@ DELIVERY_CRASH_REPLAY="$(ctx_session_at "$REPO" "$DELIVERY_CRASH_SESSION" \
 if [[ -e "$DELIVERY_CRASH_ROOT/ready" && "$DELIVERY_CRASH_RC" -eq 137 \
    && -n "$DELIVERY_CRASH_RETRY" && "$DELIVERY_CRASH_ACK" == yes \
    && -z "$DELIVERY_CRASH_REPLAY" ]]; then
-  pass=$((pass + 1)); printf '  PASS  claim consumption acknowledges final hook delivery\n'
+  ok 'claim consumption acknowledges final hook delivery'
 else
-  fail=$((fail + 1)); printf '  FAIL  final delivery gap lost or replayed context (barrier=%s rc=%s retry=%s ack=%s replay=%s)\n' \
+  badf 'claim consumption acknowledges final hook delivery' 'barrier=%s rc=%s retry=%s ack=%s replay=%s' \
     "$([[ -e "$DELIVERY_CRASH_ROOT/ready" ]] && echo hit || echo missed)" \
     "$DELIVERY_CRASH_RC" \
     "$([[ -n "$DELIVERY_CRASH_RETRY" ]] && echo yes || echo no)" \
@@ -1862,7 +1861,7 @@ else
 fi
 
 # The lookup command must not inherit the completion channel. A hostile gh that
-# writes fd 7 and then sleeps used to make the parent enter an unbounded wait.
+# writes fd 7 and then sleeps must not make the parent enter an unbounded wait.
 LOOKUP_FORGE_ROOT="$TMP/lookup-completion-forge"
 LOOKUP_FORGE_BIN="$LOOKUP_FORGE_ROOT/bin"
 mkdir -p "$LOOKUP_FORGE_BIN"
@@ -1913,9 +1912,9 @@ jq -e '.hookSpecificOutput.additionalContext | type == "string" and length > 0' 
 if [[ -e "$LOOKUP_FORGE_ROOT/ready" && ! -e "$LOOKUP_FORGE_ROOT/writable" \
    && "$LOOKUP_FORGE_BLOCKED/$LOOKUP_FORGE_RENDERED" == no/yes \
    && "$LOOKUP_FORGE_ELAPSED" -le 7 ]]; then
-  pass=$((pass + 1)); printf '  PASS  gh cannot forge completion or bypass the lookup deadline\n'
+  ok 'gh cannot forge completion or bypass the lookup deadline'
 else
-  fail=$((fail + 1)); printf '  FAIL  gh forged completion into an unbounded wait (ready=%s writable=%s blocked=%s elapsed=%ss rc=%s rendered=%s)\n' \
+  badf 'gh cannot forge completion or bypass the lookup deadline' 'ready=%s writable=%s blocked=%s elapsed=%ss rc=%s rendered=%s' \
     "$([[ -e "$LOOKUP_FORGE_ROOT/ready" ]] && echo yes || echo no)" \
     "$([[ -e "$LOOKUP_FORGE_ROOT/writable" ]] && echo yes || echo no)" \
     "$LOOKUP_FORGE_BLOCKED" "$LOOKUP_FORGE_ELAPSED" \
@@ -1961,76 +1960,40 @@ LOOKUP_START_DONE="$(cat "$LOOKUP_START_TARGET/leader.done" 2>/dev/null || true)
 if [[ ! -e "$LOOKUP_START_ROOT/ready" && "$LOOKUP_START_RC" -eq 0 \
    && "$LOOKUP_START_OUTPUT/$LOOKUP_START_DONE" \
       == keep-output/keep-done ]]; then
-  pass=$((pass + 1)); printf '  PASS  lookup startup has no unauthenticated temp-directory window\n'
+  ok 'lookup startup has no unauthenticated temp-directory window'
 else
-  fail=$((fail + 1)); printf '  FAIL  lookup authenticated a swapped temp directory (barrier=%s rc=%s output=%s done=%s)\n' \
+  badf 'lookup startup has no unauthenticated temp-directory window' 'barrier=%s rc=%s output=%s done=%s' \
     "$([[ -e "$LOOKUP_START_ROOT/ready" ]] && echo hit || echo absent)" \
     "$LOOKUP_START_RC" "$LOOKUP_START_OUTPUT" "$LOOKUP_START_DONE"
 fi
 
-# A one-second lstart token cannot prove recovery ownership after PID reuse.
-# Make an unrelated live PID appear to have the persisted weak start instant;
-# the hook must treat that unverifiable legacy lease as reclaimable.
-TOKEN_COLLISION_SESSION="post-watch-token-collision"
-TOKEN_COLLISION_COMMAND="git push origin refs/heads/local:refs/heads/token-collision"
-TOKEN_COLLISION_BRANCH="token-collision"
-TOKEN_COLLISION_ID="watch-303030303030303030303030"
-TOKEN_COLLISION_KEY="$(pr_watch_branch_key "$TOKEN_COLLISION_BRANCH")"
-TOKEN_COLLISION_LOG="$STATE_DIR/$TOKEN_COLLISION_KEY.jsonl"
-TOKEN_COLLISION_ENTRIES="$(jq -nc --arg branch "$TOKEN_COLLISION_BRANCH" \
-  --arg id "$TOKEN_COLLISION_ID" --arg log "$TOKEN_COLLISION_LOG" \
-  '[{remote_ref:("refs/heads/" + $branch),branch:$branch,watch_id:$id,event_log:$log}]')"
-TOKEN_COLLISION_MANIFEST="$(write_attachment_manifest "$REPO" \
-  "$TOKEN_COLLISION_SESSION" "$TOKEN_COLLISION_COMMAND" \
-  "$TOKEN_COLLISION_ENTRIES")"
-TOKEN_COLLISION_ROOT="$TMP/token-collision"
-mkdir -p "$TOKEN_COLLISION_ROOT/bin"
-(
-  cd "$REPO" || exit 1
-  exec env BASH_ENV="$RECOVERY_RACE_PRIME_ENV" \
-    RECOVERY_RACE_PRIME_READY="$TOKEN_COLLISION_ROOT/prime.ready" \
-    bash "$HOOK" <<< "$(jq -nc --arg session "$TOKEN_COLLISION_SESSION" \
-      --arg command "$TOKEN_COLLISION_COMMAND" \
-      '{session_id:$session,tool_input:{command:$command},
-        tool_response:{stdout:"https://github.com/acme/widget/pull/42",stderr:""}}')"
-) > "$TOKEN_COLLISION_ROOT/prime.out" 2> "$TOKEN_COLLISION_ROOT/prime.err"
-TOKEN_COLLISION_PRIME_RC=$?
-sleep 30 & TOKEN_COLLISION_PID=$!
-TOKEN_COLLISION_REAL_PS="$(command -v ps)"
-cat > "$TOKEN_COLLISION_ROOT/bin/ps" <<'TOKEN_COLLISION_PS_EOF'
-#!/usr/bin/env bash
-if [[ " $* " == *" -p $TOKEN_COLLISION_PID "* \
-   && " $* " == *" -o lstart= "* ]]; then
-  printf 'Mon Aug 31 00:00:00 2026\n'
-  exit 0
-fi
-exec "$TOKEN_COLLISION_REAL_PS" "$@"
-TOKEN_COLLISION_PS_EOF
-chmod +x "$TOKEN_COLLISION_ROOT/bin/ps"
-export TOKEN_COLLISION_PID TOKEN_COLLISION_REAL_PS
-TOKEN_COLLISION_WEAK_TOKEN="$(PATH="$TOKEN_COLLISION_ROOT/bin:$PATH" \
-  verdict_audit_process_start_token "$TOKEN_COLLISION_PID")"
-TOKEN_COLLISION_RETRY="$(cat "$TOKEN_COLLISION_MANIFEST" 2>/dev/null || true)"
-if [[ "$TOKEN_COLLISION_RETRY" =~ ^retry:([0-9]+):([0-9]+):([0-9a-f]{64})$ ]]; then
-  printf 'recovering:%s:%s:%s:%s:%s\n' \
-    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" \
-    "$TOKEN_COLLISION_PID" "$TOKEN_COLLISION_WEAK_TOKEN" \
-    > "$TOKEN_COLLISION_MANIFEST"
-fi
-TOKEN_COLLISION_CONTEXT="$(PATH="$TOKEN_COLLISION_ROOT/bin:$PATH" \
-  ctx_session_at "$REPO" "$TOKEN_COLLISION_SESSION" \
-    "$TOKEN_COLLISION_COMMAND" "https://github.com/acme/widget/pull/42")"
-kill "$TOKEN_COLLISION_PID" 2>/dev/null || true
-wait "$TOKEN_COLLISION_PID" 2>/dev/null || true
-if [[ "$TOKEN_COLLISION_PRIME_RC" -eq 143 \
-   && "$TOKEN_COLLISION_WEAK_TOKEN" =~ ^cksum-[0-9]+-[0-9]+$ \
-   && -n "$TOKEN_COLLISION_CONTEXT" ]]; then
-  pass=$((pass + 1)); printf '  PASS  weak same-second PID token cannot retain a recovery lease\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  weak PID token trusted a same-second collision (prime=%s token=%s retry=%s)\n' \
-    "$TOKEN_COLLISION_PRIME_RC" "$TOKEN_COLLISION_WEAK_TOKEN" \
-    "$([[ -n "$TOKEN_COLLISION_CONTEXT" ]] && echo yes || echo no)"
-fi
+# A recovery record without the lease inode is unsupported state: name the fix
+# on stderr and attach nothing.
+for OLD_RECOVERY_TOKEN in "cksum-1-2" "lease-$(printf '%032d' 7)"; do
+  OLD_RECOVERY_SESSION="post-watch-old-recovery-${OLD_RECOVERY_TOKEN%%-*}"
+  OLD_RECOVERY_COMMAND="git push origin refs/heads/local:refs/heads/old-recovery"
+  OLD_RECOVERY_LOG="$STATE_DIR/$(pr_watch_branch_key old-recovery).jsonl"
+  OLD_RECOVERY_ENTRIES="$(jq -nc --arg log "$OLD_RECOVERY_LOG" \
+    '[{remote_ref:"refs/heads/old-recovery",branch:"old-recovery",
+       watch_id:"watch-313131313131313131313131",event_log:$log}]')"
+  OLD_RECOVERY_MANIFEST="$(write_attachment_manifest "$REPO" \
+    "$OLD_RECOVERY_SESSION" "$OLD_RECOVERY_COMMAND" "$OLD_RECOVERY_ENTRIES")"
+  printf 'recovering:1:2:%064d:%s:%s\n' 0 "$$" "$OLD_RECOVERY_TOKEN" \
+    > "$OLD_RECOVERY_MANIFEST"
+  OLD_RECOVERY_OUT="$(cd "$REPO" && jq -nc --arg session "$OLD_RECOVERY_SESSION" \
+    --arg c "$OLD_RECOVERY_COMMAND" \
+    '{session_id:$session,tool_input:{command:$c},
+      tool_response:{stdout:"https://github.com/acme/widget/pull/42",stderr:""}}' \
+    | "$HOOK" 2>"$TMP/old-recovery.err")"
+  OLD_RECOVERY_RC=$?
+  OLD_RECOVERY_ERR="$(cat "$TMP/old-recovery.err")"
+  if [[ "$OLD_RECOVERY_RC" -eq 0 && -z "$OLD_RECOVERY_OUT" \
+     && "$OLD_RECOVERY_ERR" == 'agent-tooling: unsupported watch recovery record; restart the PR watch' ]]; then
+    ok "5-field ${OLD_RECOVERY_TOKEN%%-*} recovery record attaches nothing and names the fix"
+  else
+    badf "5-field ${OLD_RECOVERY_TOKEN%%-*} recovery record attaches nothing and names the fix" 'rc=%s out=%.80s err=%.120s' "$OLD_RECOVERY_RC" "$OLD_RECOVERY_OUT" "$OLD_RECOVERY_ERR"
+  fi
+done
 
 # Replacing the checked output name with a FIFO at the read boundary must fail
 # without opening that pathname. The alternate command pattern keeps the same
@@ -2095,9 +2058,9 @@ jq -e '.hookSpecificOutput.additionalContext | type == "string" and length > 0' 
   && LOOKUP_FIFO_RENDERED=yes
 if [[ ! -s "$LOOKUP_FIFO_ROOT/ready" && "$LOOKUP_FIFO_RC" -eq 0 \
    && "$LOOKUP_FIFO_BLOCKED/$LOOKUP_FIFO_RENDERED" == no/yes ]]; then
-  pass=$((pass + 1)); printf '  PASS  descriptor-only lookup has no pathname FIFO boundary\n'
+  ok 'descriptor-only lookup has no pathname FIFO boundary'
 else
-  fail=$((fail + 1)); printf '  FAIL  lookup opened a replaced FIFO (barrier=%s rc=%s blocked=%s elapsed=%ss rendered=%s)\n' \
+  badf 'descriptor-only lookup has no pathname FIFO boundary' 'barrier=%s rc=%s blocked=%s elapsed=%ss rendered=%s' \
     "$([[ -s "$LOOKUP_FIFO_ROOT/ready" ]] && echo hit || echo missed)" \
     "$LOOKUP_FIFO_RC" "$LOOKUP_FIFO_BLOCKED" \
     "$LOOKUP_FIFO_ELAPSED" "$LOOKUP_FIFO_RENDERED"
@@ -2147,9 +2110,9 @@ if [[ ! -e "$LOOKUP_PARENT_ROOT/ready" && "$LOOKUP_PARENT_RC" -eq 0 \
    && "$LOOKUP_PARENT_RENDERED" == yes \
    && "$LOOKUP_PARENT_OUTPUT/$LOOKUP_PARENT_DONE" \
       == keep-output/keep-done ]]; then
-  pass=$((pass + 1)); printf '  PASS  descriptor-only lookup has no pathname cleanup boundary\n'
+  ok 'descriptor-only lookup has no pathname cleanup boundary'
 else
-  fail=$((fail + 1)); printf '  FAIL  lookup cleanup deleted through a replaced parent (barrier=%s rc=%s rendered=%s output=%s done=%s)\n' \
+  badf 'descriptor-only lookup has no pathname cleanup boundary' 'barrier=%s rc=%s rendered=%s output=%s done=%s' \
     "$([[ -e "$LOOKUP_PARENT_ROOT/ready" ]] && echo hit || echo missed)" \
     "$LOOKUP_PARENT_RC" "$LOOKUP_PARENT_RENDERED" \
     "$LOOKUP_PARENT_OUTPUT" "$LOOKUP_PARENT_DONE"
@@ -2176,9 +2139,9 @@ omitted_context_bytes="$(LC_ALL=C printf '%s' "$omitted_context" | wc -c | tr -d
 if [[ "$omitted_context" == *"Remote write succeeded for 6 pushed branches; 4 exact watcher generations attached, 2 omitted."* \
    && "$omitted_context" != *"all exact generations are attached"* \
    && "$omitted_context_bytes" -le 1400 ]]; then
-  pass=$((pass + 1)); printf '  PASS  omitted pushed refs remain explicit in bounded context\n'
+  ok 'omitted pushed refs remain explicit in bounded context'
 else
-  fail=$((fail + 1)); printf '  FAIL  omitted pushed refs remain explicit in bounded context (bytes=%s context=%.160s)\n' \
+  badf 'omitted pushed refs remain explicit in bounded context' 'bytes=%s context=%.160s' \
     "$omitted_context_bytes" "$omitted_context"
 fi
 
@@ -2206,63 +2169,54 @@ if git check-ref-format "refs/heads/$oversized_branch" >/dev/null 2>&1 \
    && (( oversized_branch_context_bytes <= 1400 )) \
    && [[ -z "$oversized_branch_command" \
       && "$oversized_branch_context" == *"No safe fallback was attached"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  final overflow fallback is bounded independently of branch length\n'
+  ok 'final overflow fallback is bounded independently of branch length'
 else
-  fail=$((fail + 1)); printf '  FAIL  final overflow fallback is bounded independently of branch length (bytes=%s cmd=%.80s)\n' \
+  badf 'final overflow fallback is bounded independently of branch length' 'bytes=%s cmd=%.80s' \
     "$oversized_branch_context_bytes" "$oversized_branch_command"
 fi
 
 got="$(ctx "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
-if [[ "$got" == *"PR #1234"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  PR number read from the create URL\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  PR number read from the create URL\n'
-fi
+check_contains 'PR number read from the create URL' "$got" "PR #1234"
 
 got="$(ctx "git push" "")"
 if [[ "$got" == *"PR #42"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  falls back to the branch'"'"'s open PR\n'
+  ok "falls back to the branch's open PR"
 else
-  fail=$((fail + 1)); printf '  FAIL  falls back to the branch'"'"'s open PR (got: %.60s)\n' "$got"
+  badf "falls back to the branch's open PR" 'got: %.60s' "$got"
 fi
 
 # Prefix form, not a bare assignment: `VAR="" got="$(…)"` is TWO assignments, so
 # the empty value would persist and silently re-point every later case at the
 # no-PR branch. `ctx` is a function, so the prefix scopes it to this call.
 got="$(STUB_PR_NUMBER="" ctx "git push" "")"
-if [[ "$got" == *"No open PR"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  no PR yet still arms, noting the watcher polls\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  no PR yet still arms, noting the watcher polls\n'
-fi
+check_contains 'no PR yet still arms, noting the watcher polls' "$got" "No open PR"
 
 got="$(ctx "git push" "")"
 if [[ "$got" == *"escalation-policy.md"* && "$got" == *"pr-watch-stream.sh"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  context names the stream script and the policy\n'
+  ok 'context names the stream script and the policy'
 else
-  fail=$((fail + 1)); printf '  FAIL  context names the stream script and the policy\n'
+  bad 'context names the stream script and the policy'
 fi
 
 if [[ "$got" == *"kind 'conflict'"* && "$got" == *"confirmed merge conflict"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  context tells consumers how to handle conflicts\n'
+  ok 'context tells consumers how to handle conflicts'
 else
-  fail=$((fail + 1)); printf '  FAIL  context tells consumers how to handle conflicts\n'
+  bad 'context tells consumers how to handle conflicts'
 fi
 
-# An unknown host still gets every attach route. Guards the Codex-consumer
-# regression: a context that names only Monitor() reads as Claude-only wiring the
-# moment another host registers this hook, and a runtime this hook has not been
-# taught about must degrade to the menu rather than to a guess.
+# An unknown host still gets every attach route: a context that names only Monitor()
+# reads as Claude-only wiring the moment another host registers this hook, and a
+# runtime this hook has not been taught about must degrade to the menu, not a guess.
 if [[ "$got" == *"Monitor({"* && "$got" == *"Codex"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  context names an attach route for every host\n'
+  ok 'context names an attach route for every host'
 else
-  fail=$((fail + 1)); printf '  FAIL  context names an attach route for every host\n'
+  bad 'context names an attach route for every host'
 fi
 
 # ...and a KNOWN host is named its own route and no other. An agent that cannot run
 # Monitor should not be reading about it, and the narrower text also buys headroom
 # against the 1400-byte ceiling this hook enforces.
-# Invokes the hook directly rather than through ctx(), which strips both roots to pin
+# Invokes the hook directly rather than through ctx(), which clears the marker to pin
 # its own unknown-host default — routing this through it would erase the very host
 # being set up here.
 ctx_as_host() {  # host, command, response
@@ -2272,51 +2226,47 @@ ctx_as_host() {  # host, command, response
     '{tool_input:{command:$c}, tool_response:{stdout:$r, stderr:""}}')"
   case "$host" in
     claude)
-      printf '%s' "$payload" | env -u PLUGIN_ROOT CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+      printf '%s' "$payload" | env BOXLITE_HOOK_HOST=claude \
         "$hook" 2>/dev/null ;;
     codex)
-      printf '%s' "$payload" | env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$REPO_ROOT" \
+      printf '%s' "$payload" | env BOXLITE_HOOK_HOST=codex \
         "$hook" 2>/dev/null ;;
   esac | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
 claude_ctx="$(ctx_as_host claude "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
 if [[ "$claude_ctx" == *"Monitor({"* && "$claude_ctx" != *"Codex"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  a Claude host is named only the Monitor route\n'
+  ok 'a Claude host is named only the Monitor route'
 else
-  fail=$((fail + 1)); printf '  FAIL  a Claude host is named only the Monitor route (got: %.160s)\n' "$claude_ctx"
+  badf 'a Claude host is named only the Monitor route' 'got: %.160s' "$claude_ctx"
 fi
 codex_ctx="$(ctx_as_host codex "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
 if [[ "$codex_ctx" == *"Codex: read schedule setup at JSON path"* \
    && "$codex_ctx" == *"pr-watch-schedule.md"* && "$codex_ctx" != *"every 1 minute"* \
    && "$codex_ctx" != *"Monitor({"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  a Codex host gets watcher schedule setup\n'
+  ok 'a Codex host gets watcher schedule setup'
 else
-  fail=$((fail + 1)); printf '  FAIL  a Codex host gets watcher schedule setup (got: %.160s)\n' "$codex_ctx"
+  badf 'a Codex host gets watcher schedule setup' 'got: %.160s' "$codex_ctx"
 fi
 
 # The stream script must be addressed in the TOOLING tree (the hook's own
 # plugin), not at the consumer repo root: an installed consumer has no .agents/
 # checkout, and this suite's scratch repo root is not the tooling root. Asserting
 # the full path is what the bare-filename checks above cannot do.
-if [[ "$got" == *"bash $SHORT_ROOT/.agents/watch/pr-watch-stream.sh"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  stream script addressed at the tooling root\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  stream script addressed at the tooling root (got: %.120s)\n' "$got"
-fi
+check_contains 'stream script addressed at the tooling root' "$got" "bash $SHORT_ROOT/.agents/watch/pr-watch-stream.sh"
 
 context_bytes="$(LC_ALL=C printf '%s' "$got" | wc -c | tr -d ' ')"
 if (( context_bytes <= 1400 )); then
-  pass=$((pass + 1)); printf '  PASS  watch context stays within 1400 bytes (%s)\n' "$context_bytes"
+  ok "watch context stays within 1400 bytes ($context_bytes)"
 else
-  fail=$((fail + 1)); printf '  FAIL  watch context stays within 1400 bytes (%s)\n' "$context_bytes"
+  badf "watch context stays within 1400 bytes ($context_bytes)" '%s' "$context_bytes"
 fi
 
 if [[ "$got" == *"exactly ONE"* && "$got" == *"fail/cancel"* \
    && "$got" == *"confirmed merge conflict"* && "$got" == *"including bots"* \
    && "$got" == *"passing checks stay silent"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  compact context preserves attach and alert contracts\n'
+  ok 'compact context preserves attach and alert contracts'
 else
-  fail=$((fail + 1)); printf '  FAIL  compact context preserves attach and alert contracts\n'
+  bad 'compact context preserves attach and alert contracts'
 fi
 
 echo
@@ -2331,15 +2281,15 @@ is_fallback_context() {  # context
 }
 got="$(ctx_via "$LONG_LINK_PARENT/t" "gh pr create -t x" "https://github.com/boxlite-ai/boxlite/pull/1234")"
 if is_fallback_context "$got" && [[ "$got" == *"PR #1234"* && "$got" != *"No open PR"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  the fallback names the PR read from the create URL\n'
+  ok 'the fallback names the PR read from the create URL'
 else
-  fail=$((fail + 1)); printf '  FAIL  the fallback names the PR read from the create URL (got: %.120s)\n' "$got"
+  badf 'the fallback names the PR read from the create URL' 'got: %.120s' "$got"
 fi
 got="$(STUB_PR_NUMBER="" ctx_via "$LONG_LINK_PARENT/t" "git push" "")"
 if is_fallback_context "$got" && [[ "$got" == *"No open PR may exist yet"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  the fallback without a PR says none may exist yet\n'
+  ok 'the fallback without a PR says none may exist yet'
 else
-  fail=$((fail + 1)); printf '  FAIL  the fallback without a PR says none may exist yet (got: %.120s)\n' "$got"
+  badf 'the fallback without a PR says none may exist yet' 'got: %.120s' "$got"
 fi
 
 echo
@@ -2359,16 +2309,16 @@ long_command="$(printf '%s' "$long_context" | stream_command_from_context)"
 if [[ -z "$long_command" \
    && "$long_context" == *"No safe fallback was attached"* \
    && "$long_context" != *"tail -n +1 -F"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  oversized paths do not downgrade to raw branch-log replay\n'
+  ok 'oversized paths do not downgrade to raw branch-log replay'
 else
-  fail=$((fail + 1)); printf '  FAIL  oversized paths do not downgrade to raw branch-log replay (cmd=%.120s context=%.160s)\n' \
+  badf 'oversized paths do not downgrade to raw branch-log replay' 'cmd=%.120s context=%.160s' \
     "$long_command" "$long_context"
 fi
 long_context_bytes="$(LC_ALL=C printf '%s' "$long_context" | wc -c | tr -d ' ')"
 if (( long_context_bytes <= 1400 )); then
-  pass=$((pass + 1)); printf '  PASS  fallback context stays within 1400 bytes (%s)\n' "$long_context_bytes"
+  ok "fallback context stays within 1400 bytes ($long_context_bytes)"
 else
-  fail=$((fail + 1)); printf '  FAIL  fallback context stays within 1400 bytes (%s)\n' "$long_context_bytes"
+  badf "fallback context stays within 1400 bytes ($long_context_bytes)" '%s' "$long_context_bytes"
 fi
 
 echo
@@ -2389,9 +2339,9 @@ malicious_status=$?
 if [[ "$malicious_status" -eq 0 && ! -e "$REPO/WATCH_INJECTED" \
    && "$(sed -n '1p' "$malicious_args_file" 2>/dev/null)" == 2 \
    && "$(sed -n '3p' "$malicious_args_file" 2>/dev/null)" == "$malicious_event_log" ]]; then
-  pass=$((pass + 1)); printf '  PASS  quoted branch cannot add a shell command\n'
+  ok 'quoted branch cannot add a shell command'
 else
-  fail=$((fail + 1)); printf '  FAIL  quoted branch cannot add a shell command (status=%s injected=%s args=%s expected_event=%s cmd=%.120s)\n' \
+  badf 'quoted branch cannot add a shell command' 'status=%s injected=%s args=%s expected_event=%s cmd=%.120s' \
     "$malicious_status" "$([[ -e "$REPO/WATCH_INJECTED" ]] && echo yes || echo no)" \
     "$(tr '\n' '|' < "$malicious_args_file" 2>/dev/null)" \
     "$malicious_event_log" "$malicious_command"
@@ -2420,9 +2370,9 @@ dash_event_log="$(tail -n 1 "$dash_args_file" 2>/dev/null)"
 if [[ "$slash_status" -eq 0 && "$dash_status" -eq 0 \
    && -n "$slash_event_log" && -n "$dash_event_log" \
    && "$slash_event_log" != "$dash_event_log" ]]; then
-  pass=$((pass + 1)); printf '  PASS  foo/bar and foo-bar consumer paths cannot alias\n'
+  ok 'foo/bar and foo-bar consumer paths cannot alias'
 else
-  fail=$((fail + 1)); printf '  FAIL  foo/bar and foo-bar consumer paths cannot alias (slash=%s dash=%s)\n' \
+  badf 'foo/bar and foo-bar consumer paths cannot alias' 'slash=%s dash=%s' \
     "$slash_event_log" "$dash_event_log"
 fi
 
@@ -2432,16 +2382,16 @@ git -C "$REPO" checkout -q foo/bar
 if [[ -f "$slash_event_log" && -f "$dash_event_log" \
    && "$(jq -r 'select(.kind == "watch_start") | .branch' "$slash_event_log" | tail -1)" == "foo/bar" \
    && "$(jq -r 'select(.kind == "watch_start") | .branch' "$dash_event_log" | tail -1)" == "foo-bar" ]]; then
-  pass=$((pass + 1)); printf '  PASS  consumer paths exactly match producer event logs\n'
+  ok 'consumer paths exactly match producer event logs'
 else
-  fail=$((fail + 1)); printf '  FAIL  consumer paths exactly match producer event logs\n'
+  bad 'consumer paths exactly match producer event logs'
 fi
 
 policy_bytes="$(LC_ALL=C wc -c < "$POLICY" | tr -d ' ')"
 if (( policy_bytes <= 1800 )); then
-  pass=$((pass + 1)); printf '  PASS  escalation policy stays within 1800 bytes (%s)\n' "$policy_bytes"
+  ok "escalation policy stays within 1800 bytes ($policy_bytes)"
 else
-  fail=$((fail + 1)); printf '  FAIL  escalation policy stays within 1800 bytes (%s)\n' "$policy_bytes"
+  badf "escalation policy stays within 1800 bytes ($policy_bytes)" '%s' "$policy_bytes"
 fi
 
 policy="$(cat "$POLICY")"
@@ -2449,19 +2399,17 @@ if [[ "$policy" == *"2 auto-fix attempts"* && "$policy" == *"Never weaken"* \
    && "$policy" == *"not already in this PR's diff"* && "$policy" == *"e2e-local"* \
    && "$policy" == *"product intent"* && "$policy" == *"different error"* \
    && "$policy" == *"pre-existing"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  compact policy preserves escalation boundaries\n'
+  ok 'compact policy preserves escalation boundaries'
 else
-  fail=$((fail + 1)); printf '  FAIL  compact policy preserves escalation boundaries\n'
+  bad 'compact policy preserves escalation boundaries'
 fi
-# An escalation asks once and never stalls the watch; silence leaves the item alone (#334).
+# An escalation asks once and never stalls the watch; silence leaves the item alone.
 if [[ "$policy" == *"Ask once before acting on these, and do not wait for a reply"* \
    && "$policy" == *"leave the item unchanged, keep watching, and report it"* \
    && "$policy" == *"Silence never approves"* ]]; then
-  pass=$((pass + 1)); printf '  PASS  escalation asks never wait and default to no change\n'
+  ok 'escalation asks never wait and default to no change'
 else
-  fail=$((fail + 1)); printf '  FAIL  escalation asks never wait and default to no change\n'
+  bad 'escalation asks never wait and default to no change'
 fi
 
-echo
-printf 'post-remote-write-watch: %d passed, %d failed\n' "$pass" "$fail"
-(( fail == 0 ))
+assert_result

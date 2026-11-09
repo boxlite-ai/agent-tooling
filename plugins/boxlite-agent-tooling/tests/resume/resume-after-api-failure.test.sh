@@ -20,18 +20,9 @@ export CLAUDE_PROJECT_DIR="$project"
 scope="git-$(printf '%s' s1 | git -C "$project" hash-object --stdin)"
 state="$project/.agents/state/api-resume.$scope"
 
-pass=0
-fail=0
-# Increment pass counter and print a PASS line.  # $1 = test name
-ok()  { pass=$(( pass + 1 )); printf '  PASS  %s\n' "$1"; }
-# Increment fail counter and print a FAIL line.  # $1 = test name
-bad() { fail=$(( fail + 1 )); printf '  FAIL  %s\n' "$1"; }
-# Compare expected and actual values, calling ok or bad and printing details on mismatch.  # $1 = name, $2 = expected, $3 = actual
-check() {  # name expected actual
-  if [[ "$2" == "$3" ]]; then ok "$1"; else
-    bad "$1"; printf '        expected %s\n        actual   %s\n' "$2" "$3"
-  fi
-}
+# shellcheck source=../lib/assert.sh
+source "$hook_dir/../../tests/lib/assert.sh"
+check() { check_eq "$1" "$3" "$2"; }  # name expected actual
 
 # Feed a payload to the hook on stdin.  # $1 = payload; sets rc, leaves stdout and stderr in $work
 feed() {
@@ -192,11 +183,10 @@ check "outside a repository no wake is spent" "1" "$?"
 
 # ── A broken installation says so and never resumes ─────────────────────────
 mkdir -p "$work/bin"
-for tool in bash perl shasum git awk; do ln -sf "$(command -v "$tool")" "$work/bin/$tool"; done
+for tool in bash perl git; do ln -sf "$(command -v "$tool")" "$work/bin/$tool"; done
 printf '%s' "$(failure server_error)" | PATH="$work/bin" bash "$subject" >/dev/null 2>"$work/stderr"
 check "a missing jq exits 1, never 2" "1" "$?"
 check "a missing jq is named on stderr" "yes" \
   "$(grep -q 'required dependency not found: jq' "$work/stderr" && echo yes || echo no)"
 
-printf '\nRESULT: %d passed, %d failed\n' "$pass" "$fail"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

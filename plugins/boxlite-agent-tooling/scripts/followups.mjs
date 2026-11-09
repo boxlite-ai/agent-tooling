@@ -96,9 +96,7 @@ async function main() {
   const clone = cloneIdentity(cwd);
   const registryRoot = join(userInfo().homedir, '.boxlite-followups');
   const initialize = action === 'init';
-  const previousCommon = initialize ? args[0] : undefined;
-  if (initialize && args.length > 1) fail('Use init [PREVIOUS_GIT_COMMON_DIR]');
-  const legacyClone = cloneIdentity(cwd, { legacy: true, legacyPath: previousCommon });
+  if (initialize && args.length) fail('Use init without arguments');
   if (initialize) {
     for (const root of [statePath, registryRoot]) mkdirSync(root, { mode: 0o700, recursive: true });
   }
@@ -108,9 +106,7 @@ async function main() {
   }
   const executable = action === 'run' ? realpathSync(args[1]) : undefined;
   const { prefix, verifySdk } = isolatedUser(agentUser, cwd, statePath, registryRoot, executable);
-  const queue = openFollowupQueue(statePath, clone, {
-    initialize, registryRoot, legacyClone, requireLegacy: previousCommon !== undefined,
-  });
+  const queue = openFollowupQueue(statePath, clone, { initialize, registryRoot });
   if (initialize || action === 'status') return queue.status();
   if (action === 'history') {
     if (args.length > 1 || (args.length && !/^[1-9][0-9]*$/.test(args[0]))) fail('Use history [NEXT_BEFORE]');

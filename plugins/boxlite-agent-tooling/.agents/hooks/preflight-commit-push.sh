@@ -12,23 +12,15 @@
 #   3. That auditor writes .agents/state/last-audit.json.
 #   4. Parent retries -> hook reads the artifact and allows on PASS.
 #
-# Wired in .claude/settings.json under hooks.PreToolUse with matcher "Bash".
-#
 # Design notes
 # ------------
-# * Matcher scope: settings.json registers this hook on the broad `Bash`
-#   matcher, not a narrower `Bash:git*` pattern, because Claude Code's
-#   PreToolUse matchers are tool-name-only — there's no built-in way to filter
-#   on the bash command itself. The script does the actual filtering via the
-#   case match below and exits 0 immediately on non-target commands, so the
-#   per-invocation cost on unrelated bash calls is one jq parse + one regex.
+# * Matcher scope: host PreToolUse matchers filter on the tool name only, so this
+#   hook runs for every Bash call and exits 0 at once unless the command is a
+#   `git commit` / `git push` (one jq parse plus one regex).
 #
-# * One-shot consumption: the audit file is `rm -f`'d on the allow path
-#   (intentional, see end of script). This forces a fresh audit on every
-#   subsequent git commit/push — even at the same HEAD — so re-staged content
-#   between commits can't ride on the previous audit. The cost is that
-#   commit-then-push of the same HEAD must re-audit; the user has accepted
-#   this trade-off to avoid stale-audit-passes-new-content failure modes.
+# * One-shot consumption: a PASS is unlinked on the allow path, so every later
+#   commit or push re-audits, even at the same HEAD. Re-staged content can never
+#   ride on an earlier audit; commit-then-push of one HEAD audits twice.
 #
 # Tests: bash tests/audit/preflight-commit-push.test.sh
 set -euo pipefail
@@ -69,7 +61,7 @@ else
   exit 0
 fi
 
-for required in git perl shasum; do
+for required in git perl; do
   command -v "$required" >/dev/null 2>&1 \
     || infrastructure_failure "Required command $required is unavailable" "Restore $required on the host hook PATH and verify it is executable before retrying."
 done
@@ -79,59 +71,46 @@ project_dir="${CLAUDE_PROJECT_DIR:-$repo_root}"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 audit_file="$project_dir/.agents/state/last-audit.json"
 handoff_file="$project_dir/.agents/state/last-audit-handoff.json"
-verdict_state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
-override_state_lib="$tooling_root/.agents/lib/auditor-override-state.sh"
-if [[ ! -r "$verdict_state_lib" || ! -r "$override_state_lib" ]]; then
-  infrastructure_failure "Shared audit state libraries are unavailable: $verdict_state_lib, $override_state_lib" \
-    'Restore these files from the installed plugin version, reload the host, and verify both paths are readable.'
-fi
+
+# Libraries load only after the matcher, so a missing one never errors unrelated Bash
+# calls. A missing one exits 2: a PreToolUse hook that merely crashes is stepped over,
+# which on a deny gate lets the commit through unaudited.
+library_failure() { # library path
+  infrastructure_failure "$1 could not load" 'Restore this library from the installed plugin version, reload the host, and run its Bash syntax check.'
+}
+lib_dir="$tooling_root/.agents/lib"
+# Check first: under `set -e`, sourcing a missing file exits 1 before any `||` runs.
+for library in verdict-audit-state auditor-override-state subagent audit-task-file \
+    audit-reflection audit-reflection-gate; do
+  [[ -r "$lib_dir/$library.sh" ]] || library_failure "$lib_dir/$library.sh"
+done
 # shellcheck source=../lib/verdict-audit-state.sh
-source "$verdict_state_lib" || infrastructure_failure "$verdict_state_lib could not load" 'Restore the installed plugin library and rerun its Bash syntax check.'
+source "$lib_dir/verdict-audit-state.sh" || library_failure "$lib_dir/verdict-audit-state.sh"
 # shellcheck source=../lib/auditor-override-state.sh
-source "$override_state_lib" || infrastructure_failure "$override_state_lib could not load" 'Restore the installed plugin library and rerun its Bash syntax check.'
+source "$lib_dir/auditor-override-state.sh" || library_failure "$lib_dir/auditor-override-state.sh"
+# shellcheck source=../lib/subagent.sh
+source "$lib_dir/subagent.sh" || library_failure "$lib_dir/subagent.sh"
+# shellcheck source=../lib/audit-task-file.sh
+source "$lib_dir/audit-task-file.sh" || library_failure "$lib_dir/audit-task-file.sh"
+# shellcheck source=../lib/audit-reflection.sh
+source "$lib_dir/audit-reflection.sh" || library_failure "$lib_dir/audit-reflection.sh"
+# shellcheck source=../lib/audit-reflection-gate.sh
+source "$lib_dir/audit-reflection-gate.sh" || library_failure "$lib_dir/audit-reflection-gate.sh"
 # Assigned by auditor_override_load_valid_grant; initialize the sourced public output
 # explicitly so `set -u` and static analysis share the same boundary contract.
 auditor_override_nonce_hash=""
-# Transition mirrors. Where core.hooksPath is configured absolute rather than the
-# relative value `make setup` sets, one installed hook serves every worktree, so a
-# commit-msg from BEFORE this move can be the one that runs while this gate —
-# reached through the .claude/hooks symlink — is the one that writes. That hook
-# reads the legacy paths and cannot be taught the new ones, so this gate leaves
-# a copy where it will look. Remove both mirrors and this block once every
-# checkout is past the move.
-legacy_audit_file="$project_dir/.claude/.last-audit.json"
-legacy_handoff_file="$project_dir/.claude/.last-audit-handoff.json"
 
-# Returns 0 only when dest now holds a copy of src, so a caller that wants to
-# hand the marker over can safely delete the original.
-mirror_to_legacy() {
-  local src="$1" dest="$2" temporary="${2}.mirror-$$-${RANDOM:-0}" identity
-  mkdir -p "$(dirname "$dest")" 2>/dev/null || return 1
-  verdict_audit_copy_regular_state "$src" "$temporary" 1048576 \
-    2>/dev/null || return 1
-  identity="$(verdict_audit_path_identity "$temporary" 2>/dev/null)" || return 1
-  if ! verdict_audit_rename_exact "$temporary" "$dest" 2>/dev/null; then
-    verdict_audit_unlink_if_identity \
-      "$temporary" "$identity" 2>/dev/null || true
-    return 1
-  fi
-}
 branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
 # An audit report, and the handoff it answers, stays valid for 5 hours after it is
 # written. The branch, HEAD, diff, command and subject bindings already reject a report
 # that no longer describes what is being committed or pushed, so the age only retires
-# reports from long-finished work. 10 minutes expired reports that took 25 minutes to
-# produce before anyone could read their findings.
+# reports from long-finished work.
 max_age_seconds=18000
 deny_max_bytes=8192
 # The PreToolUse command text recorded in the handoff (see write_command_handoff).
 # Same ceiling as the deny reason that will carry it back to the agent.
 handoff_command_max_bytes=8192
-
-hash_stdin() {
-  shasum -a 256 | awk '{print $1}'
-}
 
 command_field() {
   local key="$1"
@@ -146,7 +125,7 @@ fi
 current_diff_hash() {
   case "$kind" in
     commit)
-      git -C "$repo_root" diff --cached --no-ext-diff | hash_stdin
+      git -C "$repo_root" diff --cached --no-ext-diff | verdict_audit_sha256
       ;;
     push)
       if [[ "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
@@ -157,16 +136,13 @@ current_diff_hash() {
         git -C "$repo_root" diff --no-ext-diff origin/main...HEAD 2>/dev/null ||
           git -C "$repo_root" diff --no-ext-diff HEAD~1...HEAD 2>/dev/null ||
           true
-      } | hash_stdin
-      ;;
-    *)
-      printf 'unknown' | hash_stdin
+      } | verdict_audit_sha256
       ;;
   esac
 }
 
 diff_hash="$(current_diff_hash)"
-command_hash="$(printf '%s' "$command" | hash_stdin)"
+command_hash="$(printf '%s' "$command" | verdict_audit_sha256)"
 override_active=false
 override_scope=""
 override_epoch=""
@@ -179,6 +155,11 @@ handoff_mtime=""
 handoff_selection=""
 handoff_selected_identity=""
 handoff_load_attempted=0
+# Fields of the selected handoff, filled by load_handoff_document.
+handoff_doc_branch="" handoff_doc_head="" handoff_doc_kind="" handoff_doc_diff_hash="" handoff_doc_command_hash=""
+handoff_doc_owner_pid="" handoff_doc_owner_token=""
+handoff_doc_override_scope="" handoff_doc_override_epoch="" handoff_doc_override_nonce=""
+handoff_doc_lifecycle_scope="" handoff_doc_lifecycle_epoch=""
 
 cleanup_handoff_selection() {
   if [[ -n "$handoff_selection" && -n "$handoff_selected_identity" ]]; then
@@ -189,29 +170,6 @@ cleanup_handoff_selection() {
   handoff_selected_identity=""
 }
 trap cleanup_handoff_selection EXIT
-
-remove_matching_legacy() { # selected source, legacy destination
-  local source="$1" destination="$2" selection identity
-  local source_snapshot destination_snapshot source_body destination_body
-  selection="${destination}.inspect-$$-${RANDOM:-0}"
-  identity="$(verdict_audit_link_no_clobber_identity \
-    "$destination" "$selection" 2>/dev/null)" || return 0
-  source_snapshot="$(verdict_audit_read_regular_state \
-    "$source" 1048576 json 2>/dev/null)" || source_snapshot=""
-  destination_snapshot="$(verdict_audit_read_regular_state \
-    "$selection" 1048576 json 2>/dev/null)" || destination_snapshot=""
-  source_body=""
-  destination_body=""
-  [[ "$source_snapshot" == *$'\n'* ]] && source_body="${source_snapshot#*$'\n'}"
-  [[ "$destination_snapshot" == *$'\n'* ]] \
-    && destination_body="${destination_snapshot#*$'\n'}"
-  if [[ -n "$source_body" && "$destination_body" == "$source_body" ]]; then
-    verdict_audit_unlink_if_identity \
-      "$destination" "$identity" 2>/dev/null || true
-  fi
-  verdict_audit_unlink_if_identity \
-    "$selection" "$identity" 2>/dev/null || true
-}
 
 read_override_epoch() {  # session scope
   local epoch_path="$project_dir/.agents/state/verdict-prompt-epoch.$1" epoch
@@ -307,53 +265,62 @@ load_handoff_document() {
     cleanup_handoff_selection
     return 1
   fi
+  # Every field but `command` is a single line after the schema check above, so one
+  # jq pass fills them all; `command` may span lines and is read where it is used.
+  {
+    IFS= read -r handoff_doc_branch; IFS= read -r handoff_doc_head; IFS= read -r handoff_doc_kind
+    IFS= read -r handoff_doc_diff_hash; IFS= read -r handoff_doc_command_hash
+    IFS= read -r handoff_doc_owner_pid; IFS= read -r handoff_doc_owner_token
+    IFS= read -r handoff_doc_override_scope; IFS= read -r handoff_doc_override_epoch
+    IFS= read -r handoff_doc_override_nonce
+    IFS= read -r handoff_doc_lifecycle_scope; IFS= read -r handoff_doc_lifecycle_epoch
+  } < <(printf '%s' "$handoff_document" | jq -r '
+    .branch, .head, .command_kind, .diff_hash, .command_hash,
+    .owner.pid, .owner.start_token,
+    .override.session_scope // "", .override.prompt_epoch // "", .override.nonce_hash // "",
+    .lifecycle.session_scope // "", .lifecycle.prompt_epoch // ""')
+}
+
+# True when the loaded handoff names the current branch, HEAD, and command kind; with
+# `diff`, also the current diff hash.
+handoff_binds_current() { # [diff]
+  [[ "$handoff_doc_branch" == "$branch" && "$handoff_doc_head" == "$head" \
+     && "$handoff_doc_kind" == "$kind" ]] || return 1
+  [[ "${1:-}" != diff || "$handoff_doc_diff_hash" == "$diff_hash" ]]
+}
+
+handoff_is_fresh() {
+  local handoff_age=$(( $(date +%s) - handoff_mtime ))
+  (( handoff_age >= 0 && handoff_age <= max_age_seconds ))
 }
 
 load_handoff_owner() {
-  local owner_pid owner_token
   load_handoff_document || return 1
-  owner_pid="$(printf '%s' "$handoff_document" | jq -r '.owner.pid')"
-  owner_token="$(printf '%s' "$handoff_document" | jq -r '.owner.start_token')"
-  verdict_audit_process_has_ancestor "$owner_pid" "$owner_token" || return 1
-  handoff_owner_pid="$owner_pid"
-  handoff_owner_start_token="$owner_token"
+  verdict_audit_process_has_ancestor \
+    "$handoff_doc_owner_pid" "$handoff_doc_owner_token" || return 1
+  handoff_owner_pid="$handoff_doc_owner_pid"
+  handoff_owner_start_token="$handoff_doc_owner_token"
 }
 
 load_handoff_override() {
-  local handoff_scope handoff_epoch handoff_nonce handoff_branch handoff_head handoff_kind
   load_handoff_owner || return 1
-  handoff_scope="$(printf '%s' "$handoff_document" | jq -r '.override.session_scope // ""')"
-  handoff_epoch="$(printf '%s' "$handoff_document" | jq -r '.override.prompt_epoch // ""')"
-  handoff_nonce="$(printf '%s' "$handoff_document" | jq -r '.override.nonce_hash // ""')"
-  handoff_branch="$(printf '%s' "$handoff_document" | jq -r '.branch')"
-  handoff_head="$(printf '%s' "$handoff_document" | jq -r '.head')"
-  handoff_kind="$(printf '%s' "$handoff_document" | jq -r '.command_kind')"
-  [[ "$handoff_branch" == "$branch" && "$handoff_head" == "$head" \
-     && "$handoff_kind" == "$kind" && "$handoff_nonce" =~ ^[0-9a-f]{64}$ ]] || return 1
+  handoff_binds_current && [[ "$handoff_doc_override_nonce" =~ ^[0-9a-f]{64}$ ]] || return 1
   auditor_override_load_valid_grant \
-    "$repo_root" "$handoff_scope" "$handoff_epoch" || return 1
-  [[ "$auditor_override_nonce_hash" == "$handoff_nonce" ]] || return 1
-  override_scope="$handoff_scope"
-  override_epoch="$handoff_epoch"
+    "$repo_root" "$handoff_doc_override_scope" "$handoff_doc_override_epoch" || return 1
+  [[ "$auditor_override_nonce_hash" == "$handoff_doc_override_nonce" ]] || return 1
+  override_scope="$handoff_doc_override_scope"
+  override_epoch="$handoff_doc_override_epoch"
   override_active=true
 }
 
 load_handoff_lifecycle() {
-  local handoff_scope handoff_epoch handoff_branch handoff_head handoff_kind current_epoch
+  local current_epoch
   load_handoff_owner || return 1
-  handoff_scope="$(printf '%s' "$handoff_document" | jq -r '.lifecycle.session_scope // ""')"
-  handoff_epoch="$(printf '%s' "$handoff_document" | jq -r '.lifecycle.prompt_epoch // ""')"
-  handoff_branch="$(printf '%s' "$handoff_document" | jq -r '.branch')"
-  handoff_head="$(printf '%s' "$handoff_document" | jq -r '.head')"
-  handoff_kind="$(printf '%s' "$handoff_document" | jq -r '.command_kind')"
-  [[ "$handoff_scope" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ \
-     && "$handoff_epoch" =~ ^[1-9][0-9]*-[1-9][0-9]*-[0-9]+$ \
-     && "$handoff_branch" == "$branch" && "$handoff_head" == "$head" \
-     && "$handoff_kind" == "$kind" ]] || return 1
-  current_epoch="$(read_override_epoch "$handoff_scope" 2>/dev/null)" || return 1
-  [[ "$current_epoch" == "$handoff_epoch" ]] || return 1
-  hook_session_scope="$handoff_scope"
-  hook_prompt_epoch="$handoff_epoch"
+  [[ -n "$handoff_doc_lifecycle_scope" ]] && handoff_binds_current || return 1
+  current_epoch="$(read_override_epoch "$handoff_doc_lifecycle_scope" 2>/dev/null)" || return 1
+  [[ "$current_epoch" == "$handoff_doc_lifecycle_epoch" ]] || return 1
+  hook_session_scope="$handoff_doc_lifecycle_scope"
+  hook_prompt_epoch="$handoff_doc_lifecycle_epoch"
 }
 
 if [[ -n "${GITHOOK_DELEGATED:-}" ]]; then
@@ -466,11 +433,6 @@ write_command_handoff() {
       owner:{pid:$owner_pid,start_token:$owner_start_token},
       override:$override, lifecycle:$lifecycle}' \
     | verdict_audit_write_atomic "$handoff_file"
-  # `|| true` is load-bearing: this is the last command in the function, and the
-  # defer path calls the function unguarded under `set -e`. Without it a mirror
-  # that cannot be written makes the whole hook exit 1 instead of 0. The mirror
-  # is a transition convenience — never a reason to fail the gate.
-  mirror_to_legacy "$handoff_file" "$legacy_handoff_file" || true
 }
 
 allow_override() {
@@ -488,28 +450,8 @@ allow_override() {
 }
 
 valid_handoff_command_hash() {
-  load_handoff_owner || return 1
-
-  local handoff_branch handoff_head handoff_kind handoff_diff_hash handoff_command_hash now_epoch handoff_age
-  handoff_branch="$(printf '%s' "$handoff_document" | jq -r '.branch')"
-  handoff_head="$(printf '%s' "$handoff_document" | jq -r '.head')"
-  handoff_kind="$(printf '%s' "$handoff_document" | jq -r '.command_kind')"
-  handoff_diff_hash="$(printf '%s' "$handoff_document" | jq -r '.diff_hash')"
-  handoff_command_hash="$(printf '%s' "$handoff_document" | jq -r '.command_hash')"
-  now_epoch="$(date +%s)"
-  handoff_age=$(( now_epoch - handoff_mtime ))
-
-  if [[ "$handoff_branch" == "$branch" ]] && \
-     [[ "$handoff_head" == "$head" ]] && \
-     [[ "$handoff_kind" == "$kind" ]] && \
-     [[ "$handoff_diff_hash" == "$diff_hash" ]] && \
-     [[ -n "$handoff_command_hash" ]] && \
-     (( handoff_age >= 0 && handoff_age <= max_age_seconds )); then
-    printf '%s' "$handoff_command_hash"
-    return 0
-  fi
-
-  return 1
+  load_handoff_owner && handoff_binds_current diff && handoff_is_fresh || return 1
+  printf '%s' "$handoff_doc_command_hash"
 }
 
 # Recover the command the agent actually ran from the PreToolUse handoff. Bound like
@@ -519,43 +461,16 @@ valid_handoff_command_hash() {
 # Text that does not hash to command_hash is a tampered or foreign handoff: ignore it
 # and let the caller fall back to the placeholder (closed over open).
 recover_handoff_command() {
-  local recovered handoff_branch handoff_head handoff_kind handoff_command_hash
-  local now_epoch handoff_age
+  local recovered
   load_handoff_owner || return 1
   recovered="$(printf '%s' "$handoff_document" \
     | jq -r 'if (.command | type) == "string" then .command else empty end')"
-  [[ -n "$recovered" ]] || return 1
-  handoff_branch="$(printf '%s' "$handoff_document" | jq -r '.branch')"
-  handoff_head="$(printf '%s' "$handoff_document" | jq -r '.head')"
-  handoff_kind="$(printf '%s' "$handoff_document" | jq -r '.command_kind')"
-  handoff_command_hash="$(printf '%s' "$handoff_document" | jq -r '.command_hash')"
-  now_epoch="$(date +%s)"
-  handoff_age=$(( now_epoch - handoff_mtime ))
-  [[ "$handoff_branch" == "$branch" && "$handoff_head" == "$head" \
-     && "$handoff_kind" == "$kind" ]] || return 1
-  (( handoff_age >= 0 && handoff_age <= max_age_seconds )) || return 1
-  [[ "$(printf '%s' "$recovered" | hash_stdin)" == "$handoff_command_hash" ]] || return 1
+  [[ -n "$recovered" ]] && handoff_binds_current && handoff_is_fresh || return 1
+  [[ "$(printf '%s' "$recovered" | verdict_audit_sha256)" == "$handoff_doc_command_hash" ]] || return 1
   printf '%s' "$recovered"
 }
 
 # ── Re-audit instruction ─────────────────────────────────────────────────────
-# Sourced HERE rather than at the top of the file so the two early exits above still
-# apply: a missing library must not turn every unrelated Bash call into an error, only
-# the git commands this gate actually guards.
-#
-# And it exits 2 rather than continuing without the library. A PreToolUse hook that
-# merely crashes is reported and stepped over, which on a DENY gate means the commit
-# proceeds unaudited — the one outcome worse than a noisy failure. Exit 2 blocks.
-subagent_lib="$tooling_root/.agents/lib/subagent.sh"
-if [[ ! -r "$subagent_lib" ]]; then
-  infrastructure_failure "Missing $subagent_lib" 'Restore this library from the installed plugin version and reload the host.'
-fi
-# shellcheck source=../lib/subagent.sh
-source "$subagent_lib" || infrastructure_failure "$subagent_lib could not load" 'Restore the installed library and run its Bash syntax check.'
-# shellcheck source=../lib/audit-task-file.sh
-source "$tooling_root/.agents/lib/audit-task-file.sh" \
-  || infrastructure_failure 'Audit task file library could not load' 'Restore .agents/lib/audit-task-file.sh from the installed plugin and verify its Bash syntax.'
-
 # One instruction, naming the calling host's route — or every route when that host
 # cannot be named. The choice comes from the plugin root the host injects into this
 # hook's own environment, never from a marker the session exports to every child: the
@@ -597,12 +512,6 @@ task_input_json="$(jq -nc \
     audit_started_at:$audit_started_at}')"
 reflection_context=""
 if [[ -n "$hook_session_scope" && -n "$hook_prompt_epoch" ]]; then
-  # shellcheck source=../lib/audit-reflection.sh
-  source "$tooling_root/.agents/lib/audit-reflection.sh" \
-    || infrastructure_failure 'Audit history library could not load' 'Restore .agents/lib/audit-reflection.sh from the installed plugin and verify its Bash syntax.'
-  # shellcheck source=../lib/audit-reflection-gate.sh
-  source "$tooling_root/.agents/lib/audit-reflection-gate.sh" \
-    || infrastructure_failure 'Audit history adapter could not load' 'Restore .agents/lib/audit-reflection-gate.sh from the installed plugin and verify its Bash syntax.'
   reflection_context="$(jq -nc --arg root "$(cd "$repo_root" && pwd -P)" \
     --arg session "$hook_session_scope" --arg epoch "$hook_prompt_epoch" \
     --arg branch "${branch:-HEAD}" --arg kind "$kind" \
@@ -635,7 +544,7 @@ prepare_audit_attempt() {  # task input JSON -> task input JSON with attempt fie
   local input="$1" binding tree request link
   audit_worker_idle || return 2
   binding="$(jq -nc --arg branch "$branch" --arg head "$head" --arg kind "$kind" \
-    --arg diff "$diff_hash" --arg command "$(printf '%s' "$audit_target_command" | hash_stdin)" \
+    --arg diff "$diff_hash" --arg command "$(printf '%s' "$audit_target_command" | verdict_audit_sha256)" \
     '{branch:$branch,head:$head,command_kind:$kind,diff_hash:$diff,command_hash:$command}')" || return 2
   if [[ "$kind" == commit ]]; then
     tree="$(git -C "$repo_root" write-tree)" || return 2
@@ -669,7 +578,7 @@ audit_instruction() {
     "audit_criteria=${audit_criteria}" "task_input_json=${input}")" || return 2
   task+=$'\n\n'"$(subagent_prompt audit/dossier-validation "$tooling_root" \
     "validator_json=$(jq -nc --arg path "$tooling_root/scripts/validate-audit-dossier.sh" '{path:$path}')")" || return 2
-  # Claim check (design #407): the deny reason carries a pointer, never the task text,
+  # Claim check: the deny reason carries a pointer, never the task text,
   # so findings, session paths, and routes cannot push it past the safety cap.
   local pointer read_command
   pointer="$(audit_task_file_write "$project_dir/.agents/state" "$task")" || return 2
@@ -836,7 +745,7 @@ validate_audit() {
     # must bind to the detailed pre-push command, including ref-update stdin.
     if [[ -n "$handoff_command_hash" && "$audit_command_hash" == "$handoff_command_hash" ]]; then
       command_bound=1
-    elif [[ "$kind" == "commit" && -n "$audit_commit_subject_hash" ]]; then
+    elif [[ -n "$audit_commit_subject_hash" ]]; then
       # Git exposes the real commit message later. The commit-msg hook compares
       # this audited subject hash against the message file before consuming.
       command_bound=1
@@ -871,22 +780,19 @@ Re-audit is required."
   fi
 
   # `findings` blocks, `advisories` never does. Two arrays rather than a per-finding
-  # severity so the split FAILS CLOSED: a producer that omits advisories blocks on
-  # everything, whereas a severity field would need a default and a wrong default
-  # downgrades real findings. Same effect as eslint's two counters (lib/cli.js ~496-521,
-  # where errorCount drives the exit code and warningCount only does under
-  # --max-warnings), reached without a defaulting rule.
+  # severity: a severity field would need a default, and a wrong default downgrades
+  # real findings.
   advisories="$(printf '%s' "$audit_document" \
-    | jq -r '.advisories[]? | "  ~ " + .' 2>/dev/null || echo '')"
+    | jq -r '.advisories[] | "  ~ " + .' 2>/dev/null || echo '')"
 
   if [[ "$audit_verdict" != "PASS" ]]; then
     findings="$(printf '%s' "$audit_document" \
       | jq -r '.findings[]? | "  - " + .' 2>/dev/null || echo '')"
     rm -f "$audit_selection"
-    # Claim check (design #407): findings have no count limit, so the reason names a
+    # Claim check: findings have no count limit, so the reason names a
     # saved copy instead of pasting them; the relaunched auditor replaces the dossier.
     finding_count="$(jq '.findings | length' <<<"$audit_document" 2>/dev/null || echo '?')"
-    advisory_count="$(jq '.advisories // [] | length' <<<"$audit_document" 2>/dev/null || echo '?')"
+    advisory_count="$(jq '.advisories | length' <<<"$audit_document" 2>/dev/null || echo '?')"
     if saved_findings="$(audit_task_file_write "$project_dir/.agents/state" "Findings:
 ${findings}
 ${advisories:+Advisories (NOT blocking — do not re-audit for these alone):
@@ -926,23 +832,19 @@ Read them, then reassess each finding with current evidence; a code change or ne
         cleanup_handoff_selection
         handoff_load_attempted=0
         if retry_local_recovery; then
-          load_matching_handoff || true
-          continue
+          load_handoff_document && continue
+          block_git wait "Command handoff at $handoff_file is missing or invalid after its PASS was consumed." \
+            'Retry the original Git operation through the live host; obtain a fresh audit because the earlier PASS was consumed.' \
+            'Both a fresh bound dossier and its command handoff can be consumed safely.'
         fi
         block_git wait "Command handoff consumption still conflicts at $handoff_file." \
           'Let the overlapping handoff writer finish and retry the original Git operation; obtain a fresh audit because the earlier PASS was consumed.' \
           'Both a fresh bound dossier and its command handoff can be consumed safely.'
       fi
-      remove_matching_legacy "$handoff_selection" "$legacy_handoff_file"
       cleanup_handoff_selection
     fi
-    remove_matching_legacy "$audit_selection" "$legacy_audit_file"
-    rm -f "$audit_selection"
-  else
-    # Mirror the selected inode, not a pathname that an overlapping audit may replace.
-    mirror_to_legacy "$audit_selection" "$legacy_audit_file" || true
-    rm -f "$audit_selection"
   fi
+  rm -f "$audit_selection"
   break
   done
 
@@ -966,24 +868,25 @@ ${advisories}"
 
 }
 
-# This gate never produces the audit itself. It denies and names the way to spawn an
-# auditor on the host that is calling — Task() under Claude Code,
-# collaboration.spawn_agent under Codex — falling back to every route, headless
-# producer included, when the host is unknown. Reached through the git-level gate
-# below, no plugin root is injected and that fallback is what prints, which is
-# correct: a git hook genuinely cannot tell which agent ran the command.
+# A `.claude/.last-audit*.json` file blocks agent commits and pushes until removed,
+# so a stale copy can never pass for current audit state.
+stale_approvals=()
+for stale_approval in "$project_dir/.claude/.last-audit.json" \
+    "$project_dir/.claude/.last-audit-handoff.json"; do
+  [[ -e "$stale_approval" || -L "$stale_approval" ]] && stale_approvals+=("$stale_approval")
+done
+if (( ${#stale_approvals[@]} > 0 )); then
+  printf -v stale_remove ' %q' "${stale_approvals[@]}"
+  stale_remove="rm -f --$stale_remove"
+  block_git recover "agent-tooling: remove stale .claude/.last-audit*.json: $stale_remove" \
+    "Run \`$stale_remove\`, then retry the original Git operation." \
+    'No .claude/.last-audit*.json file remains.'
+fi
 
-# Delegate to the git-level gate when installed: with core.hooksPath pointing at
-# .githooks, the same contract is enforced by .githooks/pre-commit|pre-push for
-# marked agent processes, so this PreToolUse layer steps aside only after preserving
-# markerless agent origin. The audit artifact still has a single consumer.
-# GITHOOK_DELEGATED marks the call coming FROM that git-level gate — the one
-# caller that must not be deferred, or the two layers would defer to each other
-# and everything would silently pass.
-# Defer ONLY when the delegate hook actually exists at this checkout: git skips
-# missing hooks silently, so hooksPath-configured + delegate-absent (old ref,
-# broken install) would otherwise stand BOTH layers down — a silent bypass.
-# Closed-over-open: when in doubt, gate here.
+# Delegate to the git-level gate when installed: .githooks/pre-commit and pre-push
+# enforce the same contract and rerun this script with GITHOOK_DELEGATED set, which
+# must never defer again or both layers would stand down. Defer only when the delegate
+# hook exists, because git skips a missing hook silently; when in doubt, gate here.
 if [[ -z "${GITHOOK_DELEGATED:-}" ]]; then
   hooks_path="$(git config core.hooksPath 2>/dev/null || true)"
   if [[ "$hooks_path" == *".githooks" ]]; then
@@ -1019,12 +922,12 @@ if [[ -z "${GITHOOK_DELEGATED:-}" ]]; then
         handoff_owner_start_token="$(verdict_audit_process_start_token "$handoff_owner_pid")" \
           || block_git recover 'Cannot bind agent origin to a live process; Git delegation remains blocked.' \
             'Restart the installed host launcher and recheck its process start token before retrying.' 'The same live parent PID has a verifiable start token.'
-        origin_lib="$tooling_root/.agents/lib/git-agent-origin.sh"
-        [[ -r "$origin_lib" && -r "$hooks_path/../.agents/lib/git-agent-origin.sh" ]] \
+        [[ -r "$lib_dir/git-agent-origin.sh" && -r "$hooks_path/../.agents/lib/git-agent-origin.sh" ]] \
           || block_git recover 'Installed Git hooks cannot preserve agent origin.' \
             'Update the repository tooling and reload the plugin before retrying.' 'Both installed git-agent-origin.sh libraries are readable and versions match.'
+        # Only markerless delegation records origin, so only it needs this library.
         # shellcheck source=../lib/git-agent-origin.sh
-        source "$origin_lib" || infrastructure_failure "$origin_lib could not load" 'Restore the installed origin library and verify its Bash syntax.'
+        source "$lib_dir/git-agent-origin.sh" || library_failure "$lib_dir/git-agent-origin.sh"
         git_agent_origin_record "$repo_root" "$handoff_owner_pid" "$handoff_owner_start_token" \
           || block_git recover 'Cannot record agent origin; Git delegation remains blocked.' \
             'Repair access to the origin state reported by git-agent-origin.sh, then retry through the live retained launcher.' 'The origin writer persists the current PID and start token.'

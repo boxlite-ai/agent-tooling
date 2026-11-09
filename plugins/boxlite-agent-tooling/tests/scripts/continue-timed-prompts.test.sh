@@ -55,7 +55,7 @@ mv "$scratch/expired" "$state"
 out="$(stop)"
 jq -e '.decision=="block" and (.reason|contains("edits stay blocked") and contains("Silence never overrules"))' <<<"$out" >/dev/null \
   || { printf 'FAIL: a design-decision timeout must keep edits blocked: %s\n' "$out" >&2; exit 1; }
-# Redesign approval asks once and never waits: the draft stays unposted until approved (#334).
+# Redesign approval asks once and never waits: the draft stays unposted until approved.
 jq -e '.reason | contains("Ask once in plain text") and contains("Approve the exact redesign text")
   and contains("Do not wait for a reply") and contains("Keep the draft unposted")
   and contains("Silence never overrules or approves")' <<<"$out" >/dev/null \

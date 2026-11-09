@@ -22,6 +22,8 @@ set -uo pipefail
 # one shipped beside these tests, and a two-side check reports a false pass.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$REPO_ROOT/.agents/hooks/preflight-pr-review.sh"
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -56,10 +58,7 @@ chmod +x "$TMP/gh-bin/gh"
 export PATH="$TMP/gh-bin:$PATH"
 DESIGN_FIXTURE_URL=https://github.com/example/repo/issues/123
 DOC_LINK=$'\n\n## TL;DR\n\nSummary.\n\n## How it works\n\n- Retry failed calls once.\n- '"$DESIGN_FIXTURE_URL"
-bash "$REPO_ROOT/scripts/design-doc.sh" bind "$DESIGN_FIXTURE_URL" >/dev/null
-
-pass=0
-fail=0
+bash "$REPO_ROOT/scripts/design-doc.sh" register "$DESIGN_FIXTURE_URL" >/dev/null
 
 run() {
   local desc="$1" cmd="$2" expect="$3" out decision
@@ -70,11 +69,9 @@ run() {
     decision=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null || echo "parse_error")
   fi
   if [[ "$decision" == "$expect" ]]; then
-    pass=$((pass + 1))
-    printf '  PASS  %s\n' "$desc"
+    ok "$desc"
   else
-    fail=$((fail + 1))
-    printf '  FAIL  %s  (got=%s expected=%s)\n' "$desc" "$decision" "$expect"
+    badf "$desc" 'got=%s expected=%s' "$decision" "$expect"
     printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' >&2
   fi
 }
@@ -118,18 +115,15 @@ assert_reason_budget() {
   local desc="$1" reason="$2" bytes
   bytes="$(LC_ALL=C printf '%s' "$reason" | wc -c | tr -d ' ')"
   if (( bytes <= 1200 )); then
-    pass=$((pass + 1)); printf '  PASS  %s (%s bytes)\n' "$desc" "$bytes"
+    ok "$desc ($bytes bytes)"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s (%s bytes; max 1200)\n' "$desc" "$bytes"
+    badf "$desc ($bytes bytes)" '%s bytes; max 1200' "$bytes"
   fi
 }
 
 assert_reason_contains() {
   local desc="$1" reason="$2" needle="$3"
-  case "$reason" in
-    *"$needle"*) pass=$((pass + 1)); printf '  PASS  %s\n' "$desc" ;;
-    *) fail=$((fail + 1)); printf '  FAIL  %s (missing: %s)\n' "$desc" "$needle" ;;
-  esac
+  if [[ "$reason" == *"$needle"* ]]; then ok "$desc"; else bad "$desc" "missing: $needle"; fi
 }
 
 echo "## Matcher: should pass through (not a gated gh pr invocation)"
@@ -198,7 +192,7 @@ echo "## Matcher: should gate"
 run "gh pr create direct"               "gh pr create -t foo"               "deny"
 run "gh pr edit direct"                 "gh pr edit 42 --body foo"          "deny"
 run "gh pr ready direct"                "gh pr ready 42"                    "deny"
-# gh prints help and runs nothing for help alone (#308), so it is no gated transition.
+# gh prints help and runs nothing for help alone, so it is no gated transition.
 run "help for create"                   "gh pr create --help"               "passthrough"
 run "help for edit"                     "gh pr edit --help"                 "passthrough"
 run "help for ready"                    "gh pr ready --help"                "passthrough"
@@ -321,10 +315,9 @@ run_hard_deny() { # description command
     || echo parse_error)"
   [[ "$(ack_status)" == accepted ]] && ack_state=kept || ack_state=gone
   if [[ "$decision" == deny && "$ack_state" == kept ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
+    ok "$desc"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s (decision=%s acknowledgment=%s)\n' \
-      "$desc" "$decision" "$ack_state"
+    badf "$desc" 'decision=%s acknowledgment=%s' "$decision" "$ack_state"
   fi
 }
 
@@ -335,10 +328,9 @@ run_allow_consumes() { # description command
   [[ -z "$out" ]] && decision=passthrough || decision=deny
   [[ "$(ack_status)" == consumed ]] && ack_state=gone || ack_state=kept
   if [[ "$decision" == passthrough && "$ack_state" == gone ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
+    ok "$desc"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s (decision=%s acknowledgment=%s)\n' \
-      "$desc" "$decision" "$ack_state"
+    badf "$desc" 'decision=%s acknowledgment=%s' "$decision" "$ack_state"
   fi
 }
 
@@ -393,9 +385,9 @@ multi_pr_decision="$(printf '%s' "$multi_pr_out" \
   || echo parse_error)"
 if [[ "$multi_pr_decision" == deny \
    && "$(ack_status)" == accepted ]]; then
-  pass=$((pass + 1)); printf '  PASS  multiple protected operations deny atomically without consuming one acknowledgment\n'
+  ok 'multiple protected operations deny atomically without consuming one acknowledgment'
 else
-  fail=$((fail + 1)); printf '  FAIL  multiple protected operations deny atomically without consuming one acknowledgment (decision=%s acknowledgment=%s)\n' \
+  badf 'multiple protected operations deny atomically without consuming one acknowledgment' 'decision=%s acknowledgment=%s' \
     "$multi_pr_decision" "$([[ "$(ack_status)" == accepted ]] && echo kept || echo gone)"
 fi
 run "preserved acknowledgment authorizes one retried operation" \
@@ -433,9 +425,9 @@ consume_failed=0
 for pid in "${pids[@]}"; do wait "$pid" || consume_failed=1; done
 if [[ "$consume_failed" == 0 && "$(ack_status)" == consumed && "$(ls "$TMP/consume-barrier" | wc -l | tr -d ' ')" == 2 ]] \
    && jq -es 'length==1 and .[0].hookSpecificOutput.permissionDecision=="deny"' "$TMP/consume-1" "$TMP/consume-2" >/dev/null; then
-  pass=$((pass + 1)); printf '  PASS  one request authorizes exactly one concurrent command\n'
+  ok 'one request authorizes exactly one concurrent command'
 else
-  fail=$((fail + 1)); printf '  FAIL  concurrent retries must consume the request once\n'
+  bad 'one request authorizes exactly one concurrent command' 'concurrent retries must consume the request once'
 fi
 
 write_ack "reviewed: interactive edit is unchecked"
@@ -489,9 +481,9 @@ fifo_marker_decision="$(printf '%s' "$fifo_marker_out" \
   | jq -r '.hookSpecificOutput.permissionDecision // "parse_error"' 2>/dev/null \
   || echo parse_error)"
 if [[ "$fifo_marker_rc" == 0 && "$fifo_marker_decision" == deny ]]; then
-  pass=$((pass + 1)); printf '  PASS  FIFO review request fails closed without blocking\n'
+  ok 'FIFO review request fails closed without blocking'
 else
-  fail=$((fail + 1)); printf '  FAIL  FIFO review request fails closed without blocking (rc=%s decision=%s)\n' \
+  badf 'FIFO review request fails closed without blocking' 'rc=%s decision=%s' \
     "$fifo_marker_rc" "$fifo_marker_decision"
 fi
 rm -f "$REVIEW_STATE"
@@ -507,17 +499,17 @@ replacement_out="$(jq -nc '{tool_input:{command:"gh pr ready 42"}}' |
   BASH_ENV="$consume_env" TEST_REPLACEMENT="$replacement" TEST_REQUEST="$REVIEW_STATE" "$HOOK")"
 if jq -e '.hookSpecificOutput.permissionDecision=="deny"' <<<"$replacement_out" >/dev/null \
    && jq -e --arg id "$replacement_id" '.id==$id and .status=="accepted"' "$REVIEW_STATE" >/dev/null; then
-  pass=$((pass + 1)); printf '  PASS  replacement survives and denies the old consume\n'
+  ok 'replacement survives and denies the old consume'
 else
-  fail=$((fail + 1)); printf '  FAIL  replacement must survive the old consume\n'
+  bad 'replacement survives and denies the old consume' 'replacement must survive the old consume'
 fi
 rm -f "$REVIEW_STATE"
 
-# An approval in the retired marker path cannot authorize a pending request.
+# An approval in .agents/state/pr-reviewed.json cannot authorize a pending request.
 jq -nc '{tool_input:{command:"gh pr ready 42"}}' | "$HOOK" >/dev/null
 jq -nc --arg branch "$BRANCH" --arg head "$HEAD_SHA" --arg request "$(jq -r .id "$REVIEW_STATE")" \
   '{branch:$branch,head:$head,request:$request,message:"reviewed: old marker"}' > "$TMP/.agents/state/pr-reviewed.json"
-run "legacy marker cannot authorize the command" "gh pr ready 42" "deny"
+run "pr-reviewed.json marker cannot authorize the command" "gh pr ready 42" "deny"
 rm -f "$TMP/.agents/state/pr-reviewed.json"
 
 echo
@@ -582,11 +574,10 @@ BULLET_BODY=$'- Routine SDK CI: 21 jobs -> 11.\n- Full compatibility matrix stil
 EXAMPLE_BODY=$'Example: change only the Python image -> build Python, skip Node.\nVerified with the image-selection test.'
 SEQUENCE_BODY=$'```mermaid\nsequenceDiagram\n  Contributor->>CI: Push SDK change\n  CI->>Runner: Run focused matrix\n```'
 TABLE_BODY=$'| Trigger | Matrix |\n| --- | --- |\n| PR | Focused |\n| Weekly | Full |'
-# Include a formerly valid graph so the old gate reaches the oversized body,
-# rather than denying for the unrelated lack of a graph.
-LEGACY_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
-LONG_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
-LONG_UNSPACED_BODY="$LEGACY_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
+# Each long body opens with a call-graph section; only its length decides.
+CALL_GRAPH=$'## Call graph\n\n```text\nBefore\n  old_path (Gate · src/gate.sh:10)\nAfter\n  new_path (Gate · src/gate.sh:20)\n```'
+LONG_BODY="$CALL_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<201; i++) printf "word "}')"
+LONG_UNSPACED_BODY="$CALL_GRAPH"$'\n'"$(awk 'BEGIN {for (i=0; i<2001; i++) printf "字"}')"
 # Six 20-word items keep these long bodies inside the structure limits.
 LIMIT_WORDS_BODY="$(printf -- '- Each of these list items contains twenty words and keeps this example within the writing limits for a review summary.\n%.0s' {1..6})"
 LIMIT_CHARS_BODY="$(awk 'BEGIN {for (i=0; i<40; i++) printf "字"}')"
@@ -622,13 +613,13 @@ run_body "fix without a separate bug issue → allow" "gh pr create $FIX --body 
 run_body "empty body → deny" "gh pr create $FEAT --body ''" "deny"
 WHITESPACE_BODY=$' \n\t'
 run_body "whitespace body → deny" "gh pr create $FEAT --body '$WHITESPACE_BODY'" "deny"
-run_body "oversized description with valid legacy graph → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"
+run_body "oversized description with a call graph → deny" "gh pr create $FEAT --body '$LONG_BODY'" "deny"
 run_body "unspaced text cannot evade the size limit → deny" "gh pr create $FEAT --body '$LONG_UNSPACED_BODY'" "deny"
 run_body "120 words in a list → allow" "gh pr create $FEAT --body '$LIMIT_WORDS_BODY'" "passthrough"
 run_body "121 words in a list → allow" "gh pr create $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
 run_body "long structured body edit → allow" "gh pr edit 42 $FEAT --body '$OVER_WORDS_BODY'" "passthrough"
 run_body "40 Chinese characters at the paragraph boundary → allow" "gh pr create $FEAT --body '$LIMIT_CHARS_BODY'" "passthrough"
-# The 40-word density cap is gone, and Chinese sentences skip the word limit (#419).
+# No density cap applies, and Chinese sentences skip the word limit.
 run_body "41 Chinese characters → allow" "gh pr create $FEAT --body '$OVER_CHARS_BODY'" "passthrough"
 run_body "2000 four-byte characters plus summary → allow" "gh pr create $FEAT --body '$EMOJI_BODY'" "passthrough"
 run_body "body over 8,000 characters plus summary → allow" "gh pr create $FEAT --body '$HUGE_BODY'" "passthrough"
@@ -663,9 +654,9 @@ fifo_body_decision="$(printf '%s' "$fifo_body_out" \
   | jq -r '.hookSpecificOutput.permissionDecision // "parse_error"' 2>/dev/null \
   || echo parse_error)"
 if [[ "$fifo_body_rc" == 0 && "$fifo_body_decision" == deny ]]; then
-  pass=$((pass + 1)); printf '  PASS  FIFO body file fails closed without blocking\n'
+  ok 'FIFO body file fails closed without blocking'
 else
-  fail=$((fail + 1)); printf '  FAIL  FIFO body file fails closed without blocking (rc=%s decision=%s)\n' \
+  badf 'FIFO body file fails closed without blocking' 'rc=%s decision=%s' \
     "$fifo_body_rc" "$fifo_body_decision"
 fi
 rm -f "$TMP/body.md" "$REVIEW_STATE"
@@ -786,8 +777,8 @@ for contract in "Ask once in plain text" "reviewed:" \
   assert_reason_contains "ack reason keeps '$contract'" "$ack_reason" "$contract"
 done
 
-# A long but valid ref used to push the rendered reason over its cap. The generic
-# fallback then removed the only instructions capable of satisfying the gate.
+# A long but valid ref must not push the rendered reason over its cap: the generic
+# fallback would drop the only instructions capable of satisfying the gate.
 long_segment="$(printf '%0180d' 0 | tr 0 b)"
 long_branch="$long_segment/$long_segment/$long_segment/$long_segment"
 LONG_REPO="$TMP/long-branch-repo"
@@ -796,7 +787,7 @@ git init -q -b "$long_branch" "$LONG_REPO"
 git -C "$LONG_REPO" -c user.email=t@t -c user.name=t \
   commit -q --allow-empty -m init
 mkdir -p "$LONG_STATE/.agents/state"
-(cd "$LONG_REPO" && bash "$REPO_ROOT/scripts/design-doc.sh" bind "$DESIGN_FIXTURE_URL") >/dev/null
+(cd "$LONG_REPO" && bash "$REPO_ROOT/scripts/design-doc.sh" register "$DESIGN_FIXTURE_URL") >/dev/null
 long_reason="$(reason_for_repo "$LONG_REPO" "$LONG_STATE" 'gh pr ready 42')"
 assert_reason_budget "long-ref fallback stays bounded" "$long_reason"
 for contract in "Ask once in plain text" "reviewed:" \
@@ -809,9 +800,9 @@ record_ack "$long_request" 'long branch protocol'
 long_retry="$(printf '%s' 'gh pr ready 42' | jq -Rs '{tool_input:{command:.}}' \
   | (cd "$LONG_REPO" && CLAUDE_PROJECT_DIR="$LONG_STATE" "$HOOK"))"
 if [[ -z "$long_retry" && "$(ack_status "$long_request")" == consumed ]]; then
-  pass=$((pass + 1)); printf '  PASS  long-ref fallback protocol reaches a successful retry\n'
+  ok 'long-ref fallback protocol reaches a successful retry'
 else
-  fail=$((fail + 1)); printf '  FAIL  long-ref fallback protocol reaches a successful retry\n'
+  bad 'long-ref fallback protocol reaches a successful retry'
 fi
 
 write_ack "reviewed: stale head"
@@ -844,7 +835,7 @@ echo "## Review prompts are loaded at the public hook boundary"
 fixture_plugin="$TMP/prompt-plugin"
 mkdir -p "$fixture_plugin/.agents/hooks/pr" "$fixture_plugin/.agents/lib" "$fixture_plugin/.agents/prompts"
 cp "$HOOK" "$fixture_plugin/.agents/hooks/"
-cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,user-question,hook-host,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-target,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
+cp "$REPO_ROOT/.agents/lib/"{verdict-audit-state,subagent,user-question,hook-host,shell-scan,reply-summary,github-writing,concise-writing,timed-user-prompt,pr-target,pr-size,design-doc,pr-description}.sh "$fixture_plugin/.agents/lib/"
 cp "$REPO_ROOT/.agents/lib/"{pr-size.jq,reply-summary.pl,user-question-policy.jq} "$fixture_plugin/.agents/lib/"
 mkdir -p "$fixture_plugin/.agents/skills/boxlite-writing"
 cp "$REPO_ROOT/.agents/skills/boxlite-writing/SKILL.md" "$fixture_plugin/.agents/skills/boxlite-writing/"
@@ -885,9 +876,9 @@ for skill_state in changed missing; do
   body_reason="$(reason_for "gh pr create $FEAT --body ''")"
   assert_reason_contains "$skill_state skill leaves its name in PR guidance" "$body_reason" 'boxlite-writing'
   if [[ "$body_reason" != *'Unique writing policy marker.'* ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s skill body is not embedded\n' "$skill_state"
+    ok "$skill_state skill body is not embedded"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s skill body is embedded\n' "$skill_state"
+    badf "$skill_state skill body is not embedded" '%s skill body is embedded' "$skill_state"
   fi
 done
 
@@ -907,9 +898,9 @@ for prompt_file in "$fixture_plugin/.agents/prompts/pr/"{pr-review-ack,pr-review
     prompt_status=$?
     if [[ "$prompt_status" == 2 && ! -s "$TMP/prompt-stdout" \
        && -s "$TMP/prompt-stderr" && "$(ack_status)" == accepted ]]; then
-      pass=$((pass + 1)); printf '  PASS  %s %s fails closed without spending acknowledgment\n' "$invalid" "$prompt_name"
+      ok "$invalid $prompt_name fails closed without spending acknowledgment"
     else
-      fail=$((fail + 1)); printf '  FAIL  %s %s must fail closed (exit=%s)\n' "$invalid" "$prompt_name" "$prompt_status"
+      badf "$invalid $prompt_name fails closed without spending acknowledgment" 'exit=%s' "$prompt_status"
     fi
   done
   cp "$TMP/prompt-backup" "$prompt_file"
@@ -922,10 +913,9 @@ jq -nc '{tool_input:{command:"gh pr ready 42"}}' | "$HOOK" \
 prompt_status=$?
 if [[ "$prompt_status" == 2 && ! -s "$TMP/prompt-stdout" \
    && -s "$TMP/prompt-stderr" && "$(ack_status)" == accepted ]]; then
-  pass=$((pass + 1)); printf '  PASS  oversized recovery fails closed without spending acknowledgment\n'
+  ok 'oversized recovery fails closed without spending acknowledgment'
 else
-  fail=$((fail + 1)); printf '  FAIL  oversized recovery must fail closed (exit=%s)\n' "$prompt_status"
+  badf 'oversized recovery fails closed without spending acknowledgment' 'exit=%s' "$prompt_status"
 fi
 
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

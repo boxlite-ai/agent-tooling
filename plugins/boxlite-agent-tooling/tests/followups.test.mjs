@@ -569,84 +569,43 @@ test('a full capture queue still has room to approve and send an accepted draft'
 });
 
 
-test('a path-keyed journal keeps its approval after migration and checkout rename', t => {
-  const { repo } = fixture(t);
-  const root = join(dirname(repo), 'legacy-state');
-  const registryRoot = join(dirname(repo), 'legacy-registry');
-  const legacyClone = cloneIdentity(repo, { legacy: true });
-  const legacy = openFollowupQueue(root, legacyClone, { initialize: true, registryRoot });
-  legacy.enroll('tooling', DESTINATION);
-  const draft = approveDraft(legacy, 'legacy fixture');
-  const clone = cloneIdentity(repo);
-  openFollowupQueue(root, clone, { legacyClone, registryRoot });
-  const renamed = join(dirname(repo), 'renamed');
-  renameSync(repo, renamed);
-  const [stored] = openFollowupQueue(root, cloneIdentity(renamed), { registryRoot }).status();
-  assert.equal(stored.id, draft.id);
-  assert.equal(stored.approved, true);
-  assert.equal(stored.released, true);
-});
-
-
-test('a renamed legacy clone cannot create another journal before recovery', t => {
-  const { repo } = fixture(t);
-  const root = join(dirname(repo), 'legacy-state');
-  const registryRoot = join(dirname(repo), 'legacy-registry');
-  const oldCommon = execFileSync('git', ['-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
-    { encoding: 'utf8' }).trim();
-  const legacyClone = cloneIdentity(repo, { legacy: true });
-  const legacy = openFollowupQueue(root, legacyClone, { initialize: true, registryRoot });
-  legacy.enroll('tooling', DESTINATION);
-  const draft = approveDraft(legacy, 'legacy rename');
-  const registry = new DatabaseSync(join(registryRoot, 'roots.sqlite'));
-  try { registry.prepare('DELETE FROM journal_keys WHERE clone = ?').run(legacyClone); }
-  finally { registry.close(); }
-
-  const renamed = join(dirname(repo), 'renamed');
-  renameSync(repo, renamed);
-  const clone = cloneIdentity(renamed);
-  assert.throws(() => openFollowupQueue(root, clone, {
-    initialize: true, registryRoot, legacyClone: cloneIdentity(renamed, { legacy: true }),
-  }), /previous Git common directory/);
-  assert.throws(() => openFollowupQueue(root, clone, {
-    initialize: true, registryRoot, requireLegacy: true,
-    legacyClone: cloneIdentity(renamed, { legacyPath: join(dirname(repo), 'wrong', '.git') }),
-  }), /Legacy follow-up journal was not found/);
-  const recovered = openFollowupQueue(root, clone, {
-    initialize: true, registryRoot, requireLegacy: true, legacyClone: cloneIdentity(renamed, { legacyPath: oldCommon }),
-  });
-  assert.equal(recovered.status()[0].id, draft.id);
-  assert.equal(recovered.status()[0].approved, true);
-  assert.equal(recovered.status()[0].released, true);
-});
-
-test('upgrading the journal removes ownerless handles and preserves live sessions and attempts', async t => {
+test('a version 1 journal fails closed with re-initialization steps and stays unchanged', t => {
   const { queue, state } = fixture(t);
   queue.enroll('tooling', DESTINATION);
-  const draft = approveDraft(queue, 'ambiguous legacy create');
-  await drainFollowups(queue, async query => {
-    if (query.includes('viewer')) return { viewer: { id: 'U_original' } };
-    throw new Error('Lost create response');
-  });
-  const old = { root: true, clone: queue.clone, native: 'ownerless', instance: 'old', prompt: 'old', cursor: 0 };
-  const abandoned = queue.start(old);
-  const live = { ...old, native: 'live' };
-  const liveHandle = queue.start(live);
+  approveDraft(queue, 'version 1 draft');
   const file = join(state, queue.clone, 'queue.sqlite');
-  const db = new DatabaseSync(file);
-  try {
-    const prior = JSON.parse(db.prepare('SELECT document FROM queue WHERE id = 1').get().document);
-    prior.version = 1;
-    delete prior.sessions[abandoned].owner;
-    db.prepare('UPDATE queue SET document = ? WHERE id = 1').run(JSON.stringify(prior));
-  } finally { db.close(); }
+  const rewrite = edit => {
+    const db = new DatabaseSync(file);
+    try {
+      const document = JSON.parse(db.prepare('SELECT document FROM queue WHERE id = 1').get().document);
+      edit(document);
+      db.prepare('UPDATE queue SET document = ? WHERE id = 1').run(JSON.stringify(document));
+      return document;
+    } finally { db.close(); }
+  };
+  const prior = rewrite(document => { document.version = 1; });
 
   const next = openFollowupQueue(state, queue.clone);
-  assert.throws(() => next.capture(old, { action: 'list', handle: abandoned }), /live root session/);
-  assert.deepEqual(next.capture(live, { action: 'list', handle: liveHandle }), { drafts: [] });
-  assert.equal(next.status()[0].id, draft.id);
-  assert.equal(next.status()[0].attempt.status, 'pending');
-  assert.equal(next.publish(state => state.version), 2);
+  assert.throws(() => next.status(), error =>
+    error.message.includes(`unsupported release: ${join(realpathSync(state), queue.clone)}; move it aside if present, and run init`));
+  assert.deepEqual(rewrite(() => {}), prior);
+});
+
+test('a bound clone without its journal fails closed until its binding is re-initialized', t => {
+  const { repo } = fixture(t);
+  const root = join(dirname(repo), 'bound-state');
+  const registryRoot = join(dirname(repo), 'bound-registry');
+  const registryFile = join(registryRoot, 'roots.sqlite');
+  const clone = cloneIdentity(repo);
+  openFollowupQueue(root, clone, { initialize: true, registryRoot });
+  // Move the journal away from the bound clone key.
+  renameSync(join(root, clone), join(root, 'f'.repeat(64)));
+
+  const reinit = error => error.message.includes(`, delete ${registryFile}, and run init`);
+  assert.throws(() => openFollowupQueue(root, clone, { registryRoot }), reinit);
+  assert.throws(() => openFollowupQueue(root, clone, { initialize: true, registryRoot }), reinit);
+  rmSync(registryFile);
+  assert.deepEqual(openFollowupQueue(root, clone, { initialize: true, registryRoot }).status(), []);
 });
 
 test('status bounds completed history and older pages retain deduplication', t => {

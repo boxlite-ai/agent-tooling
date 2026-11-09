@@ -37,7 +37,7 @@ fail() {
   exit 1
 }
 prepare() {
-  jq -nc '{binding:{head:"fixture"},snapshot:{transcript:("x" * 300000),tree:"fixture"}}' \
+  jq -nc '{binding:{head:"fixture"},snapshot:{transcript:("x" * 300000),tree:"fixture"},deadline:4102444800}' \
     | bash "$cli" "$context" prepare "$1" > prepared || return
   state="$(jq -r .state_path prepared)"
 }
@@ -76,7 +76,7 @@ case "$1" in
     budget="$(jq -cS 'del(.closed)' "$state" | wc -c)"
     budget=$(( budget - 1 + 524288 - 1 ))
     { cat "$state"; jq -nc --argjson context "$context" \
-        '{context:$context,attempt:{id:"policy-2",binding:{head:"fixture"},snapshot:{tree:"fixture"}}}'; } \
+        '{context:$context,attempt:{id:"policy-2",binding:{head:"fixture"},snapshot:{tree:"fixture"},deadline:4102444800}}'; } \
       | jq -ceSs -L "$plugin/.agents/lib" --arg operation prepare \
         --argjson history_max_bytes "$budget" -f "$plugin/.agents/lib/audit-reflection.jq" \
         > rejected 2> rejection && fail 'preparation did not reserve capacity for the result'
@@ -105,7 +105,7 @@ case "$1" in
       | jq -e '.exhausted and (.state.attempts | length) < 16' >/dev/null \
       || fail 'capacity exhaustion is not exposed before the attempt limit'
     cp "$state" preserved
-    jq -nc '{binding:{head:"fixture"},snapshot:{transcript:"next",tree:"fixture"}}' \
+    jq -nc '{binding:{head:"fixture"},snapshot:{transcript:"next",tree:"fixture"},deadline:4102444800}' \
       | bash "$cli" "$context" prepare extra > rejected 2> rejection && fail 'exhausted history accepted another audit'
     [[ "$(cat rejection)" == *"exhausted"* ]] || fail 'capacity rejection lacks a diagnostic'
     jq -nc '{session_id:"capacity-session",stop_hook_active:false,

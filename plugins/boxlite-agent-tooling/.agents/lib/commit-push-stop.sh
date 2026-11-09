@@ -52,7 +52,7 @@ audit_attempt_stop_check() {  # repo session-scope stop-hook-active [auditor] [h
   fi
   if [[ -n "$document" ]]; then
     state=recorded
-    if jq -e 'any(.findings[]?; startswith("unchecked:") or startswith("high: unchecked:"))' \
+    if jq -e 'any(.findings[]?; startswith("high: unchecked:"))' \
         <<<"$document" >/dev/null; then
       state=unchecked
     fi

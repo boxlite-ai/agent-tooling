@@ -10,8 +10,6 @@
 #      request bound to this checkout, target, and head.
 #   3. On retry, the gate rechecks the target and consumes the request once.
 #
-# Wired in .claude/settings.json under hooks.PreToolUse with matcher "Bash".
-#
 # Design notes
 # ------------
 # * Matcher scope: same reason as preflight-commit-push.sh — PreToolUse matchers
@@ -44,6 +42,15 @@ else
   command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // ""')"
 fi
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+lib_dir="$tooling_root/.agents/lib"
+load_failure() {  # library file name
+  printf 'preflight-pr-review: cannot load %s\n' "$lib_dir/$1" >&2
+  exit 2
+}
+# shellcheck source=../lib/shell-scan.sh
+source "$lib_dir/shell-scan.sh" || load_failure shell-scan.sh
+# shellcheck source=../lib/hook-host.sh
+source "$lib_dir/hook-host.sh" || load_failure hook-host.sh
 writing_error=""
 writing_error_reminds=1
 writing_loaded=0
@@ -51,25 +58,20 @@ writing_inspected_count=0
 
 load_writing_policy() {
   (( writing_loaded == 0 )) || return 0
-  local library dependency
+  local dependency
   for dependency in perl jq; do
     command -v "$dependency" >/dev/null 2>&1 || {
       printf 'preflight-pr-review: %s is required for GitHub writing checks.\n' "$dependency" >&2
       exit 2
     }
   done
-  for library in reply-summary.sh reply-summary.pl github-writing.sh concise-writing.sh; do
-    [[ -r "$tooling_root/.agents/lib/$library" ]] || {
-      printf 'preflight-pr-review: writing library unavailable: %s\n' "$library" >&2
-      exit 2
-    }
-  done
+  [[ -r "$lib_dir/reply-summary.pl" ]] || load_failure reply-summary.pl
   # shellcheck source=../lib/reply-summary.sh
-  source "$tooling_root/.agents/lib/reply-summary.sh"
+  source "$lib_dir/reply-summary.sh" || load_failure reply-summary.sh
   # shellcheck source=../lib/github-writing.sh
-  source "$tooling_root/.agents/lib/github-writing.sh"
+  source "$lib_dir/github-writing.sh" || load_failure github-writing.sh
   # shellcheck source=../lib/concise-writing.sh
-  source "$tooling_root/.agents/lib/concise-writing.sh"
+  source "$lib_dir/concise-writing.sh" || load_failure concise-writing.sh
   writing_loaded=1
 }
 
@@ -115,9 +117,10 @@ prepare_file_publication() {
     *) reject_pr "$usage" ;;
   esac
   # shellcheck source=../lib/verdict-audit-state.sh
-  source "$tooling_root/.agents/lib/verdict-audit-state.sh" || exit 2
+  source "$lib_dir/verdict-audit-state.sh" || load_failure verdict-audit-state.sh
   # shellcheck source=../lib/github-body-file.sh
-  source "$tooling_root/.agents/lib/github-body-file.sh" || exit 2
+  source "$lib_dir/github-body-file.sh" || load_failure github-body-file.sh
+  github_body_file_error="" github_body_file_text="" github_body_file_sha256=""
   github_body_file_read "$path" 'PR body file' || reject_pr "$github_body_file_error"
   publish_body="$github_body_file_text"
   publish_body_sha256="$github_body_file_sha256"
@@ -157,7 +160,7 @@ publish_checked_pr() {
   url="${output%$'\n'}"
   if (( status == 0 )) && [[ "${BOXLITE_PR_WATCH:-1}" != 0 ]]; then
     # shellcheck source=../lib/pr-watch-state.sh
-    if source "$tooling_root/.agents/lib/pr-watch-state.sh" \
+    if source "$lib_dir/pr-watch-state.sh" \
        && pr_watch_url_is_valid "$url" \
        && checkout="$(pr_watch_checkout_digest "$repo_root")"; then
       printf 'boxlite-pr-write %s %s\n' "$checkout" "$url" >&2
@@ -167,7 +170,7 @@ publish_checked_pr() {
 }
 
 # Bourne-Again, its POSIX mode, the Z shell and Debian Almquist build the same argv
-# around these output redirections (#308): an optional 1 or 2, then >, >> or >| with a
+# around these output redirections: an optional 1 or 2, then >, >> or >| with a
 # fused or separate plain target, or 1>&2-style duplication and closing. Input
 # redirections can feed gh text (`-F query=@-`), and other forms split the shells, so
 # both keep the command non-literal.
@@ -489,7 +492,7 @@ inspect_simple_command() {
       if [[ "$token" == *=* && ${shell_word_dynamics[$payload_index]} == 0 ]]; then
         payload="${token#*=}"
         recursive_scan_depth=$((recursive_scan_depth + 1))
-        scan_command_fragment "$payload"
+        shell_scan_fragment "$payload"
         recursive_scan_depth=$((recursive_scan_depth - 1))
         if [[ "$payload" =~ (^|[[:space:]])([^[:space:]]*/)?gh([[:space:]]|$) ]]; then
           # An alias may define only `gh` or `gh pr` and receive the remaining
@@ -521,7 +524,7 @@ inspect_simple_command() {
       opaque_protected_count=$((opaque_protected_count + 1))
     elif [[ -n "$payload" ]]; then
       recursive_scan_depth=$((recursive_scan_depth + 1))
-      scan_command_fragment "$payload"
+      shell_scan_fragment "$payload"
       recursive_scan_depth=$((recursive_scan_depth - 1))
     fi
     return 0
@@ -705,7 +708,7 @@ inspect_simple_command() {
               else
                 payload="${shell_words[$payload_index]}"
                 recursive_scan_depth=$((recursive_scan_depth + 1))
-                scan_command_fragment "$payload"
+                shell_scan_fragment "$payload"
                 recursive_scan_depth=$((recursive_scan_depth - 1))
               fi
               return 0
@@ -825,7 +828,7 @@ inspect_simple_command() {
     inspect_github_writing "$github_group_index"
     return 0
   fi
-  # gh prints help and runs nothing for help alone (#308), so `[selector] --help|-h`
+  # gh prints help and runs nothing for help alone, so `[selector] --help|-h`
   # is no transition and is claimed like other pr commands; any other argument keeps
   # the full grammar below.
   if is_pr_help_request "$((subcmd_index + 1))"; then
@@ -1019,8 +1022,8 @@ inspect_simple_command() {
   elif [[ "$subcmd" == edit ]]; then
     edit_scan_start="$index"
 
-    # A literal selector may precede edit flags. It is kept for compatibility,
-    # but a dynamic/globbed selector cannot be bound to the inspected command.
+    # A literal selector may precede edit flags. A dynamic or globbed selector
+    # cannot be bound to the inspected command.
     if (( index < word_count )) && [[ "${shell_words[$index]}" != -* ]]; then
       if [[ "${shell_words[$index]}" == *://* ]] \
          || (( shell_word_dynamics[$index] \
@@ -1274,44 +1277,6 @@ inspect_simple_command() {
   done
 }
 
-finish_shell_word() {
-  local completed_word completed_quoted completed_escaped
-  (( shell_word_started )) || return 0
-  completed_word="$shell_word"
-  completed_quoted="$shell_word_quoted"
-  completed_escaped="$shell_word_escaped"
-  shell_words[${#shell_words[@]}]="$shell_word"
-  shell_word_quotes[${#shell_word_quotes[@]}]="$shell_word_quoted"
-  shell_word_dynamics[${#shell_word_dynamics[@]}]="$shell_word_dynamic"
-  shell_word_unquoted_dynamics[${#shell_word_unquoted_dynamics[@]}]="$shell_word_unquoted_dynamic"
-  shell_word_unquoted_globs[${#shell_word_unquoted_globs[@]}]="$shell_word_unquoted_glob"
-  shell_word_redirections[${#shell_word_redirections[@]}]="$shell_word_redirection"
-  shell_word_escapes[${#shell_word_escapes[@]}]="$completed_escaped"
-  shell_word=""
-  shell_word_started=0
-  shell_word_quoted=0
-  shell_word_dynamic=0
-  shell_word_unquoted_dynamic=0
-  shell_word_unquoted_glob=0
-  shell_word_redirection=0
-  shell_word_escaped=0
-  if (( heredoc_expect )); then
-    pending_heredoc_delimiter="$completed_word"
-    pending_heredoc_expands=$(( completed_quoted == 0 && completed_escaped == 0 ))
-    heredoc_expect=0
-  elif [[ "$completed_word" =~ ^[0-9]*\<\<(-?)(.*)$ \
-       && "${BASH_REMATCH[2]}" != \<* ]]; then
-    heredoc_strip_tabs=0
-    [[ "${BASH_REMATCH[1]}" != - ]] || heredoc_strip_tabs=1
-    if [[ -n "${BASH_REMATCH[2]}" ]]; then
-      pending_heredoc_delimiter="${BASH_REMATCH[2]}"
-      pending_heredoc_expands=$(( completed_quoted == 0 && completed_escaped == 0 ))
-    else
-      heredoc_expect=1
-    fi
-  fi
-}
-
 # If the direct-command recognizer did not claim this simple command, look for a
 # still-visible protected argv sequence later in it. That sequence may be behind
 # a launcher, leading redirection, or an executable glob. We cannot authorize
@@ -1442,7 +1407,7 @@ detect_visible_protected_sequence() {
 finish_simple_command() {
   local protected_before="$protected_count" opaque_before="$opaque_protected_count"
   local writing_before="$writing_inspected_count" file_launchers_before="$file_launcher_count"
-  finish_shell_word
+  shell_scan_finish_word
   inspect_simple_command
   if (( protected_count == protected_before \
      && opaque_protected_count == opaque_before \
@@ -1459,357 +1424,12 @@ finish_simple_command() {
   shell_word_escapes=()
 }
 
-# `$()` source is executable even when its surrounding word is double quoted.
-# Extract it without executing, mark the outer word uninspectable, and scan the
-# nested source as its own command fragment. Single quotes and escaped dollars
-# never call this path, so literal examples remain inert.
-scan_dollar_substitution() {
-  local sub_start=$((scan_index + 2)) sub_index="$((scan_index + 2))"
-  local sub_depth=1 sub_quote="" sub_escaped=0 sub_comment=0 sub_char=""
-  local sub_source=""
-  while (( sub_index < scan_length )); do
-    sub_char="${command_fragment:$sub_index:1}"
-    if (( sub_comment )); then
-      [[ "$sub_char" == $'\n' ]] && sub_comment=0
-    elif (( sub_escaped )); then
-      sub_escaped=0
-    elif [[ "$sub_quote" == "'" ]]; then
-      [[ "$sub_char" == "'" ]] && sub_quote=""
-    elif [[ "$sub_quote" == '"' ]]; then
-      case "$sub_char" in
-        '"') sub_quote="" ;;
-        \\)
-          if (( sub_index + 1 < scan_length )); then
-            case "${command_fragment:$((sub_index + 1)):1}" in
-              '$'|'`'|'"'|\\|$'\n') sub_escaped=1 ;;
-            esac
-          fi
-          ;;
-      esac
-    else
-      case "$sub_char" in
-        \\) sub_escaped=1 ;;
-        "'"|'"') sub_quote="$sub_char" ;;
-        '#') sub_comment=1 ;;
-        '(') sub_depth=$((sub_depth + 1)) ;;
-        ')')
-          sub_depth=$((sub_depth - 1))
-          (( sub_depth > 0 )) || break
-          ;;
-      esac
-    fi
-    sub_index=$((sub_index + 1))
-  done
-  sub_source="${command_fragment:$sub_start:$((sub_index - sub_start))}"
-  shell_word_started=1
-  shell_word_dynamic=1
-  [[ "$scan_quote" == '"' ]] || shell_word_unquoted_dynamic=1
-  scan_command_fragment "$sub_source"
-  if (( sub_index < scan_length )); then
-    scan_index="$sub_index"
-  else
-    scan_index=$((scan_length - 1))
-  fi
-}
-
-scan_backtick_substitution() {
-  local sub_start=$((scan_index + 1)) sub_index=$((scan_index + 1))
-  local sub_escaped=0 sub_char="" sub_source=""
-  while (( sub_index < scan_length )); do
-    sub_char="${command_fragment:$sub_index:1}"
-    if (( sub_escaped )); then
-      sub_escaped=0
-    elif [[ "$sub_char" == \\ ]]; then
-      sub_escaped=1
-    elif [[ "$sub_char" == '`' ]]; then
-      break
-    fi
-    sub_index=$((sub_index + 1))
-  done
-  sub_source="${command_fragment:$sub_start:$((sub_index - sub_start))}"
-  shell_word_started=1
-  shell_word_dynamic=1
-  [[ "$scan_quote" == '"' ]] || shell_word_unquoted_dynamic=1
-  scan_command_fragment "$sub_source"
-  if (( sub_index < scan_length )); then
-    scan_index="$sub_index"
-  else
-    scan_index=$((scan_length - 1))
-  fi
-}
-
-scan_heredoc_expansions() {
-  local command_fragment="$1"
-  local scan_index=0 scan_length="${#command_fragment}" scan_escaped=0
-  local scan_char="" scan_next="" shell_word_started=0 shell_word_dynamic=0
-  while (( scan_index < scan_length )); do
-    scan_char="${command_fragment:$scan_index:1}"
-    scan_next=""
-    (( scan_index + 1 >= scan_length )) \
-      || scan_next="${command_fragment:$((scan_index + 1)):1}"
-    if (( scan_escaped )); then
-      scan_escaped=0
-    else
-      case "$scan_char" in
-        \\) scan_escaped=1 ;;
-        '$')
-          [[ "$scan_next" != '(' ]] || scan_dollar_substitution
-          ;;
-        '`') scan_backtick_substitution ;;
-      esac
-    fi
-    scan_index=$((scan_index + 1))
-  done
-}
-
-skip_pending_heredoc() {
-  local line_start=$((scan_index + 1)) line_end line heredoc_body=""
-  [[ -n "$pending_heredoc_delimiter" ]] || return 0
-  while (( line_start <= scan_length )); do
-    line_end="$line_start"
-    while (( line_end < scan_length )) \
-       && [[ "${command_fragment:$line_end:1}" != $'\n' ]]; do
-      line_end=$((line_end + 1))
-    done
-    line="${command_fragment:$line_start:$((line_end - line_start))}"
-    [[ "$line" != *$'\r' ]] || line="${line%$'\r'}"
-    if (( heredoc_strip_tabs )); then
-      line="${line#"${line%%[!$'\t']*}"}"
-    fi
-    if [[ "$line" == "$pending_heredoc_delimiter" ]]; then
-      if (( pending_heredoc_executes_body )); then
-        ambiguous_execution_context=1
-        recursive_scan_depth=$((recursive_scan_depth + 1))
-        scan_command_fragment "$heredoc_body"
-        recursive_scan_depth=$((recursive_scan_depth - 1))
-      elif (( pending_heredoc_expands )); then
-        scan_heredoc_expansions "$heredoc_body"
-      fi
-      pending_heredoc_delimiter=""
-      pending_heredoc_expands=0
-      pending_heredoc_executes_body=0
-      scan_index="$line_end"
-      return 0
-    fi
-    heredoc_body+="$line"$'\n'
-    (( line_end < scan_length )) || break
-    line_start=$((line_end + 1))
-  done
-  if (( pending_heredoc_executes_body )); then
-    ambiguous_execution_context=1
-    recursive_scan_depth=$((recursive_scan_depth + 1))
-    scan_command_fragment "$heredoc_body"
-    recursive_scan_depth=$((recursive_scan_depth - 1))
-  elif (( pending_heredoc_expands )); then
-    scan_heredoc_expansions "$heredoc_body"
-  fi
-  scan_index=$((scan_length - 1))
-}
-
-scan_command_fragment() {
-  local command_fragment="$1"
-  local -a shell_words=() shell_word_quotes=() shell_word_dynamics=()
-  local -a shell_word_unquoted_dynamics=()
-  local -a shell_word_unquoted_globs=()
-  local -a shell_word_redirections=() shell_word_escapes=()
-  local shell_word="" shell_word_started=0 shell_word_quoted=0 shell_word_dynamic=0
-  local shell_word_escaped=0 shell_word_unquoted_dynamic=0 shell_word_unquoted_glob=0
-  local shell_word_redirection=0
-  local scan_index=0 scan_length="${#command_fragment}" scan_quote=""
-  local scan_escaped=0 scan_comment=0 scan_char="" scan_next=""
-  local pending_heredoc_delimiter="" pending_heredoc_expands=0
-  local pending_heredoc_executes_body=0
-  local heredoc_expect=0 heredoc_strip_tabs=0
-  while (( scan_index < scan_length )); do
-    scan_char="${command_fragment:$scan_index:1}"
-    scan_next=""
-    (( scan_index + 1 >= scan_length )) \
-      || scan_next="${command_fragment:$((scan_index + 1)):1}"
-    if (( scan_comment )); then
-      if [[ "$scan_char" == $'\n' ]]; then
-        scan_comment=0
-        finish_simple_command
-        skip_pending_heredoc
-      fi
-      scan_index=$((scan_index + 1))
-      continue
-    fi
-    if (( scan_escaped )); then
-      # Bash removes an escaped physical newline before tokenization.
-      if [[ "$scan_char" != $'\n' ]]; then
-        shell_word+="$scan_char"
-        shell_word_started=1
-        shell_word_escaped=1
-      fi
-      scan_escaped=0
-      scan_index=$((scan_index + 1))
-      continue
-    fi
-    if [[ "$scan_quote" == "'" ]]; then
-      if [[ "$scan_char" == "'" ]]; then
-        scan_quote=""
-      else
-        shell_word+="$scan_char"
-      fi
-      shell_word_started=1
-      scan_index=$((scan_index + 1))
-      continue
-    fi
-    if [[ "$scan_quote" == ansi ]]; then
-      if (( scan_escaped )); then
-        shell_word+="$scan_char"
-        scan_escaped=0
-      elif [[ "$scan_char" == \\ ]]; then
-        shell_word+="$scan_char"
-        scan_escaped=1
-      elif [[ "$scan_char" == "'" ]]; then
-        scan_quote=""
-      else
-        shell_word+="$scan_char"
-      fi
-      shell_word_started=1
-      scan_index=$((scan_index + 1))
-      continue
-    fi
-    if [[ "$scan_quote" == '"' ]]; then
-      case "$scan_char" in
-        '"') scan_quote="" ;;
-        \\)
-          # Bash keeps a double-quoted backslash unless it precedes $, `, ",
-          # backslash, or a physical newline. Preserve the resulting argv.
-          case "$scan_next" in
-            '$'|'`'|'"'|\\|$'\n') scan_escaped=1 ;;
-            *) shell_word+=\\ ;;
-          esac
-          ;;
-        '$')
-          if [[ "$scan_next" == '(' ]]; then
-            ambiguous_execution_context=1
-            scan_dollar_substitution
-          else
-            shell_word+="$scan_char"
-            [[ "$scan_next" =~ [A-Za-z0-9_\{\*@#\?\$!\-] ]] \
-              && shell_word_dynamic=1
-          fi
-          ;;
-        '`') ambiguous_execution_context=1; scan_backtick_substitution ;;
-        *) shell_word+="$scan_char" ;;
-      esac
-      shell_word_started=1
-      scan_index=$((scan_index + 1))
-      continue
-    fi
-    case "$scan_char" in
-      \\) scan_escaped=1 ;;
-      '$')
-        if [[ "$scan_next" == "'" ]]; then
-          scan_quote=ansi
-          shell_word_started=1
-          shell_word_quoted=1
-          shell_word_dynamic=1
-          scan_index=$((scan_index + 2))
-          continue
-        elif [[ "$scan_next" == '(' ]]; then
-          ambiguous_execution_context=1
-          scan_dollar_substitution
-        else
-          shell_word+="$scan_char"
-          shell_word_started=1
-          if [[ "$scan_next" =~ [A-Za-z0-9_\{\*@#\?\$!\-] ]]; then
-            shell_word_dynamic=1
-            shell_word_unquoted_dynamic=1
-          fi
-        fi
-        ;;
-      "'"|'"') scan_quote="$scan_char"; shell_word_started=1; shell_word_quoted=1 ;;
-      '#')
-        if (( shell_word_started == 0 )); then
-          scan_comment=1
-        else
-          shell_word+="$scan_char"
-        fi
-        ;;
-      ' '|$'\t'|$'\r') finish_shell_word ;;
-      $'\n') finish_simple_command; skip_pending_heredoc ;;
-      '{'|'}')
-        # Braces are reserved words, not shell metacharacters. Keep launcher
-        # operands such as xargs -I{} in the same argv. A comma or sequence
-        # inside braces may expand and cannot establish literal arguments.
-        if [[ "$scan_char" == '{' && "$scan_next" == '}' ]]; then
-          shell_word+='{}'
-          shell_word_started=1
-          scan_index=$((scan_index + 1))
-        elif (( shell_word_started == 0 )) \
-          && [[ -z "$scan_next" || "$scan_next" =~ [[:space:]\;\&\|\(\)\<\>] ]]; then
-          ambiguous_execution_context=1
-          finish_simple_command
-        else
-          shell_word+="$scan_char"
-          shell_word_started=1
-          if [[ "$scan_char" == '{' && "${command_fragment:$scan_index}" =~ ^\{[^{}]*(,|\.\.) ]]; then
-            shell_word_dynamic=1
-            shell_word_unquoted_dynamic=1
-          fi
-        fi
-        ;;
-      ';'|'('|')')
-        ambiguous_execution_context=1
-        finish_simple_command
-        ;;
-      '&')
-        if [[ "$scan_next" == '>' \
-           || ( "$shell_word_redirection" == 1 \
-             && ( "$shell_word" == *'>' || "$shell_word" == *'<' ) ) ]]; then
-          shell_word+="$scan_char"
-          shell_word_started=1
-          shell_word_redirection=1
-        else
-          ambiguous_execution_context=1
-          finish_simple_command
-        fi
-        ;;
-      '|')
-        if (( shell_word_redirection )) && [[ "$shell_word" == *'>' ]]; then
-          shell_word+="$scan_char"
-          shell_word_started=1
-        else
-          ambiguous_execution_context=1
-          finish_simple_command
-        fi
-        ;;
-      '<'|'>')
-        shell_word+="$scan_char"
-        shell_word_started=1
-        shell_word_redirection=1
-        if [[ "$scan_next" == '(' ]]; then
-          # Process substitution is one shell word even though it contains a
-          # parenthesized command. Reuse the balanced-substitution scanner so
-          # grouping separators inside it cannot split the surrounding argv.
-          ambiguous_execution_context=1
-          shell_word_dynamic=1
-          shell_word_unquoted_dynamic=1
-          scan_dollar_substitution
-        fi
-        ;;
-      '*'|'?'|'[')
-        shell_word+="$scan_char"
-        shell_word_started=1
-        shell_word_unquoted_glob=1
-        ;;
-      '`') ambiguous_execution_context=1; scan_backtick_substitution ;;
-      *) shell_word+="$scan_char"; shell_word_started=1 ;;
-    esac
-    scan_index=$((scan_index + 1))
-  done
-  finish_simple_command
-}
-
 if (( publish_file )); then
   prepare_file_publication "$@"
   inspect_simple_command
   (( protected_count == 1 )) || reject_pr 'The PR file launcher requires one checked create or edit.'
 else
-  scan_command_fragment "$command"
+  shell_scan_fragment "$command"
 fi
 
 if (( file_launcher_count > 0 )); then
@@ -1860,10 +1480,8 @@ fi
 
 # Hosts may run hooks in the chat directory while the command targets another
 # checkout. Resolve once so GitHub lookup, design, and review state agree.
-working_directory="$(jq -er --arg fallback "$PWD" '
-  first((.tool_input.workdir, .tool_input.cwd, .cwd, $fallback) | select(. != null))
-  | strings | select(length > 0 and (index("\u0000") == null))
-' <<<"$payload")" || reject_pr 'The shell working directory is invalid.'
+working_directory="$(hook_payload_workdir "$payload" "$PWD")" \
+  || reject_pr 'The shell working directory is invalid.'
 cd -- "$working_directory" 2>/dev/null \
   || reject_pr 'The shell working directory is unavailable.'
 if [[ -n "$command_directory" ]]; then
@@ -1881,33 +1499,18 @@ fi
 branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || echo '?')"
 head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo '?')"
 request_file="$project_dir/.agents/state/pr-review-request.json"
-state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
-if [[ ! -r "$state_lib" ]]; then
-  printf 'preflight-pr-review: shared audit state library is unavailable.\n' >&2
-  exit 2
-fi
 # shellcheck source=../lib/verdict-audit-state.sh
-source "$state_lib"
-subagent_lib="$tooling_root/.agents/lib/subagent.sh"
-if [[ ! -r "$subagent_lib" ]]; then
-  printf 'preflight-pr-review: prompt loader is unavailable: %s\n' "$subagent_lib" >&2
-  exit 2
-fi
+source "$lib_dir/verdict-audit-state.sh" || load_failure verdict-audit-state.sh
 # shellcheck source=../lib/subagent.sh
-source "$subagent_lib"
+source "$lib_dir/subagent.sh" || load_failure subagent.sh
 # shellcheck source=../lib/user-question.sh
-source "$tooling_root/.agents/lib/user-question.sh" || exit 2
-timed_lib="$tooling_root/.agents/lib/timed-user-prompt.sh"
-[[ -r "$timed_lib" ]] || { printf 'preflight-pr-review: timed prompt library missing\n' >&2; exit 2; }
+source "$lib_dir/user-question.sh" || load_failure user-question.sh
 # shellcheck source=../lib/timed-user-prompt.sh
-source "$timed_lib"
-[[ -r "$tooling_root/.agents/lib/pr-target.sh" ]] || { printf 'preflight-pr-review: PR target library missing\n' >&2; exit 2; }
+source "$lib_dir/timed-user-prompt.sh" || load_failure timed-user-prompt.sh
 # shellcheck source=../lib/pr-target.sh
-source "$tooling_root/.agents/lib/pr-target.sh"
-size_lib="$tooling_root/.agents/lib/pr-size.sh"
-[[ -r "$size_lib" ]] || { printf 'preflight-pr-review: PR size library missing\n' >&2; exit 2; }
+source "$lib_dir/pr-target.sh" || load_failure pr-target.sh
 # shellcheck source=../lib/pr-size.sh
-source "$size_lib"
+source "$lib_dir/pr-size.sh" || load_failure pr-size.sh
 
 # Render before selecting or consuming the acknowledgment. The same document handles
 # normal denials and long-ref recovery, so the review question cannot drift out of one.
@@ -2089,13 +1692,12 @@ if (( size_status )); then
   reject_pr "$size_reason"
 fi
 
-for description_library in design-doc.sh pr-description.sh; do
-  [[ -r "$tooling_root/.agents/lib/$description_library" ]] || deny 'The PR description verifier is unavailable.'
-done
 # shellcheck source=../lib/design-doc.sh
-source "$tooling_root/.agents/lib/design-doc.sh"
+source "$lib_dir/design-doc.sh" 2>/dev/null \
+  || deny 'The PR description verifier is unavailable.'
 # shellcheck source=../lib/pr-description.sh
-source "$tooling_root/.agents/lib/pr-description.sh"
+source "$lib_dir/pr-description.sh" 2>/dev/null \
+  || deny 'The PR description verifier is unavailable.'
 description_reason="$(pr_description_check "$repo_root" "$pr_target" "${protected_size_args[@]}")" || {
   deny "${description_reason:-The PR description check failed; nothing was authorized.}"
 }

@@ -14,9 +14,7 @@ API_SHELL := $(P)/scripts/api-compatibility.sh \
 
 test\:bootstrap:
 	@for suite in $(addprefix $(BOOTSTRAP_TESTS)/,install.test.sh claude-plugin-bootstrap.test.sh codex-plugin-bootstrap.test.sh); do \
-	  case "$$suite" in *"$$TEST_FILTER"*) ;; *) \
-	    case "templates/$${suite##*/}" in *"$$TEST_FILTER"*) ;; *) continue ;; esac ;; \
-	  esac; \
+	  case "$$suite" in *"$$TEST_FILTER"*) ;; *) continue ;; esac; \
 	  echo "Running $$suite"; bash "$$suite" || exit $$?; \
 	done
 
@@ -44,23 +42,9 @@ test\:guidance-check:
 test\:api-compatibility:
 	python3 -m unittest discover -s $(PLUGIN_TESTS) -p 'test_api_compatibility*.py' -v $(API_TEST_ARGS)
 
-# Keep pre-move suite paths as TEST_FILTER aliases.
 test\:plugin:
 	@find $(PLUGIN_TESTS) -type f -name '*.test.sh' -print | sort | while IFS= read -r suite; do \
-	  relative=$${suite#$(PLUGIN_TESTS)/}; \
-	  case "$$relative" in \
-	    pr/fork-target.test.sh) legacy=.agents/hooks/pr/tests/fork-target.test.sh ;; \
-	    pr/gh-write.test.sh|pr/guarded-pr-watch.test.sh) legacy=tests/$$relative ;; \
-	    watch/hooks/*) legacy=.agents/hooks/watch/$${relative##*/} ;; \
-	    audit/*|design/*|pr/*|resume/*|session/*) legacy=.agents/hooks/$$relative ;; \
-	    lib/*|watch/*) legacy=.agents/$$relative ;; \
-	    git/*) legacy=.githooks/$${relative#git/} ;; \
-	    scripts/*|architecture.test.sh|host-parity.test.sh) legacy=$$relative ;; \
-	    *) legacy=tests/$$relative ;; \
-	  esac; \
-	  case "$$suite" in *"$$TEST_FILTER"*) ;; *) \
-	    case "$(P)/$$legacy" in *"$$TEST_FILTER"*) ;; *) continue ;; esac ;; \
-	  esac; \
+	  case "$$suite" in *"$$TEST_FILTER"*) ;; *) continue ;; esac; \
 	  echo "Running $$suite"; bash "$$suite" || exit $$?; \
 	done
 

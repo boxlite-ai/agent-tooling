@@ -4,135 +4,24 @@ These scripts implement host lifecycle checks and audit runners; the manifests s
 
 ## Entry points
 
-See [host wiring](../../hooks/README.md) for events and host differences,
-[Git hooks](../../.githooks/README.md) for commit/push enforcement, and
-[architecture](../../ARCHITECTURE.md#entry-points) for full contracts.
+- [Architecture](../../ARCHITECTURE.md#entry-points): each script's caller, input, and contract.
+- [Host wiring](../../hooks/README.md): events and host differences.
+- [Git hooks](../../.githooks/README.md): commit/push enforcement.
+- [Audit](audit/README.md): the verdict gate, audit runners, and the Stop flow.
 
-| Script | Caller / input | Responsibility |
-| --- | --- | --- |
-| [cancel-verdict-audit.sh](cancel-verdict-audit.sh) | `UserPromptSubmit` JSON | Revoke this session's abandoned audit; its runner owns process cancellation. |
-| [auditor-control.sh](auditor-control.sh) | `SubagentStart` / `SubagentStop` JSON | Track auditor escalation, completion, and prompt-scoped user overrides; close hook-prepared commit/push attempts. |
-| [preflight-design-doc.sh](preflight-design-doc.sh) | Editor/patch `PreToolUse` JSON | Require a current design, audit PASS, and advice before repository edits; exempt an active auditor's exact task-bound report write. |
-| [preflight-commit-push.sh](preflight-commit-push.sh) | Shell `PreToolUse` or delegated Git payload | Require matching commit/push evidence; delegate to installed Git gates. |
-| [preflight-pr-review.sh](preflight-pr-review.sh) | Shell `PreToolUse` JSON | Inspect GitHub writing and PR design, explanation, size, and review acknowledgment. |
-| [post-remote-write-watch.sh](post-remote-write-watch.sh) | Shell `PostToolUse` JSON | Connect successful remote writes and pending events to the host's watch consumer. |
-| [stop-gate.sh](stop-gate.sh) | `Stop` JSON | Sequence timed confirmations, writing checks, and verdict validation. |
-| [preflight-verdict-check.sh](audit/preflight-verdict-check.sh) | Stop payload forwarded by `stop-gate.sh` | Inspect the whole final turn and validate a dossier or request an independent audit. |
-| [run-verdict-audit.sh](audit/run-verdict-audit.sh) | `<bookkeeping_path\|-> [session_id] [generation] [session_scope]` | Pass parent context to an independent auditor and publish its validated dossier. |
-| [run-commit-push-audit.sh](audit/run-commit-push-audit.sh) | `<commit\|push> <command>` | Produce a commit/push dossier for callers without a native agent runtime. |
-| [record-api-failure.sh](record-api-failure.sh) | Claude `StopFailure` JSON | Best-effort failure-kind recording for the unattended recovery wrapper. |
-| [resume-after-api-failure.sh](resume-after-api-failure.sh) | Claude `StopFailure` JSON | Request a bounded interactive resume through `asyncRewake` for eligible failures. |
-| [rule-recency.sh](rule-recency.sh) | Opt-in `UserPromptSubmit` JSON | Emit a workflow/skill reminder for substantive prompts; always exit successfully. |
+Host callbacks read JSON on stdin; runners take positional arguments. Each hook's output and exit status follow its host event contract. Shared state and parsing live in [`../lib/`](../lib/); runtime files live under the consumer's ignored `.agents/state/`.
 
-Host callbacks read JSON on stdin; runners take positional arguments. A hook's
-output and exit status follow its host event contract, so do not apply one exit-code
-rule to every script. Shared state and parsing live in [`../lib/`](../lib/).
+## Layout
 
-Gates consume evidence; auditors produce it. The commit/push dossier shape is in
-[commit-push-audit.schema.json](audit/commit-push-audit.schema.json), and the verdict
-procedure is in [boxlite-verdict-audit](../skills/boxlite-verdict-audit/SKILL.md).
-Runtime files live under the consumer's ignored `.agents/state/` directory.
+- Registered hook entry points stay in this directory; [`audit/`](audit/README.md) holds the audit runners, verdict checker, and schema.
+- Scripts resolve grouped helpers and shared libraries from the plugin root.
+- Copy the standalone reminder and its Markdown companion together when installing it outside the plugin.
 
 ## Tests
 
-Run plugin suites from the repository root.
-
-```sh
-bash plugins/boxlite-agent-tooling/tests/design/preflight-design-doc.test.sh
-bash plugins/boxlite-agent-tooling/tests/session/stop-gate.test.sh
-```
-
-Additional suites cover GitHub writing, PR design/explanations/size, TL;DR checks, auditor overrides, and watch delivery.
+Run suites as [Contributing](../../CONTRIBUTING.md#validation) describes.
 
 - Pass `fast` to the [TL;DR suite](../../tests/session/tldr-gates.test.sh) to check denials in under a minute. Its full matrix takes over ten minutes.
-- Set `TLDR_GATES_CASES=<label>,…` to run only those cases, for example a fix's new ones within a foreground time limit; a label that runs no case fails the suite.
+- Set `TLDR_GATES_CASES=<label>,…` to run only those cases; a label that runs no case fails the suite.
 - [PR question replies](../../tests/scripts/pr-question-reply.test.sh) cover managed answers on both host routes.
 - [PR fixtures](../../tests/pr/fixtures/) hold recorded test inputs.
-
-## How it works
-
-On `Stop`, `stop-gate.sh` checks pending confirmations and writing requirements,
-then passes the payload to `preflight-verdict-check.sh`. The verdict gate captures
-the final turn, checks existing evidence, and runs an independent auditor when
-needed. A matching result determines whether the reply can finish.
-
-The auditor discovers the parent source and reviews the latest turn bound to the
-request. Earlier records can establish identity or support specific proof and retry
-checks. Bounded snapshots support triage and retry history.
-
-Registered hook entry points stay in this directory. Supporting files are grouped
-by purpose:
-
-| Directory | Responsibility |
-| --- | --- |
-| [`audit/`](audit/README.md) | Audit runners, verdict checker, schema, and audit tests |
-| `design/` | Design-document preflight tests |
-| `pr/` | PR publication tests and rendering fixtures |
-| `resume/` | API failure and recovery tests |
-| `session/` | Stop and standalone-reminder tests |
-| `watch/` | Remote-write watcher tests |
-
-Host manifests keep their existing paths.
-
-- Scripts resolve grouped helpers and shared libraries from the plugin root.
-- Keep fixture copies at the same depth.
-- Copy the standalone reminder and its Markdown companion together when installing it outside the plugin.
-
-```mermaid
-flowchart TD
-    H["Agent host: Codex or Claude"]
-    T[("① Original transcript<br/>Conversation messages and tool events")]
-    G["② Verdict gate<br/>Read the current turn"]
-    S[("③ Audit snapshot<br/>Bounded records or an incomplete marker")]
-    Q{"Audit needed?"}
-    A["④ Independent auditor<br/>Inspect claims and evidence"]
-    D[("⑤ Dossier<br/>Audit result and findings")]
-    V["⑥ Gate re-entry<br/>Validate the dossier and its bindings"]
-    OK["Allow the reply"]
-    BLOCK["Block and return findings"]
-
-    H -->|writes| T
-    H -->|Stop event with transcript_path| G
-    T -->|read| G
-    G -->|creates| S
-    S --> Q
-    Q -->|No| OK
-    Q -->|Yes, or incomplete evidence| A
-    A -->|writes| D
-    D --> V
-    S -.->|FIX: retain and reload when incomplete| V
-    V -->|Valid PASS| OK
-    V -->|Valid FAIL| BLOCK
-```
-
-**Snapshot and dossier are separate files:**
-
-| Concept | Created by | Meaning |
-|---|---|---|
-| **Original transcript** | Agent host | What happened during the conversation |
-| **Snapshot** | Gate | What evidence the auditor receives |
-| **Incomplete snapshot** | Gate | Evidence could not be captured completely |
-| **Dossier** | Auditor | Its assessment: PASS, FAIL, or IN_PROGRESS, with findings |
-
-The gate reads the transcript back from its end to the last real user message
-([reader](../lib/verdict-audit-state.sh)). It decodes at most 64 MiB of that final
-turn and only hashes earlier history, so a long session never makes evidence
-incomplete ([#262](https://github.com/boxlite-ai/agent-tooling/issues/262)).
-
-The runner gives the auditor a [private copy of the snapshot](audit/run-verdict-audit.sh).
-Re-entry means running the gate again to validate the returned dossier against the
-current session, audit generation, and repository state.
-
-## Where the fix applies
-
-The regression test follows this sequence:
-
-1. The **65 MiB original transcript** holds only NUL bytes, which the reader refuses.
-2. The gate saves an **incomplete snapshot** containing `truncated: true` and `records: []`.
-3. The test deletes the **original transcript**.
-4. The fix preserves the snapshot through retries and reloads it during **gate re-entry**.
-5. The auditor's instructions require a **FAIL dossier** for that incomplete marker,
-   which the gate uses to block. [Auditor rule](../skills/boxlite-verdict-audit/SKILL.md#fallback-snapshots)
-
-Previously, step 4 could reopen the deleted original, conclude "nothing to judge,"
-and allow **before checking the dossier**.

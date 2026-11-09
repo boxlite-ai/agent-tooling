@@ -39,18 +39,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_LIB="$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
 # shellcheck source=../../.agents/lib/verdict-audit-state.sh
 source "$STATE_LIB"
-
-pass=0
-fail=0
-
-check_eq() {  # desc  got  want
-  local desc="$1" got="$2" want="$3"
-  if [[ "$got" == "$want" ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
-  else
-    fail=$((fail + 1)); printf '  FAIL  %s  (got=%s want=%s)\n' "$desc" "$got" "$want"
-  fi
-}
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 
 hash_stdin() {
   shasum -a 256 | awk '{print $1}'
@@ -100,10 +90,9 @@ write_ref_updates_file() {  # repo remote local_ref remote_ref output_file
   printf '%s %s %s %s\n' "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" > "$output_file"
 }
 
-# Extracted from the real pre-push, not hand-duplicated: a second copy of this
-# selection algorithm is exactly how it went stale before (see new_ref_base_sha's
-# own history) — a fix applied to only one copy leaves the other asserting
-# against a base the real hook no longer picks.
+# Extracted from the real pre-push, not hand-duplicated: with a second copy of this
+# selection algorithm, a fix applied to only one copy leaves the other asserting
+# against a base the real hook does not pick.
 # shellcheck disable=SC2016  # sed scripts are literal; expansion must not happen here.
 eval "$(sed -n '/^new_ref_base_sha() {/,/^}/p' "$REPO_ROOT/.githooks/pre-push" | \
   sed -e 's|\${repo_root}|${repo}|g' -e 's|\$repo_root|\$repo|g' \
@@ -153,8 +142,8 @@ pre_push_command_for() {  # repo remote local_ref remote_ref
 }
 
 # Fixture repo with the real gate scripts installed at the same pinned-cache
-# path used by consumers. A symlink keeps older assertions that address
-# $R/.githooks directly focused on that installed copy.
+# path used by consumers. A symlink points assertions that address
+# $R/.githooks directly at that installed copy.
 setup() {
   local d head plugin scratch checkout
   d="$(mktemp -d)"
@@ -168,47 +157,26 @@ setup() {
      "$REPO_ROOT/.agents/hooks/auditor-control.sh" "$d/.agents/hooks/"
   cp "$REPO_ROOT/.agents/hooks/audit/run-commit-push-audit.sh" \
      "$REPO_ROOT/.agents/hooks/audit/commit-push-audit.schema.json" "$d/.agents/hooks/audit/"
-  # The gate resolves its shared library and prompt documents from its own location,
+  # The gate resolves its shared libraries and prompt documents from its own location,
   # and refuses to gate without them rather than waving the commit through. A fake
   # repo running a COPY of the hook therefore needs both staged beside it.
-  cp "$REPO_ROOT/.agents/lib/subagent.sh" \
-     "$REPO_ROOT/.agents/lib/git-agent-origin.sh" \
-     "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
-     "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
-     "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
-     "$REPO_ROOT/.agents/lib/subagent-identity.sh" \
-     "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
-     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
-     "$REPO_ROOT/.agents/lib/timed-user-prompt.sh" \
-     "$REPO_ROOT/.agents/lib/user-question.sh" \
-     "$REPO_ROOT/.agents/lib/user-question-policy.jq" \
-     "$REPO_ROOT/.agents/lib/git-audit-decision.sh" \
-     "$REPO_ROOT/.agents/lib/hook-host.sh" \
-     "$REPO_ROOT/.agents/lib/auditor-model.sh" "$d/.agents/lib/"
+  cp -R "$REPO_ROOT/.agents/lib/." "$d/.agents/lib/"
   cp "$REPO_ROOT/.agents/auditor-models.tsv" "$d/.agents/"
   cp -R "$REPO_ROOT/.agents/prompts/." "$d/.agents/prompts/"
-  cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$d/.agents/lib/"
   printf 'x\n' > "$d/f"
 
   scratch="$(mktemp -d)"
   plugin="$scratch/plugins/boxlite-agent-tooling"
   mkdir -p "$plugin"
   cp -R "$REPO_ROOT/.githooks" "$REPO_ROOT/scripts" "$REPO_ROOT/guidance" "$plugin/"
-  mkdir -p "$plugin/.agents/lib"
-  cp "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
-     "$REPO_ROOT/.agents/lib/git-agent-origin.sh" \
-     "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
-     "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \
-     "$REPO_ROOT/.agents/lib/subagent-identity.sh" \
-     "$REPO_ROOT/.agents/lib/commit-audit-receipt.sh" \
-     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
-     "$REPO_ROOT/.agents/lib/timed-user-prompt.sh" \
-     "$REPO_ROOT/.agents/lib/user-question.sh" \
-     "$REPO_ROOT/.agents/lib/user-question-policy.jq" \
-     "$REPO_ROOT/.agents/lib/git-audit-decision.sh" \
-     "$REPO_ROOT/.agents/lib/hook-host.sh" "$plugin/.agents/lib/"
+  mkdir -p "$plugin/.agents"
+  # The Git hooks delegate to the commit gate inside their own plugin copy.
+  cp -R "$REPO_ROOT/.agents/hooks" "$REPO_ROOT/.agents/lib" "$REPO_ROOT/.agents/prompts" \
+    "$plugin/.agents/"
+  # No PR watcher here: pre-push skips arming without its helpers, and
+  # tests/watch/pr-watch.test.sh owns that path.
+  rm -f "$plugin/.agents/lib/pr-watch-state.sh"
   git -C "$scratch" init -q
-  cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$plugin/.agents/lib/"
   git -C "$scratch" config user.email t@t.test
   git -C "$scratch" config user.name tester
   git -C "$scratch" add -A
@@ -261,12 +229,12 @@ write_audit() {  # repo kind [push_local_ref push_remote_ref]
     --arg dh "$diff_hash" \
     --arg ch "$(command_hash_for "$command")" \
     --arg csh "$(subject_hash_for "$subject")" \
-    '{branch:$b, head:$h, command_kind:$k, diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[]}' \
+    '{branch:$b, head:$h, command_kind:$k, diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[], advisories:[]}' \
     > "$repo/.agents/state/last-audit.json"
 }
 
-# Separate from write_audit() on purpose: every existing case must keep exercising the
-# dossier shape with no `advisories` key, which is what a pre-split producer writes.
+# Separate from write_audit() on purpose: every other case keeps exercising a dossier
+# with no `advisories` key, which the gate accepts.
 add_advisories() {  # repo  advisory-text
   local repo="$1" text="$2" f
   f="$repo/.agents/state/last-audit.json"
@@ -280,7 +248,7 @@ write_handoff_audit() {  # repo kind command
   ch="$(command_hash_for "$command")"
   jq -nc --arg b "$br" --arg h "$hd" --arg k "$kind" \
     --arg dh "$dh" --arg ch "$ch" \
-    '{branch:$b, head:$h, command_kind:$k, diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[]}' \
+    '{branch:$b, head:$h, command_kind:$k, diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[], advisories:[]}' \
     > "$repo/.agents/state/last-audit.json"
   jq -nc --arg b "$br" --arg h "$hd" --arg k "$kind" \
     --arg dh "$dh" --arg ch "$ch" \
@@ -314,6 +282,20 @@ activate_override_handoff() {  # repo session kind command
         bash "$repo/.agents/hooks/preflight-commit-push.sh") >/dev/null
 }
 
+# The agent's PreToolUse call records its session lifecycle in the handoff, which the
+# delegated pre-push self-audit runs under.
+codex_push_lifecycle() {  # repo push-command
+  local repo="$1" command="$2" session=session-codex-push-audit scope epoch=1501-1502-1
+  scope="git-$(printf '%s' "$session" | git -C "$repo" hash-object --stdin)"
+  mkdir -p "$repo/.agents/state"
+  cp "$REPO_ROOT/tests/audit/fixtures/audit-history-result.sh" "$repo/.agents/state/history-result-fixture.sh"
+  printf '%s\n' "$epoch" > "$repo/.agents/state/verdict-prompt-epoch.$scope"
+  printf '%s' "$(jq -nc --arg command "$command" --arg session "$session" \
+    '{session_id:$session,tool_input:{command:$command}}')" \
+    | (cd "$repo" && AGENT_GATED=1 CLAUDE_PROJECT_DIR="$repo" \
+        bash "$repo/.agents/hooks/preflight-commit-push.sh") >/dev/null
+}
+
 # Run `git commit` in the fixture as agent or human; echo the exit code.
 # env -i gives a hermetic environment: the ambient session's own harness markers
 # (CLAUDECODE, CLAUDE_PROJECT_DIR, plugin CODEX_COMPANION_*) must not leak into
@@ -329,17 +311,18 @@ run_commit() {  # repo  agent|human [message]
 }
 
 write_broken_preflight() {  # repo exit|invalid|decisionless|allow-empty|capture-allow
-  local repo="$1" mode="$2"
+  # The Git hooks run the gate from their installed plugin copy, so replace that one.
+  local repo="$1" mode="$2" gate="$1/.githooks/../.agents/hooks/preflight-commit-push.sh"
   case "$mode" in
     exit)
-      cat > "$repo/.agents/hooks/preflight-commit-push.sh" <<'BROKEN_PREFLIGHT'
+      cat > "$gate" <<'BROKEN_PREFLIGHT'
 #!/usr/bin/env bash
 printf 'boom from delegated preflight\n' >&2
 exit 7
 BROKEN_PREFLIGHT
       ;;
     invalid)
-      cat > "$repo/.agents/hooks/preflight-commit-push.sh" <<'BROKEN_PREFLIGHT'
+      cat > "$gate" <<'BROKEN_PREFLIGHT'
 #!/usr/bin/env bash
 printf 'not-json\n'
 BROKEN_PREFLIGHT
@@ -348,19 +331,19 @@ BROKEN_PREFLIGHT
     # the advisory arm — jq exits 5 on it, tripping the parse guard above — so only this
     # shape exercises the branch that decides whether the advisory split opened a hole.
     decisionless)
-      cat > "$repo/.agents/hooks/preflight-commit-push.sh" <<'BROKEN_PREFLIGHT'
+      cat > "$gate" <<'BROKEN_PREFLIGHT'
 #!/usr/bin/env bash
 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse"}}\n'
 BROKEN_PREFLIGHT
       ;;
     allow-empty)
-      cat > "$repo/.agents/hooks/preflight-commit-push.sh" <<'BROKEN_PREFLIGHT'
+      cat > "$gate" <<'BROKEN_PREFLIGHT'
 #!/usr/bin/env bash
 exit 0
 BROKEN_PREFLIGHT
       ;;
     capture-allow)
-      cat > "$repo/.agents/hooks/preflight-commit-push.sh" <<'BROKEN_PREFLIGHT'
+      cat > "$gate" <<'BROKEN_PREFLIGHT'
 #!/usr/bin/env bash
 repo="$(git rev-parse --show-toplevel)"
 context="$(git rev-parse --git-path codex-audit/last-push-audit-context.diff)"
@@ -370,7 +353,7 @@ exit 0
 BROKEN_PREFLIGHT
       ;;
   esac
-  chmod +x "$repo/.agents/hooks/preflight-commit-push.sh"
+  chmod +x "$gate"
 }
 
 try_commit() {  # repo  agent|human
@@ -537,9 +520,9 @@ rm -rf "$R" "$B"
 echo
 echo "## Advisories cross the git-level boundary without blocking"
 # The PreToolUse suite pins core.hooksPath='' and cannot see this layer, but in an
-# installed clone THIS is the only consumer of the gate's stdout. It used to reject any
-# non-deny payload, making an advisory MORE blocking than a finding — a finding at least
-# yields an actionable reason.
+# installed clone THIS is the only consumer of the gate's stdout. It must pass a
+# non-deny payload through, or an advisory would block more than a finding, which at
+# least yields an actionable reason.
 R="$(setup)"; stage_change "$R"; write_audit "$R" commit
 add_advisories "$R" "Implement: comment wraps awkwardly"
 check_eq "agent + PASS with advisories → commit allowed" "$(run_commit "$R" agent)" 0
@@ -785,7 +768,7 @@ head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
-  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[], advisories:[]}' \
   > "$output"
 if [[ -n "${CODEX_FAKE_DELAY:-}" ]]; then
   history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
@@ -876,10 +859,13 @@ head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
-  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[], advisories:[]}' \
   > "$output"
+history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
+[[ -z "$history" ]] || bash "$repo_root/.agents/state/history-result-fixture.sh" "$history" "$output"
 NEW_REF_FAKE_CODEX
 chmod +x "$R/bin/codex"
+codex_push_lifecycle "$R" "git push origin refs/heads/new-ref-test:refs/heads/new-ref-test"
 ( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CODEX_SANDBOX=seatbelt CODEX_BIN="$R/bin/codex" git push -q origin "refs/heads/new-ref-test:refs/heads/new-ref-test" >/dev/null 2>"$R/err.txt" )
 check_eq "Codex delegated new-ref push self-audits from remote base" "$?" 0
 grep -q '+new ref' "$R/new-ref-evidence.txt" && grep -q 'commit-subject .*test(hooks): new ref audit' "$R/new-ref-evidence.txt" && ! grep -q 'commit-subject .*base' "$R/new-ref-evidence.txt" && new_ref_context=yes || new_ref_context=no
@@ -938,10 +924,13 @@ head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
-  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[], advisories:[]}' \
   > "$output"
+history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
+[[ -z "$history" ]] || bash "$repo_root/.agents/state/history-result-fixture.sh" "$history" "$output"
 CLOSEST_BASE_FAKE_CODEX
   chmod +x "$R/bin/codex"
+  codex_push_lifecycle "$R" "git push origin refs/heads/stack-2:refs/heads/stack-2"
   ( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CODEX_SANDBOX=seatbelt CODEX_BIN="$R/bin/codex" git push -q origin refs/heads/stack-2:refs/heads/stack-2 >/dev/null 2>"$stacked_push_err" )
   check_eq "Codex stacked push self-audits with base $base_ref" "$?" 0
   grep -q 'commit-subject .*closest base new commit' "$R/closest-base-evidence.txt" \
@@ -1015,10 +1004,13 @@ head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
-  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[], advisories:[]}' \
   > "$output"
+history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
+[[ -z "$history" ]] || bash "$repo_root/.agents/state/history-result-fixture.sh" "$history" "$output"
 MOVED_ON_FAKE_CODEX
 chmod +x "$R/bin/codex"
+codex_push_lifecycle "$R" "git push origin refs/heads/moved-on-feature:refs/heads/moved-on-feature"
 ( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CODEX_SANDBOX=seatbelt CODEX_BIN="$R/bin/codex" git push -q origin "refs/heads/moved-on-feature:refs/heads/moved-on-feature" >/dev/null 2>"$moved_on_err" )
 check_eq "Codex delegated moved-on-base push self-audits" "$?" 0
 grep -q 'commit-subject .*feature before main moves on' "$R/moved-on-evidence.txt" \
@@ -1071,10 +1063,13 @@ head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
-  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[], advisories:[]}' \
   > "$output"
+history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
+[[ -z "$history" ]] || bash "$repo_root/.agents/state/history-result-fixture.sh" "$history" "$output"
 REWIND_FAKE_CODEX
 chmod +x "$R/bin/codex"
+codex_push_lifecycle "$R" "git push --force origin $branch_ref:$branch_ref"
 ( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CODEX_SANDBOX=seatbelt CODEX_BIN="$R/bin/codex" git push -q --force origin "$branch_ref:$branch_ref" >/dev/null 2>"$R/err.txt" )
 check_eq "Codex delegated force-push rewind self-audits" "$?" 0
 grep -q '^-force rewind' "$R/rewind-evidence.txt" && rewind_diff=yes || rewind_diff=no
@@ -1118,10 +1113,13 @@ head="$(git -C "$repo_root" rev-parse HEAD)"
 diff_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected diff hash: //p')"
 command_hash="$(printf '%s\n' "$prompt" | sed -n 's/^Expected command hash: //p')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" \
-  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"push", diff_hash:$dh, command_hash:$ch, commit_subject_hash:"", verdict:"PASS", findings:[], advisories:[]}' \
   > "$output"
+history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
+[[ -z "$history" ]] || bash "$repo_root/.agents/state/history-result-fixture.sh" "$history" "$output"
 DELETE_FAKE_CODEX
 chmod +x "$R/bin/codex"
+codex_push_lifecycle "$R" "git push origin :$delete_ref"
 ( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CODEX_SANDBOX=seatbelt CODEX_BIN="$R/bin/codex" git push -q origin ":$delete_ref" >/dev/null 2>"$R/err.txt" )
 check_eq "Codex delegated delete-ref push self-audits" "$?" 0
 grep -q "deleted $delete_ref" "$R/delete-evidence.txt" && delete_diff=yes || delete_diff=no
@@ -1197,7 +1195,7 @@ rm -rf "$R" "$B"
 
 echo
 echo "## delegation guard: exactly one consumer of the audit artifact"
-# With hooksPath installed, legacy-marked PreToolUse delegates. Markerless
+# With hooksPath installed, marked PreToolUse delegates. Markerless
 # manifest handoff is exercised by tests/git-agent-origin.test.sh.
 R="$(setup)"
 out="$(printf '{"tool_input":{"command":"git commit -m x"}}' \
@@ -1237,27 +1235,18 @@ command_hash="$(printf '%s' "$command" | shasum -a 256 | awk '{print $1}')"
 commit_subject="$(printf '%s' "$command" | sed -n "s/.* -m '\([^']*\)'.*/\1/p" | head -1)"
 commit_subject_hash="$(printf '%s' "$commit_subject" | shasum -a 256 | awk '{print $1}')"
 jq -nc --arg b "$branch" --arg h "$head" --arg dh "$diff_hash" --arg ch "$command_hash" --arg csh "$commit_subject_hash" \
-  '{branch:$b, head:$h, command_kind:"commit", diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"commit", diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[], advisories:[]}' \
   > "$output"
+history="$(printf '%s\n' "$prompt" | sed -n 's/^History input JSON: //p')"
+[[ -z "$history" ]] || bash "$TEST_HISTORY_RESULT_HELPER" "$history" "$output"
 FAKE_CODEX
 chmod +x "$R/bin/codex"
-# The contract is that the audit SURVIVES for commit-msg, not that it sits at a
-# particular path: the gate copies it to the legacy location so a commit-msg
-# from before the move can read it too. Reachable at either location counts;
-# absent from both means commit-msg will block a commit that was audited.
+# The audit must SURVIVE for commit-msg, which reads it from .agents/state/.
 audit_reachable() {
-  local root="$1"
-  if [[ -e "$root/.agents/state/last-audit.json" || -e "$root/.claude/.last-audit.json" ]]; then
-    printf 'yes'
-  else
-    printf 'no'
-  fi
+  [[ -e "$1/.agents/state/last-audit.json" ]] && printf 'yes' || printf 'no'
 }
 handoff_reachable() {
-  local root="$1" n=0
-  [[ -e "$root/.agents/state/last-audit-handoff.json" ]] && n=$((n+1))
-  [[ -e "$root/.claude/.last-audit-handoff.json" ]] && n=$((n+1))
-  case "$n" in 0) printf 'no' ;; *) printf 'yes' ;; esac
+  [[ -e "$1/.agents/state/last-audit-handoff.json" ]] && printf 'yes' || printf 'no'
 }
 
 # The gate does not manufacture the audit. It denies, names every route to an auditor,
@@ -1274,7 +1263,11 @@ check_eq "PreToolUse defers without manufacturing an audit" \
   "${out:-EMPTY}:$(audit_reachable "$R"):$(handoff_reachable "$R")" "EMPTY:no:yes"
 
 # Stand in for the subagent the agent would spawn.
+keep_scope="git-$(printf '%s' githooks-keep-session | git hash-object --stdin)"
+printf '1401-1402-1\n' > "$R/.agents/state/verdict-prompt-epoch.$keep_scope"
 ( cd "$R" && CLAUDE_PROJECT_DIR="$R" CODEX_BIN="$R/bin/codex" \
+    AUDITOR_SESSION_SCOPE="$keep_scope" AUDITOR_PROMPT_EPOCH=1401-1402-1 \
+    TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/tests/audit/fixtures/audit-history-result.sh" \
     bash "$R/.agents/hooks/audit/run-commit-push-audit.sh" commit "$KEEP_CMD" ) >/dev/null 2>&1 || true
 
 out="$(printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$KEEP_CMD" | jq -Rs .)" \
@@ -1303,7 +1296,7 @@ printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/
 check_eq "GITHOOK_DELEGATED call still judged (deny)"  "$denied" "yes"
 rm -rf "$R"
 
-# hooksPath configured but the delegate hook ABSENT (old ref, broken install):
+# hooksPath configured but the delegate hook ABSENT (broken install):
 # git silently skips missing hooks, so deferring here would stand BOTH layers
 # down — the PreToolUse layer must gate itself (fail closed).
 R="$(setup)"; rm "$R/.githooks/pre-commit"
@@ -1313,7 +1306,16 @@ printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/
 check_eq "hooksPath set, delegate missing → fail closed (deny)" "$denied" "yes"
 rm -rf "$R"
 
-# Without hooksPath, the PreToolUse layer gates as before (no regression).
+# The Git hooks run the gate from their own plugin copy; without it they block.
+R="$(setup)"; rm "$R/.githooks/../.agents/hooks/preflight-commit-push.sh"
+printf 'gateless\n' >> "$R/f"; git -C "$R" add -A
+( cd "$R" && env -i PATH="$PATH" HOME="$HOME" CLAUDECODE=1 git commit -qm 'test: gateless' >/dev/null 2>"$R/err.txt" )
+rc=$?
+grep -q 'delegated preflight failed' "$R/err.txt" && named=yes || named=no
+check_eq "agent commit with the plugin gate missing → blocked" "$rc:$named" "1:yes"
+rm -rf "$R"
+
+# Without hooksPath, the PreToolUse layer gates itself.
 R="$(setup)"; git -C "$R" config --worktree --unset core.hooksPath
 out="$(printf '{"tool_input":{"command":"git commit -m x"}}' \
       | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$R/.agents/hooks/preflight-commit-push.sh" ) 2>/dev/null)"
@@ -1376,7 +1378,7 @@ br="$(git -C "$R" branch --show-current)"; hd="$(git -C "$R" rev-parse HEAD)"
 jq -nc --arg b "$br" --arg h "$hd" --arg dh "$(diff_hash_for "$R" commit)" \
   --arg ch "$(command_hash_for "$REAL_CMD")" \
   --arg csh "$(subject_hash_for 'test(hooks): bind the real command')" \
-  '{branch:$b, head:$h, command_kind:"commit", diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[]}' \
+  '{branch:$b, head:$h, command_kind:"commit", diff_hash:$dh, command_hash:$ch, commit_subject_hash:$csh, verdict:"PASS", findings:[], advisories:[]}' \
   > "$R/.agents/state/last-audit.json"
 pretooluse_gate "$R" "$REAL_CMD"
 check_eq "agent + audit of the real command → commit allowed" \
@@ -1411,73 +1413,6 @@ printf '{"tool_input":{"command":"git push origin HEAD"}}' \
 check_eq "push handoff records no command text" \
   "$(jq -r '.command' "$R/.agents/state/last-audit-handoff.json")" "null"
 rm -rf "$R"
-
-echo
-echo "## transition compat: hooks and trees on either side of the .agents move"
-# Where core.hooksPath is configured absolute rather than the relative value
-# `make setup` sets, ONE installed hook runs for every worktree whatever commit it
-# sits on. Both directions must keep working,
-# and neither may ever run unguarded.
-COMPAT="$(mktemp -d)"
-# Used by the resolve_* bodies eval'd below, which reference $compat_root.
-# shellcheck disable=SC2034
-compat_root="$COMPAT"
-# The extracted function also checks the installed plugin before consumer-local
-# compatibility paths. Point that location at an absent fixture so these cases
-# continue to isolate the transition fallbacks.
-# shellcheck disable=SC2034 # Referenced by the function body loaded through eval below.
-tooling_root="$COMPAT/nonexistent-plugin"
-# shellcheck disable=SC1090
-eval "$(sed -n '/^resolve_gate() {/,/^}/p' "$REPO_ROOT/.githooks/pre-push" | sed 's|\$repo_root|\$compat_root|g')"
-eval "$(sed -n '/^  resolve_marker() {/,/^  }/p' "$REPO_ROOT/.githooks/commit-msg" | sed 's/^  //; s|\$repo_root|\$compat_root|g')"
-
-mkdir -p "$COMPAT/.claude/hooks"; : > "$COMPAT/.claude/hooks/preflight-commit-push.sh"
-case "$(resolve_gate || echo NONE)" in *"/.claude/hooks/"*) r=legacy ;; *) r=other ;; esac
-check_eq "gate resolves in a pre-move tree" "$r" "legacy"
-
-mkdir -p "$COMPAT/.agents/hooks"; : > "$COMPAT/.agents/hooks/preflight-commit-push.sh"
-case "$(resolve_gate || echo NONE)" in *"/.agents/hooks/"*) r=current ;; *) r=other ;; esac
-check_eq "gate prefers .agents when both exist" "$r" "current"
-
-rm -rf "$COMPAT/.claude/hooks" "$COMPAT/.agents/hooks"
-check_eq "gate is unresolvable when absent from both (fails closed)" "$(resolve_gate || echo NONE)" "NONE"
-
-mkdir -p "$COMPAT/.claude" "$COMPAT/.agents/state"
-: > "$COMPAT/.claude/.last-audit.json"
-case "$(resolve_marker last-audit.json)" in *"/.claude/.last-audit.json") r=legacy ;; *) r=other ;; esac
-check_eq "marker resolves in a pre-move tree" "$r" "legacy"
-
-: > "$COMPAT/.agents/state/last-audit.json"
-case "$(resolve_marker last-audit.json)" in *"/.agents/state/last-audit.json") r=current ;; *) r=other ;; esac
-check_eq "marker prefers .agents/state when both exist" "$r" "current"
-
-# BEHAVIOUR, not a grep for the helper's name: a name-presence check survives
-# deleting every call site. Drive the gate on the KEEP path (what a delegated
-# git hook takes) with an audit at the new location only, then look at where the
-# marker actually ended up.
-M="$(setup)"
-write_audit "$M" commit
-( cd "$M" && printf '%s' 'git commit -m x' | jq -Rs '{tool_input:{command:.}}' \
-  | CLAUDE_PROJECT_DIR="$M" CLAUDECODE=1 GITHOOK_DELEGATED=1 GITHOOK_KEEP_AUDIT=1 \
-    bash "$M/.agents/hooks/preflight-commit-push.sh" >/dev/null 2>&1 )
-[[ -r "$M/.claude/.last-audit.json" ]] && r=yes || r=no
-check_eq "kept audit reaches the legacy path a pre-move commit-msg reads" "$r" "yes"
-# The new location must survive too: more than one stage takes the keep path,
-# and handing the marker over would leave the second with nothing.
-[[ -r "$M/.agents/state/last-audit.json" ]] && r=yes || r=no
-check_eq "kept audit also stays where a later keep-stage looks" "$r" "yes"
-rm -rf "$M"
-
-# Every legacy marker location, not just the two the gate mirrors: a checkout
-# from before the move still writes the other four, and an unignored marker
-# perturbs the tree hash the verdict dossier is keyed to.
-for legacy in .claude/.last-audit.json .claude/.last-audit-handoff.json \
-              .claude/.last-verdict.json .claude/.pr-reviewed.json \
-              .claude/.verdict-last-uuid .claude/.verdict-decisions.log; do
-  git -C "$REPO_ROOT" check-ignore -q "$legacy" && r=yes || r=no
-  check_eq "legacy mirror $legacy stays gitignored (tree hash must not move)" "$r" "yes"
-done
-rm -rf "$COMPAT"
 
 echo
 echo "## installer: plugin setup points git at the shared hook layer"
@@ -1539,14 +1474,7 @@ jq -n '{
     category: "Developer Tools"
   }]
 }' > "$INST/.agents/plugins/marketplace.json"
-printf '%s\n' \
-  '.agents/state/' \
-  '.claude/.last-audit.json' \
-  '.claude/.last-audit-handoff.json' \
-  '.claude/.last-verdict.json' \
-  '.claude/.pr-reviewed.json' \
-  '.claude/.verdict-last-uuid' \
-  '.claude/.verdict-decisions.log' > "$INST/.gitignore"
+printf '%s\n' '.agents/state/' > "$INST/.gitignore"
 git -C "$INST" add -A
 git -C "$INST" commit -qm base
 
@@ -1665,7 +1593,8 @@ printf '%s\n' "$history_epoch" > "$R/.agents/state/verdict-prompt-epoch.$history
 history_context="$(jq -nc --arg root "$(cd "$R" && pwd -P)" --arg session "$history_scope" \
   --arg epoch "$history_epoch" --arg branch "$(git -C "$R" branch --show-current)" \
   '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"push"}')"
-history_attempt="$(printf '{"binding":{"head":"fixture"},"snapshot":{"diff":"reviewed bytes"}}' \
+history_attempt="$(jq -nc --argjson deadline "$(( $(date +%s) + 900 ))" \
+  '{binding:{head:"fixture"},snapshot:{diff:"reviewed bytes"},deadline:$deadline}' \
   | bash "$REPO_ROOT/scripts/audit-reflection-gate.sh" "$history_context" prepare)"
 printf '"prior push auditor failed"' | bash "$REPO_ROOT/scripts/audit-reflection-gate.sh" \
   "$history_context" error "$(jq -r .attempt_id <<<"$history_attempt")" >/dev/null
@@ -1858,6 +1787,4 @@ check_eq "receipt does not bypass the installation gate" \
   "rc=$verify_rc named=$verify_named" "rc=1 named=yes"
 rm -f "$refs_file"; rm -rf "$R" "$B"
 
-echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

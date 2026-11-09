@@ -54,7 +54,7 @@ assert_consumed
 context="$(jq -c .context "$state")"
 binding="$(jq -c '.attempts[-1].input.binding' "$state")"
 native="$(jq -nc --argjson binding "$binding" --arg tree "$(git write-tree)" --arg command "$command" \
-  '{binding:$binding,snapshot:{tree:$tree,command:$command}}' \
+  '{binding:$binding,snapshot:{tree:$tree,command:$command},deadline:4102444800}' \
   | bash "$plugin/scripts/audit-reflection-gate.sh" "$context" prepare)"
 jq 'del(.history_review,.reflection_review)' .agents/state/old-pass > .agents/state/last-audit.json
 bash "$TEST_HISTORY_RESULT_HELPER" "$native" .agents/state/last-audit.json

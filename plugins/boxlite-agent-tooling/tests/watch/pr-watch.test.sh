@@ -7,7 +7,7 @@
 # Covers:
 #   1. Event emission: one per concluded check, every terminal bucket, dedup.
 #   2. Confirmed merge-conflict emission, revision-scoped dedup, UNKNOWN handling.
-#   3. The empty-field regression: a check with no `workflow` must not shift
+#   3. Empty fields: a check with no `workflow` must not shift
 #      `link` into the workflow column.
 #   4. Single-instance lock.
 #   5. pre-push arming: branch refs armed, deletions/tags skipped, opt-out.
@@ -44,16 +44,8 @@ TMP="$(mktemp -d)"
 watcher_pat() { printf '%s' "${SCRATCH_WATCHER:-__pr_watch_no_scratch__}"; }
 trap 'pkill -f "$(watcher_pat)" 2>/dev/null; rm -rf "$TMP"' EXIT
 
-pass=0
-fail=0
-
-ok() { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-no() { fail=$((fail + 1)); printf '  FAIL  %s\n     %s\n' "$1" "${2:-}"; }
-
-check() {
-  local desc="$1" actual="$2" expect="$3"
-  if [[ "$actual" == "$expect" ]]; then ok "$desc"; else no "$desc" "got=[$actual] want=[$expect]"; fi
-}
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 
 # ── scratch repo + gh stub ───────────────────────────────────────────────────
 
@@ -79,11 +71,7 @@ mkdir -p "$scratch/$plugin_rel/.agents"
 cp -R "$REPO_ROOT/.githooks" "$REPO_ROOT/scripts" "$REPO_ROOT/guidance" \
   "$scratch/$plugin_rel/"
 cp -R "$REPO_ROOT/.agents/watch" "$scratch/$plugin_rel/.agents/watch"
-mkdir -p "$scratch/$plugin_rel/.agents/lib"
-cp "$REPO_ROOT/.agents/lib/pr-watch-state.sh" \
-   "$REPO_ROOT/.agents/lib/pr-watch-pending.sh" \
-   "$REPO_ROOT/.agents/lib/git-agent-origin.sh" \
-   "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" "$scratch/$plugin_rel/.agents/lib/"
+cp -R "$REPO_ROOT/.agents/lib" "$scratch/$plugin_rel/.agents/lib"
 mkdir -p "$scratch/$plugin_rel/.agents/hooks"
 cat > "$scratch/$plugin_rel/.agents/hooks/preflight-commit-push.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -255,30 +243,30 @@ echo "## Event emission"
 reset_state
 OUT="$(run_watch --pr 42 --once)"
 
-check "every line is valid JSON" \
+check_eq "every line is valid JSON" \
   "$(jq -e . <<<"$OUT" >/dev/null 2>&1 && echo yes || echo no)" "yes"
 
-check "emits 4 concluded checks, not the pending one" \
+check_eq "emits 4 concluded checks, not the pending one" \
   "$(events_of check "$OUT" | wc -l | tr -d ' ')" "4"
 
-check "emits the FAILING check (silence != success)" \
+check_eq "emits the FAILING check (silence != success)" \
   "$(events_of check "$OUT" | jq -r 'select(.bucket=="fail") | .name')" "Test (conclusion)"
 
-check "emits the skipped check too" \
+check_eq "emits the skipped check too" \
   "$(events_of check "$OUT" | jq -r 'select(.bucket=="skipping") | .name')" "Rust Tests"
 
-check "no checks_done while one check is still pending" \
+check_eq "no checks_done while one check is still pending" \
   "$(events_of checks_done "$OUT" | wc -l | tr -d ' ')" "0"
 
-check "emits the issue comment" \
+check_eq "emits the issue comment" \
   "$(events_of comment "$OUT" | jq -r '.author')" "boxlite-agent"
 
-check "emits the review" \
+check_eq "emits the review" \
   "$(events_of review "$OUT" | jq -r '.author + ":" + .state')" "coderabbitai:COMMENTED"
 
-check "emits the inline review comment with its path" \
+check_eq "emits the inline review comment with its path" \
   "$(events_of review_comment "$OUT" | jq -r '.path')" "src/main.rs"
-check "the PR view requests mergeability and both compared revisions" \
+check_eq "the PR view requests mergeability and both compared revisions" \
   "$(grep 'pr view' "$FIXTURE_DIR/gh-calls.log" \
       | grep -Fq -- '--json state,comments,reviews,mergeable,headRefOid,baseRefOid' \
       && echo yes || echo no)" "yes"
@@ -287,62 +275,62 @@ check "the PR view requests mergeability and both compared revisions" \
 
 echo
 echo "## Merge conflicts"
-check "a mergeable PR emits no conflict event" \
+check_eq "a mergeable PR emits no conflict event" \
   "$(events_of conflict "$OUT" | wc -l | tr -d ' ')" "0"
 
 jq '.mergeable = "UNKNOWN"' "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/view.tmp" \
   && mv "$FIXTURE_DIR/view.tmp" "$FIXTURE_DIR/view.json"
-check "UNKNOWN mergeability is not misreported as a conflict" \
+check_eq "UNKNOWN mergeability is not misreported as a conflict" \
   "$(events_of conflict "$(run_watch --pr 42 --once)" | wc -l | tr -d ' ')" "0"
 
 jq '.mergeable = "CONFLICTING"' "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/view.tmp" \
   && mv "$FIXTURE_DIR/view.tmp" "$FIXTURE_DIR/view.json"
 CONFLICT="$(run_watch --pr 42 --once)"
-check "a confirmed merge conflict emits an event" \
+check_eq "a confirmed merge conflict emits an event" \
   "$(events_of conflict "$CONFLICT" | wc -l | tr -d ' ')" "1"
-check "the conflict event identifies both compared revisions" \
+check_eq "the conflict event identifies both compared revisions" \
   "$(events_of conflict "$CONFLICT" | jq -r '.head_sha + "/" + .base_sha')" "head-1/base-1"
-check "the same conflict is not repeated on every poll" \
+check_eq "the same conflict is not repeated on every poll" \
   "$(events_of conflict "$(run_watch --pr 42 --once)" | wc -l | tr -d ' ')" "0"
 
 jq '.headRefOid = "head-2"' "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/view.tmp" \
   && mv "$FIXTURE_DIR/view.tmp" "$FIXTURE_DIR/view.json"
-check "a conflict against a new revision is reported again" \
+check_eq "a conflict against a new revision is reported again" \
   "$(events_of conflict "$(run_watch --pr 42 --once)" | jq -r '.head_sha')" "head-2"
 
 jq '.baseRefOid = "base-2"' "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/view.tmp" \
   && mv "$FIXTURE_DIR/view.tmp" "$FIXTURE_DIR/view.json"
-check "base movement independently makes the conflict new" \
+check_eq "base movement independently makes the conflict new" \
   "$(events_of conflict "$(run_watch --pr 42 --once)" | jq -r '.base_sha')" "base-2"
 
 jq 'del(.mergeable) | .headRefOid = "head-3"' \
   "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/view.tmp" \
   && mv "$FIXTURE_DIR/view.tmp" "$FIXTURE_DIR/view.json"
-check "missing mergeability is not misreported as a conflict" \
+check_eq "missing mergeability is not misreported as a conflict" \
   "$(events_of conflict "$(run_watch --pr 42 --once)" | wc -l | tr -d ' ')" "0"
 write_fixtures
 
-# ── 3. the empty-field regression ────────────────────────────────────────────
+# ── 3. empty fields ──────────────────────────────────────────────────────────
 #
 # `IFS=$'\t' read` collapses runs of tabs, so a check with an empty `workflow`
-# used to shift `link` one column left — CodeQL reported its URL as its workflow
-# name and an empty url. Guard both columns.
+# could shift `link` one column left, reporting its URL as the workflow name and an
+# empty url. Guard both columns.
 
 echo
 echo "## Regression: empty field must not shift columns"
 CODEQL="$(events_of check "$OUT" | jq -c 'select(.name=="CodeQL")')"
-check "empty workflow stays empty" \
+check_eq "empty workflow stays empty" \
   "$(jq -r '.workflow' <<<"$CODEQL")" ""
-check "link lands in url, not workflow" \
+check_eq "link lands in url, not workflow" \
   "$(jq -r '.url' <<<"$CODEQL")" "https://gh/runs/1"
-check "populated workflow still lands correctly" \
+check_eq "populated workflow still lands correctly" \
   "$(events_of check "$OUT" | jq -r 'select(.name=="Lint (conclusion)") | .workflow')" "Lint and Format"
 
 # ── 4. body handling ─────────────────────────────────────────────────────────
 
 echo
 echo "## Body handling"
-check "multi-line comment body survives as one JSON line with real newlines" \
+check_eq "multi-line comment body survives as one JSON line with real newlines" \
   "$(events_of comment "$OUT" | jq -r '.body' | wc -l | tr -d ' ')" "2"
 
 # Backslashes, tabs and quotes must all survive verbatim. @tsv escaped only the
@@ -357,7 +345,7 @@ reset_state
 jq '.comments[0].body = "win C:\\temp and C:\\new plus a \"quote\" and\ttab"' \
   "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/v.tmp" && mv "$FIXTURE_DIR/v.tmp" "$FIXTURE_DIR/view.json"
 OUTB="$(run_watch --pr 42 --once)"
-check "backslashes survive verbatim (no escape-decoding corruption)" \
+check_eq "backslashes survive verbatim (no escape-decoding corruption)" \
   "$(events_of comment "$OUTB" | jq -r '.body')" \
   "$(printf 'win C:\\temp and C:\\new plus a "quote" and\ttab')"
 write_fixtures
@@ -367,14 +355,14 @@ write_fixtures
 echo
 echo "## Dedup and locking"
 OUT2="$(run_watch --pr 42 --once)"
-check "second pass re-emits nothing" \
+check_eq "second pass re-emits nothing" \
   "$(events_of check "$OUT2" | wc -l | tr -d ' ')" "0"
 
 # A new check appearing is still emitted after the dedup pass.
 jq '. + [{"name":"New Job","state":"SUCCESS","bucket":"pass","workflow":"Test","link":"https://gh/runs/9"}]' \
   "$FIXTURE_DIR/checks.json" > "$FIXTURE_DIR/checks.tmp" && mv "$FIXTURE_DIR/checks.tmp" "$FIXTURE_DIR/checks.json"
 OUT3="$(run_watch --pr 42 --once)"
-check "a newly-concluded check IS emitted after dedup" \
+check_eq "a newly-concluded check IS emitted after dedup" \
   "$(events_of check "$OUT3" | jq -r '.name')" "New Job"
 
 # A lock owned by a LIVE process must be obeyed. $$ is this suite, definitely alive.
@@ -384,7 +372,7 @@ jq -nc --argjson pid "$$" --arg token "$LIVE_LOCK_TOKEN" \
   '{schema:1,pid:$pid,start_token:$token,watch_id:"watch-eeeeeeeeeeeeeeeeeeeeeeee",ready:true}' \
   > "$REPO/.git/pr-watch/$PR42_KEY.lock/owner.json"
 OUT4="$(run_watch --pr 42 --once)"
-check "lock held by a LIVE owner makes a second instance exit silently" \
+check_eq "lock held by a LIVE owner makes a second instance exit silently" \
   "$(printf '%s' "$OUT4" | wc -c | tr -d ' ')" "0"
 
 # SIGKILL/OOM/reboot leaves a lock no trap could clear. Obeying it forever would
@@ -395,24 +383,24 @@ check "lock held by a LIVE owner makes a second instance exit silently" \
 # so no literal is portably unusable. Spawn, reap, then assert it is gone.
 ( exit 0 ) & dead_pid=$!
 wait "$dead_pid" 2>/dev/null
-kill -0 "$dead_pid" 2>/dev/null && no "fixture: PID $dead_pid still alive" "cannot test stale lock"
+kill -0 "$dead_pid" 2>/dev/null && bad "fixture: PID $dead_pid still alive" "cannot test stale lock"
 jq -nc --argjson pid "$dead_pid" \
   '{schema:1,pid:$pid,start_token:"cksum-1-1",watch_id:"watch-ffffffffffffffffffffffff",ready:true}' \
   > "$REPO/.git/pr-watch/$PR42_KEY.lock/owner.json"
 OUT4b="$(run_watch --pr 42 --once)"
-check "STALE lock (dead owner) is reclaimed, not obeyed" \
+check_eq "STALE lock (dead owner) is reclaimed, not obeyed" \
   "$(events_of watch_start "$OUT4b" | jq -r '.pr')" "42"
 
-# A lock dir with no pid file at all — e.g. written by an older version.
+# A lock dir with no pid file at all.
 rm -rf "$REPO/.git/pr-watch/$PR42_KEY.lock"; mkdir -p "$REPO/.git/pr-watch/$PR42_KEY.lock"
 OUT4c="$(run_watch --pr 42 --once)"
-check "lock with no owner recorded is reclaimed" \
+check_eq "lock with no owner recorded is reclaimed" \
   "$(events_of watch_start "$OUT4c" | jq -r '.pr')" "42"
 rm -rf "$REPO/.git/pr-watch/$PR42_KEY.lock"
 
 # Hostile or crash-left lock metadata must never choose blocking I/O. The FIFO
-# is opened read/write later only to release the unfixed raw `cat` path after the
-# deadline, keeping the regression itself bounded.
+# is opened read/write later only to release a blocking reader after the deadline,
+# keeping the test itself bounded.
 mkdir -p "$REPO/.git/pr-watch/$PR42_KEY.lock"
 mkfifo "$REPO/.git/pr-watch/$PR42_KEY.lock/pid"
 (
@@ -425,7 +413,7 @@ mkfifo "$REPO/.git/pr-watch/$PR42_KEY.lock/pid"
 LOCK_FIFO_OUT="$(with_deadline 3 run_watch --pr 42 --once)"
 LOCK_FIFO_RC=$?
 wait "$LOCK_FIFO_WRITER" 2>/dev/null || true
-check "FIFO lock metadata is rejected without blocking" \
+check_eq "FIFO lock metadata is rejected without blocking" \
   "$(events_of watch_start "$LOCK_FIFO_OUT" | jq -r '.pr')/$LOCK_FIFO_RC" "42/0"
 
 # A live numeric PID is not an owner identity after PID reuse. A mismatched
@@ -437,7 +425,7 @@ jq -nc --argjson pid "$$" \
   '{schema:1,pid:$pid,start_token:"cksum-1-1",watch_id:"watch-dddddddddddddddddddddddd",ready:true}' \
   > "$REPO/.git/pr-watch/$PR42_KEY.lock/owner.json"
 LOCK_REUSED_PID_OUT="$(run_watch --pr 42 --once)"
-check "live PID with a mismatched start token is reclaimed as stale" \
+check_eq "live PID with a mismatched start token is reclaimed as stale" \
   "$(events_of watch_start "$LOCK_REUSED_PID_OUT" | jq -r '.pr')" "42"
 
 # Cleanup owns the exact directory it acquired. Replacing the stable name with
@@ -460,7 +448,7 @@ mkdir "$CLEANUP_LOCK"
 printf 'new-owner\n' > "$CLEANUP_LOCK/sentinel"
 kill -TERM "$CLEANUP_PID" 2>/dev/null || true
 wait "$CLEANUP_PID" 2>/dev/null || true
-check "old watcher cleanup preserves a replacement lock owner" \
+check_eq "old watcher cleanup preserves a replacement lock owner" \
   "$([[ -f "$CLEANUP_LOCK/sentinel" ]] && echo preserved || echo deleted)" "preserved"
 reset_state
 
@@ -519,7 +507,7 @@ wait "$LOCK_RETIRE_WATCHDOG" 2>/dev/null || true
 LOCK_RETIRE_REPLACEMENT=gone
 [[ -n "$LOCK_RETIRE_SELECTED" && -f "$LOCK_RETIRE_SELECTED/sentinel" ]] \
   && LOCK_RETIRE_REPLACEMENT=preserved
-check "lock retirement preserves a post-validation pathname replacement" \
+check_eq "lock retirement preserves a post-validation pathname replacement" \
   "barrier=$LOCK_RETIRE_BARRIER rc=$LOCK_RETIRE_RC replacement=$LOCK_RETIRE_REPLACEMENT" \
   "barrier=hit rc=0 replacement=preserved"
 reset_state
@@ -534,20 +522,20 @@ GEN1="$(run_watch --pr 42 --once)"
 GEN2="$(run_watch --pr 42 --once)"
 GEN1_ID="$(events_of watch_start "$GEN1" | jq -r '.watch_id // empty')"
 GEN2_ID="$(events_of watch_start "$GEN2" | jq -r '.watch_id // empty')"
-check "first generation has a watch_id" "$([[ -n "$GEN1_ID" ]] && echo yes || echo no)" "yes"
-check "same branch gets a fresh watch_id on the next generation" \
+check_eq "first generation has a watch_id" "$([[ -n "$GEN1_ID" ]] && echo yes || echo no)" "yes"
+check_eq "same branch gets a fresh watch_id on the next generation" \
   "$([[ -n "$GEN1_ID" && -n "$GEN2_ID" && "$GEN1_ID" != "$GEN2_ID" ]] && echo yes || echo no)" "yes"
 GEN1_TAGGED="$(jq -s --arg id "$GEN1_ID" 'length > 0 and all(.[]; .watch_id == $id)' \
   <<<"$GEN1" 2>/dev/null || echo false)"
 GEN2_TAGGED="$(jq -s --arg id "$GEN2_ID" 'length > 0 and all(.[]; .watch_id == $id)' \
   <<<"$GEN2" 2>/dev/null || echo false)"
-check "every event carries its generation watch_id" \
+check_eq "every event carries its generation watch_id" \
   "$([[ "$GEN1_TAGGED" == true && "$GEN2_TAGGED" == true ]] && echo yes || echo no)" "yes"
 
-# The branch journal used to grow forever. Once old generations crossed the
-# stream reader's 2 MiB input boundary, even an explicitly named NEW generation
-# appended at the end was rejected before selection. A producer that owns the
-# branch lock must retire completed history before publishing the new start.
+# Completed generations must not grow the branch journal past the stream reader's
+# 2 MiB input boundary, or even an explicitly named NEW generation appended at the
+# end is rejected before selection. A producer that owns the branch lock must retire
+# completed history before publishing the new start.
 ROLLOVER_BRANCH="journal-rollover"
 ROLLOVER_KEY="$(pr_watch_branch_key "$ROLLOVER_BRANCH")"
 ROLLOVER_LOG="$REPO/.git/pr-watch/${ROLLOVER_KEY}.jsonl"
@@ -565,15 +553,15 @@ ROLLOVER_WATCH_OUT="$(run_watch --branch "$ROLLOVER_BRANCH" --pr 42 --once \
 ROLLOVER_STREAM_OUT="$(with_deadline 10 bash "$REPO_ROOT/.agents/watch/pr-watch-stream.sh" \
   "$ROLLOVER_LOG" 1 --watch-id "$ROLLOVER_ID")"
 ROLLOVER_STREAM_RC=$?
-check "an oversized completed journal cannot block the next explicit generation" \
+check_eq "an oversized completed journal cannot block the next explicit generation" \
   "$(printf '%s\n' "$ROLLOVER_STREAM_OUT" | jq -s --arg id "$ROLLOVER_ID" \
       'length >= 2 and all(.[]; .watch_id == $id)
        and any(.[]; .kind == "watch_start") and any(.[]; .kind == "watch_end")')/$ROLLOVER_STREAM_RC" \
   "true/0"
-check "the producer bounds a branch journal at the stream input ceiling" \
+check_eq "the producer bounds a branch journal at the stream input ceiling" \
   "$([[ "$(wc -c < "$ROLLOVER_LOG" | tr -d ' ')" -le 2097152 ]] && echo bounded || echo oversized)" \
   "bounded"
-check "the rollover generation itself was published" \
+check_eq "the rollover generation itself was published" \
   "$(events_of watch_start "$ROLLOVER_WATCH_OUT" | jq -r '.watch_id')" "$ROLLOVER_ID"
 
 # The companion de-dup ledger had the same lifetime bug at a larger threshold:
@@ -589,10 +577,10 @@ perl -e 'print "old-seen-key\n" while tell(STDOUT) <= 8388608' \
   > "$SEEN_ROLLOVER_FILE"
 SEEN_ROLLOVER_OUT="$(run_watch --branch "$SEEN_ROLLOVER_BRANCH" --pr 42 --once \
   --watch-id "$SEEN_ROLLOVER_ID")"
-check "an oversized completed de-dup ledger cannot block the next generation" \
+check_eq "an oversized completed de-dup ledger cannot block the next generation" \
   "$(events_of watch_end "$SEEN_ROLLOVER_OUT" | jq -r '.watch_id // empty')" \
   "$SEEN_ROLLOVER_ID"
-check "the producer bounds de-dup state per generation" \
+check_eq "the producer bounds de-dup state per generation" \
   "$([[ "$(wc -c < "$SEEN_ROLLOVER_FILE" | tr -d ' ')" -le 8388608 ]] \
       && echo bounded || echo oversized)" "bounded"
 
@@ -624,7 +612,7 @@ CLAIM_REJECT_ID_STATE=changed
 CLAIM_REJECT_BYTE_STATE=changed
 cmp -s "$CLAIM_REJECT_SLOT" "$CLAIM_REJECT_SNAPSHOT" \
   && CLAIM_REJECT_BYTE_STATE=same
-check "rejecting an occupied live claim preserves its exact inode and bytes" \
+check_eq "rejecting an occupied live claim preserves its exact inode and bytes" \
   "rc=$CLAIM_REJECT_RC inode=$CLAIM_REJECT_ID_STATE bytes=$CLAIM_REJECT_BYTE_STATE" \
   "rc=1 inode=same bytes=same"
 
@@ -711,7 +699,7 @@ if [[ -e "$CLAIM_ATOMIC_DIR/ready" && "$CLAIM_ATOMIC_RC" -ne 0 \
    && "$CLAIM_ATOMIC_UNIQUE" -le 1 ]]; then
   ok "claim handoff has one durable JSON authority at every sync"
 else
-  no "claim handoff has one durable JSON authority at every sync" \
+  bad "claim handoff has one durable JSON authority at every sync" \
     "barrier=$([[ -e "$CLAIM_ATOMIC_DIR/ready" ]] && echo hit || echo missed) rc=$CLAIM_ATOMIC_RC unique=$CLAIM_ATOMIC_UNIQUE identities=$CLAIM_ATOMIC_IDENTITIES"
 fi
 
@@ -736,7 +724,7 @@ for DAEMON_BOUND_GENERATION in 1 2 3; do
 done
 DAEMON_BOUND_BYTES="$(wc -c < "$DAEMON_BOUND_LOG" | tr -d ' ')"
 DAEMON_BOUND_LATEST="$(tail -n 1 "$DAEMON_BOUND_LOG" 2>/dev/null || true)"
-check "per-branch daemon output stays within the stream's 2 MiB state budget" \
+check_eq "per-branch daemon output stays within the stream's 2 MiB state budget" \
   "runs=$DAEMON_BOUND_RUNS bounded=$(( DAEMON_BOUND_BYTES <= DAEMON_BOUND_LIMIT )) latest=$DAEMON_BOUND_LATEST" \
   "runs=ok bounded=1 latest=generation-3"
 
@@ -784,7 +772,7 @@ while (( SECONDS < DAEMON_ACTIVE_BOUND_DEADLINE )); do
 done
 kill -KILL "$DAEMON_ACTIVE_BOUND_PID" 2>/dev/null || true
 wait "$DAEMON_ACTIVE_BOUND_PID" 2>/dev/null || true
-check "one live daemon generation cannot exceed the 2 MiB log budget" \
+check_eq "one live daemon generation cannot exceed the 2 MiB log budget" \
   "barrier=$DAEMON_ACTIVE_BOUND_BARRIER state=$DAEMON_ACTIVE_BOUND_STATE" \
   "barrier=hit state=bounded"
 
@@ -835,7 +823,7 @@ grep -Fqx "$DAEMON_REPLACE_SENTINEL" "$DAEMON_REPLACE_LOG" 2>/dev/null \
   && DAEMON_REPLACE_DIAGNOSTIC=preserved
 : > "$DAEMON_REPLACE_RELEASE"
 wait "$DAEMON_REPLACE_ACTIVE_PID" 2>/dev/null || true
-check "owner-path replacement cannot truncate an active daemon diagnostic" \
+check_eq "owner-path replacement cannot truncate an active daemon diagnostic" \
   "barrier=$DAEMON_REPLACE_BARRIER diagnostic=$DAEMON_REPLACE_DIAGNOSTIC" \
   "barrier=hit diagnostic=preserved"
 
@@ -876,7 +864,7 @@ if [[ -n "$DAEMON_DESC_TOKEN" \
       "$DAEMON_DESC_PID" 2>/dev/null || true)" == "$DAEMON_DESC_TOKEN" ]]; then
   kill -KILL "$DAEMON_DESC_PID" 2>/dev/null || true
 fi
-check "a background descendant cannot retain the daemon lease after its leader exits" \
+check_eq "a background descendant cannot retain the daemon lease after its leader exits" \
   "leader_rc=$DAEMON_DESC_LEADER_RC pid=$([[ "$DAEMON_DESC_PID" =~ ^[1-9][0-9]*$ ]] && echo recorded || echo missing) lease=$DAEMON_DESC_LEASE" \
   "leader_rc=0 pid=recorded lease=released"
 
@@ -887,8 +875,8 @@ run_watch --branch foo/bar --pr 42 --once >/dev/null
 run_watch --branch foo-bar --pr 42 --once >/dev/null
 BRANCH_LOG_COUNT="$(find "$REPO/.git/pr-watch" -maxdepth 1 -type f -name '*.jsonl' \
   | wc -l | tr -d ' ')"
-check "foo/bar and foo-bar use collision-free event logs" "$BRANCH_LOG_COUNT" "2"
-check "branch event-log names stay one bounded filesystem component" \
+check_eq "foo/bar and foo-bar use collision-free event logs" "$BRANCH_LOG_COUNT" "2"
+check_eq "branch event-log names stay one bounded filesystem component" \
   "$(find "$REPO/.git/pr-watch" -maxdepth 1 -type f -name '*.jsonl' -exec basename {} \; \
       | awk 'length($0) > 80 || $0 !~ /^branch-[0-9a-f]+\.jsonl$/ { bad=1 } END { print bad ? "no" : "yes" }')" "yes"
 
@@ -900,10 +888,10 @@ reset_state
 jq '[.[] | select(.bucket != "pending")]' "$FIXTURE_DIR/checks.json" > "$FIXTURE_DIR/checks.tmp" \
   && mv "$FIXTURE_DIR/checks.tmp" "$FIXTURE_DIR/checks.json"
 OUT5="$(run_watch --pr 42 --once)"
-check "checks_done fires once all checks conclude" \
+check_eq "checks_done fires once all checks conclude" \
   "$(events_of checks_done "$OUT5" | jq -r '.failed')" "1"
 
-check "checks_done does not repeat for the same set" \
+check_eq "checks_done does not repeat for the same set" \
   "$(events_of checks_done "$(run_watch --pr 42 --once)" | wc -l | tr -d ' ')" "0"
 
 # A CI re-run keeps the check COUNT identical but produces new job URLs. Keying
@@ -914,13 +902,13 @@ jq '[.[] | .link |= sub("/runs/"; "/runs/re-") | .bucket = "pass" | .state = "SU
 OUT5b="$(run_watch --pr 42 --once)"
 # 5 concluded checks by now: the 4 from write_fixtures plus the "New Job" added
 # in the dedup section above. All flipped to pass, so 0 failed / 5 passed.
-check "checks_done re-fires after a re-run with the same check count" \
+check_eq "checks_done re-fires after a re-run with the same check count" \
   "$(events_of checks_done "$OUT5b" | jq -r '.failed + "/" + .passed')" "0/5"
 
 reset_state
 jq '.state = "MERGED"' "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/view.tmp" && mv "$FIXTURE_DIR/view.tmp" "$FIXTURE_DIR/view.json"
 OUT6="$(with_deadline 30 run_watch --pr 42)"   # no --once: must still exit, PR is MERGED
-check "merged PR ends the watch without --once" \
+check_eq "merged PR ends the watch without --once" \
   "$(events_of watch_end "$OUT6" | jq -r '.reason')" "PR MERGED"
 
 write_fixtures
@@ -942,7 +930,7 @@ run_watch --pr 42 --once >/dev/null            # prime .seen so nothing is new
 jq '.mergeable = "UNKNOWN"' "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/v.tmp" \
   && mv "$FIXTURE_DIR/v.tmp" "$FIXTURE_DIR/view.json"
 QUIET="$(PR_WATCH_INTERVAL=1 PR_WATCH_IDLE_TIMEOUT=3 PR_WATCH_MAX_LIFETIME=6 with_deadline 40 run_watch --pr 42)"
-check "a quiet OPEN PR with UNKNOWN mergeability still has contact" \
+check_eq "a quiet OPEN PR with UNKNOWN mergeability still has contact" \
   "$(events_of watch_end "$QUIET" | jq -r '.reason')" \
   "max lifetime 6s reached before merge"
 
@@ -953,7 +941,7 @@ reset_state
 jq 'del(.mergeable)' "$FIXTURE_DIR/view.json" > "$FIXTURE_DIR/view.tmp" \
   && mv "$FIXTURE_DIR/view.tmp" "$FIXTURE_DIR/view.json"
 MISSING_MERGEABILITY="$(PR_WATCH_INTERVAL=1 PR_WATCH_IDLE_TIMEOUT=2 PR_WATCH_MAX_LIFETIME=6 with_deadline 40 run_watch --pr 42)"
-check "missing mergeability is treated as lost contact" \
+check_eq "missing mergeability is treated as lost contact" \
   "$(events_of watch_end "$MISSING_MERGEABILITY" | jq -r '.reason')" \
   "no contact with PR for 2s"
 write_fixtures
@@ -964,7 +952,7 @@ run_watch --pr 42 --once >/dev/null
 mv "$FIXTURE_DIR/view.json" "$FIXTURE_DIR/view.hidden"
 printf 'not json\n' > "$FIXTURE_DIR/view.json"
 LOST="$(PR_WATCH_INTERVAL=1 PR_WATCH_IDLE_TIMEOUT=2 PR_WATCH_MAX_LIFETIME=60 with_deadline 40 run_watch --pr 42)"
-check "lost contact DOES end the watch" \
+check_eq "lost contact DOES end the watch" \
   "$(events_of watch_end "$LOST" | jq -r '.reason')" \
   "no contact with PR for 2s"
 mv "$FIXTURE_DIR/view.hidden" "$FIXTURE_DIR/view.json"
@@ -976,7 +964,7 @@ run_watch --pr 42 --once >/dev/null
     && mv "$FIXTURE_DIR/v.tmp" "$FIXTURE_DIR/view.json" ) &
 LATE="$(PR_WATCH_INTERVAL=1 PR_WATCH_IDLE_TIMEOUT=30 PR_WATCH_MAX_LIFETIME=60 with_deadline 40 run_watch --pr 42)"
 wait
-check "a merge after a quiet stretch is still reported" \
+check_eq "a merge after a quiet stretch is still reported" \
   "$(events_of watch_end "$LATE" | jq -r '.reason')" "PR MERGED"
 
 write_fixtures
@@ -996,7 +984,7 @@ DISCOVERY_OUT="$(with_deadline 5 /bin/bash -c '
 DISCOVERY_RC=$?
 DISCOVERY_ELAPSED=$(( $(date +%s) - DISCOVERY_STARTED_AT ))
 write_fixtures
-check "PR discovery clamps its pause to the remaining producer lifetime" \
+check_eq "PR discovery clamps its pause to the remaining producer lifetime" \
   "$(events_of watch_end "$DISCOVERY_OUT" | wc -l | tr -d ' ')/$DISCOVERY_RC/$(( DISCOVERY_ELAPSED <= 2 ))" \
   "1/0/1"
 
@@ -1016,7 +1004,7 @@ SLOW_DISCOVERY_OUT="$(with_deadline 5 /bin/bash -c '
 SLOW_DISCOVERY_RC=$?
 SLOW_DISCOVERY_ELAPSED=$(( $(date +%s) - SLOW_DISCOVERY_STARTED_AT ))
 write_fixtures
-check "PR discovery command is bounded by the remaining producer lifetime" \
+check_eq "PR discovery command is bounded by the remaining producer lifetime" \
   "$(events_of watch_end "$SLOW_DISCOVERY_OUT" | jq -r '.reason')/$SLOW_DISCOVERY_RC/$(( SLOW_DISCOVERY_ELAPSED <= 3 ))" \
   "max lifetime 1s reached before merge/0/1"
 
@@ -1037,14 +1025,14 @@ SOUT="$(with_deadline 30 bash "$STREAM" "$SLOG" 1)"
 SRC=$?
 wait
 
-check "replays existing lines and follows new ones" \
+check_eq "replays existing lines and follows new ones" \
   "$(printf '%s\n' "$SOUT" | wc -l | tr -d ' ')" "4"
-check "delivers watch_end before terminating" \
+check_eq "delivers watch_end before terminating" \
   "$(printf '%s\n' "$SOUT" | tail -1 | jq -r '.kind')" "watch_end"
-check "exits 0 at watch_end instead of following forever" "$SRC" "0"
+check_eq "exits 0 at watch_end instead of following forever" "$SRC" "0"
 
 MISSING="$(PR_WATCH_STREAM_WAIT=2 bash "$STREAM" "$TMP/does-not-exist.jsonl" 1 2>/dev/null)"
-check "a log that never appears reports an error instead of hanging" \
+check_eq "a log that never appears reports an error instead of hanging" \
   "$(printf '%s' "$MISSING" | jq -r '.kind')" "stream_error"
 
 # Each wait loop has one absolute deadline. Sleeping the full poll interval can
@@ -1056,7 +1044,7 @@ MISSING_CLAMP_OUT="$(with_deadline 6 env PR_WATCH_STREAM_WAIT=2 \
   bash "$STREAM" "$MISSING_CLAMP_LOG" 4)"
 MISSING_CLAMP_RC=$?
 MISSING_CLAMP_ELAPSED=$(( $(date +%s) - MISSING_CLAMP_STARTED_AT ))
-check "absent-log sleep is clamped to the remaining stream wait" \
+check_eq "absent-log sleep is clamped to the remaining stream wait" \
   "$(printf '%s\n' "$MISSING_CLAMP_OUT" \
       | jq -r 'select(.kind == "stream_error") | .reason')/$MISSING_CLAMP_RC/$(( MISSING_CLAMP_ELAPSED <= 3 ))" \
   "no_event_log/1/1"
@@ -1071,7 +1059,7 @@ NO_LIVE_CLAMP_OUT="$(with_deadline 6 env PR_WATCH_STREAM_WAIT=2 \
   bash "$STREAM" "$NO_LIVE_CLAMP_LOG" 4)"
 NO_LIVE_CLAMP_RC=$?
 NO_LIVE_CLAMP_ELAPSED=$(( $(date +%s) - NO_LIVE_CLAMP_STARTED_AT ))
-check "live-generation discovery sleep is clamped to the remaining wait" \
+check_eq "live-generation discovery sleep is clamped to the remaining wait" \
   "$(printf '%s\n' "$NO_LIVE_CLAMP_OUT" \
       | jq -r 'select(.kind == "stream_error") | .reason')/$NO_LIVE_CLAMP_RC/$(( NO_LIVE_CLAMP_ELAPSED <= 3 ))" \
   "no_live_generation/1/1"
@@ -1081,7 +1069,7 @@ MISSING_ID_CLAMP_OUT="$(with_deadline 6 env PR_WATCH_STREAM_WAIT=2 \
   bash "$STREAM" "$NO_LIVE_CLAMP_LOG" 4 --watch-id never-published)"
 MISSING_ID_CLAMP_RC=$?
 MISSING_ID_CLAMP_ELAPSED=$(( $(date +%s) - MISSING_ID_CLAMP_STARTED_AT ))
-check "explicit-generation discovery sleep is clamped to the remaining wait" \
+check_eq "explicit-generation discovery sleep is clamped to the remaining wait" \
   "$(printf '%s\n' "$MISSING_ID_CLAMP_OUT" \
       | jq -r 'select(.kind == "stream_error") | .reason')/$MISSING_ID_CLAMP_RC/$(( MISSING_ID_CLAMP_ELAPSED <= 3 ))" \
   "watch_id_not_found/1/1"
@@ -1094,7 +1082,7 @@ perl -e '
 OVERSIZE_OUT="$(with_deadline 5 bash "$STREAM" "$OVERSIZE_LOG" 1 \
   --watch-id oversize-generation)"
 OVERSIZE_RC=$?
-check "stream rejects an oversized regular journal before scanning it" \
+check_eq "stream rejects an oversized regular journal before scanning it" \
   "$(printf '%s\n' "$OVERSIZE_OUT" | jq -r 'select(.kind == "stream_error") | .reason')/$OVERSIZE_RC" \
   "input_limit/1"
 
@@ -1112,18 +1100,18 @@ printf '%s\n' \
 GEN_OUT="$(with_deadline 20 bash "$STREAM" "$GEN_LOG" 1)"
 GEN_RC=$?
 wait
-check "historical watch_end cannot terminate the latest live generation" \
+check_eq "historical watch_end cannot terminate the latest live generation" \
   "$(printf '%s\n' "$GEN_OUT" | jq -r 'select(.kind == "watch_end") | .reason')" "new complete"
-check "default stream emits only the latest live watch_id" \
+check_eq "default stream emits only the latest live watch_id" \
   "$(printf '%s\n' "$GEN_OUT" | jq -s 'all(.[]; .watch_id == "new-generation")')" "true"
-check "latest generation stream exits 0 at its own watch_end" "$GEN_RC" "0"
+check_eq "latest generation stream exits 0 at its own watch_end" "$GEN_RC" "0"
 
 CURSOR_OUT="$(with_deadline 10 bash "$STREAM" "$GEN_LOG" 1 --watch-id old-generation)"
 CURSOR_RC=$?
-check "explicit watch-id cursor replays only that historical generation" \
+check_eq "explicit watch-id cursor replays only that historical generation" \
   "$(printf '%s\n' "$CURSOR_OUT" | jq -s \
       'length == 3 and all(.[]; .watch_id == "old-generation")')" "true"
-check "explicit ended generation exits 0" "$CURSOR_RC" "0"
+check_eq "explicit ended generation exits 0" "$CURSOR_RC" "0"
 
 # A syntactically valid start record is not proof that a producer is still
 # alive. Crash/signal paths can leave a start-only journal and no branch lock;
@@ -1143,7 +1131,7 @@ ORPHAN_ERRORS="$(printf '%s\n' "$ORPHAN_OUT" | jq -s '
   | ($errors | length) == 1
     and ($errors[0].reason | ascii_downcase
       | test("orphan|producer.*(gone|dead|missing|inactive|lost)|abandon"))')"
-check "start-only generation without a producer fails explicitly in bounded time" \
+check_eq "start-only generation without a producer fails explicitly in bounded time" \
   "$ORPHAN_ERRORS/$(( ORPHAN_RC != 0 ))/$(( ORPHAN_ELAPSED <= 3 ))" \
   "true/1/1"
 
@@ -1219,7 +1207,7 @@ TERMINAL_RACE_RESULT="$(jq -sr '
   ([.[] | .kind] | join(",")) + "/"
   + (([.[] | select(.kind == "stream_error")] | length) | tostring)' \
   "$TMP/terminal-race.out" 2>/dev/null || printf invalid)"
-check "terminal append racing lock retirement is delivered before orphan detection" \
+check_eq "terminal append racing lock retirement is delivered before orphan detection" \
   "$terminal_race_barrier/$terminal_race_timed_out/$TERMINAL_RACE_RESULT/$TERMINAL_RACE_RC" \
   "hit/no/watch_start,watch_end/0/0"
 
@@ -1232,7 +1220,7 @@ SIGNAL_ID="watch-eeeeeeeeeeeeeeeeeeeeeeee"
 SIGNAL_LOG="$REPO/.git/pr-watch/$(pr_watch_branch_key "$SIGNAL_BRANCH").jsonl"
 /bin/bash -c '
   cd "$1" || exit 1
-  # Startup may outlast the old two-second wait under CI load.
+  # Startup may outlast a two-second wait under CI load.
   sleep 3
   exec env PR_WATCH_INTERVAL=1 PR_WATCH_IDLE_TIMEOUT=30 \
     PR_WATCH_MAX_LIFETIME=60 bash "$2" --branch "$3" --pr 42 --watch-id "$4"
@@ -1249,7 +1237,7 @@ while (( SECONDS < signal_start_deadline )); do
   kill -0 "$SIGNAL_PID" 2>/dev/null || break
   sleep 0.1
 done
-check "signal fixture reaches watch_start before termination" "$signal_ready" yes
+check_eq "signal fixture reaches watch_start before termination" "$signal_ready" yes
 kill -TERM "$SIGNAL_PID" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 \
          21 22 23 24 25 26 27 28 29 30; do
@@ -1275,7 +1263,7 @@ if [[ "$signal_ready" == yes ]]; then
   else
     SIGNAL_TERMINAL_STATUS="$(( SIGNAL_STREAM_RC != 0 ))"
   fi
-  check "signalled producer leaves a terminally detectable generation" \
+  check_eq "signalled producer leaves a terminally detectable generation" \
     "$SIGNAL_TERMINAL/$SIGNAL_TERMINAL_STATUS" \
     "$(if [[ "$SIGNAL_TERMINAL" == watch_end ]]; then printf 'watch_end/0'; else printf 'stream_error/1'; fi)"
 fi
@@ -1330,7 +1318,7 @@ stream_term_reaps_long_poll() {
   printf 'stream=%s sleep=%s' "$stream_state" "$sleep_state"
 }
 
-check "TERM reaps the stream's one-hour poll child" \
+check_eq "TERM reaps the stream's one-hour poll child" \
   "$(stream_term_reaps_long_poll)" "stream=dead sleep=dead"
 
 stream_test_pid_state() {  # pid start-token
@@ -1408,7 +1396,7 @@ STREAM_GAP_BARRIER_STATE=missed
 STREAM_GAP_CHILD_STATE="$(stream_test_pid_state \
   "$STREAM_GAP_CHILD_PID" "$STREAM_GAP_CHILD_TOKEN")"
 stream_test_kill_identity "$STREAM_GAP_CHILD_PID" "$STREAM_GAP_CHILD_TOKEN"
-check "TERM at the stream sleep fork-to-PID gap reaps the forked child" \
+check_eq "TERM at the stream sleep fork-to-PID gap reaps the forked child" \
   "barrier=$STREAM_GAP_BARRIER_STATE rc=$STREAM_GAP_RC child=$STREAM_GAP_CHILD_STATE" \
   "barrier=hit rc=143 child=dead"
 
@@ -1510,7 +1498,7 @@ STREAM_WRAPPER_DESC_STATE="$(stream_test_pid_state \
   "$STREAM_WRAPPER_DESC_PID" "$STREAM_WRAPPER_DESC_TOKEN")"
 stream_test_kill_identity "$STREAM_WRAPPER_PID" "$STREAM_WRAPPER_TOKEN"
 stream_test_kill_identity "$STREAM_WRAPPER_DESC_PID" "$STREAM_WRAPPER_DESC_TOKEN"
-check "TERM reaps a stream sleep wrapper and its background descendant" \
+check_eq "TERM reaps a stream sleep wrapper and its background descendant" \
   "barrier=$STREAM_WRAPPER_BARRIER_STATE rc=$STREAM_WRAPPER_RC wrapper=$STREAM_WRAPPER_STATE descendant=$STREAM_WRAPPER_DESC_STATE" \
   "barrier=hit rc=143 wrapper=dead descendant=dead"
 
@@ -1524,9 +1512,9 @@ printf '%s\n' \
 TRUNC_OUT="$(with_deadline 9 bash "$STREAM" "$TRUNC_LOG" 1)"
 TRUNC_RC=$?
 wait
-check "byte truncation emits a machine-readable stream_error" \
+check_eq "byte truncation emits a machine-readable stream_error" \
   "$(printf '%s\n' "$TRUNC_OUT" | jq -r 'select(.kind == "stream_error") | .reason')" "log_truncated"
-check "byte truncation exits nonzero" "$TRUNC_RC" "1"
+check_eq "byte truncation exits nonzero" "$TRUNC_RC" "1"
 
 REPLACE_LOG="$TMP/replaced.jsonl"
 printf '%s\n' \
@@ -1541,9 +1529,9 @@ printf '%s\n' \
 REPLACE_OUT="$(with_deadline 9 bash "$STREAM" "$REPLACE_LOG" 1)"
 REPLACE_RC=$?
 wait
-check "log replacement emits a machine-readable stream_error" \
+check_eq "log replacement emits a machine-readable stream_error" \
   "$(printf '%s\n' "$REPLACE_OUT" | jq -r 'select(.kind == "stream_error") | .reason')" "log_replaced"
-check "log replacement exits nonzero" "$REPLACE_RC" "1"
+check_eq "log replacement exits nonzero" "$REPLACE_RC" "1"
 
 SYMLINK_TARGET="$TMP/symlink-target.jsonl"
 SYMLINK_LOG="$TMP/symlink-stream.jsonl"
@@ -1554,7 +1542,7 @@ printf '%s\n' \
 ln -s "$SYMLINK_TARGET" "$SYMLINK_LOG"
 SYMLINK_OUT="$(with_deadline 5 bash "$STREAM" "$SYMLINK_LOG" 1)"
 SYMLINK_RC=$?
-check "stream rejects a symlink instead of following its target" \
+check_eq "stream rejects a symlink instead of following its target" \
   "$(printf '%s\n' "$SYMLINK_OUT" | jq -r 'select(.kind == "stream_error") | .reason')/$SYMLINK_RC" \
   "not_regular/1"
 
@@ -1578,7 +1566,7 @@ printf '%s\n' \
 FIFO_SWAP_OUT="$(with_deadline 6 bash "$STREAM" "$FIFO_SWAP_LOG" 1)"
 FIFO_SWAP_RC=$?
 wait "$FIFO_SWAP_WRITER" 2>/dev/null || true
-check "stream never reopens a FIFO replacement while following" \
+check_eq "stream never reopens a FIFO replacement while following" \
   "$(printf '%s\n' "$FIFO_SWAP_OUT" | jq -r 'select(.kind == "stream_error") | .reason')/$FIFO_SWAP_RC" \
   "log_replaced/1"
 
@@ -1594,9 +1582,9 @@ printf '%s\n' \
 REGRESS_OUT="$(with_deadline 9 bash "$STREAM" "$REGRESS_LOG" 1)"
 REGRESS_RC=$?
 wait
-check "line-count regression is detected even when bytes grow" \
+check_eq "line-count regression is detected even when bytes grow" \
   "$(printf '%s\n' "$REGRESS_OUT" | jq -r 'select(.kind == "stream_error") | .reason')" "line_regression"
-check "line-count regression exits nonzero" "$REGRESS_RC" "1"
+check_eq "line-count regression exits nonzero" "$REGRESS_RC" "1"
 
 echo
 echo "## Bounded replay"
@@ -1612,14 +1600,14 @@ CAP_OUT="$(with_deadline 20 env PR_WATCH_STREAM_MAX_EVENTS=3 \
   PR_WATCH_STREAM_MAX_BYTES=700 bash "$STREAM" "$CAP_LOG" 1)"
 CAP_RC=$?
 wait
-check "bounded replay reports omitted event count" \
+check_eq "bounded replay reports omitted event count" \
   "$(printf '%s\n' "$CAP_OUT" | jq -r 'select(.kind == "stream_omitted") | (.omitted_events > 0)')" "true"
-check "bounded replay reports omitted byte count" \
+check_eq "bounded replay reports omitted byte count" \
   "$(printf '%s\n' "$CAP_OUT" | jq -r 'select(.kind == "stream_omitted") | (.omitted_bytes > 0)')" "true"
-check "initial replay retains at most the configured event count" \
+check_eq "initial replay retains at most the configured event count" \
   "$(printf '%s\n' "$CAP_OUT" | jq -s \
       '[.[] | select(.kind == "check")] | length <= 3')" "true"
-check "bounded replay summary retains its terminal reason and exits 0" \
+check_eq "bounded replay summary retains its terminal reason and exits 0" \
   "$(printf '%s\n' "$CAP_OUT" | jq -r \
       'select(.kind == "stream_omitted" and .scope == "lifetime") | .terminal.reason')/$CAP_RC" \
   "cap complete/0"
@@ -1652,7 +1640,7 @@ LIFETIME_AFTER_SUMMARY="$(printf '%s\n' "$LIFETIME_OUT" | jq -sr '
     if .closed then .after += 1
     elif ($event.kind == "stream_omitted" and $event.scope == "lifetime")
     then .closed = true else . end) | .after')"
-check "stream lifetime caps do not reset across appended batches" \
+check_eq "stream lifetime caps do not reset across appended batches" \
   "$(( LIFETIME_LINES <= 4 && LIFETIME_BYTES <= 900 ))/$LIFETIME_SUMMARIES/$LIFETIME_AFTER_SUMMARY/$LIFETIME_RC" \
   "1/1/0/0"
 
@@ -1684,13 +1672,13 @@ jq -nc --arg one "$ATTACH_ONE_LOG" --arg two "$ATTACH_TWO_LOG" \
   > "$ATTACH_MANIFEST"
 ATTACH_OUT="$(bash "$ATTACH" "$ATTACH_MANIFEST")"
 ATTACH_RC=$?
-check "one bounded consumer drains both explicit generations" \
+check_eq "one bounded consumer drains both explicit generations" \
   "$(printf '%s\n' "$ATTACH_OUT" | jq -s --arg one "$ATTACH_ONE_ID" --arg two "$ATTACH_TWO_ID" \
       '[.[] | select(.kind == "watch_end") | .watch_id] | sort == ([$one,$two] | sort)')/$ATTACH_RC" \
   "true/0"
 bash "$ATTACH" "$ATTACH_MANIFEST" >/dev/null 2>&1
 ATTACH_REPLAY_RC=$?
-check "attachment manifest is one-shot" "$ATTACH_REPLAY_RC" "1"
+check_eq "attachment manifest is one-shot" "$ATTACH_REPLAY_RC" "1"
 
 # A claim remains the only retry authority until every represented stream has
 # crossed fork, exec, and its explicit ready publication. Force each launch
@@ -1709,6 +1697,7 @@ cp "$ATTACH" "$ATTACH_LAUNCH"
 cp "$STREAM" "$ATTACH_LAUNCH_STREAM"
 cp "$REPO_ROOT/.agents/lib/pr-watch-state.sh" \
   "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
+  "$REPO_ROOT/.agents/lib/pr-watch-attachment.jq" \
   "$ATTACH_LAUNCH_ROOT/.agents/lib/"
 jq -nc '{kind:"watch_start",watch_id:"watch-dddddddddddddddddddddddd"}' \
   > "$ATTACH_LAUNCH_LOG"
@@ -1809,11 +1798,11 @@ attach_failed_launch_is_retryable() {  # fork|sigkill
     "$first_state" "$claim_state" "$retry_state"
 }
 
-check "serializer fork failure preserves retry authority" \
+check_eq "serializer fork failure preserves retry authority" \
   "$(attach_failed_launch_is_retryable fork)" \
   "first=failed claim=json retry=passed"
 
-check "serializer SIGKILL before child launch preserves retry authority" \
+check_eq "serializer SIGKILL before child launch preserves retry authority" \
   "$(attach_failed_launch_is_retryable sigkill)" \
   "first=failed claim=json retry=passed"
 
@@ -1834,7 +1823,7 @@ if (( ATTACH_EXEC_FIRST_RC != 0 && ATTACH_EXEC_RETRY_RC == 0 )); then
 else
   ATTACH_EXEC_RESULT="first=$ATTACH_EXEC_FIRST_RC claim=$ATTACH_EXEC_CLAIM_STATE retry=$ATTACH_EXEC_RETRY_RC"
 fi
-check "stream exec/ready failure preserves retry authority" \
+check_eq "stream exec/ready failure preserves retry authority" \
   "$ATTACH_EXEC_RESULT" "first=failed claim=json retry=passed"
 
 # A stream that has published readiness owns the still-JSON claim lease across
@@ -1854,6 +1843,7 @@ cp "$ATTACH" "$ATTACH_LEASE"
 cp "$STREAM" "${ATTACH_LEASE_STREAM}.real"
 cp "$REPO_ROOT/.agents/lib/pr-watch-state.sh" \
   "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
+  "$REPO_ROOT/.agents/lib/pr-watch-attachment.jq" \
   "$ATTACH_LEASE_ROOT/.agents/lib/"
 mkfifo "${ATTACH_LEASE_MARKER}.release" "${ATTACH_LEASE_MARKER}.released"
 cat > "$ATTACH_LEASE_STREAM" <<'ATTACH_LEASE_STREAM_EOF'
@@ -2000,14 +1990,14 @@ with_deadline 5 bash "$ATTACH_LEASE" "$ATTACH_LEASE_MANIFEST" \
   2> "${ATTACH_LEASE_MARKER}.final.err"
 ATTACH_LEASE_FINAL_RC=$?
 ATTACH_LEASE_FINAL_STATE="$(attach_claim_state "$ATTACH_LEASE_MANIFEST")"
-check "serializer death keeps one live stream and a recoverable claim lease" \
+check_eq "serializer death keeps one live stream and a recoverable claim lease" \
   "first=$ATTACH_LEASE_FIRST_RC retry=$ATTACH_LEASE_RETRY_RC final=$ATTACH_LEASE_FINAL_RC claim=$ATTACH_LEASE_FIRST_STATE child=$ATTACH_LEASE_CHILD_STATE launches=$ATTACH_LEASE_LAUNCHES released=$ATTACH_LEASE_RELEASED final_claim=$ATTACH_LEASE_FINAL_STATE serializer=$([[ -f "${ATTACH_LEASE_MARKER}.serializer" ]] && echo reached || echo missing)" \
   "first=137 retry=1 final=0 claim=json child=alive launches=1 released=released final_claim=consumed serializer=reached"
 
 # The claim must remain recovery authority until child output has actually been
-# drained. Kill the serializer after readiness at the old tombstone-before-drain
-# boundary: the live child lease excludes a concurrent retry, then the exact
-# claim must replay once after that child observes its closed pipe and exits.
+# drained. Kill the serializer after readiness, before the drain completes: the live
+# child lease excludes a concurrent retry, then the exact claim must replay once
+# after that child observes its closed pipe and exits.
 ATTACH_DRAIN_MARKER="$TMP/attach-drain"
 ATTACH_DRAIN_MANIFEST="$(attach_launch_manifest launch-drain)"
 mkfifo "${ATTACH_DRAIN_MARKER}.release" "${ATTACH_DRAIN_MARKER}.released"
@@ -2075,7 +2065,7 @@ ATTACH_DRAIN_FINAL_RC=$?
 ATTACH_DRAIN_FINAL_STATE="$(attach_claim_state "$ATTACH_DRAIN_MANIFEST")"
 ATTACH_DRAIN_DELIVERIES="$(grep -c '"watch_id":"watch-dddddddddddddddddddddddd"' \
   "${ATTACH_DRAIN_MARKER}.final.out" 2>/dev/null || true)"
-check "serializer death before drain preserves one replay authority" \
+check_eq "serializer death before drain preserves one replay authority" \
   "first=$ATTACH_DRAIN_FIRST_RC retry=$ATTACH_DRAIN_RETRY_RC final=$ATTACH_DRAIN_FINAL_RC claim=$ATTACH_DRAIN_FIRST_STATE child=$ATTACH_DRAIN_CHILD_STATE launches=$ATTACH_DRAIN_LAUNCHES released=$ATTACH_DRAIN_RELEASED deliveries=$ATTACH_DRAIN_DELIVERIES final_claim=$ATTACH_DRAIN_FINAL_STATE serializer=$([[ -f "${ATTACH_DRAIN_MARKER}.serializer" ]] && echo reached || echo missing)" \
   "first=137 retry=1 final=0 claim=json child=alive launches=1 released=released deliveries=2 final_claim=consumed serializer=reached"
 
@@ -2106,7 +2096,7 @@ ATTACH_FINALIZER_FINAL_STATE="$(attach_claim_state \
 ATTACH_FINALIZER_DELIVERIES="$(grep -c \
   '"watch_id":"watch-dddddddddddddddddddddddd"' \
   "${ATTACH_FINALIZER_MARKER}.final.out" 2>/dev/null || true)"
-check "post-drain death replays without a duplicate delivered prefix" \
+check_eq "post-drain death replays without a duplicate delivered prefix" \
   "first=$ATTACH_FINALIZER_FIRST_RC claim=$ATTACH_FINALIZER_FIRST_STATE first_bytes=$ATTACH_FINALIZER_FIRST_BYTES final=$ATTACH_FINALIZER_FINAL_RC deliveries=$ATTACH_FINALIZER_DELIVERIES final_claim=$ATTACH_FINALIZER_FINAL_STATE serializer=$([[ -f "${ATTACH_FINALIZER_MARKER}.serializer" ]] && echo reached || echo missing)" \
   "first=137 claim=json first_bytes=0 final=0 deliveries=2 final_claim=consumed serializer=reached"
 
@@ -2203,7 +2193,7 @@ ATTACH_RELAY_FINAL_STATE="$(attach_claim_state "$ATTACH_RELAY_MANIFEST")"
 ATTACH_RELAY_DELIVERIES="$(grep -c \
   '"watch_id":"watch-dddddddddddddddddddddddd"' \
   "${ATTACH_RELAY_MARKER}.final.out" 2>/dev/null || true)"
-check "relay death before FIFO delivery preserves one replay authority" \
+check_eq "relay death before FIFO delivery preserves one replay authority" \
   "pause=$ATTACH_RELAY_PAUSED_RC serializer=$ATTACH_RELAY_SERIALIZER_RC first=$ATTACH_RELAY_FIRST_RC claim=$ATTACH_RELAY_FIRST_STATE first_bytes=$ATTACH_RELAY_FIRST_BYTES retry=$ATTACH_RELAY_RETRY_RC unlock=$ATTACH_RELAY_UNLOCK_RC final=$ATTACH_RELAY_FINAL_RC deliveries=$ATTACH_RELAY_DELIVERIES final_claim=$ATTACH_RELAY_FINAL_STATE" \
   "pause=0 serializer=0 first=137 claim=json first_bytes=0 retry=1 unlock=0 final=0 deliveries=2 final_claim=consumed"
 
@@ -2214,7 +2204,7 @@ jq -nc --arg log "$ATTACH_ONE_LOG" --arg id "$ATTACH_ONE_ID" '
      watch_id:$id,event_log:$log}]}' > "$ATTACH_CAP_MANIFEST"
 bash "$ATTACH" "$ATTACH_CAP_MANIFEST" >/dev/null 2>&1
 ATTACH_CAP_RC=$?
-check "attachment rejects more than four represented refs" "$ATTACH_CAP_RC" "1"
+check_eq "attachment rejects more than four represented refs" "$ATTACH_CAP_RC" "1"
 
 ATTACH_GLOBAL_MANIFEST="$(attach_claim_path direct-global-cap)"
 ATTACH_GLOBAL_ENTRIES='[]'
@@ -2243,7 +2233,7 @@ ATTACH_GLOBAL_BYTES="$(LC_ALL=C printf '%s\n' "$ATTACH_GLOBAL_OUT" | wc -c | tr 
 ATTACH_GLOBAL_SUMMARIES="$(printf '%s\n' "$ATTACH_GLOBAL_OUT" | jq -s \
   '[.[] | select(.kind == "stream_omitted" and .scope == "attachment"
                  and .terminal_output == true)] | length')"
-check "four-ref attach has one aggregate lifetime budget" \
+check_eq "four-ref attach has one aggregate lifetime budget" \
   "$(( ATTACH_GLOBAL_LINES <= 8 && ATTACH_GLOBAL_BYTES <= 2000 ))/$ATTACH_GLOBAL_SUMMARIES/$ATTACH_GLOBAL_RC" \
   "1/1/0"
 
@@ -2280,7 +2270,7 @@ for ATTACH_ATTEMPT in 1 2 3 4 5 6 7 8; do
     break
   fi
 done
-check "multi-ref attach preserves one valid JSON record per child event" \
+check_eq "multi-ref attach preserves one valid JSON record per child event" \
   "$ATTACH_ATOMIC_RESULT" "valid"
 
 # Inject a public-boundary probe immediately after the serializer's real fork,
@@ -2392,7 +2382,7 @@ fi
 if [[ "$ATTACH_RACE_RC/$ATTACH_RACE_CHILD_STATE" == 143/dead ]]; then
   ok "TERM at serializer fork publication reaps the forked stream"
 else
-  no "TERM at serializer fork publication reaps the forked stream" \
+  bad "TERM at serializer fork publication reaps the forked stream" \
     "rc=$ATTACH_RACE_RC child=$ATTACH_RACE_CHILD_STATE direct=$ATTACH_RACE_DIRECT_IDENTITY dir=$ATTACH_RACE_DIR_STATE stderr=$(tr '\n' ' ' < "${ATTACH_RACE_MARKER}.err" 2>/dev/null)"
 fi
 
@@ -2406,7 +2396,7 @@ bash "$ATTACH" "$ATTACH_DIRECTORY" >/dev/null 2>&1
 ATTACH_DIRECTORY_RC=$?
 ATTACH_DIRECTORY_DRAINS="$(find "$ATTACH_DIR" -maxdepth 1 \
   -name "${ATTACH_DIRECTORY##*/}.drain.*" | wc -l | tr -d ' ')"
-check "attach rejects a directory without moving or consuming it" \
+check_eq "attach rejects a directory without moving or consuming it" \
   "$([[ -f "$ATTACH_DIRECTORY/sentinel" ]] && echo present || echo moved)/$ATTACH_DIRECTORY_DRAINS/$ATTACH_DIRECTORY_RC" \
   "present/0/1"
 
@@ -2857,16 +2847,16 @@ arm() {
   printf '%s' "$result"
 }
 
-check "branch push arms a watcher" \
+check_eq "branch push arms a watcher" \
   "$(arm "refs/heads/feat $SHA refs/heads/feat $ZERO")" "armed"
 
-check "branch DELETION arms nothing" \
+check_eq "branch DELETION arms nothing" \
   "$(arm "refs/heads/feat $ZERO refs/heads/feat $SHA")" "idle"
 
-check "tag push arms nothing" \
+check_eq "tag push arms nothing" \
   "$(arm "refs/tags/v1 $SHA refs/tags/v1 $ZERO")" "idle"
 
-check "BOXLITE_PR_WATCH=0 opts out" \
+check_eq "BOXLITE_PR_WATCH=0 opts out" \
   "$(arm "refs/heads/feat $SHA refs/heads/feat $ZERO" BOXLITE_PR_WATCH=0)" "idle"
 
 attachment_key_for() { # session-scope command-hash
@@ -2902,21 +2892,21 @@ arm_agent_manifest() { # command session ref-update-lines
 EXPLICIT_COMMAND="git push origin refs/heads/local:refs/heads/other"
 EXPLICIT_MANIFEST="$(arm_agent_manifest "$EXPLICIT_COMMAND" session-explicit \
   "refs/heads/local $SHA refs/heads/other $ZERO")"
-check "pre-push records the explicit remote ref, watch generation, and hashed log" \
+check_eq "pre-push records the explicit remote ref, watch generation, and hashed log" \
   "$(jq -r '.entries[0] | .remote_ref + ":" + .branch + ":" + .watch_id + ":" + (.event_log | split("/")[-1])' \
       "$EXPLICIT_MANIFEST" 2>/dev/null)" \
   "refs/heads/other:other:$(jq -r '.entries[0].watch_id' "$EXPLICIT_MANIFEST" 2>/dev/null):$(pr_watch_branch_key other).jsonl"
-check "pre-push generation id is explicit and bounded" \
+check_eq "pre-push generation id is explicit and bounded" \
   "$(jq -r '.entries[0].watch_id | test("^watch-[0-9a-f]{24}$")' "$EXPLICIT_MANIFEST" 2>/dev/null)" "true"
 
 MULTI_COMMAND="git push origin refs/heads/one:refs/heads/remote-one refs/heads/two:refs/heads/remote-two"
 MULTI_MANIFEST="$(arm_agent_manifest "$MULTI_COMMAND" session-multi \
   "refs/heads/one $SHA refs/heads/remote-one $ZERO
 refs/heads/two $SHA refs/heads/remote-two $ZERO")"
-check "pre-push represents both remote refs from one push" \
+check_eq "pre-push represents both remote refs from one push" \
   "$(jq -r '[.entries[].remote_ref] | join("|")' "$MULTI_MANIFEST" 2>/dev/null)" \
   "refs/heads/remote-one|refs/heads/remote-two"
-check "pre-push assigns a distinct generation to every armed ref" \
+check_eq "pre-push assigns a distinct generation to every armed ref" \
   "$(jq -r '[.entries[].watch_id] | length == 2 and (unique | length == 2)' "$MULTI_MANIFEST" 2>/dev/null)" "true"
 
 # A second push commonly arrives while the first branch watcher remains live.
@@ -2961,7 +2951,7 @@ REPEAT_MANIFEST_IS_LIVE="$(jq -e --arg id "$REPEAT_MANIFEST_ID" \
   >/dev/null 2>&1 \
   && [[ "$REPEAT_READY_ID" == "$REPEAT_ACTIVE_ID" ]] \
   && echo yes || echo no)"
-check "repeat push manifest names a generation that published watch_start" \
+check_eq "repeat push manifest names a generation that published watch_start" \
   "$REPEAT_MANIFEST_IS_LIVE" "yes"
 kill_watchers
 
@@ -3047,30 +3037,30 @@ if [[ "$LOG_LOCK_REPEAT_READY_ID" == "$LOG_LOCK_REPEAT_ACTIVE_ID" \
    && "$LOG_LOCK_REPEAT_DIAGNOSTIC_STATE" == preserved ]]; then
   ok "repeat push reuses a ready generation behind the real daemon-log boundary"
 else
-  no "repeat push reuses a ready generation behind the real daemon-log boundary" \
+  bad "repeat push reuses a ready generation behind the real daemon-log boundary" \
     "ready=[$LOG_LOCK_REPEAT_READY_ID] daemon_log=[$LOG_LOCK_REPEAT_DAEMON_STATE] manifest=[$LOG_LOCK_REPEAT_MANIFEST_ID] diagnostic=[$LOG_LOCK_REPEAT_DIAGNOSTIC_STATE]"
 fi
 kill_watchers
 wait "$LOG_LOCK_REPEAT_HELPER_PID" 2>/dev/null || true
 
-check "daemon dies on SIGTERM (traps must exit, not resume)" \
+check_eq "daemon dies on SIGTERM (traps must exit, not resume)" \
   "$(term_kills_daemon)" "died"
 
-check "TERM tears down a stuck TERM-ignoring gh process group" \
+check_eq "TERM tears down a stuck TERM-ignoring gh process group" \
   "$(term_kills_stuck_gh)" "watcher=dead gh=dead descendant=dead"
 
-check "TERM at external-command PID publication reaps the owned group" \
+check_eq "TERM at external-command PID publication reaps the owned group" \
   "$(term_at_external_launch_publication)" "rc=143 child=dead"
 
-check "TERM cleanup reaps a TERM-ignoring output monitor" \
+check_eq "TERM cleanup reaps a TERM-ignoring output monitor" \
   "$(term_at_external_launch_publication ignoring-monitor)" "rc=143 child=dead monitor=dead"
 
-check "TERM cleanup reaps a TERM-ignoring timeout monitor" \
+check_eq "TERM cleanup reaps a TERM-ignoring timeout monitor" \
   "$(term_at_external_launch_publication ignoring-timeout)" "rc=143 child=dead monitor=dead"
 
 LAUNCH_TIMEOUT_RESULT="$(term_at_external_launch_publication stopped-watcher \
   2>"$TMP/launch-timeout-diagnostic")"
-check "launch cleanup watchdog fails a stalled watcher" \
+check_eq "launch cleanup watchdog fails a stalled watcher" \
   "$LAUNCH_TIMEOUT_RESULT" "rc=124 child=dead"
 if grep -Eq 'timeout=8s watcher=[1-9][0-9]* child=[1-9][0-9]*' \
      "$TMP/launch-timeout-diagnostic" \
@@ -3078,17 +3068,17 @@ if grep -Eq 'timeout=8s watcher=[1-9][0-9]* child=[1-9][0-9]*' \
      "$TMP/launch-timeout-diagnostic"; then
   ok "launch timeout reports owned process identities and stopped state"
 else
-  no "launch timeout reports owned process identities and stopped state" \
+  bad "launch timeout reports owned process identities and stopped state" \
     "$(cat "$TMP/launch-timeout-diagnostic")"
 fi
 
-check "command deadline tears down a stuck TERM-ignoring gh process group" \
+check_eq "command deadline tears down a stuck TERM-ignoring gh process group" \
   "$(timeout_kills_stuck_gh)" "watcher=dead gh=dead descendant=dead"
 
-check "stale timeout monitor refuses a changed process generation" \
+check_eq "stale timeout monitor refuses a changed process generation" \
   "$(timeout_rejects_reused_generation)" "rc=0 term=absent completed=present"
 
-check "external output is capped during writes and the process group is reaped" \
+check_eq "external output is capped during writes and the process group is reaped" \
   "$(output_cap_kills_flooding_gh)" \
   "completed=absent watcher=dead rc=0 gh=dead descendant=dead"
 
@@ -3096,15 +3086,15 @@ check "external output is capped during writes and the process group is reaped" 
 reset_state
 (cd "$REPO" && printf 'refs/heads/feat %s refs/heads/feat %s\n' "$SHA" "$ZERO" \
   | env -u CLAUDECODE -u CODEX_SANDBOX -u AGENT_GATED bash "$PREPUSH" origin url >/dev/null 2>&1)
-check "hook still exits 0 after arming" "$?" "0"
+check_eq "hook still exits 0 after arming" "$?" "0"
 kill_watchers
 
-# A missing watcher must not break pushes for checkouts that predate this file.
+# A missing watcher must not break pushes.
 reset_state
 mv "$SCRATCH_WATCHER" "$TMP/moved-watcher.sh"
 (cd "$REPO" && printf 'refs/heads/feat %s refs/heads/feat %s\n' "$SHA" "$ZERO" \
   | env -u CLAUDECODE -u CODEX_SANDBOX -u AGENT_GATED bash "$PREPUSH" origin url >/dev/null 2>&1)
-check "absent watcher does not fail the push" "$?" "0"
+check_eq "absent watcher does not fail the push" "$?" "0"
 mv "$TMP/moved-watcher.sh" "$SCRATCH_WATCHER"
 
 # ── 9. argument parsing ──────────────────────────────────────────────────────
@@ -3123,11 +3113,11 @@ arg_result() {
   else echo "other"; fi
 }
 
-check "--branch with no value is rejected, not spun on" "$(arg_result --branch)" "rejected"
-check "--sha with no value is rejected"                 "$(arg_result --sha)"    "rejected"
-check "--pr with no value is rejected"                  "$(arg_result --pr)"     "rejected"
+check_eq "--branch with no value is rejected, not spun on" "$(arg_result --branch)" "rejected"
+check_eq "--sha with no value is rejected"                 "$(arg_result --sha)"    "rejected"
+check_eq "--pr with no value is rejected"                  "$(arg_result --pr)"     "rejected"
 
-check "--help prints the whole Env section, not a truncated one" \
+check_eq "--help prints the whole Env section, not a truncated one" \
   "$(bash "$WATCHER" --help 2>&1 | grep -c 'PR_WATCH_INTERVAL\|PR_WATCH_IDLE_TIMEOUT\|PR_WATCH_MAX_LIFETIME')" "3"
 
 # Bash recursively evaluates variable contents in arithmetic expressions. An
@@ -3142,7 +3132,7 @@ ARITHMETIC_VALUE='slot[$(printf compromised > '"$ARITHMETIC_MARKER"')]'
   bash "$WATCHER" --branch arithmetic-env --pr 42 \
     --watch-id watch-777777777777777777777777 >/dev/null 2>&1)
 ARITHMETIC_RC=$?
-check "polling timing env rejects arithmetic command substitution" \
+check_eq "polling timing env rejects arithmetic command substitution" \
   "$([[ -e "$ARITHMETIC_MARKER" ]] && echo executed || echo absent)/$ARITHMETIC_RC" \
   "absent/2"
 
@@ -3159,7 +3149,7 @@ for WATCH_LIMIT_NAME in \
   (cd "$REPO" && with_deadline 10 env "$WATCH_LIMIT_NAME=$DECIMAL_OVERFLOW_TWO" \
     bash "$WATCHER" --branch "overflow-${WATCH_LIMIT_NAME}" --pr 42 --once \
       >/dev/null 2>&1)
-  check "$WATCH_LIMIT_NAME rejects a decimal wider than Bash arithmetic" "$?" "2"
+  check_eq "$WATCH_LIMIT_NAME rejects a decimal wider than Bash arithmetic" "$?" "2"
 done
 
 # Canonical decimal syntax matters too: Bash interprets a leading zero as octal,
@@ -3172,7 +3162,7 @@ for WATCH_LIMIT_NAME in \
   (cd "$REPO" && with_deadline 10 env "$WATCH_LIMIT_NAME=08" \
     bash "$WATCHER" --branch "leading-zero-${WATCH_LIMIT_NAME}" --pr 42 --once \
       >/dev/null 2>&1)
-  check "$WATCH_LIMIT_NAME rejects a leading-zero decimal" "$?" "2"
+  check_eq "$WATCH_LIMIT_NAME rejects a leading-zero decimal" "$?" "2"
 done
 
 STREAM_OVERFLOW_LOG="$TMP/stream-overflow.jsonl"
@@ -3183,19 +3173,19 @@ printf '%s\n' \
 
 with_deadline 5 bash "$STREAM" "$STREAM_OVERFLOW_LOG" \
   "$DECIMAL_OVERFLOW_TWO" >/dev/null 2>&1
-check "stream poll rejects a decimal wider than Bash arithmetic" "$?" "2"
+check_eq "stream poll rejects a decimal wider than Bash arithmetic" "$?" "2"
 
 for STREAM_LIMIT_NAME in PR_WATCH_STREAM_WAIT PR_WATCH_STREAM_MAX_EVENTS; do
   with_deadline 5 env "$STREAM_LIMIT_NAME=$DECIMAL_OVERFLOW_TWO" \
     bash "$STREAM" "$STREAM_OVERFLOW_LOG" 1 >/dev/null 2>&1
-  check "$STREAM_LIMIT_NAME rejects a decimal wider than Bash arithmetic" "$?" "2"
+  check_eq "$STREAM_LIMIT_NAME rejects a decimal wider than Bash arithmetic" "$?" "2"
 done
 with_deadline 5 env PR_WATCH_STREAM_MAX_BYTES="$DECIMAL_OVERFLOW_513" \
   bash "$STREAM" "$STREAM_OVERFLOW_LOG" 1 >/dev/null 2>&1
-check "PR_WATCH_STREAM_MAX_BYTES rejects a decimal wider than Bash arithmetic" "$?" "2"
+check_eq "PR_WATCH_STREAM_MAX_BYTES rejects a decimal wider than Bash arithmetic" "$?" "2"
 
 with_deadline 5 bash "$STREAM" "$STREAM_OVERFLOW_LOG" 08 >/dev/null 2>&1
-check "stream poll rejects a leading-zero decimal" "$?" "2"
+check_eq "stream poll rejects a leading-zero decimal" "$?" "2"
 
 # Numerically valid is not operationally bounded. A one-hour poll already
 # exceeds every interactive attachment wait in this plugin; reject anything
@@ -3203,7 +3193,7 @@ check "stream poll rejects a leading-zero decimal" "$?" "2"
 IMPRACTICAL_POLL=3601
 with_deadline 5 bash "$STREAM" "$STREAM_OVERFLOW_LOG" \
   "$IMPRACTICAL_POLL" >/dev/null 2>&1
-check "stream poll rejects an impractical interval above its hard maximum" "$?" "2"
+check_eq "stream poll rejects an impractical interval above its hard maximum" "$?" "2"
 
 # The initial event-log wait is caller-controlled too. A value can fit the
 # arithmetic parser yet retain a consumer for decades, so reject it before an
@@ -3213,18 +3203,18 @@ IMPRACTICAL_STREAM_WAIT_LOG="$TMP/impractical-stream-wait-missing.jsonl"
 rm -f "$IMPRACTICAL_STREAM_WAIT_LOG"
 with_deadline 3 env PR_WATCH_STREAM_WAIT="$IMPRACTICAL_STREAM_WAIT" \
   bash "$STREAM" "$IMPRACTICAL_STREAM_WAIT_LOG" 1 >/dev/null 2>&1
-check "stream wait rejects a value above its operational hard maximum" "$?" "2"
+check_eq "stream wait rejects a value above its operational hard maximum" "$?" "2"
 
 (cd "$REPO" && with_deadline 5 env PR_WATCH_INTERVAL="$IMPRACTICAL_POLL" \
   bash "$WATCHER" --branch impractical-interval --pr 42 --once \
     >/dev/null 2>&1)
-check "producer poll rejects an impractical interval above its hard maximum" "$?" "2"
+check_eq "producer poll rejects an impractical interval above its hard maximum" "$?" "2"
 
 for STREAM_LIMIT_NAME in \
     PR_WATCH_STREAM_WAIT PR_WATCH_STREAM_MAX_EVENTS PR_WATCH_STREAM_MAX_BYTES; do
   with_deadline 5 env "$STREAM_LIMIT_NAME=08" \
     bash "$STREAM" "$STREAM_OVERFLOW_LOG" 1 >/dev/null 2>&1
-  check "$STREAM_LIMIT_NAME rejects a leading-zero decimal" "$?" "2"
+  check_eq "$STREAM_LIMIT_NAME rejects a leading-zero decimal" "$?" "2"
 done
 
 # The pre-push cases reset the shared scratch state after the earlier attach
@@ -3248,7 +3238,7 @@ for ATTACH_LIMIT_NAME in PR_WATCH_ATTACH_MAX_EVENTS PR_WATCH_ATTACH_MAX_BYTES; d
   fi
   with_deadline 5 env "$ATTACH_LIMIT_NAME=$ATTACH_LIMIT_VALUE" \
     bash "$ATTACH" "$ATTACH_OVERFLOW_MANIFEST" >/dev/null 2>&1
-  check "$ATTACH_LIMIT_NAME rejects a decimal wider than Bash arithmetic" "$?" "2"
+  check_eq "$ATTACH_LIMIT_NAME rejects a decimal wider than Bash arithmetic" "$?" "2"
 done
 
 for ATTACH_LIMIT_NAME in PR_WATCH_ATTACH_MAX_EVENTS PR_WATCH_ATTACH_MAX_BYTES; do
@@ -3259,9 +3249,7 @@ for ATTACH_LIMIT_NAME in PR_WATCH_ATTACH_MAX_EVENTS PR_WATCH_ATTACH_MAX_BYTES; d
     > "$ATTACH_LEADING_ZERO_MANIFEST"
   with_deadline 5 env "$ATTACH_LIMIT_NAME=08" \
     bash "$ATTACH" "$ATTACH_LEADING_ZERO_MANIFEST" >/dev/null 2>&1
-  check "$ATTACH_LIMIT_NAME rejects a leading-zero decimal" "$?" "2"
+  check_eq "$ATTACH_LIMIT_NAME rejects a leading-zero decimal" "$?" "2"
 done
 
-echo
-printf 'pr-watch: %d passed, %d failed\n' "$pass" "$fail"
-(( fail == 0 ))
+assert_result

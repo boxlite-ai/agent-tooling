@@ -87,12 +87,6 @@ Add these runtime paths to the consumer's `.gitignore`:
 
 ```gitignore
 .agents/state/
-.claude/.last-audit.json
-.claude/.last-audit-handoff.json
-.claude/.last-verdict.json
-.claude/.pr-reviewed.json
-.claude/.verdict-last-uuid
-.claude/.verdict-decisions.log
 ```
 
 ### 2. Add installation and activation files
@@ -109,7 +103,7 @@ Paths in the first column are relative to this source checkout; destinations are
 | [Codex bootstrap hook](templates/codex-plugin-bootstrap.json) | Merge into `.codex/hooks.json` |
 | [Copilot activation settings](.github/copilot/settings.json) | Merge into `.github/copilot/settings.json` |
 
-The profile validator currently requires activation declarations for all three hosts, even if you use only one. Keep their marketplace refs aligned with `tooling.ref`. Use the canonical Git marketplace source from the templates; local clone registrations conflict across worktrees.
+The profile validator requires activation declarations for all three hosts, even if you use only one. Keep their marketplace refs aligned with `tooling.ref`. Use the canonical Git marketplace source from the templates; local clone registrations conflict across worktrees.
 
 For existing Claude settings, use the supplied merge helper from this checkout, with `consumer` set to the destination repository:
 
@@ -157,27 +151,20 @@ Ask your agent to work normally. Hooks check supported actions as they happen an
 | Prepare or revise a PR description | [boxlite-pr-preparation](plugins/boxlite-agent-tooling/.agents/skills/boxlite-pr-preparation/SKILL.md) |
 | Acknowledge the current PR diff | [Author acknowledgment](plugins/boxlite-agent-tooling/CONTRIBUTING.md#author-review-acknowledgment) |
 
-Workflow and writing reminders reference `boxlite-writing` by name; the host loads
-its instructions. Try: "Use boxlite-writing to shorten this PR description."
+Skills load by name from the host. Try prompts:
+
+- "Use boxlite-writing to shorten this PR description."
+- "Use boxlite-shell-engineering to review this installer for POSIX portability."
+- "Use google-code-review to review this diff."
+- "Use boxlite-clean-code to review this module's error handling without editing it."
+- "Use boxlite-distill to explain this module's core mechanism."
+
+Share whole skill directories, including `references/` and licenses.
 
 After a push, the Git hook starts the PR watcher.
 
-- Codex setup requests one ten-minute schedule per chat to keep watchers alive and report new events.
-- Scheduled and foreground turns report before acknowledging handled events.
-- Empty scheduled reads emit no events; consumers omit routine status prose.
-- Visible silence depends on the host and requires separate verification.
-- Scheduled input rows remain visible.
-- Pauses, mutes, and opt-outs remain in force.
-- Claude uses Monitor; desktop alerts require separate host verification.
-- See the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
-
-Monitoring intent and pending events survive execution-session replacement.
-
-- From the watched worktree, register once with `bash <plugin-root>/.agents/watch/pr-watch-session.sh --start --branch <branch> --pr <number>`.
-- Subsequent calls without `--start` return bounded pending events and reconcile the producer.
-- Acknowledge reported event IDs with `--ack <id>`; use `--cancel` to stop.
-- Recovery honors the original deadline.
-- Full pending storage stops polling until drained; host and OS settings still control desktop notifications.
+- It reports checks, reviews, comments, and merge conflicts; Codex keeps it alive with a ten-minute schedule, Claude with Monitor.
+- Watch intent and pending events survive session replacement; register, acknowledge, and cancel through the [watch lifecycle](plugins/boxlite-agent-tooling/.agents/watch/consumer-lifecycle.md).
 
 For unattended Claude runs, the [network-recovery wrapper](plugins/boxlite-agent-tooling/scripts/resume-on-network-error.sh) retries recorded transient failures within bounded budgets. It requires `claude`, `jq`, `curl`, the failure-recording hook, and a matching `CLAUDE_PROJECT_DIR`.
 
@@ -198,11 +185,9 @@ node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" release "
 node "$plugin_root/scripts/followups.mjs" "$queue_state" "$agent_user" drain
 ```
 
-Use an operator-private state directory outside the checkout and absolute SDK and Claude paths. Run `init` with the same directory for every linked worktree. The operator registry binds each clone to one journal, including after a same-filesystem rename.
-
-Close older managed runs before upgrading their journals. If a clone moved before its first upgrade, pass its former canonical Git common directory to `init` and reuse the existing state directory. For example, run `init /old/checkout/.git` from the relocated checkout.
-
-Open each existing journal once after upgrading before initializing a new clone.
+- Use an operator-private state directory outside the checkout, and absolute SDK and Claude paths.
+- Run `init` with the same directory for every linked worktree; the registry binds each clone to one journal, even after a same-filesystem rename.
+- A journal in an unsupported format fails and names the re-initialization steps.
 
 `status` shows active drafts and the 50 most recent completed records. Use `history` for completed records, then pass the returned `nextBefore` to `history` for the next page.
 
@@ -210,77 +195,13 @@ Open each existing journal once after upgrading before initializing a new clone.
 
 The operator reviews the exact title, body, and destination before authorizing public disclosure. `approve` waits for a verified managed close. `release` records the same approval and explicitly releases the revision.
 
-Claude Code `2.1.319` can omit SessionEnd in one-shot mode. On macOS, the launcher checks the final Stop, completed result, SDK stream exhaustion, and clean child exit before releasing drafts. On Linux and with other Claude versions, review and release drafts in the foreground. Windows and unmanaged sessions use manual issue filing.
+| Platform | Draft release |
+| --- | --- |
+| macOS, Claude Code `2.1.319` | The launcher checks final Stop, completed result, SDK stream exhaustion, and clean child exit, since one-shot mode can omit SessionEnd. |
+| Linux or other Claude versions | Review and release drafts in the foreground. |
+| Windows or unmanaged sessions | File issues manually. |
 
 Use `capture` with JSON on stdin for foreground capture. The fields are `repository`, `operation`, `failure`, `route`, `title`, `body`, and `evidence`.
-
-### Shell engineering
-
-Use `boxlite-shell-engineering` to establish the interpreter, supported platforms,
-I/O, and failure contracts before writing or reviewing Bash or POSIX shell.
-It retains hook state, concurrency, cleanup, and verification requirements.
-
-The [source index](plugins/boxlite-agent-tooling/.agents/skills/boxlite-shell-engineering/references/index.md)
-routes to complete licensed Google, Git, bash-completion, and ChromiumOS guides,
-plus ShellCheck and shfmt documentation; each snapshot includes provenance and license notices.
-UNSW and Wooledge remain external because blanket copying permission was not established.
-Load sources by topic; repository requirements govern incompatible upstream conventions.
-
-For example: "Use boxlite-shell-engineering to review this installer for POSIX portability."
-Share the complete skill directory, including references and licenses.
-
-### Google Code Review skill
-
-Use `google-code-review` for reviewer standards, coverage, navigation, comments, pushback, and timing.
-
-- The condensed guide retains its pinned source and attribution; repository requirements govern its application.
-- Both commit/push auditor routes load it; required checks, coverage, and verdict rules still apply.
-
-Try: "Use google-code-review to review this diff."
-
-### BoxLite Clean Code skill
-
-Use `boxlite-clean-code` for small maintainability improvements that preserve contracts, ownership, and repository conventions.
-
-- Before non-obvious algorithm, layout, protocol, ownership, or concurrency work, read its comment guidance for visual models and worked examples.
-- The [example index](plugins/boxlite-agent-tooling/.agents/skills/boxlite-clean-code/references/examples.md) routes concerns to focused addons; load only relevant topics.
-- For standalone use, copy the whole skill directory, including `references/`; no helper scripts or plugin dependencies are required.
-- Repository workflow stays in `AGENTS.md`.
-
-Try: "Use boxlite-clean-code to review this module's error handling without editing it."
-
-Try: "Implement this search and explain duplicate handling with a worked trace."
-
-### Reading highlights
-
-Use `boxlite-reading-highlights` to select exact source phrases while preserving conditions and negation.
-
-- Aim for five highlighted words per sentence; expand when meaning requires it, unless an explicit hard limit applies.
-- Explain skipped selections when meaningful partial highlighting fails.
-- Text selection needs no browser; page highlighting uses the optional browser guide and verifies coverage and text preservation.
-- Long scopes use one extraction, reviewed plans, and authorized text-only workers; one owner applies the result.
-- Before batch application or cache reuse, verify live text, sentence fingerprints, scope, and settings; reload clears temporary marks.
-
-Try: “Use boxlite-reading-highlights on this article; return the selected phrases.”
-
-### Distill knowledge and implementations
-
-Use `boxlite-distill` to extract the core needed to understand or reproduce one behavior.
-
-- Retain anything whose removal would break the explanation, a necessary condition, or defining behavior.
-- Whole-system requests cover major responsibilities and connections; deep dives supplement that overview, while subsystem requests stay narrow.
-- Codebase explanations connect actual types, state, interfaces, ownership, and collaboration to a reduced example.
-- Choose the knowledge guide, implementation guide, or both; return the goal, core, demonstration, omissions, and verification.
-- Keep essential roles, a causal example, run commands, and limits in the main lesson; link detailed internals and proof.
-- Match notation to the reader; explain unfamiliar syntax, and report unavailable runtimes and other verification gaps.
-- Requested implementations are separate learning artifacts unless source modification was requested; code explanations alone require no generated code.
-
-Try: "Use boxlite-distill to explain this module's core mechanism," or
-"Extract a minimal runnable example with boxlite-distill."
-
-Coverage, fidelity, execution, reader sufficiency, and evidence completeness have separate results; missing required checks prevent a complete verdict.
-
-The [usage evaluation workflow](plugins/boxlite-agent-tooling/tests/boxlite_distill/README.md) keeps source fixtures, frozen artifacts, and evidence budgets outside ordinary skill use.
 
 ### Optional prompt reminders
 
@@ -333,15 +254,9 @@ For example, repository tooling and the installed plugin can both be at 0.1.35 w
 
 A hold constrains repository tooling; it does not silently roll back host plugins. A mismatched host-plugin version fails bootstrap. Disabled plugins stay disabled; installing files does not grant hook trust.
 
-### Migrate existing consumers once
+### Upgrade across a breaking release
 
-After 0.1.35 merges, run the existing installer, then replace all three `.agent-tooling/*.sh` files listed above with the released templates. Review and commit the consumer changes; merge customizations explicitly. Keep the older scripts for a hold pinned below 0.1.35.
-
-The host scripts become loaders for the adopted package.
-
-- The consumer installer delegates later adoptions to that package too, retaining its self-contained first-install fallback.
-- Later updater fixes arrive with releases; automatic refresh leaves tracked scripts and guidance alone.
-- A missing compatible runtime fails with migration instructions.
+A breaking release requires re-copying the three `.agent-tooling/*.sh` templates listed above and rerunning `./.agent-tooling/install.sh`.
 
 ## Develop and contribute
 
@@ -353,13 +268,7 @@ Directory guides: [host hook wiring](plugins/boxlite-agent-tooling/hooks/README.
 [Git hooks](plugins/boxlite-agent-tooling/.githooks/README.md), and
 [maintenance scripts](plugins/boxlite-agent-tooling/scripts/README.md).
 
-Run these repository checks, then the focused tests for the area you changed:
-
-```sh
-bash plugins/boxlite-agent-tooling/scripts/check-writing-ownership.sh .
-bash plugins/boxlite-agent-tooling/tests/host-parity.test.sh
-bash plugins/boxlite-agent-tooling/tests/architecture.test.sh
-```
+Validation commands live in [Contributing](plugins/boxlite-agent-tooling/CONTRIBUTING.md#validation).
 
 The optional [GitHub author-review workflow](.github/workflows/author-review.yml) enforces acknowledgments on PRs. Adopt it separately using a reviewed, immutable tooling revision, then require `Author reviewed the PR` in branch rules. Never run PR-head code in that privileged workflow.
 

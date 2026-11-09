@@ -10,8 +10,7 @@ def context_ok:
   and (.repo_root | text and startswith("/")) and (.session | identifier)
   and (.epoch | identifier) and (.branch | text) and (.gate | IN("verdict","commit","push"));
 def input_ok:
-  (del(.deadline) | keys_are(["id","binding","snapshot"])) and (.id | identifier)
-  and ((has("deadline") | not) or (.deadline | ar_timestamp))
+  keys_are(["id","binding","snapshot","deadline"]) and (.id | identifier) and (.deadline | ar_timestamp)
   and (.binding | type == "object" and length > 0 and (tojson | utf8bytelength <= 4096))
   and (.snapshot | type == "object" and length > 0 and (tojson | utf8bytelength <= 327680));
 # Advisories never decide a verdict, so a rewrite that changes only them is the same outcome.
@@ -88,5 +87,5 @@ elif $operation == "record" then
   end
 elif $operation == "submit" and ($request | keys_are(["context","reflection"])) then
   audit_reflection_submit($request.reflection)
-elif ($operation == "status" or $operation == "checkpoint") and ($request | keys_are(["context"])) then .
+elif $operation == "status" and ($request | keys_are(["context"])) then .
 else error("unknown audit operation") end

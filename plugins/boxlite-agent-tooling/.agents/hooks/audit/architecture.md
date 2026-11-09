@@ -26,14 +26,13 @@ Headless commit reconstruction uses captured index tree; push uses verified outg
 
 ### Provider selection
 
-Manifests set `BOXLITE_HOOK_HOST`, replacing inherited identity; `.agents/lib/hook-host.sh` validates it before legacy single-root inference.
+Manifests set `BOXLITE_HOOK_HOST`, replacing inherited identity; `.agents/lib/hook-host.sh` accepts only that exported marker and otherwise reports `unknown`.
 
 | Host | Routing |
 | --- | --- |
 | Known Claude/Codex | Use that provider only; explicit command overrides win. |
 | Known-provider failure | Classifier falls back to regex; auditor failure blocks. |
-| Generic | `unknown`; legacy availability remains Claude-first. |
-| Both legacy roots | Ambiguous; compatibility aliases cannot override declared identity. |
+| Generic or unmarked | `unknown`; available providers are tried Claude-first. |
 
 `.agents/lib/codex-cli.sh` resolves `CODEX_BIN`, PATH, then desktop binary without choosing host.
 
@@ -84,7 +83,7 @@ Matching re-entry preserves deadlines; headless recording gets `min(60, budget)`
 | Prepare | Preflight binds attempt/history; cancels differently bound open work; writes scoped task link with deadline and empty host identity. |
 | Start | `SubagentStart` binds worker generation under control lock. |
 | Stop | Matching worker records once; old events cannot close replacements. |
-| Resume | Block once for missing dossier or pre-deadline `high: unchecked:` / legacy `unchecked:`; otherwise record dossier/ERROR. |
+| Resume | Block once for missing dossier or pre-deadline `high: unchecked:`; otherwise record dossier/ERROR. |
 | Handoff | Headless cancels/prepares its own attempt only after checking unfinished same-scope workers. |
 
 Native auditors do not prepare/record history themselves; deadline hooks enforce timing rather than prompt-only timers.
@@ -108,7 +107,7 @@ The audit task and a FAIL's findings travel by claim check ([design #407](https:
 | `wait` | Finish worker/choice or repair unverifiable state; preserve history/links/timers. |
 | `stop` | End retry chain; no prepare, launch, or history reset. |
 
-- `audit-reflection.sh next-action` returns locked structured outcomes; legacy `checkpoint` retains stderr/exit 2.
+- `audit-reflection.sh next-action` returns locked structured outcomes.
 - `inspect-scope` distinguishes prepared/active/pending-stop/unresolved ownership; preflight/headless check exclusion before replacement and launch.
 - Allow one local reselection; persistent conflicts need intervention; consumed PASS never returns; changed candidates require new invocation.
 - Native admission relies on a cooperative parent; arbitrary independent Agent calls are outside it.
@@ -183,6 +182,7 @@ Some native Codex output lacks exit metadata and stays unobserved; recorder rema
 ## Stop gate decisions
 
 After timed confirmations and writing checks, `.agents/hooks/audit/preflight-verdict-check.sh` logs these rung/outcome pairs. `tests/architecture.test.sh` checks exact coverage.
+Every record is session-scoped: a Stop payload without a non-empty string `session_id` blocks before any rung, with a reason naming the field.
 
 | Rung | Outcome | Condition |
 | --- | --- | --- |
@@ -198,7 +198,7 @@ After timed confirmations and writing checks, `.agents/hooks/audit/preflight-ver
 | dossier | discard-revoked | Consumption loses to revocation/replacement. |
 | dossier | IN_PROGRESS-allow | Parent pauses/asks user; note deferred proof. |
 | dossier | FAIL-block | Findings block; unchanged text reuses FAIL. |
-| audit | inflight-allow | Session runner active; next turn end checks result. |
+| audit | inflight-allow | Session runner active under a lease with deadline and start token; next turn end checks result. |
 | race | stale-allow | Message already judged. |
 | harness | noise-allow | Only harness/API-error text. |
 | assertion | match-block | Whole-line completion/initial confirmation; audit without classifier. |
@@ -209,4 +209,4 @@ After timed confirmations and writing checks, `.agents/hooks/audit/preflight-ver
 | regex | none-allow | No classifier, no fallback match. |
 | regex | match-block | No classifier, fallback assertion matched. |
 
-Turn dossiers carry branch/HEAD/tree/generation, PASS/FAIL/IN_PROGRESS, findings, and optional advisories; Git dossiers use PASS/FAIL, with FAIL iff findings.
+Turn dossiers carry branch/HEAD/tree/generation, PASS/FAIL/IN_PROGRESS, findings, and optional advisories; Git dossiers use PASS/FAIL with required advisories, FAIL iff findings.

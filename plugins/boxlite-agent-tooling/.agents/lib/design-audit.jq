@@ -1,4 +1,4 @@
-# Design-research loop state (design #309): one record per worktree, bound to root and
+# Design-research loop state: one record per worktree, bound to root and
 # branch. A cycle ends with PASS, OVERRIDDEN or Redesign; FAILs count until then.
 include "audit-reflection-contract";
 include "audit-reconciliation";
@@ -19,14 +19,12 @@ def da_valid:
   and (.failures | type == "array" and length <= 64 and all(.[]; type == "string"))
   and (.stop | IN("none","early","cap")) and (.extra | type == "boolean")
   and (.reflection == null or (.reflection | audit_reflection_body));
+# A record with only the binding and verdict fields lacks the loop state; it cannot be read.
+def da_pre_loop: type == "object" and keys == ["branch","content_sha256","findings","root","url","verdict"];
 # Another root or branch starts fresh; a malformed record for this one fails closed.
 def da_state($root; $branch):
   if type == "object" and .root == $root and .branch == $branch then
-    (if keys == ["branch","content_sha256","findings","root","url","verdict"] then
-       . + {advisories:[], stop:"none", extra:false, reflection:null, overruled:[],
-            failures:(if .verdict == "FAIL" then ["1:" + .content_sha256] else [] end)}
-     else . end)
-    | if da_valid then . else error("research state is malformed") end
+    if da_valid then . else error("research state is malformed") end
   else da_empty($root; $branch) end;
 def da_blocked: .stop != "none" and (.extra | not);
 def da_reflection_due:
@@ -35,7 +33,7 @@ def da_reflection_due:
 def da_redesign($digest): .verdict == "NONE" and .content_sha256 == $digest;
 def da_passed($url; $digest):
   .url == $url and .content_sha256 == $digest and (.verdict | IN("PASS","OVERRIDDEN"));
-# The verdict an advice record answers (design #335): a FAIL's attempt id, or the PASSed
+# The verdict an advice record answers: a FAIL's attempt id, or the PASSed
 # content. An overrule needs no advice.
 def da_verdict_id:
   if .verdict == "FAIL" then (.failures[-1] // "")

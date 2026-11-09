@@ -36,7 +36,6 @@ Runtime derives `outcome.deadline_review = {deadline, recorded_at}` only after c
 | Unread coverage / unchecked reflection | Qualified PASS may retain both with advisories. |
 | Unresolved findings / insufficient reflection | Still block; expiry cannot resolve evidence. |
 | Known unverified verdict claim | Keep `proof.status: blocked` and deadline reason. |
-| Legacy attempt without deadline | Strict completeness. |
 | Replay | Persist qualification before cleanup, reuse first marker; never rewrite old FAILs. |
 
 Design recording uses matching task/content predecessor metadata.
@@ -59,7 +58,6 @@ Context: `repo_root`, `session`, `epoch`, `branch`, `gate`; limits: eight failur
 - IDs are `F1`–`F9999`; only new findings use `NEW`; dispositions/conflicts name registry IDs.
 - Partition snapshot keys exactly once into `reviewed`/`unread`; reject missing/invented/duplicated keys, and unread PASS before qualified deadline.
 - Inspection/preparation share capacity checks; exhausted completed cycles stop before launch while pending results may still record.
-- Unscoped callers retain legacy omitted/null history assessments; schema cannot enumerate dynamic snapshot keys.
 
 ### Verdict records
 

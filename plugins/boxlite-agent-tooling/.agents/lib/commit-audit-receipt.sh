@@ -16,10 +16,9 @@
 # ONE fixed slot, the same convention as last-audit.json beside it, rather than a
 # keyed cache: a push can only ever claim the receipt for its own single new commit,
 # so at most one is claimable at a time and a newer commit's receipt may simply
-# replace an older one. Interleaving commits across branches before pushing either
-# therefore loses a receipt — which costs that push an audit, exactly the behavior
-# that existed before receipts, and keeps this file free of the key derivation,
-# eviction ceiling, and directory sweep a cache would need.
+# replace an older one. Interleaving commits across branches before pushing loses a
+# receipt, which costs that push one audit and keeps this file free of the key
+# derivation, eviction ceiling, and directory sweep a cache would need.
 #
 # Every failure is silent and non-zero: no receipt simply means the push audits.
 

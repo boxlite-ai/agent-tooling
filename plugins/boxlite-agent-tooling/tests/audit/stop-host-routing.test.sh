@@ -50,6 +50,9 @@ if [[ "$ROUTE_ROLE" == classifier ]]; then
 else
   printf '{"branch":"main","head":"h","tree_hash":"t","generation":"%s","verdict":"PASS","proof":[],"findings":[]}' \
     "$VERDICT_AUDITOR_GENERATION" > "$VERDICT_AUDITOR_OUTPUT_FILE"
+  bash "$ROUTE_HISTORY_HELPER" \
+    "$(sed -n '/^UNTRUSTED_TASK_INPUT_JSON:$/ { n; p; q; }' "$ROUTE_CAPTURE/prompt")" \
+    "$VERDICT_AUDITOR_OUTPUT_FILE" bind
 fi
 if [[ "$stream_json" == true ]]; then
   printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
@@ -57,15 +60,11 @@ if [[ "$stream_json" == true ]]; then
 fi
 MODEL
 chmod +x "$scratch/model"
+export ROUTE_HISTORY_HELPER="$plugin_root/tests/audit/fixtures/audit-history-result.sh"
 
-pass=0 fail=0 case_number=0
-check_eq() {
-  if [[ "$2" == "$3" ]]; then
-    pass=$((pass + 1)); printf 'PASS %s\n' "$1"
-  else
-    fail=$((fail + 1)); printf 'FAIL %s: got <%s>, want <%s>\n' "$1" "$2" "$3"
-  fi
-}
+# shellcheck source=../lib/assert.sh
+source "$plugin_root/tests/lib/assert.sh"
+case_number=0
 
 run_case() { # role, host, scenario, expected provider, exit status, classifier rung
   local role="$1" host="$2" scenario="$3" expected="$4" expected_rc="$5"
@@ -90,8 +89,8 @@ run_case() { # role, host, scenario, expected provider, exit status, classifier 
     unset PLUGIN_ROOT CLAUDE_PLUGIN_ROOT BOXLITE_HOOK_HOST VERDICT_AUDITOR_CMD VERDICT_CLASSIFIER_CMD \
       VERDICT_EXTRACTOR_CMD VERDICT_GATE_HARD_BLOCK ROUTE_REPLY ROUTE_FAIL ROUTE_VERSION_HANG
     case "$host" in
-      codex) export PLUGIN_ROOT="$plugin_root" ;;
-      claude) export CLAUDE_PLUGIN_ROOT="$plugin_root" ;;
+      codex) export PLUGIN_ROOT="$plugin_root" BOXLITE_HOOK_HOST=codex ;;
+      claude) export CLAUDE_PLUGIN_ROOT="$plugin_root" BOXLITE_HOOK_HOST=claude ;;
       ambiguous) export PLUGIN_ROOT="$plugin_root" CLAUDE_PLUGIN_ROOT="$plugin_root" ;;
     esac
     if [[ "$scenario" == aliases ]]; then
@@ -108,15 +107,35 @@ run_case() { # role, host, scenario, expected provider, exit status, classifier 
         # shellcheck disable=SC2016 # Expand fixture variables in the child shell.
         export VERDICT_CLASSIFIER_CMD='while IFS= read -r line; do :; done; printf "override\n" > "$ROUTE_CAPTURE/calls"; printf "NO\n"'
       else
+        # Builtins only, as above. The history review comes from the one-line, key-sorted
+        # history the task input names: its first history_hash and id are the attempt's.
         # shellcheck disable=SC2016 # Expand fixture variables in the child shell.
-        export VERDICT_AUDITOR_CMD='while IFS= read -r line; do :; done; printf "override\n" > "$ROUTE_CAPTURE/calls"; printf "{\"branch\":\"main\",\"head\":\"h\",\"tree_hash\":\"t\",\"verdict\":\"PASS\",\"proof\":[],\"findings\":[]}" > "$VERDICT_AUDITOR_OUTPUT_FILE"'
+        export VERDICT_AUDITOR_CMD='task=""; next=false
+          while IFS= read -r line; do
+            [[ "$next" == true ]] && { task="$line"; next=false; }
+            [[ "$line" == "UNTRUSTED_TASK_INPUT_JSON:" ]] && next=true
+          done
+          [[ "$task" =~ \"history_path\":\"([^\"]+)\" ]] || exit 9
+          IFS= read -r history < "${BASH_REMATCH[1]}"
+          [[ "$history" =~ \"history_hash\":\"([0-9a-f]{64})\" ]] || exit 9; hash="${BASH_REMATCH[1]}"
+          [[ "$history" =~ \"id\":\"([^\"]+)\" ]] || exit 9; id="${BASH_REMATCH[1]}"
+          [[ "$history" =~ \"branch\":\"([^\"]*)\" ]] || exit 9; branch="${BASH_REMATCH[1]}"
+          [[ "$history" =~ \"head\":\"([0-9a-f]+)\" ]] || exit 9; head="${BASH_REMATCH[1]}"
+          [[ "$history" =~ \"tree_hash\":\"([0-9a-f]+)\" ]] || exit 9; tree="${BASH_REMATCH[1]}"
+          printf "override\n" > "$ROUTE_CAPTURE/calls"
+          printf "{\"branch\":\"%s\",\"head\":\"%s\",\"tree_hash\":\"%s\",\"generation\":\"%s\",\"verdict\":\"PASS\",\"proof\":[],\"findings\":[],\"history_review\":{\"attempt_id\":\"%s\",\"history_hash\":\"%s\",\"dispositions\":[],\"findings\":[],\"coverage\":{\"reviewed\":[\"transcript\",\"tree\"],\"unread\":[]}}}" \
+            "$branch" "$head" "$tree" "$VERDICT_AUDITOR_GENERATION" "$id" "$hash" > "$VERDICT_AUDITOR_OUTPUT_FILE"'
       fi
     fi
     if [[ "$role" == classifier ]]; then
-      jq -nc --arg p "$repo/transcript.jsonl" '{transcript_path:$p,hook_event_name:"Stop"}' \
+      jq -nc --arg p "$repo/transcript.jsonl" \
+        '{transcript_path:$p,hook_event_name:"Stop",session_id:"route-session"}' \
         | bash "$checker"
     else
-      bash "$runner" "$repo/transcript.jsonl"
+      # The runner audits only the generation its session's current request names.
+      printf '101-102-1 %s cksum-1-1\n' "$(( $(date +%s) + 600 ))" \
+        > "$repo/.agents/state/verdict-request.git-$(printf route-session | git hash-object --stdin)"
+      bash "$runner" "$repo/transcript.jsonl" route-session 101-102-1
     fi
   ) > "$repo/.capture/output" 2> "$repo/.capture/error"
   rc=$?
@@ -124,7 +143,7 @@ run_case() { # role, host, scenario, expected provider, exit status, classifier 
   check_eq "$role/$host/$scenario provider" "${calls:-none}" "$expected"
   check_eq "$role/$host/$scenario exit" "$rc" "$expected_rc"
   if [[ "$role" == classifier ]]; then
-    observed_rung="$(awk '{print $(NF-1), $NF}' "$repo/.agents/state/verdict-decisions.log" 2>/dev/null)"
+    observed_rung="$(awk '{print $(NF-1), $NF}' "$repo"/.agents/state/verdict-decisions.log.git-* 2>/dev/null)"
     check_eq "$role/$host/$scenario decision" "$observed_rung" "$rung"
   fi
   if [[ "$role/$host/$scenario" == classifier/codex/normal ]]; then
@@ -169,5 +188,4 @@ run_case auditor unknown codex-only codex 0
 run_case classifier codex malformed codex 0 'regex none-allow'
 run_case classifier codex version-hang none 0 'regex none-allow'
 
-printf '\nRESULT: %s passed, %s failed\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+assert_result

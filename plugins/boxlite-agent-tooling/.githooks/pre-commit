@@ -2,9 +2,10 @@
 # Universal (agent-agnostic) commit gate: enforces the same audited-dossier
 # contract as .agents/hooks/preflight-commit-push.sh, but from git's own hook
 # interface — it fires for ANY process that runs `git commit`, whichever coding
-# agent drives it, including agents with no hook system of their own. Installed
-# by `make setup` (sets core.hooksPath). The PreToolUse gate detects the
-# installation and delegates, so the audit artifact keeps exactly one consumer.
+# agent drives it, including agents with no hook system of their own. The
+# installer's scripts/setup.sh points core.hooksPath here. The PreToolUse gate
+# detects the installation and delegates, so the audit artifact keeps exactly one
+# consumer.
 #
 # Humans are not gated: enforcement uses a harness marker or a live ancestor
 # recorded by PreToolUse. Environment markers are CLAUDECODE, CODEX_SANDBOX,
@@ -26,6 +27,8 @@ tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$tooling_root/.agents/lib/verdict-audit-state.sh" || exit 1
 # shellcheck source=../.agents/lib/git-agent-origin.sh
 source "$tooling_root/.agents/lib/git-agent-origin.sh" || exit 1
+# shellcheck source=hook-lib.sh
+source "$tooling_root/.githooks/hook-lib.sh" || exit 1
 is_agent="$(git_agent_origin_classify "$repo_root")" || {
   printf 'agent-tooling: cannot determine agent origin; commit remains gated.\n' >&2
   exit 1
@@ -43,30 +46,8 @@ verify_installation="$tooling_root/scripts/verify-installation.sh"
 
 # The committed guidance block is part of the installation contract: missing or
 # hand-edited fails closed, exactly like a stale installation; merely behind the
-# adopted revision only warns (consumers float same-ref, not same-revision). An
-# adopted revision that predates the checker has no contract to enforce.
-sync_guidance="$tooling_root/scripts/sync-guidance.sh"
-if [[ -x "$sync_guidance" ]]; then
-  "$sync_guidance" --check "$repo_root" || exit 1
-fi
-
-# Resolve the delegated gate. A worktree checked out at a pre-migration commit
-# has no .agents/hooks/, yet it can still be THIS hook that runs. `make setup`
-# sets core.hooksPath RELATIVE, where each worktree uses its own copy and this
-# cannot happen; a clone configured with an ABSOLUTE path has one installed hook
-# serving every worktree, whatever commit each sits on, and then it can.
-# Try the current path, fall back to the legacy one, and fail closed
-# when neither exists: a missing gate must never read as an ungated change.
-resolve_gate() {
-  local candidate
-  for candidate in "$tooling_root/.agents/hooks/preflight-commit-push.sh" \
-                   "$repo_root/.agents/hooks/preflight-commit-push.sh" \
-                   "$repo_root/.claude/hooks/preflight-commit-push.sh"; do
-    [[ -r "$candidate" ]] && { printf '%s' "$candidate"; return 0; }
-  done
-  return 1
-}
-
+# adopted revision only warns (consumers float same-ref, not same-revision).
+"$tooling_root/scripts/sync-guidance.sh" --check "$repo_root" || exit 1
 
 # Chain via --git-common-dir, NOT --git-path: --git-path honors core.hooksPath
 # and would resolve to THIS script — self-exec recursion (infinite for humans,
@@ -78,37 +59,13 @@ if [[ -x "$chained" && "$(realpath "$chained" 2>/dev/null)" != "$(realpath "$0" 
 fi
 
 if [[ "$is_agent" == 1 ]]; then
-  # GITHOOK_DELEGATED tells the PreToolUse script this call IS the git-level
-  # gate — without it the script's delegation guard would defer right back to
-  # us and everything would silently pass.
   # `git commit` is a placeholder: git gives this hook no argv. The gate recovers
   # the command the agent actually ran from the PreToolUse handoff when it names
   # the re-audit target, and binds a PASS through the handoff hash or the audited
   # subject (checked by commit-msg) rather than through this placeholder.
-  if ! out="$(printf '{"tool_input":{"command":"git commit"}}' \
-        | GITHOOK_DELEGATED=1 GITHOOK_KEEP_AUDIT=1 bash "$(resolve_gate || echo /nonexistent-gate)" 2>&1)"; then
-    printf 'commit-push-auditor delegated preflight failed\n%s\n' "$out" >&2
-    exit 1
-  fi
-  if [[ -n "$out" ]]; then
-    if ! decision="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)"; then
-      printf 'commit-push-auditor delegated preflight returned invalid output\n%s\n' "$out" >&2
-      exit 1
-    fi
-    if [[ "$decision" == "deny" ]]; then
-      printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason' >&2
-      exit 1
-    fi
-    # A payload with no decision but an additionalContext is the gate reporting
-    # NON-BLOCKING advisories on an otherwise passing audit. Print and continue; see
-    # preflight-commit-push.sh's validate_audit for what the two channels mean.
-    advisory="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null || true)"
-    if [[ -z "$advisory" ]]; then
-      printf 'commit-push-auditor delegated preflight returned invalid output\n%s\n' "$out" >&2
-      exit 1
-    fi
-    printf '%s\n' "$advisory" >&2
-  fi
+  # GITHOOK_KEEP_AUDIT leaves the PASS for commit-msg, its single consumer.
+  githook_run_delegated_gate "$tooling_root/.agents/hooks/preflight-commit-push.sh" \
+    '{"tool_input":{"command":"git commit"}}' '' GITHOOK_KEEP_AUDIT=1 || exit 1
 fi
 
 exit 0

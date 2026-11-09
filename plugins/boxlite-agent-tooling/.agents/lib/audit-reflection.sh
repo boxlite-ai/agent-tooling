@@ -48,7 +48,7 @@ audit_reflection() { # operation state-path; request on stdin
 _audit_reflection_transition() { # library operation state-path; lease already held
   local library="$1" operation="$2" path="$3" request state=null snapshot next history_hash reflection_hash
   local history_max_bytes
-  local checked checkpoint_request decision
+  local checked context_request decision
   history_max_bytes="$(audit_reflection_history_limit)"
   local LC_ALL=C
   request="$(perl -e '
@@ -72,9 +72,9 @@ _audit_reflection_transition() { # library operation state-path; lease already h
       [[ "$(jq -r '.reflection.hash' <<<"$state")" == "$reflection_hash" ]] || return 2
     fi
   fi
-  if [[ "$operation" == prepare || "$operation" == checkpoint || "$operation" == next-action ]]; then
-    checkpoint_request="$(jq -c '{context}' <<<"$request")" || return 2
-    checked="$(printf '%s\n%s\n' "$state" "$checkpoint_request" \
+  if [[ "$operation" == prepare || "$operation" == next-action ]]; then
+    context_request="$(jq -c '{context}' <<<"$request")" || return 2
+    checked="$(printf '%s\n%s\n' "$state" "$context_request" \
       | jq -ceSs -L "$library" --arg operation status --argjson history_max_bytes "$history_max_bytes" \
         -f "$library/audit-reflection.jq")" || return 2
     if [[ "$operation" == next-action ]]; then
@@ -85,7 +85,7 @@ _audit_reflection_transition() { # library operation state-path; lease already h
       fi
       # shellcheck source=git-audit-decision.sh
       source "$library/git-audit-decision.sh" || return 2
-      decision="$(git_audit_checkpoint_result "$library" "$checked" "$path")" || return 2
+      decision="$(git_audit_decision_result "$library" "$checked" "$path")" || return 2
       if [[ "$(jq -r .action <<<"$decision")" == continue ]] \
           && ! jq -e -L "$library" 'include "audit-reflection-contract"; audit_reflection_ready' <<<"$checked" >/dev/null; then
         decision='{"action":"reflect","reason":"Current failed audit history requires reflection."}'
@@ -103,7 +103,7 @@ _audit_reflection_transition() { # library operation state-path; lease already h
       fi
       # shellcheck source=git-audit-decision.sh
       source "$library/git-audit-decision.sh" || return 2
-      decision="$(git_audit_checkpoint_result "$library" "$checked" "$path")" || return 2
+      decision="$(git_audit_decision_result "$library" "$checked" "$path")" || return 2
       if [[ "$(jq -r .action <<<"$decision")" != continue ]]; then
         jq -r .reason <<<"$decision" >&2
         return 2
@@ -128,7 +128,7 @@ _audit_reflection_transition() { # library operation state-path; lease already h
     next="$(jq -cS '.closed |= .[1:]' <<<"$next")" || return 2
   done
   (( ${#next} <= history_max_bytes )) || return 2
-  if [[ "$operation" != status && "$operation" != checkpoint ]]; then
+  if [[ "$operation" != status ]]; then
     printf '%s\n' "$next" | verdict_audit_write_atomic "$path" || return 2
   fi
   printf '%s\n' "$next"
@@ -136,10 +136,10 @@ _audit_reflection_transition() { # library operation state-path; lease already h
 
 _audit_reflection_history_hash() {
   printf '%s' "$1" | jq -cS '{context,registry,attempts:[.attempts[] | select(.outcome != null)]}' \
-    | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'
+    | verdict_audit_sha256
 }
 
 _audit_reflection_body_hash() {
   printf '%s' "$1" | jq -cS '.reflection.body' \
-    | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'
+    | verdict_audit_sha256
 }

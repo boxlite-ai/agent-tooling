@@ -13,7 +13,7 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 scratch="$(cd "$scratch" && pwd -P)"
 context="$(jq -nc --arg root "$scratch" '{repo_root:$root,session:"s",epoch:"1",branch:"main",gate:"verdict"}')"
-input='{"binding":{"head":"h"},"snapshot":{"diff":"candidate bytes"}}'
+input='{"binding":{"head":"h"},"snapshot":{"diff":"candidate bytes"},"deadline":4102444800}'
 gate() { audit_reflection_gate "$context" "$@"; }
 reject() { if gate "$@" >"$scratch/out" 2>"$scratch/err"; then
   printf 'FAIL: gate accepted %s\n' "$*" >&2; exit 1; fi; }

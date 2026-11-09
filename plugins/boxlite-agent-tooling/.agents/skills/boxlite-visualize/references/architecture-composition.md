@@ -4,7 +4,7 @@ For architecture, deployment, topology, overview, or rendered-picture work.
 
 ## Baseline
 
-Hosted cloud: start from [`apps/infra/docs/deployment.md#architecture`](../../../../apps/infra/docs/deployment.md#architecture).
+Hosted cloud: start from the consumer's `apps/infra/docs/deployment.md#architecture`, when present.
 
 - Reuse its layout, but treat its containment as a hypothesis and re-verify every boundary against current IaC and source.
 - Never rebuild the system from call paths because more source exists.

@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
 # Shared public-hook regressions; sourced by each host's boundary suite.
+startup_consumer() {  # directory, fake state directory, host bootstrap template
+  CONSUMER="$1"
+  FAKE_STATE="$2"
+  mkdir -p "$CONSUMER/.agent-tooling" "$CONSUMER/.claude" "$CONSUMER/.agents/plugins" \
+    "$CONSUMER/.github/copilot" "$CONSUMER/subdirectory" "$FAKE_STATE"
+  git init -q "$CONSUMER"
+  cp "$3" "$CONSUMER/.agent-tooling/$startup_host-plugin-bootstrap.sh"
+  cp "$FAKE_INSTALLER" "$CONSUMER/.agent-tooling/install.sh"
+  cp "$REPO_ROOT/templates/claude-plugin-bootstrap.json" "$CONSUMER/.claude/settings.json"
+  cp "$CONSUMER/.claude/settings.json" "$CONSUMER/.github/copilot/settings.json"
+  cp "$REPO_ROOT/.agents/plugins/marketplace.json" "$CONSUMER/.agents/plugins/marketplace.json"
+  printf '/.agents/state/\n' > "$CONSUMER/.gitignore"
+  jq -nc '{schemaVersion:1,profile:"consumer",repository:"boxlite-ai/example-consumer",
+    tooling:{repository:"boxlite-ai/agent-tooling",ref:"main"},checks:[{name:"test",command:"true"}]}' \
+    > "$CONSUMER/.agent-tooling/profile.json"
+  chmod +x "$CONSUMER/.agent-tooling/"*.sh
+}
+
 echo "## Startup discovers a release when both installed versions agree"
-CONSUMER="$TMP/startup consumer"
-FAKE_STATE="$TMP/startup-state"
-mkdir -p "$CONSUMER/.agent-tooling" "$CONSUMER/.claude" "$CONSUMER/.agents/plugins" \
-  "$CONSUMER/.github/copilot" "$CONSUMER/subdirectory" "$FAKE_STATE"
-git init -q "$CONSUMER"
-cp "$BOOTSTRAP" "$CONSUMER/.agent-tooling/$startup_host-plugin-bootstrap.sh"
-cp "$FAKE_INSTALLER" "$CONSUMER/.agent-tooling/install.sh"
-cp "$REPO_ROOT/templates/claude-plugin-bootstrap.json" "$CONSUMER/.claude/settings.json"
-cp "$CONSUMER/.claude/settings.json" "$CONSUMER/.github/copilot/settings.json"
-cp "$REPO_ROOT/.agents/plugins/marketplace.json" "$CONSUMER/.agents/plugins/marketplace.json"
-printf '/.agents/state/\n/.claude/.*\n' > "$CONSUMER/.gitignore"
-jq -nc '{schemaVersion:1,profile:"consumer",repository:"boxlite-ai/example-consumer",
-  tooling:{repository:"boxlite-ai/agent-tooling",ref:"main"},checks:[{name:"test",command:"true"}]}' \
-  > "$CONSUMER/.agent-tooling/profile.json"
-chmod +x "$CONSUMER/.agent-tooling/"*.sh
+startup_consumer "$TMP/startup consumer" "$TMP/startup-state" "$BOOTSTRAP"
 run_hook > "$TMP/out" 2> "$TMP/err"
 check_eq "equal-version fixture starts successfully" "$?" 0
 

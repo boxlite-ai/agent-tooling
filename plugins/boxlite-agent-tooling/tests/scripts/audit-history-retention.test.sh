@@ -8,7 +8,7 @@ mkdir -p "$scratch/.agents/state"
 cli="$plugin/scripts/audit-reflection-gate.sh"
 session="git-$(printf '%040d' 1)"
 epoch_file="$scratch/.agents/state/verdict-prompt-epoch.$session"
-input='{"binding":{"head":"test"},"snapshot":{"diff":"original evidence"}}'
+input='{"binding":{"head":"test"},"snapshot":{"diff":"original evidence"},"deadline":4102444800}'
 for epoch in 1 2 3 4 5 6 7; do
   printf '%s\n' "$epoch" > "$epoch_file"
   context="$(jq -nc --arg root "$scratch" --arg session "$session" --arg epoch "$epoch" \

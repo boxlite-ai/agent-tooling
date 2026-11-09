@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The one-time nonce that marks an asyncRewake wake as internal: mint it, hash it, and
 # recognise it in the prompt Claude Code submits when the hook exits 2.
-# Source this file; it performs no work on load. Requires jq, perl, shasum and awk.
+# Source this file; it performs no work on load. Requires jq, perl, and verdict-audit-state.sh.
 #
 # The host wraps the hook's stderr, not the envelope, so a marker the hook prints lands
 # in the trailing system-reminder. Shape captured from a live Claude Code 2.1.278 session:
@@ -32,7 +32,7 @@ hook_wake_new_nonce() {
 # Print the SHA-256 an owner stores in place of the nonce, so state never holds one.
 hook_wake_nonce_hash() {  # nonce
   [[ "$1" =~ ^[0-9a-f]{64}$ ]] || return 1
-  printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+  printf '%s' "$1" | verdict_audit_sha256
 }
 
 # Print the 64-hex nonce of the first `[<name>:<nonce>]` marker in a wake's reminder.

@@ -19,10 +19,8 @@ SYNC="$PLUGIN_ROOT/scripts/sync-guidance.sh"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf -- "$TMP"' EXIT
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+source "$PLUGIN_ROOT/tests/lib/assert.sh"
 check_eq() {
   local desc="$1" got="$2" want="$3"
   if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc (got=$got want=$want)"; fi
@@ -473,6 +471,4 @@ run_sync "$SYNC" --check "$R" >/dev/null 2> "$TMP/err"
 check_eq "check fails when no file carries the block" "$?" 1
 grep -q 'install.sh' "$TMP/err" && ok "points at the installer" || bad "points at the installer"
 
-echo
-printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

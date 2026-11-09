@@ -94,7 +94,7 @@ concise_writing_check_summary() { # Markdown, anywhere|first, optional word limi
 concise_writing_max_listed_violations=5
 
 # One correction listing up to five broken structure limits, each with a positive,
-# numeric fix (#419). Returns 0 when every limit holds, 1 with the list, and 2 when
+# numeric fix. Returns 0 when every limit holds, 1 with the list, and 2 when
 # the checker failed, so callers fail closed.
 concise_writing_check_structure() { # Markdown, optional no-hint
   local report rule count limit excerpt total=0 skill_hint='; apply boxlite-writing'
@@ -120,7 +120,7 @@ concise_writing_check_structure() { # Markdown, optional no-hint
   done <<< "$report"
   (( total <= concise_writing_max_listed_violations )) \
     || printf -- '- %s more not shown\n' "$((total - concise_writing_max_listed_violations))"
-  # One-correction replays lost facts when splits detached plans or merged items (#419).
+  # Splits can detach plans or merge items and so lose facts; name what to keep.
   printf 'Rewrite in place: keep every fact, number, caveat and plan-versus-done wording; split sentences only at complete thoughts.\n'
   return 1
 }

@@ -155,5 +155,5 @@ while IFS= read -r name; do
   receipt_count=$((receipt_count + 1))
   (( receipt_count > receipt_limit )) || continue
   [[ "$name" =~ ^[0-9]+-[0-9]+-[0-9]+\.json$ ]] && rm -f "$receipt_dir/$name"
-done < <(ls -1 "$receipt_dir" 2>/dev/null | sort -t- -k1,1nr -k2,2nr)
+done < <(cd "$receipt_dir" 2>/dev/null && printf '%s\n' * | sort -t- -k1,1nr -k2,2nr)
 exit 0

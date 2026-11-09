@@ -1,48 +1,31 @@
 #!/usr/bin/env bash
-# PostToolUse hook: after a successful remote write, tell the agent that is running
-# to attach a consumer to the pr-watch event stream.
+# PostToolUse hook: after a successful remote write, tell the running agent to
+# attach a consumer to the pr-watch event stream. .githooks/pre-push starts the
+# producer for every pusher; this hook bridges its stream into the session.
 #
-# This is the in-session *consumer* of the watch. The producer is universal —
-# .githooks/pre-push starts .agents/watch/pr-watch.sh for every agent and every
-# human. This hook bridges that stream into whichever session ran the remote
-# write. Humans keep reading the log directly.
-#
-# Registered from hooks/hooks.json (PostToolUse, matcher "Bash") — Claude Code
-# resolves it through the generic plugin.json, Codex through
-# .codex-plugin/plugin.json: the vendor manifests register, .agents/ implements.
-#
-# The context names the attach route this host has — Monitor for Claude Code, a
-# bounded foreground draining for Codex — and names all of them
-# when hook_host_kind answers
-# `unknown`. That accessor is the only sanctioned way to ask; .agents/lib/hook-host.sh
-# carries which signals are trustworthy and which look right but are not.
-#
-# Design notes
-# ------------
-# * Advisory, not `decision: "block"`. The push has already happened, so a block
-#   cannot undo it — it can only nag. Worse, the auto-fix loop this arms itself
-#   ends in a push, so a hard block here would deadlock that loop.
-#
-# * Matcher scope: PreToolUse/PostToolUse matchers are tool-name-only, so this
-#   registers on the broad `Bash` matcher and does its own filtering, exiting 0
-#   immediately on unrelated commands. Same shape as
-#   .agents/hooks/preflight-commit-push.sh:55 and preflight-pr-review.sh:52 —
-#   segment-anchored so `echo "git push"` does not match, newline-normalized so
-#   a verb on line 2 does.
-#
-# * `git push` is matched, but so are the `gh pr` writes. The pre-push arm
-#   already covers PR creation transitively (a push always precedes it), so the
-#   gh cases exist to re-attach a Monitor in a session that pushed earlier, or
-#   where the push happened outside this session.
+# * Advisory, not `decision: "block"`: the write already happened, and the
+#   auto-fix loop this arms ends in a push, so a block would deadlock it.
+# * Host matchers name tools only, so this filters Bash commands itself and
+#   exits 0 on unrelated commands.
+# * `gh pr` writes re-attach a session that pushed earlier or elsewhere.
+# * The context names this host's attach route, or every route when
+#   hook_host_kind answers `unknown`.
 #
 # Tests: bash tests/watch/hooks/post-remote-write-watch.test.sh
 set -euo pipefail
 
+tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+lib_dir="$tooling_root/.agents/lib"
+load_failure() {
+  printf 'post-remote-write-watch: cannot load %s\n' "$1" >&2
+  exit 1
+}
+# shellcheck source=../lib/hook-host.sh
+source "$lib_dir/hook-host.sh" || load_failure "$lib_dir/hook-host.sh"
+
 payload="$(cat)"
 command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // ""')"
 
-normalized="${command//$'\n'/;}"
-work="${normalized#"${normalized%%[![:space:]]*}"}"
 remote_write_kind=""
 guarded_launcher=""
 if [[ "$command" == *gh-pr.sh* ]]; then
@@ -61,9 +44,10 @@ if [[ "$command" == *gh-pr.sh* ]]; then
 fi
 if [[ -n "$guarded_launcher" ]]; then
   remote_write_kind="gh_pr_file"
-elif [[ "$work" =~ (^|[[:space:]]*(\&\&|\|\||\;|\||\&|\$\(|\(|\`)[[:space:]]*)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*git[[:space:]]+push([[:space:]]|$) ]]; then
+elif hook_command_segment_verb "$command" 'git[[:space:]]+(push)' >/dev/null; then
   remote_write_kind="git_push"
-elif [[ "$work" =~ (^|[[:space:]]*(\&\&|\|\||\;|\||\&|\$\(|\(|\`)[[:space:]]*)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*gh[[:space:]]+pr[[:space:]]+(create|edit|ready|comment|review)([[:space:]]|$) ]]; then
+elif hook_command_segment_verb "$command" \
+    'gh[[:space:]]+pr[[:space:]]+(create|edit|ready|comment|review)' >/dev/null; then
   remote_write_kind="gh_pr"
 else
   exit 0
@@ -87,63 +71,28 @@ response="$(printf '%s' "$payload" \
            else ((.tool_response.stdout // .tool_response.output // "") + "\n" + (.tool_response.stderr // ""))
            end' 2>/dev/null || echo '')"
 
-# A failed push leaves nothing new to watch. Hosts without an exit code must
-# instead be checked against Git's own output.
-#
-# Match the whole `error:`/`fatal:` class, not a list of specific messages. A
-# local pre-push hook that exits non-zero — this repo's own audit gate — prints
-# ONLY `error: failed to push some refs`: no `fatal:`, no `[rejected]`. An
-# earlier version enumerated messages, missed that one, and announced a blocked
-# push as a successful remote write.
-#
-# Fails closed: over-matching costs an un-armed watch, under-matching reports a
-# push that never happened.
+# Hosts without an exit code are checked against Git's output. Match the whole
+# `error:`/`fatal:` class: a rejecting local pre-push hook prints only
+# `error: failed to push some refs`. Over-matching costs an un-armed watch;
+# under-matching reports a push that never happened.
 failure_re='(^|[[:space:]])(fatal|error):|\[(remote )?rejected\]|Everything up-to-date|Permission denied'
 if [[ "$response" =~ $failure_re ]]; then
   exit 0
 fi
 
 if [[ "$remote_write_kind" == gh_pr_file ]]; then
-  command_dir="$(jq -er --arg fallback "$PWD" '
-    first((.tool_input.workdir, .tool_input.cwd, .cwd, $fallback) | select(. != null))
-    | strings | select(length > 0 and index("\u0000") == null)
-  ' <<<"$payload")" || exit 0
+  command_dir="$(hook_payload_workdir "$payload" "$PWD")" || exit 0
   cd -- "$command_dir" 2>/dev/null || exit 0
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 else
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 fi
-# The stream script and the escalation policy live in the TOOLING tree (this
-# script's own plugin), never at the consumer's repo root — an installed
-# consumer carries only .agent-tooling/ and the pinned cache under .git/. An
-# earlier version addressed both as ${repo_root}/.agents/… , which exists in
-# neither layout; the tests missed it by asserting bare filenames.
-tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-state_helpers="$tooling_root/.agents/lib/pr-watch-state.sh"
-if [[ ! -r "$state_helpers" ]]; then
-  printf 'post-remote-write-watch: state helper not found: %s\n' "$state_helpers" >&2
-  exit 1
-fi
-# shellcheck source=../lib/pr-watch-state.sh
-source "$state_helpers"
-safe_state_helpers="$tooling_root/.agents/lib/verdict-audit-state.sh"
-if [[ ! -r "$safe_state_helpers" ]]; then
-  printf 'post-remote-write-watch: safe state helper not found: %s\n' "$safe_state_helpers" >&2
-  exit 1
-fi
+# The stream script and escalation policy live in this tooling tree, never at
+# the consumer's repository root.
 # shellcheck source=../lib/verdict-audit-state.sh
-source "$safe_state_helpers"
-host_helpers="$tooling_root/.agents/lib/hook-host.sh"
-if [[ ! -r "$host_helpers" ]]; then
-  printf 'post-remote-write-watch: host helper not found: %s\n' "$host_helpers" >&2
-  exit 1
-fi
-# shellcheck source=../lib/hook-host.sh
-source "$host_helpers"
-command -v shasum >/dev/null 2>&1 || {
-  printf 'post-remote-write-watch: shasum not found\n' >&2
-  exit 127
-}
+source "$lib_dir/verdict-audit-state.sh" || load_failure "$lib_dir/verdict-audit-state.sh"
+# shellcheck source=../lib/pr-watch-state.sh
+source "$lib_dir/pr-watch-state.sh" || load_failure "$lib_dir/pr-watch-state.sh"
 state_dir="$(git -C "$repo_root" rev-parse --git-path pr-watch 2>/dev/null || echo '')"
 [[ -z "$state_dir" ]] && exit 0
 [[ "$state_dir" != /* ]] && state_dir="$repo_root/$state_dir"
@@ -187,11 +136,10 @@ attachment_published=false
 active_lookup_pid=""
 active_lookup_fd_open=false
 
-# The claim JSON is the only consumable capability after selection. The stable
-# manifest becomes a small non-authoritative recovery record via atomic replace;
-# it is never truncated in place. A separate kernel flock is the live lease, so
-# recovery never trusts a recycled PID or a wall-clock-resolution start token.
-transition_attachment_claim_state() {  # check|acquire|retry|published|discard
+# A separate kernel flock is the live lease, so recovery never trusts a recycled
+# PID or a wall-clock-resolution start token. `discard` leaves an unparsed
+# `retired:` record, which no reader accepts.
+transition_attachment_claim_state() {  # check|acquire|retry|discard
   local target="$1" target_record new_identity
   [[ -n "$attachment_manifest" && -n "$attachment_manifest_identity" \
      && -n "$attachment_marker_identity" \
@@ -202,7 +150,7 @@ transition_attachment_claim_state() {  # check|acquire|retry|published|discard
      && "$attachment_lease_identity" =~ ^[0-9]+:[0-9]+$ \
      && -n "$attachment_prompt_epoch" \
      && -n "$attachment_prompt_epoch_path" \
-     && "$target" =~ ^(check|acquire|retry|published|discard)$ ]] || return 1
+     && "$target" =~ ^(check|acquire|retry|discard)$ ]] || return 1
   if [[ "$target" == acquire ]]; then
     [[ -n "$attachment_recovery_marker" \
        && -n "$attachment_recovery_source_marker" ]] || return 1
@@ -210,190 +158,15 @@ transition_attachment_claim_state() {  # check|acquire|retry|published|discard
   elif [[ "$target" == check ]]; then
     [[ -n "$attachment_recovery_source_marker" ]] || return 1
     target_record="$attachment_recovery_source_marker"
-  elif [[ "$target" == retry || "$target" == published ]]; then
+  elif [[ "$target" == retry ]]; then
     target_record="retry:${attachment_manifest_identity}:${attachment_claim_hash}"
   else
-    target_record="published:${attachment_manifest_identity}:${attachment_claim_hash}"
+    target_record="retired:${attachment_manifest_identity}:${attachment_claim_hash}"
   fi
-  new_identity="$(perl -MFcntl=:DEFAULT,:flock -MDigest::SHA -MIO::Handle -e '
-    my ($manifest, $generation_identity, $marker_identity, $claim,
-      $claim_identity, $hash, $target, $expected, $replacement,
-      $lease_path, $lease_identity, $lease_nonce, $epoch_path,
-      $epoch_record) = @ARGV;
-    my $max = 65536;
-    $SIG{ALRM} = sub { exit 1 };
-    alarm 2;
-    exit 1 unless $generation_identity =~ /\A[0-9]+:[0-9]+\z/
-      && $marker_identity =~ /\A[0-9]+:[0-9]+\z/
-      && $claim_identity =~ /\A[0-9]+:[0-9]+\z/
-      && $hash =~ /\A[0-9a-f]{64}\z/
-      && $target =~ /\A(?:check|acquire|retry|published|discard)\z/
-      && $lease_identity =~ /\A[0-9]+:[0-9]+\z/
-      && $lease_nonce =~ /\A[0-9a-f]{32}\z/
-      && length($epoch_record) > 0 && length($epoch_record) <= 256
-      && length($expected) <= $max && length($replacement) <= 512
-      && $epoch_record !~ /[\0\r\n]/
-      && $expected !~ /[\0\r\n]/ && $replacement !~ /[\0\r\n]/;
-    my $open_exact = sub {
-      my ($path, $identity, $exclusive) = @_;
-      exit 1 if lstat($path) && -l _;
-      my $flags = ($exclusive ? O_RDWR : O_RDONLY) | O_NONBLOCK;
-      $flags |= Fcntl::O_NOFOLLOW() if defined &Fcntl::O_NOFOLLOW;
-      sysopen(my $fh, $path, $flags) or exit 1;
-      flock($fh, ($exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) or exit 1;
-      my @opened = stat($fh);
-      my @named = lstat($path);
-      exit 1 unless @opened && @named && -f $fh && $opened[3] >= 1
-        && ($opened[0] . ":" . $opened[1]) eq $identity
-        && $opened[0] == $named[0] && $opened[1] == $named[1]
-        && $opened[7] <= $max;
-      return $fh;
-    };
-    my $read_exact = sub {
-      my ($fh) = @_;
-      my $body = "";
-      sysseek($fh, 0, 0) or exit 1;
-      while (length($body) <= $max) {
-        my $chunk = "";
-        my $count = sysread($fh, $chunk, $max + 1 - length($body));
-        next if !defined($count) && $!{EINTR};
-        exit 1 unless defined($count);
-        last if $count == 0;
-        $body .= $chunk;
-      }
-      exit 1 if length($body) > $max || $body =~ /[\0\r]/;
-      return $body;
-    };
-    exit 1 if lstat($lease_path) && -l _;
-    my $lease_flags = O_RDWR | O_NONBLOCK;
-    $lease_flags |= Fcntl::O_NOFOLLOW() if defined &Fcntl::O_NOFOLLOW;
-    sysopen(my $lease_fh, $lease_path, $lease_flags) or exit 1;
-    my @lease_opened = stat($lease_fh);
-    my @lease_named = lstat($lease_path);
-    exit 1 unless @lease_opened && @lease_named && -f $lease_fh
-      && $lease_opened[3] == 1 && $lease_opened[7] <= 128
-      && ($lease_opened[0] . ":" . $lease_opened[1]) eq $lease_identity
-      && $lease_opened[0] == $lease_named[0]
-      && $lease_opened[1] == $lease_named[1];
-    my $lease_is_current = sub {
-      @lease_named = lstat($lease_path);
-      return 0 unless @lease_named
-        && $lease_opened[0] == $lease_named[0]
-        && $lease_opened[1] == $lease_named[1];
-      my $lease_body = $read_exact->($lease_fh);
-      return 0 unless $lease_body eq "lease:" . $lease_nonce . "\n";
-      if (flock($lease_fh, LOCK_EX | LOCK_NB)) {
-        flock($lease_fh, LOCK_UN);
-        return 0;
-      }
-      return $!{EWOULDBLOCK} || $!{EAGAIN};
-    };
-    my $epoch_is_current = sub {
-      return 0 if lstat($epoch_path) && -l _;
-      my $flags = O_RDONLY | O_NONBLOCK;
-      $flags |= Fcntl::O_NOFOLLOW() if defined &Fcntl::O_NOFOLLOW;
-      sysopen(my $fh, $epoch_path, $flags) or return 0;
-      flock($fh, LOCK_SH | LOCK_NB) or return 0;
-      my @opened = stat($fh);
-      my @named = lstat($epoch_path);
-      return 0 unless @opened && @named && -f $fh
-        && $opened[3] == 1 && $opened[7] <= 256
-        && $opened[0] == $named[0] && $opened[1] == $named[1];
-      my $record = $read_exact->($fh);
-      @named = lstat($epoch_path);
-      return 0 unless @named && $opened[0] == $named[0]
-        && $opened[1] == $named[1]
-        && $record eq $epoch_record . "\n";
-      close($fh) or return 0;
-      return 1;
-    };
-    my $manifest_fh = $open_exact->($manifest, $marker_identity, 1);
-    my $manifest_body = $read_exact->($manifest_fh);
-    $manifest_body =~ s/\n\z// or exit 1;
-    exit 1 unless $manifest_body eq $expected;
-
-    my ($claim_fh, $claim_record);
-    if ($marker_identity eq $claim_identity) {
-      $claim_record = $manifest_body;
-    } else {
-      $claim_fh = $open_exact->($claim, $claim_identity, 1);
-      $claim_record = $read_exact->($claim_fh);
-      $claim_record =~ s/\n\z// or exit 1;
-    }
-    exit 1 unless $claim_record ne ""
-      && index($claim_record, "\n") < 0
-      && Digest::SHA::sha256_hex($claim_record) eq $hash;
-    my @manifest_named = lstat($manifest);
-    my @claim_named = lstat($claim);
-    exit 1 unless @manifest_named && @claim_named
-      && ($manifest_named[0] . ":" . $manifest_named[1]) eq $marker_identity
-      && ($claim_named[0] . ":" . $claim_named[1]) eq $claim_identity;
-    exit 1 unless $lease_is_current->() && $epoch_is_current->();
-
-    if ($target eq "check") {
-      close($lease_fh) or exit 1;
-      close($claim_fh) or exit 1 if defined($claim_fh);
-      close($manifest_fh) or exit 1;
-      alarm 0;
-      print $manifest_named[0], ":", $manifest_named[1];
-      exit 0;
-    }
-
-    if ($target eq "discard") {
-      exit 1 unless defined($claim_fh);
-      truncate($claim_fh, 0) or exit 1;
-      sysseek($claim_fh, 0, 0) or exit 1;
-      syswrite($claim_fh, "retired\n") == 8 or exit 1;
-      $claim_fh->sync or exit 1;
-    }
-
-    my $temporary = $manifest . ".state.tmp";
-    exit 1 if lstat($temporary) && -l _;
-    my $temporary_flags = O_RDWR | O_CREAT | O_NONBLOCK;
-    $temporary_flags |= Fcntl::O_NOFOLLOW() if defined &Fcntl::O_NOFOLLOW;
-    sysopen(my $temporary_fh, $temporary, $temporary_flags, 0600) or exit 1;
-    flock($temporary_fh, LOCK_EX | LOCK_NB) or exit 1;
-    my @temporary_opened = stat($temporary_fh);
-    my @temporary_named = lstat($temporary);
-    exit 1 unless @temporary_opened && @temporary_named && -f $temporary_fh
-      && $temporary_opened[3] == 1
-      && $temporary_opened[0] == $temporary_named[0]
-      && $temporary_opened[1] == $temporary_named[1];
-    truncate($temporary_fh, 0) or exit 1;
-    sysseek($temporary_fh, 0, 0) or exit 1;
-    my $record = $replacement . "\n";
-    my $offset = 0;
-    while ($offset < length($record)) {
-      my $written = syswrite(
-        $temporary_fh, $record, length($record) - $offset, $offset);
-      next if !defined($written) && $!{EINTR};
-      exit 1 unless defined($written) && $written > 0;
-      $offset += $written;
-    }
-    $temporary_fh->sync or exit 1;
-
-    @manifest_named = lstat($manifest);
-    @claim_named = lstat($claim);
-    @temporary_named = lstat($temporary);
-    exit 1 unless @manifest_named && @claim_named && @temporary_named
-      && ($manifest_named[0] . ":" . $manifest_named[1]) eq $marker_identity
-      && ($claim_named[0] . ":" . $claim_named[1]) eq $claim_identity
-      && $lease_is_current->() && $epoch_is_current->();
-    rename($temporary, $manifest) or exit 1;
-    my @published = lstat($manifest);
-    exit 1 unless @published
-      && $published[0] == $temporary_opened[0]
-      && $published[1] == $temporary_opened[1];
-    close($temporary_fh) or exit 1;
-    close($lease_fh) or exit 1;
-    close($claim_fh) or exit 1 if defined($claim_fh);
-    close($manifest_fh) or exit 1;
-    alarm 0;
-    print $published[0], ":", $published[1];
-  ' "$attachment_manifest" "$attachment_manifest_identity" \
-    "$attachment_marker_identity" "$attachment_claim" \
-    "$attachment_claim_identity" "$attachment_claim_hash" "$target" \
-    "$attachment_recovery_source_marker" "$target_record" \
+  new_identity="$(pr_watch_attachment_transition "$attachment_manifest" \
+    "$attachment_manifest_identity" "$attachment_marker_identity" \
+    "$attachment_claim" "$attachment_claim_identity" "$attachment_claim_hash" \
+    "$target" "$attachment_recovery_source_marker" "$target_record" \
     "${attachment_manifest}.lease" "$attachment_lease_identity" \
     "$attachment_lease_nonce" "$attachment_prompt_epoch_path" \
     "$attachment_prompt_epoch")" || return 1
@@ -422,57 +195,7 @@ start_attachment_recovery_lease() {
   [[ -n "$attachment_manifest" && -n "$attachment_marker_identity" ]] || return 1
   trap 'lease_signal=TERM' TERM
   trap 'lease_signal=INT' INT
-  exec 6< <(exec perl -MFcntl=:DEFAULT,:flock -MIO::Handle -e '
-    use strict;
-    use warnings;
-    my ($path, $parent_pid) = @ARGV;
-    exit 1 unless $parent_pid =~ /\A[1-9][0-9]*\z/;
-    $SIG{TERM} = sub { exit 143 };
-    $SIG{INT} = sub { exit 130 };
-    $SIG{PIPE} = sub { exit 0 };
-    exit 1 if lstat($path) && -l _;
-    my $flags = O_RDWR | O_CREAT | O_NONBLOCK;
-    $flags |= Fcntl::O_NOFOLLOW() if defined &Fcntl::O_NOFOLLOW;
-    sysopen(my $fh, $path, $flags, 0600) or exit 1;
-    flock($fh, LOCK_EX | LOCK_NB) or exit 1;
-    my @opened = stat($fh);
-    my @named = lstat($path);
-    exit 1 unless @opened && @named && -f $fh && $opened[3] == 1
-      && $opened[0] == $named[0] && $opened[1] == $named[1];
-    sysopen(my $random, "/dev/urandom", O_RDONLY) or exit 1;
-    my $bytes = "";
-    while (length($bytes) < 16) {
-      my $count = sysread($random, $bytes, 16 - length($bytes), length($bytes));
-      next if !defined($count) && $!{EINTR};
-      exit 1 unless defined($count) && $count > 0;
-    }
-    close($random) or exit 1;
-    my $nonce = unpack("H*", $bytes);
-    truncate($fh, 0) or exit 1;
-    sysseek($fh, 0, 0) or exit 1;
-    my $record = "lease:" . $nonce . "\n";
-    my $offset = 0;
-    while ($offset < length($record)) {
-      my $written = syswrite($fh, $record, length($record) - $offset, $offset);
-      next if !defined($written) && $!{EINTR};
-      exit 1 unless defined($written) && $written > 0;
-      $offset += $written;
-    }
-    $fh->sync or exit 1;
-    @named = lstat($path);
-    exit 1 unless @named && $opened[0] == $named[0]
-      && $opened[1] == $named[1];
-    STDOUT->autoflush(1);
-    print "lease:", $$, ":", $nonce, ":", $opened[0], ":", $opened[1],
-      "\n" or exit 1;
-    # The report pipe is the non-recyclable owner identity: SIGKILL of the hook
-    # closes its only reader, so the next heartbeat gets EPIPE and drops flock.
-    while (kill(0, $parent_pid)) {
-      select(undef, undef, undef, 0.05);
-      syswrite(STDOUT, ".", 1) or exit 0;
-    }
-    close($fh) or exit 1;
-  ' "$lease_path" "$$")
+  exec 6< <(pr_watch_attachment_lease_hold "$lease_path" "$$")
   attachment_lease_pid=$!
   attachment_lease_fd_open=true
   trap 'exit 143' TERM
@@ -716,7 +439,7 @@ inspect_attachment_manifest() {
   local manifest_prompt_epoch prompt_epoch_path current_prompt_epoch
   local owner_pid owner_token entry branch_key expected_log branch
   session_scope="$(verdict_audit_scope_from_hook_payload "$payload" "$repo_root" 2>/dev/null)" || return 1
-  command_hash="$(LC_ALL=C printf '%s' "$command" | shasum -a 256 | awk '{print $1}')" || return 1
+  command_hash="$(LC_ALL=C printf '%s' "$command" | verdict_audit_sha256)" || return 1
   attachment_key="$(pr_watch_attachment_key "$session_scope" "$command_hash" 2>/dev/null)" || return 1
   manifest="$state_dir/${attachment_key}.json"
   manifest_identity="$(verdict_audit_path_identity "$manifest" 2>/dev/null)" || return 1
@@ -742,16 +465,10 @@ inspect_attachment_manifest() {
        && ${#BASH_REMATCH[6]} -le 20 \
        && ${#BASH_REMATCH[7]} -le 20 ]] || return 1
     recovery_source_marker="$body"
-  elif [[ "$body" =~ ^recovering:([0-9]+):([0-9]+):([0-9a-f]{64}):([1-9][0-9]*):((cksum-[0-9]+-[0-9]+)|(lease-[0-9a-f]{32}))$ ]]; then
-    # Legacy recovery records did not bind the flock inode. They are only a
-    # source generation: a new exact lease must be acquired before any output.
-    marker_identity="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
-    marker_hash="${BASH_REMATCH[3]}"
-    recovery_owner_pid="${BASH_REMATCH[4]}"
-    recovery_owner_token="${BASH_REMATCH[5]}"
-    [[ ${#recovery_owner_pid} -le 18 \
-       && -n "$recovery_owner_token" ]] || return 1
-    recovery_source_marker="$body"
+  elif [[ "$body" =~ ^recovering:[0-9]+:[0-9]+:[0-9a-f]{64}:[1-9][0-9]*:(cksum-[0-9]+-[0-9]+|lease-[0-9a-f]{32})$ ]]; then
+    # A recovery record without the lease inode is unsupported.
+    printf 'agent-tooling: unsupported watch recovery record; restart the PR watch\n' >&2
+    return 1
   fi
   if [[ -n "$recovery_source_marker" ]]; then
     for slot in 0 1 2 3; do
@@ -769,7 +486,7 @@ inspect_attachment_manifest() {
          && ${#candidate_mtime} -le 18 ]] || continue
       (( candidate_mtime <= now && now - candidate_mtime <= 600 )) || continue
       candidate_hash="$(LC_ALL=C printf '%s' "$candidate_body" \
-        | shasum -a 256 | awk '{print $1}')" || continue
+        | verdict_audit_sha256)" || continue
       [[ "$candidate_hash" == "$marker_hash" ]] || continue
       claim_matches=$((claim_matches + 1))
       recovered_claim="$candidate_claim"
@@ -780,34 +497,14 @@ inspect_attachment_manifest() {
     manifest_hash="$marker_hash"
   else
     manifest_hash="$(LC_ALL=C printf '%s' "$body" \
-      | shasum -a 256 | awk '{print $1}')" || return 1
+      | verdict_audit_sha256)" || return 1
     [[ "$manifest_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
   fi
-  printf '%s' "$body" | jq -e --arg command_hash "$command_hash" \
+  printf '%s' "$body" | jq -e -L "$lib_dir" --arg command_hash "$command_hash" \
     --arg session_scope "$session_scope" --argjson now "$now" '
-      type == "object" and .schema == 1
-      and (keys | sort) == ["command_hash","created_at","entries","omitted_refs",
-                            "owner","prompt_epoch","schema","session_scope"]
-      and .command_hash == $command_hash and .session_scope == $session_scope
-      and (.prompt_epoch | type == "string"
-           and test("^[1-9][0-9]*-[1-9][0-9]*-[0-9]+$"))
-      and (.created_at | type == "number" and floor == .
-           and . <= $now and . >= ($now - 300))
-      and (.owner | type == "object"
-           and (keys | sort) == ["pid","start_token"])
-      and (.owner.pid | type == "number" and . > 0 and floor == .)
-      and (.owner.start_token | type == "string"
-           and test("^cksum-[0-9]+-[0-9]+$"))
-      and (.entries | type == "array" and length > 0 and length <= 4)
-      and (.omitted_refs | type == "number" and . >= 0
-           and . <= 1000000 and floor == .)
-      and all(.entries[];
-        (keys | sort) == ["branch","event_log","remote_ref","watch_id"]
-        and (.remote_ref | type == "string" and startswith("refs/heads/"))
-        and (.branch | type == "string" and length > 0)
-        and .remote_ref == ("refs/heads/" + .branch)
-        and (.watch_id | type == "string" and test("^watch-[0-9a-f]{24}$"))
-        and (.event_log | type == "string" and startswith("/")))' \
+      include "pr-watch-attachment";
+      pr_watch_attachment_lifecycle($now; 300) and pr_watch_attachment_entries
+      and .command_hash == $command_hash and .session_scope == $session_scope' \
     >/dev/null 2>&1 || return 1
   manifest_prompt_epoch="$(printf '%s' "$body" | jq -r '.prompt_epoch')"
   prompt_epoch_path="$(verdict_audit_state_path \
@@ -982,17 +679,9 @@ else
   }
   event_log="$state_dir/${branch_key}.jsonl"
   if [[ -n "$guarded_pr_url" ]]; then
-    owner_dir="$state_dir/$branch_key.lock"
-    owner_identity="$(pr_watch_state_directory_identity "$owner_dir")" || exit 0
-    owner="$(verdict_audit_read_json_snapshot "$owner_dir/owner.json" 2>/dev/null)" || exit 0
-    owner="${owner#*$'\n'}"
-    owner_pid="$(jq -er '.pid | numbers | select(. > 0 and floor == .)' <<<"$owner")" || exit 0
-    owner_token="$(verdict_audit_process_start_token "$owner_pid" 2>/dev/null)" || exit 0
-    watch_id="$(jq -er --arg token "$owner_token" \
-      'select(.schema == 1 and .ready == true and .start_token == $token) | .watch_id | strings' \
-      <<<"$owner")" || exit 0
-    pr_watch_id_is_valid "$watch_id" || exit 0
-    [[ "$(pr_watch_state_directory_identity "$owner_dir")" == "$owner_identity" ]] || exit 0
+    owner="$(pr_watch_owner_read "$state_dir/$branch_key.lock")" || exit 0
+    IFS=$'\t' read -r _ watch_id owner_ready <<<"$owner"
+    [[ "$owner_ready" == true ]] || exit 0
     printf -v stream_command 'bash %q %q --watch-id %q --expect-pr-url %q' \
       "$stream_script" "$event_log" "$watch_id" "$guarded_pr_url"
   else

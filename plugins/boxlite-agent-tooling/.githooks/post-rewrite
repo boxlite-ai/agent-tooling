@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-stdin_file="$(mktemp)"
+# Git passes the rewritten pairs on stdin; keep them for the chained hook.
+stdin_file="$(mktemp)" || exit 1
 trap 'rm -f "$stdin_file"' EXIT
 cat > "$stdin_file"
 
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-"$tooling_root/scripts/sync-installation.sh" || true
-
-chained="$(git rev-parse --git-common-dir)/hooks/post-rewrite"
-if [[ -x "$chained" && "$(realpath "$chained" 2>/dev/null)" != "$(realpath "$0" 2>/dev/null)" ]]; then
-  "$chained" "$@" < "$stdin_file"
-  exit $?
-fi
-exit 0
+# shellcheck source=hook-lib.sh
+source "$tooling_root/.githooks/hook-lib.sh" || exit 1
+githook_sync_then_chain "$tooling_root" post-rewrite "$stdin_file" "$@"

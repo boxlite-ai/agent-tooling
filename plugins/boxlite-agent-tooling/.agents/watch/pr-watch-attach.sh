@@ -5,7 +5,6 @@
 set -uo pipefail
 
 readonly MAX_REFS=4
-readonly MAX_OMITTED_REFS=1000000
 readonly CHILD_MAX_EVENTS=16
 readonly CHILD_MAX_BYTES=8192
 readonly DEFAULT_ATTACH_MAX_EVENTS=16
@@ -13,11 +12,6 @@ readonly DEFAULT_ATTACH_MAX_BYTES=8192
 readonly HARD_ATTACH_MAX_EVENTS=64
 readonly HARD_ATTACH_MAX_BYTES=32768
 readonly ATTACH_SUMMARY_RESERVE_BYTES=512
-
-attach_positive_decimal_is_bounded() {
-  local value="$1"
-  [[ "$value" =~ ^[1-9][0-9]*$ && ${#value} -le 18 ]]
-}
 
 manifest="${1:-}"
 expected_manifest_identity=""
@@ -35,10 +29,23 @@ elif [[ -z "$manifest" || $# -ne 1 ]]; then
   exit 2
 fi
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+lib_dir="$script_dir/../lib"
+# shellcheck source=../lib/verdict-audit-state.sh
+source "$lib_dir/verdict-audit-state.sh" || {
+  printf 'pr-watch-attach: cannot load %s\n' "$lib_dir/verdict-audit-state.sh" >&2
+  exit 127
+}
+# shellcheck source=../lib/pr-watch-state.sh
+source "$lib_dir/pr-watch-state.sh" || {
+  printf 'pr-watch-attach: cannot load %s\n' "$lib_dir/pr-watch-state.sh" >&2
+  exit 127
+}
+
 attach_max_events="${PR_WATCH_ATTACH_MAX_EVENTS:-$DEFAULT_ATTACH_MAX_EVENTS}"
 attach_max_bytes="${PR_WATCH_ATTACH_MAX_BYTES:-$DEFAULT_ATTACH_MAX_BYTES}"
-attach_positive_decimal_is_bounded "$attach_max_events" \
-  && attach_positive_decimal_is_bounded "$attach_max_bytes" || {
+pr_watch_positive_decimal_is_bounded "$attach_max_events" \
+  && pr_watch_positive_decimal_is_bounded "$attach_max_bytes" || {
   printf 'pr-watch-attach: aggregate limits must be positive integers\n' >&2
   exit 2
 }
@@ -53,18 +60,6 @@ attach_positive_decimal_is_bounded "$attach_max_events" \
     "$((ATTACH_SUMMARY_RESERVE_BYTES + 1))" "$HARD_ATTACH_MAX_BYTES" >&2
   exit 2
 }
-
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-state_helpers="$script_dir/../lib/pr-watch-state.sh"
-safe_state_helpers="$script_dir/../lib/verdict-audit-state.sh"
-[[ -r "$state_helpers" && -r "$safe_state_helpers" ]] || {
-  printf 'pr-watch-attach: state helpers unavailable\n' >&2
-  exit 127
-}
-# shellcheck source=../lib/pr-watch-state.sh
-source "$state_helpers" || exit 127
-# shellcheck source=../lib/verdict-audit-state.sh
-source "$safe_state_helpers" || exit 127
 
 manifest_name="${manifest##*/}"
 [[ "$manifest_name" =~ ^attach-[0-9a-f]{64}\.json\.claim\.[0-3]$ ]] || {
@@ -109,7 +104,7 @@ verdict_audit_selected_identity_matches "$manifest" "$manifest_identity" \
 }
 manifest_mtime="${snapshot%%$'\n'*}"
 body="${snapshot#*$'\n'}"
-manifest_hash="$(LC_ALL=C printf '%s' "$body" | shasum -a 256 | awk '{print $1}')"
+manifest_hash="$(LC_ALL=C printf '%s' "$body" | verdict_audit_sha256)"
 if [[ -n "$expected_manifest_hash" \
    && "$manifest_hash" != "$expected_manifest_hash" ]]; then
   printf 'pr-watch-attach: attachment claim binding mismatch\n' >&2
@@ -130,22 +125,9 @@ if [[ -n "$expected_manifest_identity" ]]; then
     exit 1
   fi
 
-  printf '%s' "$body" | jq -e --argjson now "$now" '
-    type == "object" and .schema == 1
-    and (keys | sort) == ["command_hash","created_at","entries","omitted_refs",
-                          "owner","prompt_epoch","schema","session_scope"]
-    and (.command_hash | type == "string" and test("^[0-9a-f]{64}$"))
-    and (.session_scope | type == "string"
-         and test("^git-[0-9a-f]{40}([0-9a-f]{24})?$"))
-    and (.prompt_epoch | type == "string"
-         and test("^[1-9][0-9]*-[1-9][0-9]*-[0-9]+$"))
-    and (.created_at | type == "number" and floor == .
-         and . <= $now and . >= ($now - 600))
-    and (.owner | type == "object"
-         and (keys | sort) == ["pid","start_token"])
-    and (.owner.pid | type == "number" and . > 0 and floor == .)
-    and (.owner.start_token | type == "string"
-         and test("^cksum-[0-9]+-[0-9]+$"))' >/dev/null 2>&1 || {
+  printf '%s' "$body" | jq -e -L "$lib_dir" --argjson now "$now" '
+    include "pr-watch-attachment"; pr_watch_attachment_lifecycle($now; 600)' \
+    >/dev/null 2>&1 || {
     printf 'pr-watch-attach: attachment lifecycle schema rejected\n' >&2
     exit 1
   }
@@ -222,8 +204,8 @@ attachment_lifecycle_is_current() {
   }
   current_mtime="${current_snapshot%%$'\n'*}"
   current_body="${current_snapshot#*$'\n'}"
-  current_hash="$(LC_ALL=C printf '%s' "$current_body" \
-    | shasum -a 256 | awk '{print $1}')" || return 1
+  current_hash="$(LC_ALL=C printf '%s' "$current_body" | verdict_audit_sha256)" \
+    || return 1
   [[ "$current_hash" == "$manifest_hash" ]] || {
     printf 'pr-watch-attach: attachment changed before consumption\n' >&2
     return 1
@@ -258,20 +240,8 @@ attachment_lifecycle_is_current() {
   }
 }
 
-printf '%s' "$body" | jq -e --argjson max "$MAX_REFS" \
-  --argjson max_omitted "$MAX_OMITTED_REFS" '
-  type == "object" and .schema == 1
-  and (.entries | type == "array" and length > 0 and length <= $max)
-  and (.omitted_refs | type == "number" and . >= 0
-       and . <= $max_omitted and floor == .)
-  and all(.entries[];
-    (keys | sort) == ["branch","event_log","remote_ref","watch_id"]
-    and (.remote_ref | type == "string" and startswith("refs/heads/"))
-    and (.branch | type == "string" and length > 0)
-    and .remote_ref == ("refs/heads/" + .branch)
-    and (.watch_id | type == "string" and test("^watch-[0-9a-f]{24}$"))
-    and (.event_log | type == "string" and startswith("/") and endswith(".jsonl")))' \
-  >/dev/null 2>&1 || {
+printf '%s' "$body" | jq -e -L "$lib_dir" \
+  'include "pr-watch-attachment"; pr_watch_attachment_entries' >/dev/null 2>&1 || {
     printf 'pr-watch-attach: attachment schema rejected\n' >&2
     exit 1
   }
@@ -289,7 +259,7 @@ if ! mkfifo "$event_fifo" "$delivery_fifo"; then
   exit 1
 fi
 delivery_nonce="$(LC_ALL=C printf '%s' \
-  "$runtime_dir:$$:${RANDOM:-0}" | shasum -a 256 | awk '{print $1}')"
+  "$runtime_dir:$$:${RANDOM:-0}" | verdict_audit_sha256)"
 [[ "$delivery_nonce" =~ ^[0-9a-f]{64}$ ]] || {
   rm -f "$event_fifo" "$delivery_fifo" 2>/dev/null || true
   rmdir "$runtime_dir" 2>/dev/null || true

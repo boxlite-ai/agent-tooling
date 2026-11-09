@@ -35,23 +35,20 @@ source "$LIB_DIR/subagent.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=assert.sh
+source "$LIB_DIR/../../tests/lib/assert.sh"
 has() { case "$2" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
 check()    { has "$2" "$3" && ok "$1" || bad "$1 (missing: $2)"; }
 check_no() { has "$2" "$3" && bad "$1 (present: $2)" || ok "$1"; }
 
-# Every case below that does not name a host runs with neither root exported, so it
-# renders the unknown-host menu — the shape the whole suite was written against.
+# Every case below that does not name a host runs without the BOXLITE_HOOK_HOST marker,
+# so it renders the unknown-host menu — the shape the whole suite was written against.
 as_host() {  # claude | codex | unknown, then the subagent_instruction arguments
   local host="$1"; shift
   (
-    unset PLUGIN_ROOT CLAUDE_PLUGIN_ROOT
+    unset PLUGIN_ROOT CLAUDE_PLUGIN_ROOT BOXLITE_HOOK_HOST
     case "$host" in
-      claude) export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT_FIXTURE" ;;
-      codex)  export PLUGIN_ROOT="$PLUGIN_ROOT_FIXTURE" ;;
+      claude|codex) export BOXLITE_HOOK_HOST="$host" ;;
     esac
     subagent_instruction "$@"
   )
@@ -206,8 +203,7 @@ hijack_out="$(
   hook_host_kind() { printf 'codex'; }
   # shellcheck source=/dev/null
   source "$LIB_DIR/subagent.sh"
-  unset PLUGIN_ROOT
-  export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT_FIXTURE"
+  export BOXLITE_HOOK_HOST=claude
   subagent_instruction --agent verdict-auditor --root "$PLUGIN_ROOT_FIXTURE" \
     --task 'audit my turn'
 )"
@@ -794,7 +790,7 @@ done
 shopt -u nullglob
 
 echo
-echo "## The gates no longer carry prompts as shell string literals"
+echo "## The gates carry no prompts as shell string literals"
 # The point of the extraction: a prompt in a heredoc inherits shell expansion rules and
 # cannot be reviewed without reading bash quoting around it.
 for hook in preflight-commit-push audit/preflight-verdict-check; do
@@ -912,6 +908,4 @@ for case in \
     || bad "driver: $name (got $got, want $status:$dossier:$log)"
 done
 
-echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

@@ -10,4 +10,4 @@ Draft a redesign from the findings and reflection. Keep the draft local.
 
 {{approval}}
 
-A matching legacy Codex question reply or typed design decision still counts.
+A matching Codex question reply or typed design decision still counts.

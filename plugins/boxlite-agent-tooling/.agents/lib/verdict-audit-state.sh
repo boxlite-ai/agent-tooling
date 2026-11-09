@@ -22,6 +22,12 @@ verdict_audit_epoch_is_bounded() {
   [[ "$1" =~ ^[1-9][0-9]*$ && ${#1} -le 18 ]]
 }
 
+# stdin: bytes. stdout: lowercase SHA-256 hex. The one hashing helper for shell callers.
+verdict_audit_sha256() {
+  perl -MDigest::SHA -e 'binmode STDIN; my $d = Digest::SHA->new(256); $d->addfile(\*STDIN); print $d->hexdigest' \
+    || return 1
+}
+
 # Snapshot workspace state without letting a FIFO, symlink, or replacement pathname
 # choose what gets parsed. `record` mode validates the bytes before command substitution
 # can erase trailing LFs. `json` mode prefixes the selected inode's mtime, keeping
@@ -71,7 +77,7 @@ verdict_audit_read_regular_state() {  # path max-bytes record|json [device:inode
   ' "$1" "$2" "$3" "${4:-}"
 }
 
-# Writers use one final LF; legacy records without it remain readable, while CR, an
+# Writers use one final LF; a record without it still reads, while CR, an
 # embedded LF, or a second blank record fails.
 verdict_audit_read_single_record() {  # record-path
   verdict_audit_read_regular_state "$1" 4096 record
@@ -117,15 +123,8 @@ verdict_audit_regular_file_bytes() {  # path [device:inode] -> byte count
 # `output-state` when either stopped being the plain file the caller created,
 # `output-limit` when either reached its ceiling.
 #
-# A live poller cannot answer this on its own. Its loop ends the moment a status record
-# exists, so an agent that crosses a ceiling and exits inside one poll interval is
-# never measured, and the ceiling would hold only for writers slow enough to be caught.
-# This runs once the process is reaped, when both files are final.
-#
-# Split out of the caller rather than inlined so it can be tested against a FIFO
-# directly. Reached through the caller it is racy to exercise — a poller watching the
-# same paths may report first — and that race is a property of the poller, not of this
-# decision, which has none.
+# Run once the process is reaped, when both files are final: a live poller stops at the
+# first status record and would miss a ceiling crossed inside one poll interval.
 verdict_audit_output_reason() {  # result-path result-max stderr-path stderr-max
   local result_path="$1" result_max="$2" stderr_path="$3" stderr_max="$4"
   local result_bytes stderr_bytes
@@ -875,7 +874,7 @@ verdict_audit_normalize_turn_snapshot() {  # max-allowed-bytes; snapshot JSON on
 }
 
 # Normalize exactly one verdict dossier only when it matches the published wire contract.
-# Legacy/manual dossiers may omit `generation`; a present generation is always a string.
+# Every dossier names its request `generation` as a string.
 # `advisories` is optional on every verdict: non-blocking notes that never decide one.
 # `auditor_model`/`auditor_effort` are optional echoes of the pinned pair (design #474).
 # Keeping this policy in one function prevents the runner and Stop gate from drifting on
@@ -912,7 +911,7 @@ verdict_audit_normalize_dossier() {  # JSON on stdin
        and (.[0].branch | type) == "string"
        and (.[0].head | type) == "string"
        and (.[0].tree_hash | type) == "string"
-       and ((.[0] | has("generation") | not) or (.[0].generation | type) == "string")
+       and (.[0].generation | type) == "string"
        and (.[0].verdict == "PASS" or .[0].verdict == "FAIL"
             or .[0].verdict == "IN_PROGRESS")
        and (.[0].proof | type) == "array"
@@ -1507,11 +1506,11 @@ verdict_audit_append_log_line() {  # log-path line-without-LF
   ' "$1" "$2"
 }
 
-# Hash an untrusted harness session id into one whitespace-free lock field. Empty is a
-# deliberate legacy/manual scope. Git is already required by both callers and supports
-# SHA-1 and SHA-256 repositories, so accept either output length at the read boundary.
+# Hash an untrusted harness session id into one whitespace-free lock field. An empty id
+# has no scope. Git is already required by both callers and supports SHA-1 and SHA-256
+# repositories, so accept either output length at the read boundary.
 verdict_audit_scope_identity() {  # raw-session-id git-repo
-  [[ -n "$1" ]] || { printf '-'; return; }
+  [[ -n "$1" ]] || return 1
   local object_id
   object_id="$(printf '%s' "$1" | git -C "$2" hash-object --stdin)" || return 1
   [[ "$object_id" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || return 1
@@ -1534,15 +1533,11 @@ verdict_audit_scope_from_hook_payload() {  # hook-payload git-repo
   printf 'git-%s' "$object_id"
 }
 
-# Keep legacy/manual invocations on their established path. Harness sessions get one
-# opaque suffix shared by request, lock, dossier, and gate bookkeeping, so tasks using
-# the same worktree cannot consume or cancel each other's runtime state.
+# Harness sessions get one opaque suffix shared by request, lock, dossier, and gate
+# bookkeeping, so tasks using the same worktree cannot consume or cancel each other's
+# runtime state.
 verdict_audit_state_path() {  # base-path session-scope
-  if [[ "$2" == "-" ]]; then
-    printf '%s' "$1"
-  else
-    printf '%s.%s' "$1" "$2"
-  fi
+  printf '%s.%s' "$1" "$2"
 }
 
 # INT/TERM has no UserPromptSubmit hook to revoke a session request. A generation-named

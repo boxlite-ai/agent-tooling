@@ -59,7 +59,7 @@ chmod +x "$scratch/bin/"{gh,perl}
 export PATH="$scratch/bin:$PATH" CODEX_THREAD_ID=codex-file-pr
 unset CLAUDE_CODE_SESSION_ID GH_HOST GH_REPO GIT_DIR GIT_WORK_TREE BOXLITE_PR_WATCH
 cd "$scratch/repo"
-bash "$plugin/scripts/design-doc.sh" bind "$FILE_PR_URL" >/dev/null
+bash "$plugin/scripts/design-doc.sh" register "$FILE_PR_URL" >/dev/null
 hook="$plugin/.agents/hooks/preflight-pr-review.sh"
 launcher="$plugin/scripts/gh-pr.sh"
 title='feat: keep the approved description'

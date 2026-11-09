@@ -16,18 +16,9 @@ trap 'rm -rf "$work"' EXIT
 export CLAUDE_PROJECT_DIR="$work/project"
 record="$CLAUDE_PROJECT_DIR/.agents/state/last-api-failure.json"
 
-pass=0
-fail=0
-# Increment pass counter and print a PASS line.  # $1 = test name
-ok()  { pass=$(( pass + 1 )); printf '  PASS  %s\n' "$1"; }
-# Increment fail counter and print a FAIL line.  # $1 = test name
-bad() { fail=$(( fail + 1 )); printf '  FAIL  %s\n' "$1"; }
-# Compare expected and actual values, calling ok or bad and printing details on mismatch.  # $1 = name, $2 = expected, $3 = actual
-check() {  # name expected actual
-  if [[ "$2" == "$3" ]]; then ok "$1"; else
-    bad "$1"; printf '        expected %s\n        actual   %s\n' "$2" "$3"
-  fi
-}
+# shellcheck source=../lib/assert.sh
+source "$hook_dir/../../tests/lib/assert.sh"
+check() { check_eq "$1" "$3" "$2"; }  # name expected actual
 
 # stderr is captured, never discarded, so every case below can assert silence.
 # Feed a payload to the subject hook via stdin, capture exit code and stderr.  # $1 = payload JSON; sets rc, writes stderr to $work/stderr
@@ -141,5 +132,4 @@ for quiet_payload in '{"hook_event_name":"StopFailure","error":"teapot"}' \
   check "silent on stderr: ${quiet_payload:-<empty>}" "0" "$(stderr_bytes)"
 done
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-(( fail == 0 ))
+assert_result

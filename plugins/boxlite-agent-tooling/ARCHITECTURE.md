@@ -27,13 +27,13 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 | Auditor/advisor start, tool, stop | `.agents/hooks/audit-deadline.sh` | Publish native dossier-worker ownership, enforce deadlines, and clean up owned tasks. |
 | Design auditor/advisor tools | `.agents/hooks/audit-privacy.sh` | Reject recognizable personal identifiers and key requests; see [privacy limits](docs/design-and-pr-gates.md#audit-rule-ownership). |
 | Editor, notebook, patch `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Require current design authority, with exceptions for outside targets and [owned auditor reports](docs/design-and-pr-gates.md#auditor-report-writes). |
-| Commit/push `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | Delegate to installed Git gates; deny with an explicit next action. |
+| Commit/push `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | Delegate to installed Git gates; deny with an explicit next action. A leftover `.claude/.last-audit*.json` blocks agent commits and pushes; the denial names the `rm` command. |
 | GitHub/PR shell `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Check writing, privacy, design, description, size, and human review acknowledgment. |
 | PR body file | `scripts/gh-pr.sh` | Run the same PR checks and publish the checked snapshot over stdin. |
 | Issue, comment, review, and release text file | `scripts/gh-write.sh` | Apply GitHub writing checks to a bounded snapshot and pass it over stdin. |
 | Remote-write `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Attach successful writes to PR monitoring. |
 | Test `PostToolUse`; Claude failure event | `.agents/hooks/record-test-run.sh` | Record supported completed `make test...` results in ignored test-run receipts. |
-| `Stop` | `.agents/hooks/stop-gate.sh` | Continue timed requests, check writing, then execute verdict checking. |
+| `Stop` | `.agents/hooks/stop-gate.sh` | Continue timed requests, check writing, then execute verdict checking. A payload without a non-empty `session_id` blocks. |
 | Claude `StopFailure` | `.agents/hooks/record-api-failure.sh` | Record failure kind for `scripts/resume-on-network-error.sh`. |
 | Claude async `StopFailure` | `.agents/hooks/resume-after-api-failure.sh` | Resume eligible interactive failures at most three times per session in ten minutes. |
 
@@ -62,17 +62,23 @@ The optional Claude launcher injects the queue rule and handle through SessionSt
 
 The capture callback waits for the installed Stop gate to allow the turn. It can ask once per prompt for an exact draft acknowledgment, including an empty set. A later tool call or model turn invalidates the seal.
 
-The operator stores clone-keyed SQLite state outside the checkout and beyond the agent account's access. An operator-owned registry binds each clone to one journal across linked worktrees and same-filesystem renames. Finished drafts leave the active queue and keep their deduplication records in SQLite. Status and history read at most 50 completed records per page.
+- The operator stores clone-keyed SQLite state outside the checkout, beyond the agent account's access.
+- An operator-owned registry binds each clone to one journal across linked worktrees and same-filesystem renames.
+- Finished drafts leave the active queue and keep deduplication records; status and history read at most 50 completed records per page.
 
-The queue lock covers the version upgrade and archive writes. The upgrade fences older writers and discards legacy handles without a recorded owner. Drafts, approvals, and attempts survive the upgrade.
+The queue lock covers archive writes. A journal in an unsupported format fails closed and names the re-initialization steps.
 
 The operator checks the private SDK installation before loading any of its code. Startup reclaims abandoned handles when their recorded owner process has exited. The active draft size limit leaves room for approvals, close evidence, and retry state.
 
-The qualified macOS one-shot launcher requires an allowed final Stop, a completed root result, SDK stream exhaustion, and clean child exit. If Claude omits SessionEnd, the launcher records the close after observing those signals. The root result starts one deadline for SDK exhaustion and child closure. A timeout forces teardown and holds the drafts.
+- The qualified macOS one-shot launcher requires an allowed final Stop, a completed root result, SDK stream exhaustion, and clean child exit.
+- If Claude omits SessionEnd, the launcher records the close after observing those signals.
+- The root result starts one deadline for SDK exhaustion and child closure; a timeout forces teardown and holds the drafts.
 
 Enrollment pins a GitHub repository ID. The operator grants public disclosure for the exact revision and destination, including the embedded marker. A clone lock spans the durable attempt and the single create request.
 
-After an ambiguous create, drains read open and closed issues in the original repository for the recorded author and marker. Drains resume scheduling after the last serviced draft and reduce oversized pages at the same cursor. Unmatched sweeps repeat without another create. Each drain allows 30 seconds, 10 requests, and up to five seconds per request.
+- After an ambiguous create, drains search the original repository's open and closed issues for the recorded author and marker; unmatched sweeps never create again.
+- Drains resume after the last serviced draft and reduce oversized pages at the same cursor.
+- Each drain allows 30 seconds, 10 requests, and up to five seconds per request.
 
 ## Boundaries
 
@@ -140,7 +146,7 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | --- | --- |
 | [hooks/](hooks/README.md) | Host manifests. |
 | [.agents/hooks/](.agents/hooks/README.md), [audit/](.agents/hooks/audit/README.md) | Stable lifecycle hooks, shared helpers, and audit runners. |
-| `.agents/lib/` | Sourced state, host, receipt, rendering, and dispatch libraries. |
+| `.agents/lib/` | Sourced state, host, receipt, rendering, and dispatch libraries; see [shared libraries](#shared-libraries). |
 | [`.agents/prompts/`](PROMPTS.md#runtime-contracts) | Runtime Markdown templates. |
 | `.agents/watch/` | Producer, durable intent, pending delivery, consumers. |
 | `.agents/skills/`, `.claude/agents/` | Complete skills and native auditor/advisor specs. |
@@ -151,6 +157,15 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 Entry paths stay stable. Runtime helpers live in subsystem directories. Tests resolve implementation paths from the plugin root.
 
 Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's canonical paths in symlink-free cache copies.
+
+### Shared libraries
+
+| Library | Used by | Owns |
+| --- | --- | --- |
+| `.agents/lib/tooling-profile.sh` | Installer, refresh, verification, profile validation, host bootstraps | Profile `tooling` fields and hold policy; callers report its error. |
+| `.agents/lib/shell-scan.sh` | `.agents/hooks/preflight-pr-review.sh` | Splits shell source into simple commands without running it. |
+| `.agents/lib/pr-watch-attachment.jq` | `.agents/hooks/post-remote-write-watch.sh`, `.agents/watch/pr-watch-attach.sh` | Pre-push attachment manifest schema. |
+| `.githooks/hook-lib.sh` | Git hooks | Delegated commit/push gate call and the sync-then-chain step. |
 
 ### Skill ownership
 
@@ -164,8 +179,4 @@ Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's can
 | `boxlite-distill` | Knowledge/minimal implementation scope, removal test, fidelity, execution, reader sufficiency, evidence results. |
 | `boxlite-visualize` | Source-grounded `diagram.md`/`evidence.json`; render/fit/trace validation in `validation.json`, then visual inspection. |
 
-- Share whole skill directories, including references; standalone Clean Code needs no plugin scripts and retains repository permissions/workflow.
-- Adversarial fixer handoffs name each finding's failure class; cross-finding patterns remain optional and require evidence.
-- Shell `references/sources.json` records revisions/bytes/hashes/licenses; UNSW/Wooledge remain links without established blanket redistribution permission.
-- Distill guides separate whole-system coverage, selective depth, source/ownership/lifecycle, and complete minimal paths; isolated evaluations live in `tests/boxlite_distill/`.
-- Skill discovery adds no publication authority; [instruction owners](CONTRIBUTING.md#instruction-ownership) retain policies/checkers; runtime/model/host evidence require separate verification.
+Share whole skill directories, including references. Skill discovery adds no publication authority; [instruction owners](CONTRIBUTING.md#instruction-ownership) keep policies and checkers.

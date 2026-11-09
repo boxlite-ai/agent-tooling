@@ -9,7 +9,7 @@ trap 'rm -rf "$scratch"' EXIT
 state="$scratch/cycle.json"
 context='{"repo_root":"/fixture","session":"s","epoch":"1","branch":"main","gate":"verdict"}'
 prepare() { audit_test_submit_due "$cli" "$state"; jq -nc --argjson context "$context" --arg id "$1" \
-  '{context:$context,attempt:{id:$id,binding:{head:$id},snapshot:{diff:"reviewed bytes"}}}' \
+  '{context:$context,attempt:{id:$id,binding:{head:$id},snapshot:{diff:"reviewed bytes"},deadline:4102444800}}' \
   | bash "$cli" prepare "$state" >/dev/null; }
 finding='{"id":"NEW","invariant":"publication is serialized","behavior":"late writer","criterion":"both event orderings pass","evidence":"test:publication", "origin":"existing","origin_evidence":"baseline:publication","review_gap":"","review_change":"","reopening":null,"conflict":null,"criterion_change":null}'
 disposition() { jq -nc --arg id "$1" --arg status "$2" \

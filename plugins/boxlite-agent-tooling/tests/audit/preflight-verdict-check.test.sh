@@ -46,16 +46,18 @@ unset VERDICT_EXTRACTOR_CMD
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$REPO_ROOT/.agents/hooks/audit/preflight-verdict-check.sh"
 CANCEL_HOOK="$REPO_ROOT/.agents/hooks/cancel-verdict-audit.sh"
+# shellcheck source=../../.agents/lib/verdict-audit-state.sh
+source "$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
+# shellcheck source=../lib/verdict-fixtures.sh
+source "$REPO_ROOT/tests/lib/verdict-fixtures.sh"
 
-pass=0
-fail=0
-
-kill_test_pids() {  # signal pid...
-  local signal="$1" pid; shift
-  for pid in "$@"; do
-    [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill "-$signal" "$pid" 2>/dev/null || true
-  done
-}
+# The gate audits only session-scoped Stops. Cases that name no session run as
+# DEFAULT_SESSION; its scope is a Git blob hash, identical in every fixture repository.
+DEFAULT_SESSION=test-session
+DEFAULT_SCOPE="git-$(printf '%s' "$DEFAULT_SESSION" | git hash-object --stdin)"
+DEFAULT_GENERATION=101-102-1
 
 dependency_bin="$(mktemp -d)"
 ln -s "$(command -v bash)" "$dependency_bin/bash"
@@ -64,10 +66,9 @@ missing_perl_err="$(PATH="$dependency_bin" bash "$HOOK" </dev/null 2>&1)"
 missing_perl_rc=$?
 if [[ "$missing_perl_rc" == 2 \
    && "$missing_perl_err" == *"required dependency not found: perl"* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "missing Perl fails closed with an actionable Stop-hook error"
+  ok "missing Perl fails closed with an actionable Stop-hook error"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s err=%s)\n' \
-    "missing Perl silently bypassed the verdict gate" "$missing_perl_rc" "$missing_perl_err"
+  badf "missing Perl fails closed with an actionable Stop-hook error" 'rc=%s err=%s' "$missing_perl_rc" "$missing_perl_err"
 fi
 rm -rf "$dependency_bin"
 
@@ -88,15 +89,6 @@ setup() {
   git -C "$d" add -A
   git -C "$d" commit -qm base
   printf '%s' "$d"
-}
-
-# Same content-addressed tree hash the hook computes (keep in sync).
-tree_hash_of() {
-  local repo="$1" idx; idx="$(mktemp)"
-  GIT_INDEX_FILE="$idx" git -C "$repo" read-tree HEAD >/dev/null 2>&1
-  GIT_INDEX_FILE="$idx" git -C "$repo" add -A >/dev/null 2>&1
-  GIT_INDEX_FILE="$idx" git -C "$repo" write-tree 2>/dev/null
-  rm -f "$idx"
 }
 
 # Fake session transcript whose LAST assistant message is $2 (prior assistant
@@ -170,14 +162,42 @@ append_root_tool_record_object() {
     >> "$1/transcript.jsonl"
 }
 
-# Write a dossier; tree_hash defaults to the repo's current working-tree hash.
+# The message identity the hook binds a request to: every assistant text after the last
+# real user record of transcript.jsonl (an independent copy of the hook's extraction).
+final_id_of() {  # repo
+  local text
+  text="$(jq -rs '
+    def is_assistant: [.. | objects | select((.role? == "assistant") or (.type? == "assistant"))] | length > 0;
+    def is_real_user:
+      ((.type? == "user") and
+        ((.message.content? | type) == "string"
+         or ([.message.content[]? | select((.type? // "") == "text")] | length) > 0))
+      or ([.. | objects | select((.role? // "") == "user")
+           | [.content[]? | select((.type? // "" | tostring) | test("text"))] | length]
+          | any(. > 0));
+    . as $r
+    | ([$r[] | is_real_user] | rindex(true)) as $lastu
+    | $r[(if $lastu == null then 0 else $lastu + 1 end):]
+    | [.[] | select(is_assistant) | (
+        ([.. | objects | select((.type? // "" | tostring) | test("text")) | .text? // empty | strings] | join("\n")) as $typed
+        | (if ($typed | length) > 0 then $typed
+           else ([.. | objects | .text? // empty | strings] | join("\n")) end)
+      ) | select(length > 0)]
+    | join("\n\n")' "$1/transcript.jsonl" 2>/dev/null)" || text=""
+  cksum_of "$text"
+}
+
+# Write the default session's dossier and the current request it answers; tree_hash
+# defaults to the repo's current working-tree hash.
 write_verdict() {
   local repo="$1" verdict="$2" findings="$3" tree="${4:-$(tree_hash_of "$1")}"
   local br hd; br="$(git -C "$repo" branch --show-current)"; hd="$(git -C "$repo" rev-parse HEAD)"
   mkdir -p "$repo/.agents/state"
   jq -nc --arg b "$br" --arg h "$hd" --arg t "$tree" --arg v "$verdict" --argjson f "$findings" \
-    '{branch:$b, head:$h, tree_hash:$t, verdict:$v, proof:[], findings:$f}' \
-    > "$repo/.agents/state/last-verdict.json"
+    --arg g "$DEFAULT_GENERATION" \
+    '{branch:$b, head:$h, tree_hash:$t, generation:$g, verdict:$v, proof:[], findings:$f}' \
+    > "$repo/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
+  write_session_request "$repo" "$DEFAULT_SESSION" "$DEFAULT_GENERATION" "$(final_id_of "$repo")"
 }
 
 # A real runner seam, not a prebuilt dossier: the Stop hook must invoke this command,
@@ -229,7 +249,9 @@ export TEST_AUDIT_VERDICT=FAIL
 
 # Run the hook inside repo for an exact Stop payload.
 run_payload_hook() {
-  local repo="$1" payload="$2"
+  local repo="$1" payload="$2" scoped
+  scoped="$(jq -ce --arg s "$DEFAULT_SESSION" 'if has("session_id") then . else . + {session_id:$s} end' \
+    <<<"$payload" 2>/dev/null)" && payload="$scoped"
   # Decision-logic cases run in HARD mode so a block condition is observable as
   # decision:block. Soft mode is covered in its own section below.
   printf '%s' "$payload" \
@@ -257,27 +279,33 @@ decide_payload() {
 decide() {
   local repo="$1" tp="/dev/null" payload
   [[ -f "$repo/transcript.jsonl" ]] && tp="$repo/transcript.jsonl"
-  payload="$(jq -nc --arg p "$tp" '{transcript_path:$p, hook_event_name:"Stop"}')"
+  payload="$(jq -nc --arg p "$tp" --arg s "$DEFAULT_SESSION" \
+    '{transcript_path:$p, hook_event_name:"Stop", session_id:$s}')"
   decide_payload "$repo" "$payload"
 }
 
 check() {  # desc  repo  expect
-  local desc="$1" repo="$2" expect="$3" got
-  got="$(decide "$repo")"
-  if [[ "$got" == "$expect" ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
-  else
-    fail=$((fail + 1)); printf '  FAIL  %s  (got=%s expected=%s)\n' "$desc" "$got" "$expect"
-  fi
+  check_eq "$1" "$(decide "$2")" "$3"
 }
 
 # Assert the dossier file is gone (consumed on allow, or discarded on mismatch).
 check_gone() {  # desc  repo
   local desc="$1" repo="$2"
-  if [[ ! -e "$repo/.agents/state/last-verdict.json" ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
+  if [[ ! -e "$repo/.agents/state/last-verdict.json.$DEFAULT_SCOPE" ]]; then
+    ok "$desc"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s  (dossier still present)\n' "$desc"
+    bad "$desc" 'dossier still present'
+  fi
+}
+
+# Assert the written dossier is gone: absent, or replaced by a fresh audit's generation.
+check_stale_gone() {  # desc  repo
+  local desc="$1" generation
+  generation="$(jq -r '.generation // empty' "$2/.agents/state/last-verdict.json.$DEFAULT_SCOPE" 2>/dev/null)"
+  if [[ "$generation" != "$DEFAULT_GENERATION" ]]; then
+    ok "$desc"
+  else
+    bad "$desc" 'stale dossier still present'
   fi
 }
 
@@ -289,31 +317,23 @@ check_gone() {  # desc  repo
 cls_stub()      { printf "while IFS= read -r _line; do :; done; : > '%s/CLASSIFIER_RAN'; printf '%s\\n'" "$1" "$2"; }
 classifier_ran() { [[ -e "$1/CLASSIFIER_RAN" ]] && echo yes || echo no; }
 run_hook() {  # repo  classifier-answer
-  jq -nc --arg p "$1/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+  jq -nc --arg p "$1/transcript.jsonl" --arg s "$DEFAULT_SESSION" \
+    '{transcript_path:$p, hook_event_name:"Stop", session_id:$s}' \
     | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" VERDICT_GATE_HARD_BLOCK=1 \
         VERDICT_CLASSIFIER_CMD="$(cls_stub "$1" "$2")" bash "$HOOK" ) 2>/dev/null
 }
 
-# Session-aware runtime state uses an opaque Git object hash, independently reproduced
-# here so these tests do not grade the path helper with itself.
-session_scope_of() {  # repo session
-  printf 'git-%s' "$(printf '%s' "$2" | git -C "$1" hash-object --stdin)"
-}
-session_state_path() {  # repo basename session
-  printf '%s/.agents/state/%s.%s' "$1" "$2" "$(session_scope_of "$1" "$3")"
-}
 write_session_request() {  # repo session generation final-id
   local path epoch; path="$(session_state_path "$1" verdict-request "$2")"
   mkdir -p "$(dirname "$path")"
   printf '%s %s %s\n' "$3" "$(( $(date +%s) + 600 ))" "$4" > "$path"
   epoch="$(cat "$(session_state_path "$1" verdict-prompt-epoch "$2")" 2>/dev/null || true)"
-  if [[ -n "$epoch" ]]; then
-    jq -nc --arg request "$(cat "$path")" --arg epoch "$epoch" \
-      --arg branch "$(git -C "$1" branch --show-current)" --arg head "$(git -C "$1" rev-parse HEAD)" \
-      --arg tree "$(tree_hash_of "$1")" \
-      '{request:$request,origin_epoch:$epoch,branch:$branch,head:$head,tree_hash:$tree}' \
-      > "$(session_state_path "$1" verdict-request-context.json "$2")"
-  fi
+  [[ -n "$epoch" ]] || epoch=-
+  jq -nc --arg request "$(cat "$path")" --arg epoch "$epoch" \
+    --arg branch "$(git -C "$1" branch --show-current)" --arg head "$(git -C "$1" rev-parse HEAD)" \
+    --arg tree "$(tree_hash_of "$1")" \
+    '{request:$request,origin_epoch:$epoch,branch:$branch,head:$head,tree_hash:$tree}' \
+    > "$(session_state_path "$1" verdict-request-context.json "$2")"
 }
 run_session_hook() {  # repo session classifier-answer
   jq -nc --arg p "$1/transcript.jsonl" --arg s "$2" \
@@ -447,16 +467,15 @@ for f in \
   .agents/state/pr-reviewed.json \
   .agents/state/verdict-last-uuid \
   .agents/state/verdict-stop-message.jsonl \
-  .agents/state/verdict-previous-dossier.json \
   .agents/state/verdict-prompt-epoch \
   .agents/state/verdict-audit.lock \
   .agents/state/verdict-audit.lock.mutex \
   .agents/state/verdict-request.publish.mutex \
   .agents/state/verdict-decisions.log; do
   if git -C "$REPO_ROOT" check-ignore -q "$f"; then
-    pass=$((pass + 1)); printf '  PASS  %s gitignored\n' "$f"
+    ok "$f gitignored"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s NOT gitignored → would perturb compute_tree_hash\n' "$f"
+    badf "$f gitignored" '%s NOT gitignored → would perturb compute_tree_hash' "$f"
   fi
 done
 
@@ -468,18 +487,13 @@ check "'root cause is X' → block (verdict asserted, unaudited)"   "$R" "block"
 R="$(setup)"
 mkfifo "$R/transcript.fifo"
 fifo_payload="$(jq -nc --arg p "$R/transcript.fifo" \
-  '{transcript_path:$p, hook_event_name:"Stop"}')"
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}')"
 fifo_out="$(printf '%s' "$fifo_payload" | (cd "$R" && CLAUDE_PROJECT_DIR="$R" \
   VERDICT_GATE_HARD_BLOCK=1 perl -e 'alarm 3; exec @ARGV' bash "$HOOK") 2>/dev/null)"
 fifo_rc=$?
 fifo_runs="$(wc -l < "$R/.agents/state/SYNC_AUDIT_RUNS" 2>/dev/null | tr -d ' ')"
 fifo_state="rc=$fifo_rc decision=$(decision_from_output "$fifo_out") runs=${fifo_runs:-0}"
-if [[ "$fifo_state" == "rc=0 decision=block runs=1" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "FIFO transcript fails closed without blocking the hook"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (%s)\n' \
-    "FIFO transcript fails closed without blocking the hook" "$fifo_state"
-fi
+check_eq "FIFO transcript fails closed without blocking the hook" "$fifo_state" "rc=0 decision=block runs=1"
 rm -rf "$R"
 
 R="$(setup)"
@@ -509,12 +523,7 @@ history_snapshot_state="$history_snapshot_state final=$(grep -q 'FINAL_SMALL' "$
 history_snapshot_state="$history_snapshot_state tool=$(grep -q 'TOOL_EVIDENCE' "$history_snapshot" 2>/dev/null && echo yes || echo no)"
 history_snapshot_state="$history_snapshot_state old=$(grep -q 'OLD_HISTORY_' "$history_snapshot" 2>/dev/null && echo yes || echo no)"
 history_snapshot_state="$history_snapshot_state context=$history_context"
-if [[ "$history_snapshot_state" == "decision=block bounded=yes final=yes tool=yes old=no context=true" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "synchronous route separates bounded history from transcript discovery"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (%s)\n' \
-    "synchronous route discovery handoff" "$history_snapshot_state"
-fi
+check_eq "synchronous route separates bounded history from transcript discovery" "$history_snapshot_state" "decision=block bounded=yes final=yes tool=yes old=no context=true"
 rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
@@ -525,10 +534,9 @@ if [[ -z "$silent_pass_out" \
    && -e "$R/.agents/state/SYNC_AUDIT_RAN" \
    && ! -e "$(session_state_path "$R" last-verdict.json session-a)" \
    && ! -e "$(session_state_path "$R" verdict-request session-a)" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "successful synchronous audit is silent and consumed"
+  ok "successful synchronous audit is silent and consumed"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s ran=%s)\n' \
-    "successful audit still exposes Stop feedback" "${silent_pass_out:-EMPTY}" \
+  badf "successful synchronous audit is silent and consumed" 'out=%s ran=%s' "${silent_pass_out:-EMPTY}" \
     "$([[ -e "$R/.agents/state/SYNC_AUDIT_RAN" ]] && echo yes || echo no)"
 fi
 rm -rf "$R"
@@ -548,10 +556,9 @@ if [[ "$advisory_pass_keys" == '["continue","systemMessage"]' \
    && "$advisory_pass_note" == *"socket.rs:59 is cited; the call is on :60"* \
    && ! -e "$(session_state_path "$R" last-verdict.json session-a)" \
    && ! -e "$(session_state_path "$R" verdict-request session-a)" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "PASS advisories end the turn and reach only the human"
+  ok "PASS advisories end the turn and reach only the human"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' \
-    "PASS advisories did not end the turn as a human-only note" "${advisory_pass_out:-EMPTY}"
+  badf "PASS advisories end the turn and reach only the human" 'out=%s' "${advisory_pass_out:-EMPTY}"
 fi
 rm -rf "$R"
 
@@ -567,10 +574,9 @@ advisory_fail_reason="$(printf '%s' "$advisory_fail_out" | jq -r '.reason // ""'
 if [[ "$(decision_from_output "$advisory_fail_out")" == block \
    && "$advisory_fail_reason" == *"independent audit finding"* \
    && "$advisory_fail_reason" != *"wording could be tighter"* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "FAIL blocks on findings and keeps advisories out of the reason"
+  ok "FAIL blocks on findings and keeps advisories out of the reason"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' \
-    "FAIL with advisories did not block on findings alone" "${advisory_fail_out:-EMPTY}"
+  badf "FAIL blocks on findings and keeps advisories out of the reason" 'out=%s' "${advisory_fail_out:-EMPTY}"
 fi
 rm -rf "$R"
 
@@ -584,10 +590,9 @@ malformed_advisory_out="$(export TEST_AUDIT_VERDICT=PASS TEST_AUDIT_ADVISORIES='
 malformed_advisory_reason="$(printf '%s' "$malformed_advisory_out" | jq -r '.reason // ""' 2>/dev/null)"
 if [[ "$(decision_from_output "$malformed_advisory_out")" == block \
    && "$malformed_advisory_reason" == *"did not produce a valid dossier"* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "malformed advisories fail the audit closed"
+  ok "malformed advisories fail the audit closed"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' \
-    "malformed advisories were accepted" "${malformed_advisory_out:-EMPTY}"
+  badf "malformed advisories fail the audit closed" 'out=%s' "${malformed_advisory_out:-EMPTY}"
 fi
 rm -rf "$R"
 
@@ -612,10 +617,9 @@ if [[ "$(decision_from_output "$no_runner_out")" == block \
    && "$no_runner_reason" != *"collaboration.spawn_agent"* \
    && "$no_runner_reason" != *"Task("* \
    && ! -e "$(session_state_path "$R" verdict-last-uuid session-a)" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "unavailable synchronous auditor fails closed on every retry"
+  ok "unavailable synchronous auditor fails closed on every retry"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (first=%s retry=%s reason=%s)\n' \
-    "unavailable auditor exposed or bypassed control" \
+  badf "unavailable synchronous auditor fails closed on every retry" 'first=%s retry=%s reason=%s' \
     "$(decision_from_output "$no_runner_out")" \
     "$(decision_from_output "$no_runner_retry_out")" "$no_runner_reason"
 fi
@@ -652,10 +656,9 @@ fi
 wait "$steered_stop_job" 2>/dev/null; steered_stop_rc=$?
 steered_stop_out="$(cat "$R/steered-stop.out" 2>/dev/null || true)"
 if [[ "$steered_bounded" == yes && "$steered_stop_rc" == 0 && -z "$steered_stop_out" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "user steer cancels synchronous audit and releases the old Stop silently"
+  ok "user steer cancels synchronous audit and releases the old Stop silently"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (bounded=%s rc=%s out=%s)\n' \
-    "steered prompt remained blocked behind its old audit" "$steered_bounded" \
+  badf "user steer cancels synchronous audit and releases the old Stop silently" 'bounded=%s rc=%s out=%s' "$steered_bounded" \
     "$steered_stop_rc" "${steered_stop_out:-EMPTY}"
 fi
 rm -rf "$R"
@@ -709,10 +712,9 @@ if [[ -e "$R/.agents/state/reentry-gap-ready" \
    && "$reentry_gap_runs" == 1 \
    && ! -e "$R/reentry-gap-watchdog-hit" \
    && -z "$reentry_gap_out" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "post-audit prompt releases validator re-entry without a second audit"
+  ok "post-audit prompt releases validator re-entry without a second audit"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (ready=%s rc=%s runs=%s watchdog=%s out=%s)\n' \
-    "validator re-entry adopted a newer prompt epoch" \
+  badf "post-audit prompt releases validator re-entry without a second audit" 'ready=%s rc=%s runs=%s watchdog=%s out=%s' \
     "$([[ -e "$R/.agents/state/reentry-gap-ready" ]] && echo yes || echo no)" \
     "$reentry_gap_rc" "${reentry_gap_runs:-0}" \
     "$([[ -e "$R/reentry-gap-watchdog-hit" ]] && echo hit || echo quiet)" \
@@ -735,10 +737,9 @@ if [[ "$(decision_from_output "$out")" == block \
    && "$fail_reason" != *"Task("* \
    && "$fail_reason" != *"run-verdict-audit.sh"* \
    && "$fail_runs" == 1 ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "failed synchronous audit exposes only concise findings"
+  ok "failed synchronous audit exposes only concise findings"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (reason=%s runs=%s)\n' \
-    "failed audit still exposes its control prompt" "$fail_reason" "${fail_runs:-0}"
+  badf "failed synchronous audit exposes only concise findings" 'reason=%s runs=%s' "$fail_reason" "${fail_runs:-0}"
 fi
 
 # The same blocked message reuses its retained FAIL; a revised message receives one
@@ -752,41 +753,51 @@ if [[ "$(decision_from_output "$unchanged_out")" == block \
    && "$(decision_from_output "$revised_out")" == block \
    && "$unchanged_runs" == 1 \
    && "$revised_runs" == 2 ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "unchanged FAIL is retained; revised answer is re-audited once"
+  ok "unchanged FAIL is retained; revised answer is re-audited once"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (unchanged=%s/%s revised=%s/%s)\n' \
-    "finding-driven retry miscounts synchronous audits" \
+  badf "unchanged FAIL is retained; revised answer is re-audited once" 'unchanged=%s/%s revised=%s/%s' \
     "$(decision_from_output "$unchanged_out")" "${unchanged_runs:-0}" \
     "$(decision_from_output "$revised_out")" "${revised_runs:-0}"
 fi
 rm -rf "$R"
 
-# Parse one hook event once. A present-but-invalid session id or a concatenated JSON
-# stream must fail before selecting the legacy state paths; neither may consume a global
-# dossier as though the session field were absent.
-for malformed_payload_kind in numeric-session multiple-documents; do
+# Parse one hook event once. A Stop without a non-empty string session_id cannot be
+# audited, so it blocks with a reason naming the field; a concatenated JSON stream is
+# rejected. Neither may consume a session's dossier.
+for malformed_payload_kind in numeric-session missing-session multiple-documents; do
   R="$(setup)"; write_transcript "$R" "The fix works and 12/12 tests pass."
   write_verdict "$R" PASS '[]'
   case "$malformed_payload_kind" in
     numeric-session)
       malformed_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
         '{transcript_path:$p,hook_event_name:"Stop",session_id:7}')"
+      malformed_payload_want="rc=0 decision=block reason=named dossier=present"
+      ;;
+    missing-session)
+      malformed_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+        '{transcript_path:$p,hook_event_name:"Stop"}')"
+      malformed_payload_want="rc=0 decision=block reason=named dossier=present"
       ;;
     *)
-      malformed_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-        '{transcript_path:$p,hook_event_name:"Stop"}')$(jq -nc '{hook_event_name:"Stop"}')"
+      malformed_payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s "$DEFAULT_SESSION" \
+        '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')$(jq -nc '{hook_event_name:"Stop"}')"
+      malformed_payload_want="rc=1 decision=allow reason=absent dossier=present"
       ;;
   esac
   printf '%s' "$malformed_payload" \
     | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 bash "$HOOK" ) \
       >"$R/malformed-payload.out" 2>"$R/malformed-payload.err"
   malformed_payload_rc=$?
-  malformed_payload_state="rc=$malformed_payload_rc dossier=$([[ -e "$R/.agents/state/last-verdict.json" ]] && echo present || echo gone)"
-  if [[ "$malformed_payload_state" == "rc=1 dossier=present" ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' "$malformed_payload_kind fails before state selection"
+  malformed_payload_reason=absent
+  if jq -e '.reason | contains("session_id")' "$R/malformed-payload.out" >/dev/null 2>&1 \
+     && grep -q 'no non-empty session_id' "$R/malformed-payload.err"; then
+    malformed_payload_reason=named
+  fi
+  malformed_payload_state="rc=$malformed_payload_rc decision=$(decision_from_output "$(cat "$R/malformed-payload.out")") reason=$malformed_payload_reason dossier=$([[ -e "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" ]] && echo present || echo gone)"
+  if [[ "$malformed_payload_state" == "$malformed_payload_want" ]]; then
+    ok "$malformed_payload_kind fails closed before state selection"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-      "$malformed_payload_kind aliased legacy state" "$malformed_payload_state"
+    badf "$malformed_payload_kind fails closed before state selection" 'got=%s want=%s' "$malformed_payload_state" "$malformed_payload_want"
   fi
   rm -rf "$R"
 done
@@ -837,10 +848,9 @@ else
 fi
 if [[ "$canceled_consume_state" == \
       "decision=block barrier=hit marker=present generation=fresh" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "failed request retirement keeps cancellation authoritative"
+  ok "failed request retirement keeps cancellation authoritative"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "failed request retirement resurrected a canceled generation" "$canceled_consume_state"
+  badf "failed request retirement keeps cancellation authoritative" 'got=%s' "$canceled_consume_state"
 fi
 rm -rf "$R"
 
@@ -886,33 +896,33 @@ check "previous-turn verdict, new chat turn → allow"              "$R" "allow"
 R="$(setup)"; write_transcript "$R" '`API` Error handling is fixed and all tests pass.'
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "citation at line start does not disguise a claim as harness noise"
+  ok "citation at line start does not disguise a claim as harness noise"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "tier A swallowed an assertion" "$out"
+  badf "citation at line start does not disguise a claim as harness noise" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Tier B's only \$-anchored pattern: a trailing citation must not defeat it. Classifier
 # forced UNKNOWN so tier B is what decides, not the model.
 R="$(setup)"; write_transcript "$R" 'Done. `#1161`'
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD=false bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "trailing citation does not defeat the done. assertion"
+  ok "trailing citation does not defeat the done. assertion"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "tier B anchor broken by a citation" "$out"
+  badf "trailing citation does not defeat the done. assertion" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # The mirror of the leading-token case: a model that reasons first and answers last was
 # readable under the old tail -n1 parse and must not regress to UNKNOWN.
 R="$(setup)"; write_transcript "$R" "Noted, I'll wait for your call on the API shape."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
       VERDICT_CLASSIFIER_CMD='while IFS= read -r _line; do :; done; printf "Let me think about this.\nYES\n"' \
       bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "trailing classifier answer still read"
+  ok "trailing classifier answer still read"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "answer-last shape became UNKNOWN" "$out"
+  badf "trailing classifier answer still read" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Assert on what the classifier RECEIVES, not on the decision: a stub that answers NO
@@ -921,7 +931,7 @@ fi; rm -rf "$R"
 # opposite halves of the rule from one input.
 R="$(setup)"
 write_transcript "$R" 'Root cause is the stale socket path, at `src/proxy.rs:412`, per `tests pass` in the docs.'
-jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
       VERDICT_CLASSIFIER_CMD="_text=''; IFS= read -r -d '' _text || :; printf '%s' \"\$_text\" > '$R/seen.txt'; printf 'NO\\n'" bash "$HOOK" ) >/dev/null 2>&1
 seen="$(cat "$R/seen.txt" 2>/dev/null || echo MISSING)"
@@ -930,9 +940,9 @@ dropped="no";   printf '%s' "$seen" | grep -q 'tests pass'       || dropped="yes
 for probe in "single-token citation reaches the classifier:$kept" \
              "multi-word quoted prose does not:$dropped"; do
   if [[ "${probe##*:}" == "yes" ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' "${probe%:*}"
+    ok "${probe%:*}"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (post-strip text=%s)\n' "${probe%:*}" "$seen"
+    badf "${probe%:*}" 'post-strip text=%s' "$seen"
   fi
 done
 rm -rf "$R"
@@ -941,14 +951,14 @@ rm -rf "$R"
 # but leads with the word; a `tail -n1 | tr -dc` parse mangles it into nonsense, drops
 # to the regex fallback, and the turn's real triage answer is lost.
 R="$(setup)"; write_transcript "$R" "Noted, I'll wait for your call on the API shape."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
       VERDICT_CLASSIFIER_CMD='while IFS= read -r _line; do :; done; printf "YES\nbecause the turn declares the fix works\n"' \
       bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "explanatory classifier answer still read as YES"
+  ok "explanatory classifier answer still read as YES"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "rambling answer silently became UNKNOWN" "$out"
+  badf "explanatory classifier answer still read as YES" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Verdict phrasing quoted inside code spans/fences is documentation, not a claim.
@@ -966,14 +976,13 @@ check "no transcript → allow (fail-open)"                         "$R" "allow"
 # last_assistant_message field on Stop. Ignoring that field turns every such event
 # into an empty allow even when the message is an obvious verdict.
 R="$(setup)"
-payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", stop_hook_active:false,
+payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", session_id:"test-session", stop_hook_active:false,
   last_assistant_message:"All tests pass."}')"
 out="$(run_payload_hook "$R" "$payload")"
 got="$(decision_from_output "$out")"
 expected_id="$(cksum_of "All tests pass.")"
-recorded_id="$(cat "$R/.agents/state/verdict-last-uuid" 2>/dev/null || echo MISSING)"
-fallback_transcript="$R/.agents/state/verdict-stop-message.jsonl"
-fallback_transcript="$(cd "$R" && pwd -P)/.agents/state/verdict-stop-message.jsonl"
+recorded_id="$(cat "$R/.agents/state/verdict-last-uuid.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
+fallback_transcript="$(cd "$R" && pwd -P)/.agents/state/verdict-stop-message.jsonl.$DEFAULT_SCOPE"
 fallback_text="$(jq -r '[.records[]? | select(.kind == "assistant") | .texts[]?] | join("\n\n")' \
   "$fallback_transcript" 2>/dev/null || echo MISSING)"
 runner_context="$(jq -r '(has("transcript_path") | not) and has("parent_session_id")' \
@@ -981,74 +990,70 @@ runner_context="$(jq -r '(has("transcript_path") | not) and has("parent_session_
 if [[ "$got" == "block" && "$recorded_id" == "$expected_id" \
    && "$fallback_text" == "All tests pass." \
    && "$runner_context" == true ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "null transcript + Stop message → block with content identity and discovery context"
+  ok "null transcript + Stop message → block with content identity and discovery context"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s id=%s expected=%s fallback=%s handed-off=%s)\n' \
-    "null transcript fallback" "$got" "$recorded_id" "$expected_id" "$fallback_text" \
+  badf "null transcript + Stop message → block with content identity and discovery context" 'got=%s id=%s expected=%s fallback=%s handed-off=%s' "$got" "$recorded_id" "$expected_id" "$fallback_text" \
     "$runner_context"
 fi
 
 # A recursive Stop for the message just judged is stale, but only when Codex marks
 # the hook active. It must avoid the transcript flush wait because there is no
 # transcript to flush; otherwise every blocked Stop adds two seconds of dead time.
-payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", stop_hook_active:true,
+# A session with an open FAIL re-audits every Stop, so the guard runs in a session whose
+# audit of this message passed.
+payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", session_id:"recursion-session",
+  stop_hook_active:false, last_assistant_message:"All tests pass."}')"
+TEST_AUDIT_VERDICT=PASS decide_payload "$R" "$payload" >/dev/null
+payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", session_id:"recursion-session", stop_hook_active:true,
   last_assistant_message:"All tests pass."}')"
 started=$SECONDS
 got="$(decide_payload "$R" "$payload")"
 elapsed=$((SECONDS - started))
 if [[ "$got" == "allow" && "$elapsed" -lt 2 ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "same active Stop payload → immediate stale allow"
+  ok "same active Stop payload → immediate stale allow"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s elapsed=%ss)\n' \
-    "payload recursion guard" "$got" "$elapsed"
+  badf "same active Stop payload → immediate stale allow" 'got=%s elapsed=%ss' "$got" "$elapsed"
 fi
 
 # The same text without the recursion signal may be a new user turn and must be
 # judged again. Conversely, stop_hook_active never exempts changed text.
-payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", stop_hook_active:false,
+payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", session_id:"test-session", stop_hook_active:false,
   last_assistant_message:"All tests pass."}')"
 got_same_fresh="$(decide_payload "$R" "$payload")"
-payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", stop_hook_active:true,
+payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", session_id:"test-session", stop_hook_active:true,
   last_assistant_message:"All 7/7 tests pass."}')"
 got_changed_active="$(decide_payload "$R" "$payload")"
 if [[ "$got_same_fresh" == "block" && "$got_changed_active" == "block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "payload guard skips only an identical active recursion"
+  ok "payload guard skips only an identical active recursion"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (same-fresh=%s changed-active=%s)\n' \
-    "payload recursion scope" "$got_same_fresh" "$got_changed_active"
+  badf "payload guard skips only an identical active recursion" 'same-fresh=%s changed-active=%s' "$got_same_fresh" "$got_changed_active"
 fi; rm -rf "$R"
 
 R="$(setup)"
 payload="$(jq -nc --arg p "$R/missing.jsonl" \
-  '{transcript_path:$p, hook_event_name:"Stop", stop_hook_active:false,
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session", stop_hook_active:false,
     last_assistant_message:"Root cause is the stale index."}')"
 got_missing="$(decide_payload "$R" "$payload")"
-payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", stop_hook_active:false,
+payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", session_id:"question-session", stop_hook_active:false,
   last_assistant_message:"Should I run the focused suite?"}')"
 got_question="$(decide_payload "$R" "$payload")"
-payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", stop_hook_active:false,
+payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", session_id:"empty-session", stop_hook_active:false,
   last_assistant_message:null}')"
 got_empty="$(decide_payload "$R" "$payload")"
 if [[ "$got_missing" == "block" && "$got_question" == "allow" && "$got_empty" == "allow" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "payload fallback distinguishes verdict, question, and empty input"
+  ok "payload fallback distinguishes verdict, question, and empty input"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (missing=%s question=%s empty=%s)\n' \
-    "payload fallback decisions" "$got_missing" "$got_question" "$got_empty"
+  badf "payload fallback distinguishes verdict, question, and empty input" 'missing=%s question=%s empty=%s' "$got_missing" "$got_question" "$got_empty"
 fi; rm -rf "$R"
 
 # A readable transcript remains authoritative because it contains the whole turn.
 # The latest payload fragment must not hide a verdict asserted earlier in that turn.
 R="$(setup)"; write_transcript "$R" "Root cause is the stale index."
 payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p, hook_event_name:"Stop", stop_hook_active:false,
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session", stop_hook_active:false,
     last_assistant_message:"Anything else?"}')"
 got="$(decide_payload "$R" "$payload")"
-if [[ "$got" == "block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "whole-turn transcript takes precedence over payload fragment"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' "transcript precedence" "$got"
-fi; rm -rf "$R"
+check_eq "whole-turn transcript takes precedence over payload fragment" "$got" "block"; rm -rf "$R"
 
 # A nonempty transcript with no assistant record may simply be ahead of its flush.
 # Do not fall back to a benign latest fragment until the bounded transcript wait has
@@ -1060,27 +1065,22 @@ jq -nc '{type:"user", message:{content:[{type:"text",text:"go"}]}}' > "$R/transc
     text:"Root cause is the stale index; all tests pass."}]}}' >> "$R/transcript.jsonl" ) &
 late_writer=$!
 payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p, hook_event_name:"Stop", stop_hook_active:false,
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session", stop_hook_active:false,
     last_assistant_message:"Anything else?"}')"
 got="$(decide_payload "$R" "$payload")"
 wait "$late_writer" 2>/dev/null
-if [[ "$got" == "block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "transcript flush wins before payload fallback"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s — payload fragment bypassed flush wait)\n' \
-    "payload fallback ordering" "$got"
-fi; rm -rf "$R"
+check_eq "transcript flush wins before payload fallback" "$got" "block"; rm -rf "$R"
 
 # ── The gate must never end a turn it could not SEE ──────────────────────────
 # A zero-byte/absent transcript is genuinely nothing to judge → allow at once, and the
 # rung must say `empty` so it stays distinguishable from being blind.
 R="$(setup)"
 decide "$R" >/dev/null
-if grep -q ' extract empty-allow$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "no transcript → allow logged as empty (not blind)"
+if grep -q ' extract empty-allow$' "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null; then
+  ok "no transcript → allow logged as empty (not blind)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (log=%s)\n' "no-transcript rung" \
-    "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  badf "no transcript → allow logged as empty (not blind)" 'log=%s' \
+    "$(cat "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 # THE REPRODUCER. A transcript WITH content but no assistant text means the hook read
@@ -1096,22 +1096,18 @@ jq -nc '{type:"user", message:{content:[{type:"text",text:"go"}]}}' > "$R/transc
 late_writer=$!
 got="$(decide "$R")"
 wait "$late_writer" 2>/dev/null
-if [[ "$got" == "block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "text flushed mid-wait → turn is judged, not skipped"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s — the turn ended unjudged)\n' "late-flush turn judged" "$got"
-fi; rm -rf "$R"
+check_eq "text flushed mid-wait → turn is judged, not skipped" "$got" "block"; rm -rf "$R"
 
 # Content present but the turn genuinely never produces assistant text: still fail open
 # (never trap on absent state), but under a rung that ADMITS the gate was blind.
 R="$(setup)"
 jq -nc '{type:"user", message:{content:[{type:"text",text:"go"}]}}' > "$R/transcript.jsonl"
 got="$(decide "$R")"
-if [[ "$got" == "allow" ]] && grep -q ' extract blind-allow$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "still no assistant text after the wait → allow, logged blind"
+if [[ "$got" == "allow" ]] && grep -q ' extract blind-allow$' "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null; then
+  ok "still no assistant text after the wait → allow, logged blind"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s log=%s)\n' "blind rung" "$got" \
-    "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  badf "still no assistant text after the wait → allow, logged blind" 'got=%s log=%s' "$got" \
+    "$(cat "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 echo
@@ -1148,7 +1144,7 @@ oversized_finding="$(awk 'BEGIN {
 oversized_findings="$(jq -nc --arg f "$oversized_finding" '[$f]')"
 write_verdict "$R" "FAIL" "$oversized_findings"
 oversized_fail_out="$(run_payload_hook "$R" \
-  "$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p,hook_event_name:"Stop"}')")"
+  "$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')")"
 oversized_fail_reason="$(printf '%s' "$oversized_fail_out" | jq -r '.reason // ""')"
 oversized_fail_bytes="$(LC_ALL=C printf '%s' "$oversized_fail_reason" | wc -c | tr -d ' ')"
 if [[ "$(decision_from_output "$oversized_fail_out")" == block ]] \
@@ -1156,15 +1152,15 @@ if [[ "$(decision_from_output "$oversized_fail_out")" == block ]] \
    && [[ "$oversized_fail_reason" != *"END_UNBOUNDED_VERDICT_FINDING"* ]] \
    && [[ "$oversized_fail_reason" == *"8192-byte safety limit"* ]] \
    && [[ "$oversized_fail_reason" == *"remains blocked"* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "oversized FAIL reason stays blocked and bounded ($oversized_fail_bytes bytes)"
+  ok "oversized FAIL reason stays blocked and bounded ($oversized_fail_bytes bytes)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s\n' "oversized FAIL reason escaped the final-output bound ($oversized_fail_bytes bytes)"
+  bad "oversized FAIL reason stays blocked and bounded ($oversized_fail_bytes bytes)" "oversized FAIL reason escaped the final-output bound ($oversized_fail_bytes bytes)"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Proof is still in progress."
 write_verdict "$R" "IN_PROGRESS" "$oversized_findings"
 oversized_progress_out="$(run_payload_hook "$R" \
-  "$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p,hook_event_name:"Stop"}')")"
+  "$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')")"
 oversized_progress_note="$(printf '%s' "$oversized_progress_out" | jq -r '.systemMessage // ""')"
 oversized_progress_bytes="$(LC_ALL=C printf '%s' "$oversized_progress_note" | wc -c | tr -d ' ')"
 if [[ "$(decision_from_output "$oversized_progress_out")" == allow ]] \
@@ -1172,9 +1168,9 @@ if [[ "$(decision_from_output "$oversized_progress_out")" == allow ]] \
    && [[ "$oversized_progress_note" != *"END_UNBOUNDED_VERDICT_FINDING"* ]] \
    && [[ "$oversized_progress_note" == *"IN_PROGRESS"* ]] \
    && [[ "$oversized_progress_note" == *"details omitted"* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "oversized IN_PROGRESS note stays bounded ($oversized_progress_bytes bytes)"
+  ok "oversized IN_PROGRESS note stays bounded ($oversized_progress_bytes bytes)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s\n' "oversized IN_PROGRESS note escaped the final-output bound ($oversized_progress_bytes bytes)"
+  bad "oversized IN_PROGRESS note stays bounded ($oversized_progress_bytes bytes)" "oversized IN_PROGRESS note escaped the final-output bound ($oversized_progress_bytes bytes)"
 fi; rm -rf "$R"
 
 # PASS advisories are auditor-controlled strings too: the human-only note stays bounded
@@ -1182,10 +1178,10 @@ fi; rm -rf "$R"
 R="$(setup)"; write_transcript "$R" "The fix works."
 write_verdict "$R" "PASS" '[]'
 jq -c --argjson a "$oversized_findings" '. + {advisories:$a}' \
-  "$R/.agents/state/last-verdict.json" > "$R/oversized-advisories.json" \
-  && mv "$R/oversized-advisories.json" "$R/.agents/state/last-verdict.json"
+  "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" > "$R/oversized-advisories.json" \
+  && mv "$R/oversized-advisories.json" "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 oversized_pass_out="$(run_payload_hook "$R" \
-  "$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p,hook_event_name:"Stop"}')")"
+  "$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')")"
 oversized_pass_note="$(printf '%s' "$oversized_pass_out" | jq -r '.systemMessage // ""')"
 oversized_pass_bytes="$(LC_ALL=C printf '%s' "$oversized_pass_note" | wc -c | tr -d ' ')"
 if [[ "$(decision_from_output "$oversized_pass_out")" == allow ]] \
@@ -1193,27 +1189,9 @@ if [[ "$(decision_from_output "$oversized_pass_out")" == allow ]] \
    && [[ "$oversized_pass_note" != *"END_UNBOUNDED_VERDICT_FINDING"* ]] \
    && [[ "$oversized_pass_note" == *"Verdict: PASS"* ]] \
    && [[ "$oversized_pass_note" == *"omitted"* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "oversized PASS advisories note stays bounded ($oversized_pass_bytes bytes)"
+  ok "oversized PASS advisories note stays bounded ($oversized_pass_bytes bytes)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s\n' "oversized PASS advisories note escaped the final-output bound ($oversized_pass_bytes bytes)"
-fi; rm -rf "$R"
-
-# A carried legacy FAIL is handled before message extraction and blocks once with only
-# its findings. With no session/message binding it must not launch or retain an audit.
-R="$(setup)"; write_verdict "$R" "FAIL" '["Test: re-run the focused reproducer"]'
-payload="$(jq -nc '{transcript_path:null, hook_event_name:"Stop", stop_hook_active:false,
-  last_assistant_message:"The focused fix is ready."}')"
-out="$(run_payload_hook "$R" "$payload")"
-if [[ "$(decision_from_output "$out")" == "block" \
-   && "$out" == *"Test: re-run the focused reproducer"* \
-   && ! -e "$R/.agents/state/SYNC_AUDIT_RAN" \
-   && ! -e "$R/.agents/state/last-verdict.json" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "legacy FAIL blocks once without poisoning later turns"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s ran=%s retained=%s)\n' \
-    "legacy FAIL retained unaffiliated authority" "$out" \
-    "$([[ -e "$R/.agents/state/SYNC_AUDIT_RAN" ]] && echo yes || echo no)" \
-    "$([[ -e "$R/.agents/state/last-verdict.json" ]] && echo yes || echo no)"
+  bad "oversized PASS advisories note stays bounded ($oversized_pass_bytes bytes)" "oversized PASS advisories note escaped the final-output bound ($oversized_pass_bytes bytes)"
 fi; rm -rf "$R"
 
 echo
@@ -1221,10 +1199,20 @@ echo "## Audit in flight → allow (the gate must not busy-wait on its own remed
 # Regression: 108 blocks in one session, 39 in a 512s window, while the audit the gate
 # demanded was still running. Each conjunct gets its own case — the rung must suppress
 # only the window where no verdict provably exists yet.
-lock_path() { printf '%s/.agents/state/verdict-audit.lock' "$1"; }
-# $2 = body VERBATIM; cases write malformed and legacy bodies too, so this must not
-# encode the format. See take_audit_lock() in run-verdict-audit.sh.
-take_lock()  { mkdir -p "$1/.agents/state"; printf '%s' "$2" > "$(lock_path "$1")"; }
+lock_path() { printf '%s/.agents/state/verdict-audit.lock.%s' "$1" "$DEFAULT_SCOPE"; }
+# $2 = body VERBATIM, except that a bare PID or "PID DEADLINE" becomes the complete lease
+# a runner publishes for the default session's current request (deadline defaults to
+# 300 s ahead). See take_audit_lock() in run-verdict-audit.sh.
+take_lock() {
+  local body="$2" pid deadline
+  mkdir -p "$1/.agents/state"
+  if [[ "$body" =~ ^([1-9][0-9]*)(\ ([0-9]+))?$ ]]; then
+    pid="${BASH_REMATCH[1]}"; deadline="${BASH_REMATCH[3]:-$(( $(date +%s) + 300 ))}"
+    write_session_request "$1" "$DEFAULT_SESSION" "$DEFAULT_GENERATION" "$(final_id_of "$1")"
+    body="$pid $deadline 0 $DEFAULT_SCOPE 201-202-1 $DEFAULT_GENERATION $(verdict_audit_process_start_token "$pid" 2>/dev/null)"
+  fi
+  printf '%s' "$body" > "$(lock_path "$1")"
+}
 hold_lock_mutex() {  # lock-metadata-path
   local metadata_path="$1" ready="${1}.mutex-ready"
   perl -MFcntl=:flock -e '
@@ -1269,12 +1257,12 @@ take_lock "$R" "$LIVE_PID"
 hold_lock_mutex "$(lock_path "$R")"
 out="$(run_hook "$R" YES)"
 if [[ -z "$out" ]] \
-   && grep -q ' audit inflight-allow$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null \
+   && grep -q ' audit inflight-allow$' "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null \
    && [[ ! -e "$R/CLASSIFIER_RAN" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "audit running → silent allow (classifier skipped)"
+  ok "audit running → silent allow (classifier skipped)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s ran=%s log=%s)\n' "in-flight rung" "$out" \
-    "$(classifier_ran "$R")" "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  badf "audit running → silent allow (classifier skipped)" 'out=%s ran=%s log=%s' "$out" \
+    "$(classifier_ran "$R")" "$(cat "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 # A live PID plus plausible metadata is not ownership. Without the kernel lease, a stale
@@ -1283,9 +1271,9 @@ R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 
 take_lock "$R" "$LIVE_PID"
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "live PID without the kernel lease → block"
+  ok "live PID without the kernel lease → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "metadata without ownership bought silence" "$out"
+  badf "live PID without the kernel lease → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # A busy flock is authoritative only on the single-link inode at the exact runtime path.
@@ -1309,9 +1297,9 @@ for (( poll_index=0; poll_index<100; poll_index++ )); do
 done
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "hardlinked busy mutex cannot authorize inflight allow"
+  ok "hardlinked busy mutex cannot authorize inflight allow"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "outside hardlink bought inflight authority" "$out"
+  badf "hardlinked busy mutex cannot authorize inflight allow" 'out=%s' "$out"
 fi
 rm -rf "$R"; wait "$hardlink_mutex_holder" 2>/dev/null || true
 
@@ -1324,17 +1312,12 @@ rm -f "$(lock_path "$R").mutex"
 mkfifo "$R/audit-mutex-fifo"
 ln -s "$R/audit-mutex-fifo" "$(lock_path "$R").mutex"
 fifo_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 fifo_out="$(printf '%s' "$fifo_payload" | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" \
   VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD='false' \
   perl -e 'alarm 2; exec @ARGV' bash "$HOOK" ) 2>/dev/null)"; fifo_rc=$?
 fifo_gate_state="rc=$fifo_rc decision=$(decision_from_output "$fifo_out")"
-if [[ "$fifo_gate_state" == "rc=0 decision=block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "FIFO audit mutex → bounded rejection"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "FIFO audit mutex blocked lease inspection" "$fifo_gate_state"
-fi; rm -rf "$R"
+check_eq "FIFO audit mutex → bounded rejection" "$fifo_gate_state" "rc=0 decision=block"; rm -rf "$R"
 
 # A dead runner must not buy silence: the EXIT trap misses SIGKILL, so an interrupted
 # session orphans the lock.
@@ -1343,9 +1326,9 @@ sleep 0 & DEAD_PID=$!; wait "$DEAD_PID" 2>/dev/null
 take_lock "$R" "$DEAD_PID"
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "lock held by a DEAD pid → block (no bypass)"
+  ok "lock held by a DEAD pid → block (no bypass)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "dead-runner lock bought silence" "$out"
+  badf "lock held by a DEAD pid → block (no bypass)" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # A bare-PID body has no deadline, so it takes the max_age_seconds fallback — not the
@@ -1354,33 +1337,33 @@ R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 
 take_lock "$R" "$LIVE_PID"; touch -t 202001010000 "$(lock_path "$R")"
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "lock older than max_age → block (pid reuse bounded)"
+  ok "lock older than max_age → block (pid reuse bounded)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "aged lock bought silence" "$out"
+  badf "lock older than max_age → block (pid reuse bounded)" 'out=%s' "$out"
 fi; rm -rf "$R"
 
-# A future mtime is not fresh metadata; it is an invalid clock observation. Both legacy
-# and deadline-bearing lock formats must reject it instead of extending a stale lease.
+# A future mtime is not fresh metadata; it is an invalid clock observation. The gate must
+# reject it instead of extending a stale lease.
 R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
 take_lock "$R" "$LIVE_PID"
 hold_lock_mutex "$(lock_path "$R")"
 futuredate "$(lock_path "$R")" 600
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "future-mtime legacy lock → block"
+  ok "future-mtime lock → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "future legacy lock bought silence" "$out"
+  badf "future-mtime lock → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
-take_lock "$R" "$LIVE_PID $(( $(now_epoch) + 800 )) 123 cksum-session owner-token legacy"
+take_lock "$R" "$LIVE_PID $(( $(now_epoch) + 800 )) 123 cksum-session owner-token extra-field"
 hold_lock_mutex "$(lock_path "$R")"
 futuredate "$(lock_path "$R")" 600
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "future-mtime deadline lock → block"
+  ok "future-mtime deadline lock → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "future deadline lock bought silence" "$out"
+  badf "future-mtime deadline lock → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # THE soundness case. The runner removes the dossier before auditing, so a present one
@@ -1399,9 +1382,9 @@ for junk in "" "0" "not-a-pid" "12x34" "-1"; do
   take_lock "$R" "$junk"
   out="$(run_hook "$R" YES)"
   if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-    pass=$((pass+1)); printf '  PASS  %s\n' "lock content '${junk:-<empty>}' is not a live pid → block"
+    ok "lock content '${junk:-<empty>}' is not a live pid → block"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "non-pid lock content '${junk:-<empty>}' bought silence" "$out"
+    badf "lock content '${junk:-<empty>}' is not a live pid → block" 'out=%s' "$out"
   fi; rm -rf "$R"
 done
 
@@ -1409,63 +1392,74 @@ done
 # a hook that ignores the deadline and falls back to the mtime bound fails here.
 # Backdated 700s, not to 2020, because the ceiling is anchored to the mtime.
 R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
-# New runners append process-group/session/owner fields. The gate still owns only the
-# first two fields; `read pid deadline` accidentally folds every remaining field into
-# deadline and silently falls back to the shorter legacy mtime window.
-take_lock "$R" "$LIVE_PID $(( $(now_epoch) + 800 )) 123 cksum-session owner-token"
+take_lock "$R" "$LIVE_PID $(( $(now_epoch) + 800 ))"
 hold_lock_mutex "$(lock_path "$R")"
 backdate "$(lock_path "$R")" 700
 out="$(run_hook "$R" YES)"
 if [[ -z "$out" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "deadline beyond max_age_seconds → still silent allow (long audits covered)"
+  ok "deadline beyond max_age_seconds → still silent allow (long audits covered)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "lock expired mid-run despite its deadline" "$out"
+  badf "deadline beyond max_age_seconds → still silent allow (long audits covered)" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Field parsing is not record parsing: `read` accepts a valid first line and silently
 # ignores later records. A forged suffix must invalidate the whole persisted lease.
 R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
-take_lock "$R" "$LIVE_PID $(( $(now_epoch) + 800 )) 123 cksum-session owner-token legacy
+take_lock "$R" "$LIVE_PID $(( $(now_epoch) + 800 )) 123 cksum-session owner-token extra-field
 ignored second record"
 hold_lock_mutex "$(lock_path "$R")"
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "a valid lock prefix cannot hide a second persisted record"
+  ok "a valid lock prefix cannot hide a second persisted record"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' \
-    "multiline lock metadata bought silence" "$out"
+  badf "a valid lock prefix cannot hide a second persisted record" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
 mkdir -p "$R/.agents/state"
 printf '%s\n\n' \
-  "$LIVE_PID $(( $(now_epoch) + 800 )) 123 cksum-session owner-token legacy" \
+  "$LIVE_PID $(( $(now_epoch) + 800 )) 123 cksum-session owner-token extra-field" \
   > "$(lock_path "$R")"
 hold_lock_mutex "$(lock_path "$R")"
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "a trailing blank record invalidates lock metadata"
+  ok "a trailing blank record invalidates lock metadata"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' \
-    "blank lock record bought silence" "$out"
+  badf "a trailing blank record invalidates lock metadata" 'out=%s' "$out"
 fi; rm -rf "$R"
+
+# A lock without a deadline or a start token is unsupported metadata: even with a live
+# PID, a held lease, and a current request it buys no silence, and stderr names the fix.
+for old_lock_kind in no-deadline no-start-token; do
+  R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
+  take_lock "$R" "$LIVE_PID"
+  case "$old_lock_kind" in
+    no-deadline) printf '%s' "$LIVE_PID" > "$(lock_path "$R")" ;;
+    *) printf '%s' "$LIVE_PID $(( $(now_epoch) + 300 )) 0 $DEFAULT_SCOPE 201-202-1 $DEFAULT_GENERATION" \
+         > "$(lock_path "$R")" ;;
+  esac
+  hold_lock_mutex "$(lock_path "$R")"
+  old_lock_out="$(jq -nc --arg p "$R/transcript.jsonl" --arg s "$DEFAULT_SESSION" \
+      '{transcript_path:$p, hook_event_name:"Stop", session_id:$s}' \
+    | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
+        VERDICT_CLASSIFIER_CMD="$(cls_stub "$R" YES)" bash "$HOOK" ) 2>"$R/old-lock.err")"
+  old_lock_state="decision=$(decision_from_output "$old_lock_out") fix=$(grep -q \
+    "unsupported verdict audit lock without a deadline or start token; remove .*/verdict-audit\.lock\.$DEFAULT_SCOPE$" \
+    "$R/old-lock.err" && echo named || echo missing)"
+  check_eq "$old_lock_kind lock fails closed and names its removal" "$old_lock_state" "decision=block fix=named"; rm -rf "$R"
+done
 
 # The metadata path itself is workspace state. It must be opened nonblocking and
 # rejected when it is not a regular file, before the in-flight rung can buy silence.
 R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
 mkdir -p "$R/.agents/state"; mkfifo "$(lock_path "$R")"
 fifo_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 fifo_out="$(printf '%s' "$fifo_payload" | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" \
   VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD='false' \
-  perl -e 'alarm 2; exec @ARGV' bash "$HOOK" ) 2>/dev/null)"; fifo_rc=$?
+  perl -e 'alarm 5; exec @ARGV' bash "$HOOK" ) 2>/dev/null)"; fifo_rc=$?
 fifo_lock_state="rc=$fifo_rc decision=$(decision_from_output "$fifo_out")"
-if [[ "$fifo_lock_state" == "rc=0 decision=block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "FIFO lock metadata → bounded rejection"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "FIFO lock metadata blocked record inspection" "$fifo_lock_state"
-fi; rm -rf "$R"
+check_eq "FIFO lock metadata → bounded rejection" "$fifo_lock_state" "rc=0 decision=block"; rm -rf "$R"
 
 # ...but the deadline is file content, not a promise. Past it, the run is over however
 # alive the PID looks.
@@ -1473,9 +1467,9 @@ R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 
 take_lock "$R" "$LIVE_PID $(( $(now_epoch) - 30 ))"
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "deadline already passed → block"
+  ok "deadline already passed → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "expired deadline bought silence" "$out"
+  badf "deadline already passed → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # A lock cannot buy itself unbounded silence by claiming a deadline years out.
@@ -1483,9 +1477,9 @@ R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 
 take_lock "$R" "$LIVE_PID $(( $(now_epoch) + 86400 ))"
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "deadline past the hard ceiling → block (rejected, not capped)"
+  ok "deadline past the hard ceiling → block (rejected, not capped)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "an unbounded deadline was honoured" "$out"
+  badf "deadline past the hard ceiling → block (rejected, not capped)" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Decimal width is part of validation, not presentation. Bash 3 wraps 2^64 + (now+800)
@@ -1495,9 +1489,9 @@ take_lock "$R" "$LIVE_PID $(overflow_epoch 800)"
 hold_lock_mutex "$(lock_path "$R")"
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "overflowing lock deadline → block before arithmetic"
+  ok "overflowing lock deadline → block before arithmetic"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "overflowing lock deadline bought silence" "$out"
+  badf "overflowing lock deadline → block before arithmetic" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Composition with the discard path, which is how a re-audit round actually looks: the
@@ -1506,27 +1500,29 @@ fi; rm -rf "$R"
 # way past this rung, and the discarded dossier must not resurrect as a block.
 R="$(setup)"; write_transcript "$R" "Root cause is the stale socket path; 12/12 tests pass."
 write_verdict "$R" "FAIL" '["Test: no reproducer for the claimed fix"]'
+jq '.generation = "91-92-9"' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" > "$R/older-dossier"
+mv "$R/older-dossier" "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"  # an earlier round
 printf 'moved\n' >> "$R/src/lib.rs"            # invalidates the binding
 take_lock "$R" "$LIVE_PID $(( $(now_epoch) + 800 ))"
 hold_lock_mutex "$(lock_path "$R")"
 out="$(run_hook "$R" YES)"
 if [[ -z "$out" ]] \
-   && [[ ! -e "$R/.agents/state/last-verdict.json" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "stale dossier discarded + audit in flight → silent allow"
+   && [[ ! -e "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" ]]; then
+  ok "stale dossier discarded + audit in flight → silent allow"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s dossier=%s)\n' "discard→in-flight composition" "$out" \
-    "$([[ -e "$R/.agents/state/last-verdict.json" ]] && echo present || echo gone)"
+  badf "stale dossier discarded + audit in flight → silent allow" 'out=%s dossier=%s' "$out" \
+    "$([[ -e "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" ]] && echo present || echo gone)"
 fi; rm -rf "$R"
 
 # A worktree can host more than one task. Session A's live audit must suppress only A's
 # repeated Stop; otherwise session B can use A's expensive proof work as an unaudited
-# bypass. Write both the legacy global lock and the intended scoped lock so this is red
-# against the pre-fix gate and remains a direct boundary test after migration.
+# bypass. Session A's lock also sits at the default session's path, so only the scope
+# field, not the pathname, can grant the allowance.
 R="$(setup)"; claim="Root cause is the stale socket path; 12/12 tests pass."
 write_transcript "$R" "$claim"
 generation="901-902-3"; scope_a="$(session_scope_of "$R" session-a)"
 write_session_request "$R" session-a "$generation" "$(cksum_of "$claim")"
-lock_body="$LIVE_PID $(( $(now_epoch) + 800 )) 123 $scope_a 901-902-4 $generation"
+lock_body="$LIVE_PID $(( $(now_epoch) + 800 )) 123 $scope_a 901-902-4 $generation $(verdict_audit_process_start_token "$LIVE_PID")"
 take_lock "$R" "$lock_body"
 printf '%s' "$lock_body" > "$(session_state_path "$R" verdict-audit.lock session-a)"
 hold_lock_mutex "$(session_state_path "$R" verdict-audit.lock session-a)"
@@ -1534,9 +1530,9 @@ out_a="$(run_session_hook "$R" session-a YES)"
 out_b="$(run_session_hook "$R" session-b YES)"
 pair="a=$(decision_from_output "$out_a") b=$(decision_from_output "$out_b")"
 if [[ "$pair" == "a=allow b=block" && -z "$out_a" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "silent in-flight allowance is owned by one session"
+  ok "silent in-flight allowance is owned by one session"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' "another session used the live-audit bypass" "$pair"
+  badf "silent in-flight allowance is owned by one session" 'got=%s' "$pair"
 fi; rm -rf "$R"
 
 # A canceled auditor can finish its write after the next generation is already
@@ -1549,21 +1545,21 @@ scope_a="$(session_scope_of "$R" session-a)"
 request_path="$(session_state_path "$R" verdict-request session-a)"
 dossier_path="$(session_state_path "$R" last-verdict.json session-a)"
 write_session_request "$R" session-a "$current_generation" "$(cksum_of "$claim")"
-lock_body="$LIVE_PID $(( $(now_epoch) + 800 )) 123 $scope_a 921-922-7 $current_generation"
+lock_body="$LIVE_PID $(( $(now_epoch) + 800 )) 123 $scope_a 921-922-7 $current_generation $(verdict_audit_process_start_token "$LIVE_PID")"
 printf '%s' "$lock_body" > "$(session_state_path "$R" verdict-audit.lock session-a)"
 hold_lock_mutex "$(session_state_path "$R" verdict-audit.lock session-a)"
 write_verdict "$R" PASS '[]'
-jq --arg g "$late_generation" '.generation=$g' "$R/.agents/state/last-verdict.json" > "$dossier_path"
-rm -f "$R/.agents/state/last-verdict.json"
+jq --arg g "$late_generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" > "$dossier_path"
+rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 out="$(run_session_hook "$R" session-a YES)"
 request_generation="$(awk '{print $1}' "$request_path" 2>/dev/null || echo MISSING)"
 late_dossier_gone=no; [[ ! -e "$dossier_path" ]] && late_dossier_gone=yes
 late_pair="decision=$(decision_from_output "$out") request=$request_generation dossier_gone=$late_dossier_gone"
 if [[ "$late_pair" == "decision=allow request=$current_generation dossier_gone=yes" \
    && -z "$out" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "late generation cannot expose the current in-flight audit"
+  ok "late generation cannot expose the current in-flight audit"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' "late dossier displaced the current generation" "$late_pair"
+  badf "late generation cannot expose the current in-flight audit" 'got=%s' "$late_pair"
 fi; rm -rf "$R"
 
 # A completed PASS is equally session- and generation-bound. Running B first is
@@ -1573,15 +1569,11 @@ generation="911-912-5"
 write_session_request "$R" session-a "$generation" "$(cksum_of "$claim")"
 write_verdict "$R" PASS '[]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" > "$session_dossier"
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" > "$session_dossier"
 out_b="$(run_session_hook "$R" session-b YES)"
 out_a="$(run_session_hook "$R" session-a YES)"
 pair="a=$(decision_from_output "$out_a") b=$(decision_from_output "$out_b")"
-if [[ "$pair" == "a=allow b=block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "completed dossier is bound to its session and audit generation"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' "a completed dossier crossed session/generation" "$pair"
-fi; rm -rf "$R"
+check_eq "completed dossier is bound to its session and audit generation" "$pair" "a=allow b=block"; rm -rf "$R"
 
 # Hosts may invoke an absolute hook from outside the consumer while providing the
 # repository through CLAUDE_PROJECT_DIR. Every binding input must come from that same
@@ -1591,9 +1583,9 @@ claim="The fix works and 12/12 tests pass."; write_transcript "$R" "$claim"
 generation="912-913-6"; write_session_request "$R" session-a "$generation" "$(cksum_of "$claim")"
 write_verdict "$R" PASS '[]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
-rm -f "$R/.agents/state/last-verdict.json"
+rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 outside_payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
   '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')"
 outside_out="$(printf '%s' "$outside_payload" | ( cd "$outside_repo" \
@@ -1601,12 +1593,7 @@ outside_out="$(printf '%s' "$outside_payload" | ( cd "$outside_repo" \
      VERDICT_CLASSIFIER_CMD="$(cls_stub "$R" YES)" bash "$HOOK" ) 2>/dev/null)"
 outside_gate_state="decision=$(decision_from_output "$outside_out")"
 outside_gate_state="$outside_gate_state dossier=$([[ -e "$session_dossier" ]] && echo present || echo gone)"
-if [[ "$outside_gate_state" == "decision=allow dossier=gone" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "out-of-repo Stop gate binds the consumer repository"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "out-of-repo Stop gate inspected the caller cwd" "$outside_gate_state"
-fi; rm -rf "$R" "$outside_repo"
+check_eq "out-of-repo Stop gate binds the consumer repository" "$outside_gate_state" "decision=allow dossier=gone"; rm -rf "$R" "$outside_repo"
 
 # UserPromptSubmit can revoke a native audit after the Stop gate has atomically selected
 # its dossier. Selection hides the inode from the prompt hook, so the gate must re-check
@@ -1616,9 +1603,9 @@ R="$(setup)"; claim="The fix works and 12/12 tests pass."; write_transcript "$R"
 generation="913-914-6"; write_session_request "$R" session-a "$generation" "$(cksum_of "$claim")"
 write_verdict "$R" PASS '[]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
-rm -f "$R/.agents/state/last-verdict.json"
+rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 write_quarantine_barrier_env "$R"
 payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
   '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')"
@@ -1650,12 +1637,7 @@ quarantine_pass_state="$quarantine_pass_state watchdog=$([[ -e "$R/quarantine-wa
                                || quarantine_pass_state="$quarantine_pass_state dossier=gone"
 [[ -e "$request_path" ]] && quarantine_pass_state="$quarantine_pass_state request=present" \
                             || quarantine_pass_state="$quarantine_pass_state request=gone"
-if [[ "$quarantine_pass_state" == "barrier=hit waiting=yes decision=allow gate_rc=0 prompt_rc=0 watchdog=quiet dossier=gone request=gone" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "post-quarantine prompt revokes PASS, then cleans the decision window"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "quarantined PASS survived prompt cancellation" "$quarantine_pass_state"
-fi; rm -rf "$R"
+check_eq "post-quarantine prompt revokes PASS, then cleans the decision window" "$quarantine_pass_state" "barrier=hit waiting=yes decision=allow gate_rc=0 prompt_rc=0 watchdog=quiet dossier=gone request=gone"; rm -rf "$R"
 
 # FAIL is not special authority: after the same revocation it must neither be restored
 # to the stable path nor block the superseded turn on an abandoned finding.
@@ -1663,9 +1645,9 @@ R="$(setup)"; claim="The fix works and 12/12 tests pass."; write_transcript "$R"
 generation="914-915-7"; write_session_request "$R" session-a "$generation" "$(cksum_of "$claim")"
 write_verdict "$R" FAIL '["abandoned generation finding"]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
-rm -f "$R/.agents/state/last-verdict.json"
+rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 write_quarantine_barrier_env "$R"
 payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
   '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')"
@@ -1695,12 +1677,7 @@ quarantine_fail_state="$quarantine_fail_state prompt_rc=$prompt_rc"
 quarantine_fail_state="$quarantine_fail_state watchdog=$([[ -e "$R/quarantine-watchdog-hit" ]] && echo hit || echo quiet)"
 [[ -e "$session_dossier" ]] && quarantine_fail_state="$quarantine_fail_state dossier=present" \
                                || quarantine_fail_state="$quarantine_fail_state dossier=gone"
-if [[ "$quarantine_fail_state" == "barrier=hit waiting=yes decision=allow gate_rc=0 old_finding=gone prompt_rc=0 watchdog=quiet dossier=gone" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "post-quarantine prompt revokes and retires FAIL"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "quarantined FAIL survived prompt cancellation" "$quarantine_fail_state"
-fi; rm -rf "$R"
+check_eq "post-quarantine prompt revokes and retires FAIL" "$quarantine_fail_state" "barrier=hit waiting=yes decision=allow gate_rc=0 old_finding=gone prompt_rc=0 watchdog=quiet dossier=gone"; rm -rf "$R"
 
 # A stale FAIL takes the park path instead of the live FAIL path. Cancellation in the
 # same hidden-inode window must not let that old generation reappear as `.prev`.
@@ -1709,9 +1686,9 @@ generation="915-916-8"; write_session_request "$R" session-a "$generation" "$(ck
 write_verdict "$R" FAIL '["abandoned stale finding"]' deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
 session_prev="$(session_state_path "$R" last-verdict.prev.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
-rm -f "$R/.agents/state/last-verdict.json"
+rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 write_quarantine_barrier_env "$R"
 payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
   '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')"
@@ -1740,12 +1717,7 @@ quarantine_park_state="$quarantine_park_state gate_rc=$quarantined_gate_rc prev=
 quarantine_park_state="$quarantine_park_state prompt_rc=$prompt_rc"
 quarantine_park_state="$quarantine_park_state watchdog=$([[ -e "$R/quarantine-watchdog-hit" ]] && echo hit || echo quiet)"
 quarantine_park_state="$quarantine_park_state dossier=$([[ -e "$session_dossier" ]] && echo present || echo gone)"
-if [[ "$quarantine_park_state" == "barrier=hit waiting=yes decision=allow gate_rc=0 prev=gone prompt_rc=0 watchdog=quiet dossier=gone" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "prompt revocation cannot resurrect a stale FAIL park"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "canceled stale FAIL was republished" "$quarantine_park_state"
-fi; rm -rf "$R"
+check_eq "prompt revocation cannot resurrect a stale FAIL park" "$quarantine_park_state" "barrier=hit waiting=yes decision=allow gate_rc=0 prev=gone prompt_rc=0 watchdog=quiet dossier=gone"; rm -rf "$R"
 
 # The prompt hook deliberately returns after three seconds if a Stop gate is wedged. A
 # persistent epoch, not the mutex wait, must prevent both post-authority FAIL restore and
@@ -1762,9 +1734,9 @@ for epoch_race_mode in live-fail stale-fail; do
   session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
   session_prev="$(session_state_path "$R" last-verdict.prev.json session-a)"
   request_path="$(session_state_path "$R" verdict-request session-a)"
-  jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+  jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
     > "$session_dossier"
-  rm -f "$R/.agents/state/last-verdict.json"
+  rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
   write_epoch_barrier_env "$R"
   payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
     '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')"
@@ -1796,12 +1768,7 @@ for epoch_race_mode in live-fail stale-fail; do
   epoch_race_state="$epoch_race_state request=$([[ -e "$request_path" ]] && echo present || echo gone)"
   epoch_race_state="$epoch_race_state dossier=$([[ -e "$session_dossier" ]] && echo present || echo gone)"
   epoch_race_state="$epoch_race_state prev=$([[ -e "$session_prev" ]] && echo present || echo gone)"
-  if [[ "$epoch_race_state" == "barrier=hit prompt_rc=0 gate_live=yes gate_rc=0 decision=allow request=gone dossier=gone prev=gone" ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' "$epoch_race_mode cannot publish after bounded prompt return"
-  else
-    fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-      "$epoch_race_mode published after prompt cancellation" "$epoch_race_state"
-  fi
+  check_eq "$epoch_race_mode cannot publish after bounded prompt return" "$epoch_race_state" "barrier=hit prompt_rc=0 gate_live=yes gate_rc=0 decision=allow request=gone dossier=gone prev=gone"
   rm -rf "$R"
 done
 
@@ -1853,12 +1820,7 @@ CLASSIFIER_BARRIER
   classifier_epoch_state="$classifier_epoch_state gate_rc=$classifier_gate_rc decision=$(decision_from_output "$classifier_epoch_out")"
   classifier_epoch_state="$classifier_epoch_state request=$([[ -e "$request_path" ]] && echo present || echo gone)"
   classifier_epoch_state="$classifier_epoch_state epoch=$([[ -f "$epoch_path" && ! -L "$epoch_path" ]] && echo regular || echo unsafe)"
-  if [[ "$classifier_epoch_state" == "barrier=hit prompt_rc=0 gate_live=yes gate_rc=0 decision=allow request=gone epoch=regular" ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' "$classifier_epoch_mode chime invalidates a classifier-delayed block"
-  else
-    fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-      "$classifier_epoch_mode classifier published after chime" "$classifier_epoch_state"
-  fi
+  check_eq "$classifier_epoch_mode chime invalidates a classifier-delayed block" "$classifier_epoch_state" "barrier=hit prompt_rc=0 gate_live=yes gate_rc=0 decision=allow request=gone epoch=regular"
   rm -rf "$R"
 done
 
@@ -1895,12 +1857,7 @@ last_uuid_state="$last_uuid_state prompt_rc=$last_uuid_prompt_rc gate_live=$last
 last_uuid_state="$last_uuid_state gate_rc=$last_uuid_gate_rc decision=$(decision_from_output "$last_uuid_out")"
 last_uuid_state="$last_uuid_state uuid=$([[ -e "$last_uuid_path" ]] && echo present || echo gone)"
 last_uuid_state="$last_uuid_state request=$([[ -e "$request_path" ]] && echo present || echo gone)"
-if [[ "$last_uuid_state" == "barrier=hit prompt_rc=0 gate_live=yes gate_rc=0 decision=allow uuid=gone request=gone" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "chime retracts an old Stop's post-write UUID"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "old Stop retained its judged UUID after chime" "$last_uuid_state"
-fi; rm -rf "$R"
+check_eq "chime retracts an old Stop's post-write UUID" "$last_uuid_state" "barrier=hit prompt_rc=0 gate_live=yes gate_rc=0 decision=allow uuid=gone request=gone"; rm -rf "$R"
 
 # An invalid request read is only an observation. If a prompt and newer Stop replace that
 # pathname before the old gate selects it, the old gate must restore—not delete—the valid
@@ -1938,10 +1895,9 @@ invalid_request_state="barrier=$([[ -e "$R/.agents/state/epoch-barrier-ready" ]]
 invalid_request_state="$invalid_request_state prompt_rc=$invalid_request_prompt_rc gate_rc=$invalid_request_gate_rc"
 invalid_request_state="$invalid_request_state decision=$(decision_from_output "$invalid_request_out") preserved=$([[ "$preserved_request_body" == "$new_request_body" ]] && echo yes || echo no)"
 if [[ "$invalid_request_state" == "barrier=hit prompt_rc=0 gate_rc=0 decision=allow preserved=yes" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "invalid-request recovery preserves a post-chime replacement"
+  ok "invalid-request recovery preserves a post-chime replacement"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s body=%s)\n' \
-    "old invalid-request cleanup deleted new authority" "$invalid_request_state" "$preserved_request_body"
+  badf "invalid-request recovery preserves a post-chime replacement" 'got=%s body=%s' "$invalid_request_state" "$preserved_request_body"
 fi; rm -rf "$R"
 
 # The same select-then-check rule applies to the stale dossier removed while opening a
@@ -1976,12 +1932,7 @@ discard_dossier_out="$(cat "$R/discard-dossier-race.out" 2>/dev/null || true)"
 discard_dossier_state="barrier=$([[ -e "$R/.agents/state/epoch-barrier-ready" ]] && echo hit || echo missed)"
 discard_dossier_state="$discard_dossier_state prompt_rc=$discard_dossier_prompt_rc gate_rc=$discard_dossier_gate_rc"
 discard_dossier_state="$discard_dossier_state decision=$(decision_from_output "$discard_dossier_out") dossier=$(cat "$session_dossier" 2>/dev/null || echo MISSING)"
-if [[ "$discard_dossier_state" == "barrier=hit prompt_rc=0 gate_rc=0 decision=allow dossier=fresh dossier" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "audit-round cleanup preserves a post-chime dossier"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "old audit-round cleanup deleted a new dossier" "$discard_dossier_state"
-fi; rm -rf "$R"
+check_eq "audit-round cleanup preserves a post-chime dossier" "$discard_dossier_state" "barrier=hit prompt_rc=0 gate_rc=0 decision=allow dossier=fresh dossier"; rm -rf "$R"
 
 # Previous-FAIL expiry starts before the decision mutex. If the prompt wins before exact
 # selection and a newer gate parks replacement findings, the old expiry pass restores the
@@ -2015,12 +1966,7 @@ prev_select_finding="$(jq -r '.findings[0] // "MISSING"' "$session_prev" 2>/dev/
 prev_select_state="barrier=$([[ -e "$R/.agents/state/epoch-barrier-ready" ]] && echo hit || echo missed)"
 prev_select_state="$prev_select_state prompt_rc=$prev_select_prompt_rc gate_rc=$prev_select_gate_rc"
 prev_select_state="$prev_select_state decision=$(decision_from_output "$prev_select_out") finding=$prev_select_finding"
-if [[ "$prev_select_state" == "barrier=hit prompt_rc=0 gate_rc=0 decision=allow finding=fresh replacement finding" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "previous-FAIL expiry preserves a post-chime replacement"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "old previous-FAIL expiry deleted new findings" "$prev_select_state"
-fi; rm -rf "$R"
+check_eq "previous-FAIL expiry preserves a post-chime replacement" "$prev_select_state" "barrier=hit prompt_rc=0 gate_rc=0 decision=allow finding=fresh replacement finding"; rm -rf "$R"
 
 # Dossier inspection pins the inode observed before the authority check. If prompt
 # cancellation returns after its bounded mutex wait and a new generation publishes at
@@ -2029,9 +1975,9 @@ R="$(setup)"; claim="The fix works and 12/12 tests pass."; write_transcript "$R"
 generation="993-994-12"; write_session_request "$R" session-a "$generation" "$(cksum_of "$claim")"
 write_verdict "$R" PASS '[]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
-rm -f "$R/.agents/state/last-verdict.json"
+rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 write_epoch_barrier_env "$R"
 payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
   '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')"
@@ -2065,12 +2011,7 @@ dossier_select_generation="$(jq -r '.generation // "MISSING"' "$session_dossier"
 dossier_select_state="barrier=$([[ -e "$R/.agents/state/epoch-barrier-ready" ]] && echo hit || echo missed)"
 dossier_select_state="$dossier_select_state prompt_rc=$dossier_select_prompt_rc gate_rc=$dossier_select_gate_rc"
 dossier_select_state="$dossier_select_state decision=$(decision_from_output "$dossier_select_out") generation=$dossier_select_generation"
-if [[ "$dossier_select_state" == "barrier=hit prompt_rc=0 gate_rc=0 decision=allow generation=$new_generation" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "dossier selection preserves a post-timeout replacement"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "old dossier inspection deleted a new generation" "$dossier_select_state"
-fi; rm -rf "$R"
+check_eq "dossier selection preserves a post-timeout replacement" "$dossier_select_state" "barrier=hit prompt_rc=0 gate_rc=0 decision=allow generation=$new_generation"; rm -rf "$R"
 
 # Parking a stale FAIL preserves its original mtime through a hardlink, but publishing
 # that link is no-clobber. A new turn's already-parked findings always win the stable name.
@@ -2079,9 +2020,9 @@ generation="997-998-14"; write_session_request "$R" session-a "$generation" "$(c
 write_verdict "$R" FAIL '["old stale finding"]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
 session_prev="$(session_state_path "$R" last-verdict.prev.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
-rm -f "$R/.agents/state/last-verdict.json"
+rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 printf 'pub fn changed() {}\n' >> "$R/src/lib.rs"
 write_epoch_barrier_env "$R"
 payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
@@ -2109,12 +2050,7 @@ park_publish_finding="$(jq -r '.findings[0] // "MISSING"' "$session_prev" 2>/dev
 park_publish_state="barrier=$([[ -e "$R/.agents/state/epoch-barrier-ready" ]] && echo hit || echo missed)"
 park_publish_state="$park_publish_state prompt_rc=$park_publish_prompt_rc gate_rc=$park_publish_gate_rc"
 park_publish_state="$park_publish_state decision=$(decision_from_output "$park_publish_out") finding=$park_publish_finding"
-if [[ "$park_publish_state" == "barrier=hit prompt_rc=0 gate_rc=0 decision=allow finding=new parked finding" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "stale-FAIL parking cannot clobber new-turn findings"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "old stale-FAIL park replaced new findings" "$park_publish_state"
-fi; rm -rf "$R"
+check_eq "stale-FAIL parking cannot clobber new-turn findings" "$park_publish_state" "barrier=hit prompt_rc=0 gate_rc=0 decision=allow finding=new parked finding"; rm -rf "$R"
 
 # Killing the delegated decision-lock holder must not let a prompt return and then allow
 # the lockless gate to restore its hidden FAIL. The epoch remains authoritative even when
@@ -2125,9 +2061,9 @@ write_verdict "$R" FAIL '["decision holder finding"]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
 session_prev="$(session_state_path "$R" last-verdict.prev.json session-a)"
 request_path="$(session_state_path "$R" verdict-request session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
-rm -f "$R/.agents/state/last-verdict.json"
+rm -f "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 write_quarantine_barrier_env "$R"
 payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s session-a \
   '{transcript_path:$p,hook_event_name:"Stop",session_id:$s}')"
@@ -2158,12 +2094,7 @@ holder_loss_state="$holder_loss_state decision=$(decision_from_output "$holder_l
 holder_loss_state="$holder_loss_state request=$([[ -e "$request_path" ]] && echo present || echo gone)"
 holder_loss_state="$holder_loss_state dossier=$([[ -e "$session_dossier" ]] && echo present || echo gone)"
 holder_loss_state="$holder_loss_state prev=$([[ -e "$session_prev" ]] && echo present || echo gone)"
-if [[ "$holder_loss_state" == "setup=valid prompt_rc=0 gate_rc=0 decision=allow request=gone dossier=gone prev=gone" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "decision-holder loss cannot bypass prompt revocation"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "lockless gate published after decision-holder loss" "$holder_loss_state"
-fi; rm -rf "$R"
+check_eq "decision-holder loss cannot bypass prompt revocation" "$holder_loss_state" "setup=valid prompt_rc=0 gate_rc=0 decision=allow request=gone dossier=gone prev=gone"; rm -rf "$R"
 
 # `.prev` expiry happens before the decision mutex. Hold the selected inode for longer
 # than the prompt hook's wait budget; after the chime-in returns, the old Stop must discard
@@ -2198,12 +2129,7 @@ prev_epoch_state="barrier=$([[ -e "$R/.agents/state/epoch-barrier-ready" ]] && e
 prev_epoch_state="$prev_epoch_state prompt_rc=$prev_epoch_prompt_rc gate_live=$prev_epoch_gate_live"
 prev_epoch_state="$prev_epoch_state gate_rc=$prev_epoch_gate_rc decision=$(decision_from_output "$prev_epoch_out")"
 prev_epoch_state="$prev_epoch_state prev=$([[ -e "$session_prev" ]] && echo present || echo gone)"
-if [[ "$prev_epoch_state" == "barrier=hit prompt_rc=0 gate_live=yes gate_rc=0 decision=allow prev=gone" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "prompt epoch prevents delayed previous-FAIL restore"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "previous FAIL returned after prompt cancellation" "$prev_epoch_state"
-fi; rm -rf "$R"
+check_eq "prompt epoch prevents delayed previous-FAIL restore" "$prev_epoch_state" "barrier=hit prompt_rc=0 gate_live=yes gate_rc=0 decision=allow prev=gone"; rm -rf "$R"
 
 # Expiry selects one exact inode. If another gate parks a fresh replacement after that
 # selection, stale cleanup may delete only the selected old inode, never the new pathname.
@@ -2222,12 +2148,7 @@ replacement_out="$(printf '%s' "$payload" | ( cd "$R" && CLAUDE_PROJECT_DIR="$R"
 replacement_finding="$(jq -r '.findings[0] // "MISSING"' "$session_prev" 2>/dev/null || echo MISSING)"
 replacement_state="barrier=$([[ -e "$R/.agents/state/epoch-barrier-ready" ]] && echo hit || echo missed)"
 replacement_state="$replacement_state finding=$replacement_finding decision=$(decision_from_output "$replacement_out")"
-if [[ "$replacement_state" == "barrier=hit finding=fresh replacement finding decision=block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "previous-FAIL expiry preserves a concurrent replacement inode"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "previous-FAIL expiry deleted a replacement" "$replacement_state"
-fi; rm -rf "$R"
+check_eq "previous-FAIL expiry preserves a concurrent replacement inode" "$replacement_state" "barrier=hit finding=fresh replacement finding decision=block"; rm -rf "$R"
 
 # jq accepts a stream of top-level values. A valid PASS followed by an object whose
 # fields normalize to trailing blanks must not collapse back into the first object's
@@ -2245,9 +2166,9 @@ jq -nc '{branch:"",head:"",tree_hash:"",generation:null,verdict:"",proof:[],find
   >> "$session_dossier"
 multi_value_out="$(run_session_hook "$R" session-a YES)"
 if [[ "$(decision_from_output "$multi_value_out")" == block ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "multiple top-level dossier values cannot authorize PASS"
+  ok "multiple top-level dossier values cannot authorize PASS"
 else
-  fail=$((fail+1)); printf '  FAIL  %s\n' "multiple dossier values collapsed into an authorized PASS"
+  bad "multiple top-level dossier values cannot authorize PASS" "multiple dossier values collapsed into an authorized PASS"
 fi; rm -rf "$R"
 
 for malformed_schema_kind in \
@@ -2280,9 +2201,9 @@ for malformed_schema_kind in \
     ' > "$session_dossier"
   malformed_schema_out="$(run_session_hook "$R" session-a YES)"
   if [[ "$(decision_from_output "$malformed_schema_out")" == block ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' "$malformed_schema_kind cannot authorize a gate PASS"
+    ok "$malformed_schema_kind cannot authorize a gate PASS"
   else
-    fail=$((fail+1)); printf '  FAIL  %s\n' "$malformed_schema_kind authorized a gate PASS"
+    bad "$malformed_schema_kind cannot authorize a gate PASS" "$malformed_schema_kind authorized a gate PASS"
   fi
   rm -rf "$R"
 done
@@ -2306,9 +2227,9 @@ jq -nc --arg b "$branch" --arg h "$head" --arg t "$tree" --arg g "$generation" '
 valid_proof_out="$(run_session_hook "$R" session-a YES)"
 if [[ "$(decision_from_output "$valid_proof_out")" == allow \
    && ! -e "$session_dossier" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "verified and blocked proof entries authorize a valid gate PASS"
+  ok "verified and blocked proof entries authorize a valid gate PASS"
 else
-  fail=$((fail+1)); printf '  FAIL  %s\n' "valid non-empty proof was rejected"
+  bad "verified and blocked proof entries authorize a valid gate PASS" "valid non-empty proof was rejected"
 fi; rm -rf "$R"
 
 # The request's deadline is equally untrusted. With no width bound, Bash arithmetic wraps
@@ -2320,7 +2241,7 @@ printf '%s %s %s\n' "$generation" "$(overflow_epoch 600)" "$(cksum_of "$claim")"
   > "$request_path"
 write_verdict "$R" PASS '[]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
 out="$(run_session_hook "$R" session-a YES)"
 fresh_generation="$(awk '{print $1}' "$request_path" 2>/dev/null || echo MISSING)"
@@ -2328,12 +2249,7 @@ overflow_request_state="decision=$(decision_from_output "$out")"
 [[ "$fresh_generation" != "$generation" && "$fresh_generation" != MISSING ]] \
   && overflow_request_state="$overflow_request_state request=fresh" \
   || overflow_request_state="$overflow_request_state request=stale"
-if [[ "$overflow_request_state" == "decision=block request=fresh" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "overflowing request deadline cannot authorize PASS"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "overflowing request deadline authorized a dossier" "$overflow_request_state"
-fi; rm -rf "$R"
+check_eq "overflowing request deadline cannot authorize PASS" "$overflow_request_state" "decision=block request=fresh"; rm -rf "$R"
 
 # The request is the authority linking a Stop message to one generation. A valid first
 # line plus any second record is malformed and must not authorize a matching PASS.
@@ -2344,7 +2260,7 @@ printf '%s %s %s\nignored second record\n' \
   "$generation" "$(( $(date +%s) + 600 ))" "$(cksum_of "$claim")" > "$request_path"
 write_verdict "$R" PASS '[]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
 out="$(run_session_hook "$R" session-a YES)"
 fresh_generation="$(awk '{print $1}' "$request_path" 2>/dev/null || echo MISSING)"
@@ -2352,12 +2268,7 @@ multiline_request_state="decision=$(decision_from_output "$out")"
 [[ "$fresh_generation" != "$generation" && "$fresh_generation" != MISSING ]] \
   && multiline_request_state="$multiline_request_state request=fresh" \
   || multiline_request_state="$multiline_request_state request=stale"
-if [[ "$multiline_request_state" == "decision=block request=fresh" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "a valid request prefix cannot hide a second persisted record"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "multiline request authorized a dossier" "$multiline_request_state"
-fi; rm -rf "$R"
+check_eq "a valid request prefix cannot hide a second persisted record" "$multiline_request_state" "decision=block request=fresh"; rm -rf "$R"
 
 R="$(setup)"; claim="The fix works and 12/12 tests pass."; write_transcript "$R" "$claim"
 generation="938-939-9"; request_path="$(session_state_path "$R" verdict-request session-a)"
@@ -2366,7 +2277,7 @@ printf '%s %s %s\n\n' \
   "$generation" "$(( $(date +%s) + 600 ))" "$(cksum_of "$claim")" > "$request_path"
 write_verdict "$R" PASS '[]'
 session_dossier="$(session_state_path "$R" last-verdict.json session-a)"
-jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json" \
+jq --arg g "$generation" '.generation=$g' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" \
   > "$session_dossier"
 out="$(run_session_hook "$R" session-a YES)"
 fresh_generation="$(awk '{print $1}' "$request_path" 2>/dev/null || echo MISSING)"
@@ -2374,12 +2285,7 @@ blank_request_state="decision=$(decision_from_output "$out")"
 [[ "$fresh_generation" != "$generation" && "$fresh_generation" != MISSING ]] \
   && blank_request_state="$blank_request_state request=fresh" \
   || blank_request_state="$blank_request_state request=stale"
-if [[ "$blank_request_state" == "decision=block request=fresh" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "a trailing blank record invalidates the request"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "blank request record authorized a dossier" "$blank_request_state"
-fi; rm -rf "$R"
+check_eq "a trailing blank record invalidates the request" "$blank_request_state" "decision=block request=fresh"; rm -rf "$R"
 
 R="$(setup)"; claim="The fix works and 12/12 tests pass."; write_transcript "$R" "$claim"
 request_path="$(session_state_path "$R" verdict-request session-a)"
@@ -2410,12 +2316,7 @@ fifo_request_state="replacement=$fifo_replacement rc=$fifo_rc decision=$(decisio
   || fifo_request_state="$fifo_request_state request=missing"
 [[ "$fifo_out" == *"independent audit finding"* ]] \
   && fifo_request_state="$fifo_request_state audit=completed"
-if [[ "$fifo_request_state" == "replacement=bounded rc=0 decision=block request=fresh audit=completed" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "FIFO request metadata → bounded replacement"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "FIFO request metadata blocked record inspection" "$fifo_request_state"
-fi; rm -rf "$R"
+check_eq "FIFO request metadata → bounded replacement" "$fifo_request_state" "replacement=bounded rc=0 decision=block request=fresh audit=completed"; rm -rf "$R"
 
 # Dossier paths are auditor-controlled. A FIFO must be rejected as malformed without
 # letting jq block the Stop hook outside any cancellable process group.
@@ -2446,12 +2347,7 @@ kill "$watchdog" 2>/dev/null || true; wait "$watchdog" 2>/dev/null || true
 fifo_dossier_out="$(cat "$R/fifo-dossier.out" 2>/dev/null || true)"
 fifo_dossier_state="rc=$fifo_dossier_rc bounded=$fifo_dossier_bounded"
 fifo_dossier_state="$fifo_dossier_state decision=$(decision_from_output "$fifo_dossier_out")"
-if [[ "$fifo_dossier_state" == "rc=0 bounded=yes decision=block" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "FIFO dossier → bounded rejection"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "FIFO dossier blocked verdict inspection" "$fifo_dossier_state"
-fi; rm -rf "$R"
+check_eq "FIFO dossier → bounded rejection" "$fifo_dossier_state" "rc=0 bounded=yes decision=block"; rm -rf "$R"
 
 # All authority-bearing fields must come from ONE file open. A late canceled writer can
 # atomically replace the shared path between reads. The old implementation read verdict
@@ -2500,10 +2396,9 @@ snapshot_state="$snapshot_state stable=$snapshot_generation spliced=no"
   && snapshot_state="${snapshot_state/spliced=no/spliced=yes}"
 if [[ "$snapshot_state" == \
     "decision=block barrier=hit stable=$current_generation spliced=no" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "dossier selection preserves a concurrent replacement"
+  ok "dossier selection preserves a concurrent replacement"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s)\n' \
-    "selected dossier state crossed inode boundaries" "$snapshot_state"
+  badf "dossier selection preserves a concurrent replacement" 'got=%s' "$snapshot_state"
 fi; rm -rf "$R"
 
 kill "$LIVE_PID" 2>/dev/null; wait "$LIVE_PID" 2>/dev/null
@@ -2523,20 +2418,20 @@ check_gone "mismatched dossier discarded"                         "$R"; rm -rf "
 R="$(setup)"; write_transcript "$R" "Applied the follow-up; the fix works and tests pass."
 write_verdict "$R" "PASS" "[]"; printf 'more\n' >> "$R/src/lib.rs"
 check "tree moved + verdict ending → block (fresh audit)"         "$R" "block"
-check_gone "mismatched dossier discarded before re-detect"        "$R"; rm -rf "$R"
+check_stale_gone "mismatched dossier discarded before re-detect"        "$R"; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Thanks, ending here."; write_verdict "$R" "FAIL" '["x"]'
-jq '.head="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"' "$R/.agents/state/last-verdict.json" > "$R/.agents/state/x" \
-  && mv "$R/.agents/state/x" "$R/.agents/state/last-verdict.json"
+jq '.head="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"' "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" > "$R/.agents/state/x" \
+  && mv "$R/.agents/state/x" "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 check "HEAD-mismatched FAIL + chat ending → allow (discarded)"    "$R" "allow"
 check_gone "HEAD-mismatched dossier discarded"                    "$R"; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Deploy is healthy."; write_verdict "$R" "PASS" "[]"
-touch -t 202001010000 "$R/.agents/state/last-verdict.json"
+touch -t 202001010000 "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 check "stale-mtime PASS + verdict ending → block (re-detect)"     "$R" "block"; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Deploy is healthy."; write_verdict "$R" "PASS" "[]"
-futuredate "$R/.agents/state/last-verdict.json" 600
+futuredate "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" 600
 check "future-mtime PASS + verdict ending → block (re-detect)"    "$R" "block"; rm -rf "$R"
 
 echo
@@ -2548,17 +2443,17 @@ echo "## Tier A: harness text in the assistant slot decides without a model call
 R="$(setup)"; write_transcript "$R" "API Error: 400 Your input exceeds the context window of this model."
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '(.decision // "") != "block"' >/dev/null 2>&1 && [[ ! -e "$R/CLASSIFIER_RAN" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "harness API error only → allow, classifier never invoked"
+  ok "harness API error only → allow, classifier never invoked"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s classifier_ran=%s)\n' "tier A skips the model" "$out" "$(classifier_ran "$R")"
+  badf "harness API error only → allow, classifier never invoked" 'out=%s classifier_ran=%s' "$out" "$(classifier_ran "$R")"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "No response requested."
 out="$(run_hook "$R" YES)"
 if printf '%s' "$out" | jq -e '(.decision // "") != "block"' >/dev/null 2>&1 && [[ ! -e "$R/CLASSIFIER_RAN" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "harness 'No response requested.' → allow, classifier never invoked"
+  ok "harness 'No response requested.' → allow, classifier never invoked"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s classifier_ran=%s)\n' "tier A on quota//status text" "$out" "$(classifier_ran "$R")"
+  badf "harness 'No response requested.' → allow, classifier never invoked" 'out=%s classifier_ran=%s' "$out" "$(classifier_ran "$R")"
 fi; rm -rf "$R"
 
 # SOUNDNESS — why EVERY non-empty line must match, not just the first. A turn that did
@@ -2568,9 +2463,9 @@ R="$(setup)"; write_transcript "$R" "Verified the socket path resolves under the
 append_assistant "$R" "API Error: Overloaded"
 out="$(run_hook "$R" NO)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "real verdict THEN harness error → block (not swallowed)"
+  ok "real verdict THEN harness error → block (not swallowed)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "trailing harness error swallowed the verdict" "$out"
+  badf "real verdict THEN harness error → block (not swallowed)" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # ...and so does the reverse order, which is exactly what a first-line-only anchor
@@ -2579,17 +2474,17 @@ R="$(setup)"; write_transcript "$R" "API Error: Overloaded"
 append_assistant "$R" "Verified the socket path resolves under the jailer."
 out="$(run_hook "$R" NO)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "harness error THEN real verdict → block (not swallowed)"
+  ok "harness error THEN real verdict → block (not swallowed)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "leading harness error swallowed the verdict" "$out"
+  badf "harness error THEN real verdict → block (not swallowed)" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "API Error: Overloaded"
 decide "$R" >/dev/null
-if grep -q ' harness noise-allow$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "tier A decision logged (rung + outcome)"
+if grep -q ' harness noise-allow$' "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null; then
+  ok "tier A decision logged (rung + outcome)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (log=%s)\n' "tier A logged" "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  badf "tier A decision logged (rung + outcome)" 'log=%s' "$(cat "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 echo
@@ -2598,9 +2493,9 @@ echo "## Count wording uses classification; completion assertions keep the fast 
 R="$(setup)"; write_transcript "$R" "Reran the suite: 173/173 tests pass on the hook harness."
 out="$(run_hook "$R" NO)"
 if printf '%s' "$out" | jq -e '(.decision // "") != "block"' >/dev/null 2>&1 && [[ -e "$R/CLASSIFIER_RAN" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "slash counts reach the same classifier as prose counts"
+  ok "slash counts reach the same classifier as prose counts"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s classifier_ran=%s)\n' "count wording uses classification" \
+  badf "slash counts reach the same classifier as prose counts" 'out=%s classifier_ran=%s' \
     "$out" "$([[ -e "$R/CLASSIFIER_RAN" ]] && echo yes || echo no)"
 fi; rm -rf "$R"
 
@@ -2611,27 +2506,27 @@ fi; rm -rf "$R"
 R="$(setup)"; write_transcript "$R" "In prose people write things like tests pass or root cause is X or deploy is healthy."
 out="$(run_hook "$R" NO)"
 if printf '%s' "$out" | jq -e '(.decision // "") != "block"' >/dev/null 2>&1 && [[ -e "$R/CLASSIFIER_RAN" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "discussion of verdict wording → reaches the model, allowed"
+  ok "discussion of verdict wording → reaches the model, allowed"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s classifier_ran=%s)\n' "tier B precision" \
+  badf "discussion of verdict wording → reaches the model, allowed" 'out=%s classifier_ran=%s' \
     "$out" "$(classifier_ran "$R")"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Verified the socket path resolves under the jailer."
 out="$(run_hook "$R" NO)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1 && [[ ! -e "$R/CLASSIFIER_RAN" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "line-initial 'Verified …' → block, classifier never invoked"
+  ok "line-initial 'Verified …' → block, classifier never invoked"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s classifier_ran=%s)\n' "tier B line-initial form" \
+  badf "line-initial 'Verified …' → block, classifier never invoked" 'out=%s classifier_ran=%s' \
     "$out" "$(classifier_ran "$R")"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "26/26 tests pass."
 decide "$R" >/dev/null
-if grep -q ' regex match-block$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "offline count fallback logged (rung + outcome)"
+if grep -q ' regex match-block$' "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null; then
+  ok "offline count fallback logged (rung + outcome)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (log=%s)\n' "count fallback logged" "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  badf "offline count fallback logged (rung + outcome)" 'log=%s' "$(cat "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 echo
@@ -2642,26 +2537,26 @@ echo "## Slow path: a FAILed dossier survives the fix that invalidates its bindi
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
 write_verdict "$R" "FAIL" '["tests-pass: no re-runnable command named"]' "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 decide "$R" >/dev/null
-if jq -e '.verdict == "FAIL"' "$R/.agents/state/last-verdict.prev.json" >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "FAIL dossier parked as prev when the binding goes stale"
+if jq -e '.verdict == "FAIL"' "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" >/dev/null 2>&1; then
+  ok "FAIL dossier parked as prev when the binding goes stale"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (prev=%s)\n' "FAIL parked as prev" \
-    "$(cat "$R/.agents/state/last-verdict.prev.json" 2>/dev/null || echo MISSING)"
+  badf "FAIL dossier parked as prev when the binding goes stale" 'prev=%s' \
+    "$(cat "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi
-check_gone "…live dossier still discarded (re-detect, never block on bookkeeping)" "$R"; rm -rf "$R"
+check_stale_gone "…live dossier still discarded (re-detect, never block on bookkeeping)" "$R"; rm -rf "$R"
 
 # An AGED-OUT FAIL means nobody acted on those findings and the round is over. Parking
 # it would hand the next audit findings about unrelated work — observed live, a FAIL
 # from 04:46 still being offered at 05:37 to an auditor judging a different task.
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
 write_verdict "$R" "FAIL" '["tests-pass: no re-runnable command named"]'
-touch -t 202001010000 "$R/.agents/state/last-verdict.json"
+touch -t 202001010000 "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE"
 decide "$R" >/dev/null
-if [[ ! -e "$R/.agents/state/last-verdict.prev.json" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "aged-out FAIL is dropped, not parked"
+if [[ ! -e "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" ]]; then
+  ok "aged-out FAIL is dropped, not parked"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (prev=%s)\n' "aged-out FAIL wrongly parked" \
-    "$(cat "$R/.agents/state/last-verdict.prev.json" 2>/dev/null)"
+  badf "aged-out FAIL is dropped, not parked" 'prev=%s' \
+    "$(cat "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" 2>/dev/null)"
 fi; rm -rf "$R"
 
 # A PASS/IN_PROGRESS that merely aged out carries nothing to re-check — it must not
@@ -2669,24 +2564,23 @@ fi; rm -rf "$R"
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
 write_verdict "$R" "PASS" '[]' "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 decide "$R" >/dev/null
-if [[ ! -e "$R/.agents/state/last-verdict.prev.json" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "stale PASS is dropped, not parked"
+if [[ ! -e "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" ]]; then
+  ok "stale PASS is dropped, not parked"
 else
-  fail=$((fail+1)); printf '  FAIL  %s\n' "stale PASS wrongly parked as a failed round"
+  bad "stale PASS is dropped, not parked" "stale PASS wrongly parked as a failed round"
 fi; rm -rf "$R"
 
 # Parking is inert unless the findings actually reach the auditor.
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
 write_verdict "$R" "FAIL" '["tests-pass: no command named"]'
-mv "$R/.agents/state/last-verdict.json" "$R/.agents/state/last-verdict.prev.json"
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+mv "$R/.agents/state/last-verdict.json.$DEFAULT_SCOPE" "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE"
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 bash "$HOOK" ) 2>/dev/null)"
 prior_seen="$(cat "$R/.agents/state/SYNC_AUDIT_PREVIOUS" 2>/dev/null || echo MISSING)"
 if [[ "$prior_seen" == *"tests-pass: no command named"* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "synchronous auditor receives the prior findings file"
+  ok "synchronous auditor receives the prior findings file"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (prior=%s out=%s)\n' \
-    "prior findings reach the auditor" "$prior_seen" "$out"
+  badf "synchronous auditor receives the prior findings file" 'prior=%s out=%s' "$prior_seen" "$out"
 fi; rm -rf "$R"
 
 # An UNCLAIMED park expires too. Age-gating only the write bounds staleness at park time,
@@ -2696,16 +2590,16 @@ fi; rm -rf "$R"
 # manufactured FAIL.
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
 mkdir -p "$R/.agents/state"
-printf '{"verdict":"FAIL","findings":["stale round, never claimed"]}' > "$R/.agents/state/last-verdict.prev.json"
-touch -t 202001010000 "$R/.agents/state/last-verdict.prev.json"
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+printf '{"verdict":"FAIL","findings":["stale round, never claimed"]}' > "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE"
+touch -t 202001010000 "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE"
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 bash "$HOOK" ) 2>/dev/null)"
 if ! printf '%s' "$out" | jq -e '.reason | test("A PRIOR audit")' >/dev/null 2>&1 \
-   && [[ ! -e "$R/.agents/state/last-verdict.prev.json" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "unclaimed parked FAIL expires, never reaches the next audit"
+   && [[ ! -e "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" ]]; then
+  ok "unclaimed parked FAIL expires, never reaches the next audit"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (prev_still_there=%s)\n' "stale park expired" \
-    "$([[ -e "$R/.agents/state/last-verdict.prev.json" ]] && echo yes || echo no)"
+  badf "unclaimed parked FAIL expires, never reaches the next audit" 'prev_still_there=%s' \
+    "$([[ -e "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" ]] && echo yes || echo no)"
 fi; rm -rf "$R"
 
 # Future dating is equally invalid: a negative age must not preserve abandoned findings
@@ -2713,17 +2607,16 @@ fi; rm -rf "$R"
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
 mkdir -p "$R/.agents/state"
 printf '{"verdict":"FAIL","findings":["future-dated abandoned round"]}' \
-  > "$R/.agents/state/last-verdict.prev.json"
-futuredate "$R/.agents/state/last-verdict.prev.json" 600
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+  > "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE"
+futuredate "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" 600
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 bash "$HOOK" ) 2>/dev/null)"
 if ! printf '%s' "$out" | jq -e '.reason | test("A PRIOR audit")' >/dev/null 2>&1 \
-   && [[ ! -e "$R/.agents/state/last-verdict.prev.json" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "future-dated parked FAIL expires"
+   && [[ ! -e "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" ]]; then
+  ok "future-dated parked FAIL expires"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (prev_still_there=%s)\n' \
-    "future park reached the next audit" \
-    "$([[ -e "$R/.agents/state/last-verdict.prev.json" ]] && echo yes || echo no)"
+  badf "future-dated parked FAIL expires" 'prev_still_there=%s' \
+    "$([[ -e "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" ]] && echo yes || echo no)"
 fi; rm -rf "$R"
 
 # ...but a freshly parked one is still offered, so expiry cannot swallow the live case.
@@ -2733,26 +2626,25 @@ R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
 write_verdict "$R" "FAIL" '["tests-pass: no re-runnable command named"]' "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 decide "$R" >/dev/null                       # parks it
 write_transcript "$R" "Reworked the index guard; the root cause is addressed."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 bash "$HOOK" ) 2>/dev/null)"
 prior_seen="$(cat "$R/.agents/state/SYNC_AUDIT_PREVIOUS" 2>/dev/null || echo MISSING)"
 if [[ "$prior_seen" == *"tests-pass: no re-runnable command named"* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "a just-parked FAIL reaches the next synchronous audit"
+  ok "a just-parked FAIL reaches the next synchronous audit"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (prior=%s out=%s)\n' \
-    "fresh park survives expiry" "$prior_seen" "$out"
+  badf "a just-parked FAIL reaches the next synchronous audit" 'prior=%s out=%s' "$prior_seen" "$out"
 fi; rm -rf "$R"
 
 # The cycle ended clean: a surviving prev would aim the next audit at resolved findings.
 R="$(setup)"; write_transcript "$R" "Fix verified; tests pass."
 mkdir -p "$R/.agents/state"
-printf '{"verdict":"FAIL","findings":["x"]}' > "$R/.agents/state/last-verdict.prev.json"
+printf '{"verdict":"FAIL","findings":["x"]}' > "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE"
 write_verdict "$R" "PASS" "[]"
 decide "$R" >/dev/null
-if [[ ! -e "$R/.agents/state/last-verdict.prev.json" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "PASS consumption clears the parked FAIL"
+if [[ ! -e "$R/.agents/state/last-verdict.prev.json.$DEFAULT_SCOPE" ]]; then
+  ok "PASS consumption clears the parked FAIL"
 else
-  fail=$((fail+1)); printf '  FAIL  %s\n' "parked FAIL outlives the PASS that resolved it"
+  bad "PASS consumption clears the parked FAIL" "parked FAIL outlives the PASS that resolved it"
 fi; rm -rf "$R"
 
 echo
@@ -2760,9 +2652,9 @@ echo "## Triage (intelligent trigger): classifier decides; regex is the fallback
 triage_prompt_words="$(sed -n "/^triage_prompt='/,/^# The old parse/p" "$HOOK" \
   | sed '$d' | wc -w | tr -d ' ')"
 if [[ "$triage_prompt_words" -le 70 ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "classifier instruction stays within 70 words ($triage_prompt_words)"
+  ok "classifier instruction stays within 70 words ($triage_prompt_words)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s\n' "classifier instruction exceeds 70 words ($triage_prompt_words)"
+  bad "classifier instruction stays within 70 words ($triage_prompt_words)" "classifier instruction exceeds 70 words ($triage_prompt_words)"
 fi
 
 # The default Claude Code print route is a full coding-agent request: project/user
@@ -2814,7 +2706,7 @@ printf 'NO\n'
 CLASSIFIER_CLI
 chmod +x "$R/bin/claude"
 classifier_budget_out="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p, hook_event_name:"Stop"}' \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && env -u VERDICT_CLASSIFIER_CMD PATH="$R/bin:$PATH" \
       CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 bash "$HOOK" ) 2>/dev/null)"
 classifier_request_bytes="$(wc -c < "$R/classifier-request.json" | tr -d ' ')"
@@ -2828,11 +2720,9 @@ if [[ "$classifier_request_bytes" -le 4096 \
    && "$(jq -r '.no_session_persistence' "$R/classifier-request.json")" == true \
    && "$(jq -r '.effort' "$R/classifier-request.json")" == low \
    && "$(decision_from_output "$classifier_budget_out")" == allow ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "classifier request stays isolated and bounded (${classifier_request_bytes}B, ${classifier_tool_count} tools, one call)"
+  ok "classifier request stays isolated and bounded (${classifier_request_bytes}B, ${classifier_tool_count} tools, one call)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (bytes=%s system=%s tools=%s request=%s out=%.120s)\n' \
-    "classifier inherited coding-agent context" "$classifier_request_bytes" \
+  badf "classifier request stays isolated and bounded (${classifier_request_bytes}B, ${classifier_tool_count} tools, one call)" 'bytes=%s system=%s tools=%s request=%s out=%.120s' "$classifier_request_bytes" \
     "$classifier_system_bytes" "$classifier_tool_count" \
     "$(jq -c '{calls,safe_mode,no_session_persistence,effort}' "$R/classifier-request.json")" \
     "$classifier_budget_out"
@@ -2844,16 +2734,15 @@ rm -rf "$R"
 R="$(setup)"
 oversized_message="$(awk 'BEGIN { for (i=0; i<12100; i++) printf "a" }')"
 write_transcript "$R" "$oversized_message"
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
       VERDICT_CLASSIFIER_CMD=': > "$CLAUDE_PROJECT_DIR/classifier-called"; printf "NO\n"' bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1 \
    && [[ ! -e "$R/classifier-called" ]] \
    && [[ -e "$R/.agents/state/SYNC_AUDIT_RAN" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "oversized turn skips classifier and runs the file-backed audit"
+  ok "oversized turn skips classifier and runs the file-backed audit"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%.120s classifier=%s audit=%s)\n' \
-    "oversized turn bypassed the synchronous audit boundary" "$out" \
+  badf "oversized turn skips classifier and runs the file-backed audit" 'out=%.120s classifier=%s audit=%s' "$out" \
     "$([[ -e "$R/classifier-called" ]] && echo called || echo skipped)" \
     "$([[ -e "$R/.agents/state/SYNC_AUDIT_RAN" ]] && echo ran || echo missing)"
 fi
@@ -2861,33 +2750,33 @@ rm -rf "$R"
 # The classifier stub receives the stripped message on stdin and answers YES/NO.
 # YES on a message the regex would MISS → the intelligence adds recall.
 R="$(setup)"; write_transcript "$R" "The culprit involved an unusual interaction."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD='while IFS= read -r _line; do :; done; printf "YES\n"' bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "classifier YES on regex-miss phrasing → block"
+  ok "classifier YES on regex-miss phrasing → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "classifier YES → block" "$out"
+  badf "classifier YES on regex-miss phrasing → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # NO on a message the regex would HIT (quoting/discussion) → intelligence removes
 # the static false positive.
 R="$(setup)"; write_transcript "$R" "In prose people write things like tests pass or root cause is X when they conclude."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD='while IFS= read -r _line; do :; done; printf "NO\n"' bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '(.decision // "") != "block" and .continue == true and (.systemMessage | test("triage: NO"))' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "classifier NO → allow, announced to the human only"
+  ok "classifier NO → allow, announced to the human only"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "classifier NO → announced allow" "$out"
+  badf "classifier NO → allow, announced to the human only" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Classifier unavailable / garbage → UNKNOWN → deterministic regex fallback still gates.
 R="$(setup)"; write_transcript "$R" "All tests pass: 23/23 on the hook suite."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD='while IFS= read -r _line; do :; done; printf "MAYBE\n"' bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "classifier garbage → regex fallback → block"
+  ok "classifier garbage → regex fallback → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "garbage → regex fallback" "$out"
+  badf "classifier garbage → regex fallback → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Closing stdout is not process completion. A classifier can make the answer pipe
@@ -2912,7 +2801,7 @@ fi
 CLASSIFIER_TIMEOUT_ENV
 classifier_sleep_cmd='printf "%s\n" "$$" > "$CLAUDE_PROJECT_DIR/classifier-sleeper.pid"; : > "$CLAUDE_PROJECT_DIR/classifier-sleeper-ready"; exec 1>&-; exec sleep 6'
 classifier_sleep_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 classifier_sleep_started=$SECONDS
 classifier_sleep_out="$(printf '%s' "$classifier_sleep_payload" \
   | (cd "$R" && BASH_ENV="$classifier_timeout_env" CLAUDE_PROJECT_DIR="$R" \
@@ -2934,11 +2823,9 @@ if [[ "$classifier_sleep_rc" -eq 0 \
    && -e "$R/classifier-sleeper-ready" \
    && "$classifier_sleep_elapsed" -lt 4 \
    && "$classifier_sleep_live" == no ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "classifier timeout reaps a producer that closed stdout early"
+  ok "classifier timeout reaps a producer that closed stdout early"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s elapsed=%ss timeout_hook=%s ready=%s child_live=%s out=%.80s)\n' \
-    "classifier waited past its deadline after producer stdout closed" \
+  badf "classifier timeout reaps a producer that closed stdout early" 'rc=%s elapsed=%ss timeout_hook=%s ready=%s child_live=%s out=%.80s' \
     "$classifier_sleep_rc" "$classifier_sleep_elapsed" \
     "$([[ -e "$R/classifier-timeout-shortened" ]] && echo hit || echo missed)" \
     "$([[ -e "$R/classifier-sleeper-ready" ]] && echo yes || echo no)" \
@@ -2952,26 +2839,26 @@ echo "## Flush-race guard: never judge a message that was already judged"
 # records the identity it judged (checksum of the text — harness-agnostic);
 # seeing the same identity again → allow, never re-block.
 R="$(setup)"; write_transcript "$R" "Fix verified; tests pass."   # verdict-shaped
-mkdir -p "$R/.agents/state"; cksum_of "Fix verified; tests pass." > "$R/.agents/state/verdict-last-uuid"
+mkdir -p "$R/.agents/state"; cksum_of "Fix verified; tests pass." > "$R/.agents/state/verdict-last-uuid.$DEFAULT_SCOPE"
 check "stale transcript (identity already judged) → allow"       "$R" "allow"; rm -rf "$R"
 
 # Normal path records the judged identity so the NEXT stale sighting is recognized.
 R="$(setup)"; write_transcript "$R" "Deploy is healthy."
 got="$(decide "$R")"
-recorded="$(cat "$R/.agents/state/verdict-last-uuid" 2>/dev/null || echo MISSING)"
+recorded="$(cat "$R/.agents/state/verdict-last-uuid.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 if [[ "$got" == "block" && "$recorded" == "$(cksum_of "Deploy is healthy.")" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "detection block records the judged identity"
+  ok "detection block records the judged identity"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s recorded=%s)\n' "identity recorded on block" "$got" "$recorded"
+  badf "detection block records the judged identity" 'got=%s recorded=%s' "$got" "$recorded"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Anything else to adjust?"
 got="$(decide "$R")"
-recorded="$(cat "$R/.agents/state/verdict-last-uuid" 2>/dev/null || echo MISSING)"
+recorded="$(cat "$R/.agents/state/verdict-last-uuid.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 if [[ "$got" == "allow" && "$recorded" == "$(cksum_of "Anything else to adjust?")" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "detection allow records the judged identity"
+  ok "detection allow records the judged identity"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (got=%s recorded=%s)\n' "identity recorded on allow" "$got" "$recorded"
+  badf "detection allow records the judged identity" 'got=%s recorded=%s' "$got" "$recorded"
 fi; rm -rf "$R"
 
 echo
@@ -2984,12 +2871,12 @@ GREP_STUB='text=""; IFS= read -r -d "" text || :; [[ "$text" == *"1:1 port"* ]] 
 
 R="$(setup)"; write_transcript "$R" "The activity service is a 1:1 port of upstream; there is no auto-start in the proxy."
 append_assistant "$R" "Let me check what the standalone proxy serves next."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD="$GREP_STUB" bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "mid-turn finding + closing narration → block (joined text judged)"
+  ok "mid-turn finding + closing narration → block (joined text judged)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "mid-turn finding → block" "$out"
+  badf "mid-turn finding + closing narration → block (joined text judged)" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # The dominant real-transcript shape: a tool call sits between the finding and
@@ -2998,23 +2885,23 @@ fi; rm -rf "$R"
 R="$(setup)"; write_transcript "$R" "The activity service is a 1:1 port of upstream; there is no auto-start in the proxy."
 append_tool_result_array "$R" "src/proxy.go: 200 lines, no timer, no activity import"
 append_assistant "$R" "Let me check what the standalone proxy serves next."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD="$GREP_STUB" bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "array tool_result mid-turn does not split the turn → block"
+  ok "array tool_result mid-turn does not split the turn → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "array tool_result mid-turn" "$out"
+  badf "array tool_result mid-turn does not split the turn → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "The activity service is a 1:1 port of upstream; there is no auto-start in the proxy."
 append_tool_result_string "$R" "ok"
 append_assistant "$R" "Let me check what the standalone proxy serves next."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD="$GREP_STUB" bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "string tool_result mid-turn does not split the turn → block"
+  ok "string tool_result mid-turn does not split the turn → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "string tool_result mid-turn" "$out"
+  badf "string tool_result mid-turn does not split the turn → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Tool output is untrusted structured data. User- or assistant-shaped objects nested
@@ -3022,35 +2909,35 @@ fi; rm -rf "$R"
 R="$(setup)"; write_transcript "$R" "The activity service is a 1:1 port of upstream; there is no auto-start in the proxy."
 append_tool_result_object "$R" '{"role":"user","content":"nested tool data"}'
 append_assistant "$R" "Let me check what the standalone proxy serves next."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD="$GREP_STUB" bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "nested user-shaped tool data does not split the turn → block"
+  ok "nested user-shaped tool data does not split the turn → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "nested user-shaped tool data" "$out"
+  badf "nested user-shaped tool data does not split the turn → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 NESTED_ASSISTANT_STUB='text=""; IFS= read -r -d "" text || :; [[ "$text" == *"NESTED_ASSISTANT_CLAIM"* ]] && printf "YES\n" || printf "NO\n"'
 R="$(setup)"; write_transcript "$R" "Want me to inspect the remaining boundary?"
 append_tool_result_object "$R" '{"role":"assistant","content":[{"type":"text","text":"NESTED_ASSISTANT_CLAIM"}]}'
 append_assistant "$R" "I am still checking."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD="$NESTED_ASSISTANT_STUB" bash "$HOOK" ) 2>/dev/null)"
 if ! printf '%s' "$out" | jq -e '(.decision // "") == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "nested assistant-shaped tool data is evidence, not a claim → allow"
+  ok "nested assistant-shaped tool data is evidence, not a claim → allow"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "nested assistant-shaped tool data" "$out"
+  badf "nested assistant-shaped tool data is evidence, not a claim → allow" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Want me to inspect the remaining boundary?"
 append_root_tool_record_object "$R" '{"role":"assistant","content":[{"type":"text","text":"NESTED_ASSISTANT_CLAIM"}]}'
 append_assistant "$R" "I am still checking."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD="$NESTED_ASSISTANT_STUB" bash "$HOOK" ) 2>/dev/null)"
 if ! printf '%s' "$out" | jq -e '(.decision // "") == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "root tool records cannot supply assistant claims → allow"
+  ok "root tool records cannot supply assistant claims → allow"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "root tool record with assistant-shaped message" "$out"
+  badf "root tool records cannot supply assistant claims → allow" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Same finding but in a PREVIOUS turn (real user message between): the final
@@ -3058,12 +2945,12 @@ fi; rm -rf "$R"
 R="$(setup)"; write_transcript "$R" "The activity service is a 1:1 port of upstream; there is no auto-start in the proxy."
 append_user "$R" "ok — check the proxy then"
 append_assistant "$R" "Let me check what the standalone proxy serves next."
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD="$GREP_STUB" bash "$HOOK" ) 2>/dev/null)"
 if ! printf '%s' "$out" | jq -e '(.decision // "") == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "same finding in a previous turn → allow (turn boundary respected)"
+  ok "same finding in a previous turn → allow (turn boundary respected)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "previous-turn finding → allow" "$out"
+  badf "same finding in a previous turn → allow (turn boundary respected)" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # Codex rollout shape, same semantics: user boundary + two assistant texts join.
@@ -3071,12 +2958,12 @@ R="$(setup)"
 jq -nc '{type:"response_item", payload:{type:"message", role:"user", content:[{type:"input_text", text:"compare with upstream"}]}}' > "$R/transcript.jsonl"
 jq -nc '{type:"response_item", payload:{type:"message", role:"assistant", content:[{type:"output_text", text:"The activity service is a 1:1 port of upstream."}]}}' >> "$R/transcript.jsonl"
 jq -nc '{type:"response_item", payload:{type:"message", role:"assistant", content:[{type:"output_text", text:"Let me check the proxy next."}]}}' >> "$R/transcript.jsonl"
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 VERDICT_CLASSIFIER_CMD="$GREP_STUB" bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "codex shape: mid-turn finding joined across records → block"
+  ok "codex shape: mid-turn finding joined across records → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "codex turn-level" "$out"
+  badf "codex shape: mid-turn finding joined across records → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 echo
@@ -3094,11 +2981,9 @@ long_rung="none"
 grep -q 'extract truncated-block' "$R"/.agents/state/verdict-decisions.log* 2>/dev/null \
   && long_rung="extract truncated-block"
 if [[ "$long_decision" == allow && "$long_rung" == none ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  a 66 MiB session with a small final turn is judged, not truncated\n'
+  ok 'a 66 MiB session with a small final turn is judged, not truncated'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  a 66 MiB session with a small final turn is judged, not truncated  (decision=%s rung=%s)\n' \
+  badf 'a 66 MiB session with a small final turn is judged, not truncated' 'decision=%s rung=%s' \
     "$long_decision" "$long_rung"
 fi
 rm -rf "$R"
@@ -3130,11 +3015,9 @@ boundary_texts="$(jq -c '[.records[] | select(.kind == "assistant") | .texts[]]'
 if [[ "$boundary_texts" == "$(jq -nc --arg c "$long_claim" '[$c, "crlf", "no final LF"]')" \
    && "$(jq -r '.source_sha256' <<<"$boundary_snapshot")" == "$(sha256_of "$t")" \
    && "$(jq -r '.source_bytes' <<<"$boundary_snapshot")" == "$(wc -c < "$t" | tr -d ' ')" ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  block-spanning, blank, CRLF and unterminated lines read as a forward read does\n'
+  ok 'block-spanning, blank, CRLF and unterminated lines read as a forward read does'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  block-spanning, blank, CRLF and unterminated lines read as a forward read does  (texts=%.80s)\n' \
+  badf 'block-spanning, blank, CRLF and unterminated lines read as a forward read does' 'texts=%.80s' \
     "$boundary_texts"
 fi
 rm -rf "$R"
@@ -3149,16 +3032,15 @@ jq -nc --arg c "$(perl -e 'print "w" x 8192')" \
   '{type:"assistant", message:{content:[{type:"text",text:$c}]}}' >> "$t"
 large_turn_rc=0; snapshot_of "$t" 4096 >/dev/null || large_turn_rc=$?
 if [[ "$small_turn_rc" == 0 && "$large_turn_rc" != 0 ]]; then
-  pass=$((pass + 1)); printf '  PASS  the decode bound covers the final turn, not the file\n'
+  ok 'the decode bound covers the final turn, not the file'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  the decode bound covers the final turn, not the file  (small=%s large=%s)\n' \
+  badf 'the decode bound covers the final turn, not the file' 'small=%s large=%s' \
     "$small_turn_rc" "$large_turn_rc"
 fi
 rm -rf "$R"
 
 # History is hashed, not parsed: NUL anywhere still fails, as does a malformed final-turn
-# line, but a malformed line before the last real user message no longer does.
+# line, but a malformed line before the last real user message does not.
 R="$(mktemp -d)"
 for history_case in nul malformed-turn malformed-history; do
   t="$R/$history_case.jsonl"
@@ -3175,11 +3057,9 @@ nul_rc=0; snapshot_of "$R/nul.jsonl" 67108864 >/dev/null || nul_rc=$?
 turn_rc=0; snapshot_of "$R/malformed-turn.jsonl" 67108864 >/dev/null || turn_rc=$?
 history_rc=0; snapshot_of "$R/malformed-history.jsonl" 67108864 >/dev/null || history_rc=$?
 if [[ "$nul_rc" != 0 && "$turn_rc" != 0 && "$history_rc" == 0 ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  NUL and malformed final-turn lines fail; malformed history is only hashed\n'
+  ok 'NUL and malformed final-turn lines fail; malformed history is only hashed'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  NUL and malformed final-turn lines fail; malformed history is only hashed  (nul=%s turn=%s history=%s)\n' \
+  badf 'NUL and malformed final-turn lines fail; malformed history is only hashed' 'nul=%s turn=%s history=%s' \
     "$nul_rc" "$turn_rc" "$history_rc"
 fi
 rm -rf "$R"
@@ -3188,11 +3068,11 @@ echo
 echo "## Harness-agnostic extraction: conventions, not schema lists"
 R="$(setup)"; write_codex_transcript "$R" "Root cause is the missing bind mount; all tests pass now."
 check "codex rollout schema, verdict → block"                    "$R" "block"
-recorded="$(cat "$R/.agents/state/verdict-last-uuid" 2>/dev/null || echo MISSING)"
+recorded="$(cat "$R/.agents/state/verdict-last-uuid.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 if [[ "$recorded" == cksum-* ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "codex record (no id) → checksum identity recorded"
+  ok "codex record (no id) → checksum identity recorded"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (recorded=%s)\n' "checksum identity" "$recorded"
+  badf "codex record (no id) → checksum identity recorded" 'recorded=%s' "$recorded"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_codex_transcript "$R" "Which retry policy do you prefer here?"
@@ -3200,7 +3080,7 @@ check "codex rollout schema, chat → allow"                       "$R" "allow";
 
 # Race guard on content identity: same text → same checksum → stale.
 R="$(setup)"; write_codex_transcript "$R" "Deploy is healthy."
-mkdir -p "$R/.agents/state"; cksum_of "Deploy is healthy." > "$R/.agents/state/verdict-last-uuid"
+mkdir -p "$R/.agents/state"; cksum_of "Deploy is healthy." > "$R/.agents/state/verdict-last-uuid.$DEFAULT_SCOPE"
 check "codex stale (identity already judged) → allow"            "$R" "allow"; rm -rf "$R"
 
 # The acceptance test for "all kinds of coding agents": a schema NO harness uses
@@ -3213,14 +3093,14 @@ check "invented future-agent schema, chat → allow"               "$R" "allow";
 
 # VERDICT_EXTRACTOR_CMD: the escape hatch for a truly alien (non-JSONL) format.
 R="$(setup)"; printf 'PLAIN TEXT LOG. verdict: tests pass\n' > "$R/transcript.jsonl"
-out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
       VERDICT_EXTRACTOR_CMD='last=""; while IFS= read -r line || [[ -n "$line" ]]; do last="$line"; done < "$1"; printf "%s\n" "$last"' \
       bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "custom extractor (non-JSONL format) → block"
+  ok "custom extractor (non-JSONL format) → block"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (out=%s)\n' "custom extractor" "$out"
+  badf "custom extractor (non-JSONL format) → block" 'out=%s' "$out"
 fi; rm -rf "$R"
 
 # The extractor is an external producer, so the snapshot cap must close its pipe before
@@ -3245,7 +3125,7 @@ printf '%s\n' '#!/usr/bin/env perl' \
   'print {$done} "complete\n"; close($done) or exit 2;' > "$extractor_script"
 chmod +x "$extractor_script"
 oversized_extractor_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 oversized_extractor_out="$(printf '%s' "$oversized_extractor_payload" \
   | (cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
       EXTRACTOR_PROGRESS="$extractor_progress" \
@@ -3257,11 +3137,9 @@ oversized_extractor_chunks="$(cat "$extractor_progress" 2>/dev/null || echo 0)"
 if [[ "$oversized_extractor_rc" -eq 0 && ! -e "$extractor_complete" \
    && "$oversized_extractor_chunks" =~ ^[0-9]+$ \
    && "$oversized_extractor_chunks" -lt 64 ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "custom extractor stdout is cut off before unbounded Bash materialization"
+  ok "custom extractor stdout is cut off before unbounded Bash materialization"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s chunks=%s complete=%s out=%.120s)\n' \
-    "custom extractor stdout bypassed the snapshot resource bound" \
+  badf "custom extractor stdout is cut off before unbounded Bash materialization" 'rc=%s chunks=%s complete=%s out=%.120s' \
     "$oversized_extractor_rc" "$oversized_extractor_chunks" \
     "$([[ -e "$extractor_complete" ]] && echo yes || echo no)" \
     "$oversized_extractor_out"
@@ -3282,7 +3160,7 @@ printf '%s\n' '#!/usr/bin/env bash' \
   'exec sleep 10' > "$closed_extractor"
 chmod +x "$closed_extractor"
 closed_extractor_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 closed_extractor_started=$SECONDS
 closed_extractor_out="$(printf '%s' "$closed_extractor_payload" \
   | (cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
@@ -3306,11 +3184,9 @@ if [[ "$closed_extractor_rc" -eq 0 \
    && -e "$R/closed-extractor-ready" \
    && "$closed_extractor_elapsed" -le 8 \
    && "$closed_extractor_live" == no ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "custom extractor deadline reaps a producer that closed stdout early"
+  ok "custom extractor deadline reaps a producer that closed stdout early"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s elapsed=%ss ready=%s child_live=%s out=%.80s)\n' \
-    "custom extractor waited past its five-second deadline after stdout closed" \
+  badf "custom extractor deadline reaps a producer that closed stdout early" 'rc=%s elapsed=%ss ready=%s child_live=%s out=%.80s' \
     "$closed_extractor_rc" "$closed_extractor_elapsed" \
     "$([[ -e "$R/closed-extractor-ready" ]] && echo yes || echo no)" \
     "$closed_extractor_live" "$closed_extractor_out"
@@ -3326,18 +3202,16 @@ if [[ "$(uname -s)" == Darwin ]]; then
   R="$(setup)"; write_transcript "$R" \
     "In prose people write things like tests pass when they conclude."
   override_builtin_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-    '{transcript_path:$p,hook_event_name:"Stop"}')"
+    '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
   override_builtin_out="$(printf '%s' "$override_builtin_payload" \
     | (cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
         VERDICT_CLASSIFIER_CMD='while IFS= read -r _line; do :; done; printf "NO\n"' \
         bash "$HOOK") 2>/dev/null)"
   if [[ "$(decision_from_output "$override_builtin_out")" == allow \
      && "$override_builtin_out" == *"triage: NO"* ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' \
-      "macOS containment permits a builtin-only classifier override"
+    ok "macOS containment permits a builtin-only classifier override"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (out=%.120s)\n' \
-      "macOS containment disabled a non-spawning override" "$override_builtin_out"
+    badf "macOS containment permits a builtin-only classifier override" 'out=%.120s' "$override_builtin_out"
   fi
   rm -rf "$R"
 
@@ -3347,18 +3221,16 @@ if [[ "$(uname -s)" == Darwin ]]; then
   R="$(setup)"; write_transcript "$R" \
     "In prose people write things like tests pass when they conclude."
   override_spawn_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-    '{transcript_path:$p,hook_event_name:"Stop"}')"
+    '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
   override_spawn_cmd='perl -e '\''open(my $f, ">", $ENV{CLAUDE_PROJECT_DIR}."/override-spawned") or exit 2; close($f)'\''; printf "NO\n"'
   override_spawn_out="$(printf '%s' "$override_spawn_payload" \
     | (cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
         VERDICT_CLASSIFIER_CMD="$override_spawn_cmd" bash "$HOOK") 2>/dev/null)"
   if [[ "$(decision_from_output "$override_spawn_out")" == block \
      && ! -e "$R/override-spawned" ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' \
-      "macOS containment rejects a child-spawning classifier override"
+    ok "macOS containment rejects a child-spawning classifier override"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (spawned=%s out=%.120s)\n' \
-      "macOS override escaped the fork-denial boundary" \
+    badf "macOS containment rejects a child-spawning classifier override" 'spawned=%s out=%.120s' \
       "$([[ -e "$R/override-spawned" ]] && echo yes || echo no)" \
       "$override_spawn_out"
   fi
@@ -3376,7 +3248,7 @@ if [[ -z "${VERDICT_LINUX_UNAVAILABLE_ENV_LOADED:-}" ]]; then
 fi
 LINUX_UNAVAILABLE_ENV
   linux_unavailable_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-    '{transcript_path:$p,hook_event_name:"Stop"}')"
+    '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
   printf '%s' "$linux_unavailable_payload" \
     | (cd "$R" && BASH_ENV="$linux_unavailable_env" CLAUDE_PROJECT_DIR="$R" \
         VERDICT_GATE_HARD_BLOCK=1 \
@@ -3389,11 +3261,9 @@ LINUX_UNAVAILABLE_ENV
      && "$(decision_from_output "$linux_unavailable_out")" == block \
      && ! -e "$R/linux-override-ran" \
      && "$linux_unavailable_err" == *"Linux user/PID namespace support is unavailable"* ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' \
-      "Linux without unshare rejects only the explicit override with a diagnostic"
+    ok "Linux without unshare rejects only the explicit override with a diagnostic"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (rc=%s ran=%s err=%.120s out=%.100s)\n' \
-      "Linux containment failure was silent or launched the override" \
+    badf "Linux without unshare rejects only the explicit override with a diagnostic" 'rc=%s ran=%s err=%.120s out=%.100s' \
       "$linux_unavailable_rc" \
       "$([[ -e "$R/linux-override-ran" ]] && echo yes || echo no)" \
       "$linux_unavailable_err" "$linux_unavailable_out"
@@ -3426,7 +3296,7 @@ if [[ -z "${VERDICT_CAPTURE_GAP_ENV_LOADED:-}" ]]; then
 fi
 CAPTURE_GAP_ENV
 capture_gap_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 capture_gap_extractor='printf "%s\n" "$$" > "$VERDICT_CAPTURE_GAP_CHILD_PID_FILE"; : > "$VERDICT_CAPTURE_GAP_CHILD_READY"; exec 1>&-; exec sleep 20 #'
 (
   printf '%s' "$capture_gap_payload" \
@@ -3480,11 +3350,9 @@ wait "$capture_gap_job" 2>/dev/null; capture_gap_rc=$?
 if [[ "$capture_gap_barrier" == hit \
    && "$capture_gap_hook_live/$capture_gap_group_live" == no/no \
    && "$capture_gap_elapsed" -le 3 ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "TERM across capture fork publication leaves no process group"
+  ok "TERM across capture fork publication leaves no process group"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (barrier=%s rc=%s elapsed=%ss hook=%s group=%s pgid=%s)\n' \
-    "TERM beat bounded-capture ownership publication" \
+  badf "TERM across capture fork publication leaves no process group" 'barrier=%s rc=%s elapsed=%ss hook=%s group=%s pgid=%s' \
     "$capture_gap_barrier" "$capture_gap_rc" "$capture_gap_elapsed" \
     "$capture_gap_hook_live" "$capture_gap_group_live" "$capture_gap_pgid"
 fi
@@ -3492,7 +3360,7 @@ rm -rf "$R"
 
 # A configurable command can try to create a new session and escape the supervisor's
 # process group. The kernel boundary may prevent that fork/session transition outright;
-# if a child did start, the legacy marker witness must still account for it before the
+# if a child did start, the marker witness must still account for it before the
 # bounded run returns.
 escaped_capture_root="$(mktemp -d)"
 escaped_capture_script="$escaped_capture_root/escape-capture.sh"
@@ -3531,12 +3399,12 @@ for escaped_capture_mode in classifier extractor; do
     write_transcript "$R" \
       "In prose people write things like tests pass when they conclude."
     escaped_capture_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-      '{transcript_path:$p,hook_event_name:"Stop"}')"
+      '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
     escaped_capture_command_env="VERDICT_CLASSIFIER_CMD"
   else
     printf 'ALIEN TRANSCRIPT\n' > "$R/transcript.jsonl"
     escaped_capture_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-      '{transcript_path:$p,hook_event_name:"Stop"}')"
+      '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
     escaped_capture_command_env="VERDICT_EXTRACTOR_CMD"
   fi
   escaped_capture_started=$SECONDS
@@ -3572,11 +3440,9 @@ for escaped_capture_mode in classifier extractor; do
   if [[ "$escaped_capture_rc" -eq 0 \
      && "$escaped_capture_elapsed" -lt 8 \
      && "$escaped_capture_safe" == yes ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' \
-      "$escaped_capture_mode prevents or reaps a setsid TERM-ignoring descendant"
+    ok "$escaped_capture_mode prevents or reaps a setsid TERM-ignoring descendant"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (rc=%s elapsed=%ss ready=%s child_live=%s pid=%s out=%.80s)\n' \
-      "$escaped_capture_mode process group lost an escaped descendant" \
+    badf "$escaped_capture_mode prevents or reaps a setsid TERM-ignoring descendant" 'rc=%s elapsed=%ss ready=%s child_live=%s pid=%s out=%.80s' \
       "$escaped_capture_rc" "$escaped_capture_elapsed" \
       "$([[ -e "$R/escaped-capture-ready" ]] && echo yes || echo no)" \
       "$escaped_capture_live" "$escaped_capture_pid" "$escaped_capture_out"
@@ -3620,7 +3486,7 @@ printf 'NO\n'
 CLOSED_MARKER_SCRIPT
 chmod +x "$closed_marker_script"
 closed_marker_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 closed_marker_started=$SECONDS
 closed_marker_out="$(printf '%s' "$closed_marker_payload" \
   | (cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
@@ -3642,11 +3508,9 @@ if [[ "$closed_marker_rc" -eq 0 \
    && "$closed_marker_elapsed" -lt 8 \
    && "$closed_marker_decision" == block \
    && "$closed_marker_live" == no ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "bounded capture fails closed on a close_fds daemon escape"
+  ok "bounded capture fails closed on a close_fds daemon escape"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s elapsed=%ss ready=%s decision=%s child_live=%s pid=%s out=%.80s)\n' \
-    "bounded capture accepted output after losing all daemon ownership channels" \
+  badf "bounded capture fails closed on a close_fds daemon escape" 'rc=%s elapsed=%ss ready=%s decision=%s child_live=%s pid=%s out=%.80s' \
     "$closed_marker_rc" "$closed_marker_elapsed" \
     "$([[ -e "$R/closed-marker-ready" ]] && echo yes || echo no)" \
     "$closed_marker_decision" "$closed_marker_live" "$closed_marker_pid" \
@@ -3687,7 +3551,7 @@ sleep 20
 LATE_ESCAPE_SCRIPT
 chmod +x "$late_escape_script"
 late_escape_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 late_escape_started=$SECONDS
 late_escape_out="$(printf '%s' "$late_escape_payload" \
   | (cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=1 \
@@ -3712,11 +3576,9 @@ fi
 if [[ "$late_escape_rc" -eq 0 \
    && "$late_escape_elapsed" -lt 10 \
    && "$late_escape_safe" == yes ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "teardown prevents or reaps a TERM-spawned setsid descendant"
+  ok "teardown prevents or reaps a TERM-spawned setsid descendant"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s elapsed=%ss ready=%s child_live=%s pid=%s out=%.80s)\n' \
-    "bounded capture retired its marker before a late holder was reaped" \
+  badf "teardown prevents or reaps a TERM-spawned setsid descendant" 'rc=%s elapsed=%ss ready=%s child_live=%s pid=%s out=%.80s' \
     "$late_escape_rc" "$late_escape_elapsed" \
     "$([[ -e "$R/late-escape-ready" ]] && echo yes || echo no)" \
     "$late_escape_live" "$late_escape_pid" "$late_escape_out"
@@ -3758,7 +3620,7 @@ if [[ -z "${VERDICT_TRANSCRIPT_STAGE_REPLACE_ENV_LOADED:-}" ]]; then
 fi
 TRANSCRIPT_STAGE_REPLACE_ENV
   transcript_stage_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-    '{transcript_path:$p,hook_event_name:"Stop"}')"
+    '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
   transcript_stage_out="$(printf '%s' "$transcript_stage_payload" \
     | (cd "$R" && BASH_ENV="$transcript_stage_env" CLAUDE_PROJECT_DIR="$R" \
         VERDICT_GATE_HARD_BLOCK=1 \
@@ -3784,11 +3646,9 @@ TRANSCRIPT_STAGE_REPLACE_ENV
   if [[ "$transcript_stage_rc" -eq 0 \
      && -e "$R/transcript-stage.ready" \
      && "$transcript_stage_preserved" == yes ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' \
-      "transcript cleanup preserves a $transcript_stage_replacement_kind pathname replacement"
+    ok "transcript cleanup preserves a $transcript_stage_replacement_kind pathname replacement"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (rc=%s barrier=%s preserved=%s path=%s out=%.80s)\n' \
-      "transcript cleanup removed a $transcript_stage_replacement_kind replacement" \
+    badf "transcript cleanup preserves a $transcript_stage_replacement_kind pathname replacement" 'rc=%s barrier=%s preserved=%s path=%s out=%.80s' \
       "$transcript_stage_rc" \
       "$([[ -e "$R/transcript-stage.ready" ]] && echo hit || echo missed)" \
       "$transcript_stage_preserved" "$transcript_stage_path" "$transcript_stage_out"
@@ -3840,7 +3700,7 @@ if [[ -z "${VERDICT_CAPTURE_REPLACE_ENV_LOADED:-}" ]]; then
 fi
 CAPTURE_REPLACE_ENV
 capture_replace_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 capture_replace_out="$(printf '%s' "$capture_replace_payload" \
   | (cd "$R" && BASH_ENV="$capture_replace_env" CLAUDE_PROJECT_DIR="$R" \
       VERDICT_GATE_HARD_BLOCK=1 \
@@ -3855,11 +3715,9 @@ capture_replace_path="$(cat "$R/capture-replace.path" 2>/dev/null || true)"
 if [[ "$capture_replace_rc" -eq 0 \
    && -e "$R/capture-replace.ready" \
    && "$capture_replace_result" == preserved ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "capture failure cleanup preserves a pathname replacement"
+  ok "capture failure cleanup preserves a pathname replacement"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s barrier=%s replacement=%s path=%s out=%.80s)\n' \
-    "capture failure cleanup unlinked a replacement inode" \
+  badf "capture failure cleanup preserves a pathname replacement" 'rc=%s barrier=%s replacement=%s path=%s out=%.80s' \
     "$capture_replace_rc" \
     "$([[ -e "$R/capture-replace.ready" ]] && echo hit || echo missed)" \
     "$capture_replace_result" "$capture_replace_path" "$capture_replace_out"
@@ -3905,11 +3763,9 @@ for unlink_replacement_kind in directory symlink fifo; do
   if [[ "$unlink_replacement_rc" -eq 1 \
      && "$unlink_replacement_preserved" == yes \
      && "$unlink_quarantine_count" -eq 0 ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' \
-      "exact unlink preserves a $unlink_replacement_kind replacement in place"
+    ok "exact unlink preserves a $unlink_replacement_kind replacement in place"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (rc=%s preserved=%s quarantine=%s)\n' \
-      "exact unlink selected a mismatched $unlink_replacement_kind" \
+    badf "exact unlink preserves a $unlink_replacement_kind replacement in place" 'rc=%s preserved=%s quarantine=%s' \
       "$unlink_replacement_rc" "$unlink_replacement_preserved" \
       "$unlink_quarantine_count"
   fi
@@ -3945,11 +3801,9 @@ unlink_race_rc="$(cat "$R/race-rc" 2>/dev/null || echo missing)"
 unlink_race_body="$(cat "$unlink_target" 2>/dev/null || echo missing)"
 if [[ -e "$R/race-fired" && "$unlink_race_rc" -eq 1 \
    && "$unlink_race_body" == replacement ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "exact unlink restores a replacement swapped at selection"
+  ok "exact unlink restores a replacement swapped at selection"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (barrier=%s rc=%s body=%s)\n' \
-    "exact unlink lost a selection-race replacement" \
+  badf "exact unlink restores a replacement swapped at selection" 'barrier=%s rc=%s body=%s' \
     "$([[ -e "$R/race-fired" ]] && echo hit || echo missed)" \
     "$unlink_race_rc" "$unlink_race_body"
 fi
@@ -4017,11 +3871,9 @@ for unlink_postcheck_kind in regular symlink fifo directory; do
      && "$unlink_postcheck_rc" -ne 0 \
      && "$unlink_postcheck_preserved" == yes \
      && "$(cat "$R/displaced-owned" 2>/dev/null)" == owned ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' \
-      "exact unlink preserves a post-validation $unlink_postcheck_kind replacement"
+    ok "exact unlink preserves a post-validation $unlink_postcheck_kind replacement"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (barrier=%s rc=%s preserved=%s owned=%s path=%s)\n' \
-      "exact unlink removed a post-validation $unlink_postcheck_kind replacement" \
+    badf "exact unlink preserves a post-validation $unlink_postcheck_kind replacement" 'barrier=%s rc=%s preserved=%s owned=%s path=%s' \
       "$([[ -e "$R/postcheck-fired" ]] && echo hit || echo missed)" \
       "$unlink_postcheck_rc" "$unlink_postcheck_preserved" \
       "$(cat "$R/displaced-owned" 2>/dev/null || echo missing)" \
@@ -4038,7 +3890,7 @@ for publish_cleanup_kind in staged prior; do
   R="$(setup)"; write_transcript "$R" "Which retry policy do you prefer here?"
   mkdir -p "$R/.agents/state"
   if [[ "$publish_cleanup_kind" == prior ]]; then
-    printf 'old-identity\n' > "$R/.agents/state/verdict-last-uuid"
+    printf 'old-identity\n' > "$R/.agents/state/verdict-last-uuid.$DEFAULT_SCOPE"
   fi
   publish_cleanup_env="$R/publish-cleanup-env.sh"
   cat > "$publish_cleanup_env" <<'PUBLISH_CLEANUP_ENV'
@@ -4066,7 +3918,7 @@ if [[ -z "${VERDICT_PUBLISH_CLEANUP_ENV_LOADED:-}" ]]; then
 fi
 PUBLISH_CLEANUP_ENV
   publish_cleanup_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-    '{transcript_path:$p,hook_event_name:"Stop"}')"
+    '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
   publish_cleanup_out="$(printf '%s' "$publish_cleanup_payload" \
     | (cd "$R" && BASH_ENV="$publish_cleanup_env" CLAUDE_PROJECT_DIR="$R" \
         VERDICT_GATE_HARD_BLOCK=1 \
@@ -4082,11 +3934,9 @@ PUBLISH_CLEANUP_ENV
      && -f "$publish_cleanup_path" && ! -L "$publish_cleanup_path" \
      && "$(cat "$publish_cleanup_path" 2>/dev/null)" == replacement \
      && -f "$R/publish-cleanup-owned" ]]; then
-    pass=$((pass+1)); printf '  PASS  %s\n' \
-      "epoch publisher preserves a post-validation $publish_cleanup_kind replacement"
+    ok "epoch publisher preserves a post-validation $publish_cleanup_kind replacement"
   else
-    fail=$((fail+1)); printf '  FAIL  %s  (rc=%s barrier=%s path=%s preserved=%s out=%.80s)\n' \
-      "epoch publisher deleted a post-validation $publish_cleanup_kind replacement" \
+    badf "epoch publisher preserves a post-validation $publish_cleanup_kind replacement" 'rc=%s barrier=%s path=%s preserved=%s out=%.80s' \
       "$publish_cleanup_rc" \
       "$([[ -e "$R/publish-cleanup.ready" ]] && echo hit || echo missed)" \
       "$publish_cleanup_path" \
@@ -4108,11 +3958,9 @@ identity_stdout_target="$R/output"
 ) 2>/dev/null
 identity_stdout_rc=$?
 if [[ "$identity_stdout_rc" -ne 0 && ! -e "$identity_stdout_target" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "identity writer retracts its inode when identity publication fails"
+  ok "identity writer retracts its inode when identity publication fails"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s destination=%s)\n' \
-    "identity writer reported success without cleanup authority" \
+  badf "identity writer retracts its inode when identity publication fails" 'rc=%s destination=%s' \
     "$identity_stdout_rc" \
     "$([[ -e "$identity_stdout_target" ]] && echo leaked || echo absent)"
 fi
@@ -4132,11 +3980,9 @@ snapshot_identity_stdout_target="$R/snapshot-output"
 snapshot_identity_stdout_rc=$?
 if [[ "$snapshot_identity_stdout_rc" -ne 0 \
    && ! -e "$snapshot_identity_stdout_target" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "snapshot writer retracts its inode when identity publication fails"
+  ok "snapshot writer retracts its inode when identity publication fails"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (rc=%s destination=%s)\n' \
-    "snapshot writer leaked an inode without cleanup authority" \
+  badf "snapshot writer retracts its inode when identity publication fails" 'rc=%s destination=%s' \
     "$snapshot_identity_stdout_rc" \
     "$([[ -e "$snapshot_identity_stdout_target" ]] && echo leaked || echo absent)"
 fi
@@ -4162,7 +4008,7 @@ if [[ -z "${VERDICT_IDENTITY_SIDECAR_ENV_LOADED:-}" ]]; then
 fi
 IDENTITY_SIDECAR_ENV
 identity_sidecar_payload="$(jq -nc --arg p "$R/transcript.jsonl" \
-  '{transcript_path:$p,hook_event_name:"Stop"}')"
+  '{transcript_path:$p,hook_event_name:"Stop", session_id:"test-session"}')"
 identity_sidecar_out="$(printf '%s' "$identity_sidecar_payload" \
   | (cd "$R" && BASH_ENV="$identity_sidecar_env" CLAUDE_PROJECT_DIR="$R" \
       VERDICT_GATE_HARD_BLOCK=1 \
@@ -4171,11 +4017,9 @@ identity_sidecar_out="$(printf '%s' "$identity_sidecar_payload" \
 identity_sidecar_decision="$(decision_from_output "$identity_sidecar_out")"
 if [[ -e "$R/identity-sidecar-ready" \
    && "$identity_sidecar_decision" == block ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' \
-    "capture rejects a missing destination identity sidecar"
+  ok "capture rejects a missing destination identity sidecar"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (barrier=%s decision=%s out=%.100s)\n' \
-    "capture accepted output without cleanup authority" \
+  badf "capture rejects a missing destination identity sidecar" 'barrier=%s decision=%s out=%.100s' \
     "$([[ -e "$R/identity-sidecar-ready" ]] && echo hit || echo missed)" \
     "$identity_sidecar_decision" "$identity_sidecar_out"
 fi
@@ -4193,39 +4037,34 @@ echo
 echo "## Decision log: every Stop decision leaves one greppable line"
 R="$(setup)"; write_transcript "$R" "Deploy is healthy."
 decide "$R" >/dev/null
-if grep -q ' regex match-block$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "block decision logged (rung + outcome)"
+if grep -q ' regex match-block$' "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null; then
+  ok "block decision logged (rung + outcome)"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (log=%s)\n' "block logged" "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  badf "block decision logged (rung + outcome)" 'log=%s' "$(cat "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Anything else to adjust?"
 decide "$R" >/dev/null
-if grep -q ' regex none-allow$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "allow decision logged"
+if grep -q ' regex none-allow$' "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null; then
+  ok "allow decision logged"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (log=%s)\n' "allow logged" "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  badf "allow decision logged" 'log=%s' "$(cat "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 # In-place rotation must not follow a hard link and truncate a file outside runtime
 # state. Logging is best-effort, so a multiply linked inode is rejected unchanged.
 R="$(setup)"; write_transcript "$R" "Deploy is healthy."
 outside_log="$R/outside-owned.log"
-decision_log_path="$R/.agents/state/verdict-decisions.log"
+decision_log_path="$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE"
 mkdir -p "$(dirname "$decision_log_path")"
 printf 'outside sentinel\n' > "$outside_log"
 ln "$outside_log" "$decision_log_path"
 decide "$R" >/dev/null
 hardlink_log_state="$(cat "$outside_log" 2>/dev/null || echo MISSING)"
-if [[ "$hardlink_log_state" == "outside sentinel" ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "decision logging rejects a multiply linked inode"
-else
-  fail=$((fail+1)); printf '  FAIL  %s  (outside=%s)\n' \
-    "decision logging rewrote a hard-linked file" "$hardlink_log_state"
-fi; rm -rf "$R"
+check_eq "decision logging rejects a multiply linked inode" "$hardlink_log_state" "outside sentinel"; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Deploy is healthy."
-decision_log_path="$R/.agents/state/verdict-decisions.log"
+decision_log_path="$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE"
 mkdir -p "$(dirname "$decision_log_path")"
 perl -MFcntl=:flock -e '
   my ($path, $ready) = @ARGV;
@@ -4243,21 +4082,26 @@ log_started="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
 log_lock_decision="$(decide "$R")"
 log_finished="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
 kill -TERM "$log_holder_pid" 2>/dev/null || true; wait "$log_holder_pid" 2>/dev/null || true
-log_elapsed_ok="$(perl -e 'print(($ARGV[1] - $ARGV[0]) < 1.5 ? "yes" : "no")' \
-  "$log_started" "$log_finished")"
+# The same Stop in a fresh repository, with no writer holding the log, is the baseline.
+B="$(setup)"; write_transcript "$B" "Deploy is healthy."
+log_base_started="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
+decide "$B" >/dev/null
+log_base_finished="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
+rm -rf "$B"
+log_elapsed_ok="$(perl -e 'print(($ARGV[1] - $ARGV[0]) - ($ARGV[3] - $ARGV[2]) < 1.5 ? "yes" : "no")' \
+  "$log_started" "$log_finished" "$log_base_started" "$log_base_finished")"
 if [[ "$log_elapsed_ok" == yes && "$log_lock_decision" == block ]]; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "a held decision-log flock cannot delay the Stop decision"
+  ok "a held decision-log flock cannot delay the Stop decision"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (bounded=%s decision=%s)\n' \
-    "decision logging waited on another writer" "$log_elapsed_ok" "$log_lock_decision"
+  badf "a held decision-log flock cannot delay the Stop decision" 'bounded=%s decision=%s' "$log_elapsed_ok" "$log_lock_decision"
 fi; rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "Fix verified; tests pass."; write_verdict "$R" "PASS" "[]"
 decide "$R" >/dev/null
-if grep -q ' dossier PASS-allow$' "$R/.agents/state/verdict-decisions.log" 2>/dev/null; then
-  pass=$((pass+1)); printf '  PASS  %s\n' "dossier consumption logged"
+if grep -q ' dossier PASS-allow$' "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null; then
+  ok "dossier consumption logged"
 else
-  fail=$((fail+1)); printf '  FAIL  %s  (log=%s)\n' "dossier logged" "$(cat "$R/.agents/state/verdict-decisions.log" 2>/dev/null || echo MISSING)"
+  badf "dossier consumption logged" 'log=%s' "$(cat "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null || echo MISSING)"
 fi; rm -rf "$R"
 
 echo
@@ -4267,22 +4111,22 @@ echo "## Soft mode (VERDICT_GATE_HARD_BLOCK=0 ONLY): block conditions become nud
 # settings.json env — was ever gated; the Codex registration and any direct
 # invocation silently got a nudge. The unset case is asserted to BLOCK below.
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
-soft_out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+soft_out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK=0 bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$soft_out" | jq -e '(.decision // "") != "block" and .continue == true and (.systemMessage | type) == "string"' >/dev/null 2>&1; then
-  pass=$((pass + 1)); printf '  PASS  %s\n' "detected verdict → nudge in soft mode, not block"
+  ok "detected verdict → nudge in soft mode, not block"
 else
-  fail=$((fail + 1)); printf '  FAIL  %s  (out=%s)\n' "soft-mode detection nudge" "$soft_out"
+  badf "detected verdict → nudge in soft mode, not block" 'out=%s' "$soft_out"
 fi
 rm -rf "$R"
 
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
-unset_out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+unset_out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
   | ( cd "$R" && env -u VERDICT_GATE_HARD_BLOCK CLAUDE_PROJECT_DIR="$R" bash "$HOOK" ) 2>/dev/null)"
 if printf '%s' "$unset_out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
-  pass=$((pass + 1)); printf '  PASS  %s\n' "unset VERDICT_GATE_HARD_BLOCK blocks (documented default is hard)"
+  ok "unset VERDICT_GATE_HARD_BLOCK blocks (documented default is hard)"
 else
-  fail=$((fail + 1)); printf '  FAIL  %s  (out=%.120s)\n' "unset VERDICT_GATE_HARD_BLOCK blocks (documented default is hard)" "$unset_out"
+  badf "unset VERDICT_GATE_HARD_BLOCK blocks (documented default is hard)" 'out=%.120s' "$unset_out"
 fi
 rm -rf "$R"
 
@@ -4295,7 +4139,7 @@ chat_ok=yes
 chat_detail=""
 for chat_mode in 0 1; do
   R="$(setup)"; write_transcript "$R" "Anything else you want changed?"
-  chat_out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop"}' \
+  chat_out="$(jq -nc --arg p "$R/transcript.jsonl" '{transcript_path:$p, hook_event_name:"Stop", session_id:"test-session"}' \
     | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_GATE_HARD_BLOCK="$chat_mode" bash "$HOOK" ) 2>/dev/null)"
   if [[ -n "$chat_out" ]] && printf '%s' "$chat_out" | jq -e '(.decision // "") == "block"' >/dev/null 2>&1; then
     chat_ok=no
@@ -4305,9 +4149,9 @@ for chat_mode in 0 1; do
   rm -rf "$R"
 done
 if [[ "$chat_ok" == "yes" ]]; then
-  pass=$((pass + 1)); printf '  PASS  %s\n' "chat turn → allow via triage in soft AND hard"
+  ok "chat turn → allow via triage in soft AND hard"
 else
-  fail=$((fail + 1)); printf '  FAIL  %s (%s)\n' "chat turn → allow via triage in soft AND hard" "$chat_detail"
+  bad "chat turn → allow via triage in soft AND hard" "$chat_detail"
 fi
 
 # Wait until the gate publishes the hollow snapshot (source_bytes 0), so a test that
@@ -4351,11 +4195,9 @@ retry_rung="none"
 [[ -n "$retry_log" && -r "$retry_log" ]] \
   && grep -q 'extract truncated-block' "$retry_log" && retry_rung="extract truncated-block"
 if [[ "$retry_decision" == allow && "$retry_rung" == none ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  a settled re-read keeps the turn off the truncated rung\n'
+  ok 'a settled re-read keeps the turn off the truncated rung'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  a settled re-read keeps the turn off the truncated rung  (decision=%s rung=%s)\n' \
+  badf 'a settled re-read keeps the turn off the truncated rung' 'decision=%s rung=%s' \
     "$retry_decision" "$retry_rung"
 fi
 rm -rf "$R"
@@ -4373,10 +4215,9 @@ check_still_blocks() {  # desc repo
   [[ -n "$log" && -r "$log" ]] \
     && grep -q 'extract truncated-block' "$log" && rung="extract truncated-block"
   if [[ "$decision" == block && "$rung" == "extract truncated-block" ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
+    ok "$desc"
   else
-    fail=$((fail + 1))
-    printf '  FAIL  %s  (decision=%s rung=%s)\n' "$desc" "$decision" "$rung"
+    badf "$desc" 'decision=%s rung=%s' "$decision" "$rung"
   fi
 }
 
@@ -4384,9 +4225,8 @@ check_still_blocks() {  # desc repo
 # source on either side of that check. Force both orderings and require the FAIL
 # dossier, so an auditor-startup error cannot masquerade as the expected block.
 for retry_boundary in before-arm refresh-delete refresh-empty; do
-  for retry_mode in legacy session legacy-payload session-payload; do
-    retry_session=""; retry_payload_text=""
-    [[ "$retry_mode" == session* ]] && retry_session=retry-session
+  for retry_mode in session session-payload; do
+    retry_session=retry-session; retry_payload_text=""
     [[ "$retry_mode" == *-payload ]] && retry_payload_text="Just chatting."
     R="$(setup)"
     mkdir -p "$R/.agents/state"
@@ -4416,8 +4256,7 @@ fi
 RETRY_ENV
     retry_payload="$(jq -nc --arg p "$R/transcript.jsonl" --arg s "$retry_session" \
       --arg t "$retry_payload_text" \
-      '{transcript_path:$p,hook_event_name:"Stop",last_assistant_message:$t}
-       + (if $s == "" then {} else {session_id:$s} end)')"
+      '{transcript_path:$p,hook_event_name:"Stop",last_assistant_message:$t,session_id:$s}')"
     retry_out="$(BASH_ENV="$retry_env" VERDICT_RETRY_BOUNDARY="$retry_boundary" \
       run_payload_hook "$R" "$retry_payload")"
     retry_decision="$(decision_from_output "$retry_out")"
@@ -4425,7 +4264,6 @@ RETRY_ENV
     [[ -e "$R/.agents/state/retry-boundary-hit" ]] \
       && retry_state="${retry_state/boundary=missed/boundary=hit}"
     retry_snapshot="$(session_state_path "$R" verdict-stop-message.jsonl "$retry_session")"
-    [[ -n "$retry_session" ]] || retry_snapshot="$R/.agents/state/verdict-stop-message.jsonl"
     if jq -e '.truncated == true and .source_bytes == 0' \
         "$retry_snapshot" >/dev/null 2>&1; then
       retry_state="${retry_state/evidence=missing/evidence=incomplete}"
@@ -4435,13 +4273,8 @@ RETRY_ENV
        && grep -q ' dossier FAIL-block$' "$R"/.agents/state/verdict-decisions.log*; then
       retry_state="${retry_state/dossier=missing/dossier=FAIL}"
     fi
-    if [[ "$retry_state" == "decision=block boundary=hit evidence=incomplete dossier=FAIL" ]]; then
-      pass=$((pass + 1)); printf '  PASS  unreadable transcript %s (%s) consumes FAIL\n' \
-        "$retry_boundary" "$retry_mode"
-    else
-      fail=$((fail + 1)); printf '  FAIL  unreadable transcript %s (%s) consumes FAIL (%s)\n' \
-        "$retry_boundary" "$retry_mode" "$retry_state"
-    fi
+    check_eq "unreadable transcript $retry_boundary ($retry_mode) consumes FAIL" \
+      "$retry_state" "decision=block boundary=hit evidence=incomplete dossier=FAIL"
     rm -rf "$R"
   done
 done
@@ -4457,15 +4290,14 @@ R="$(setup)"
 write_transcript "$R" "Nothing here is a verdict; just chatting."
 mv "$R/transcript.jsonl" "$R/target.jsonl"
 ln -s "$R/target.jsonl" "$R/transcript.jsonl"
-symlink_started="$SECONDS"
 symlink_decision="$(decide "$R")"
-symlink_elapsed=$(( SECONDS - symlink_started ))
-if [[ "$symlink_decision" == block && "$symlink_elapsed" -lt 2 ]]; then
-  pass=$((pass + 1))
-  printf '  PASS  a symlinked transcript fails closed without spending the retry window\n'
+symlink_elapsed="$(sed -n 's/.* elapsed_seconds=\([0-9]*\) .* extract truncated-block$/\1/p' \
+  "$R/.agents/state/verdict-decisions.log.$DEFAULT_SCOPE" 2>/dev/null | head -n 1)"
+symlink_elapsed="${symlink_elapsed:-unlogged}"
+if [[ "$symlink_decision" == block && "$symlink_elapsed" =~ ^[0-9]+$ && "$symlink_elapsed" -lt 2 ]]; then
+  ok 'a symlinked transcript fails closed without spending the retry window'
 else
-  fail=$((fail + 1))
-  printf '  FAIL  a symlinked transcript fails closed without spending the retry window  (decision=%s elapsed=%ss)\n' \
+  badf 'a symlinked transcript fails closed without spending the retry window' 'decision=%s elapsed=%ss' \
     "$symlink_decision" "$symlink_elapsed"
 fi
 rm -rf "$R"
@@ -4484,21 +4316,11 @@ decided_rung() {  # repo classifier-answer -> rung and outcome of the last logge
 }
 R="$(setup)"; write_transcript "$R" "Nothing here is a verdict; just chatting."
 rung="$(decided_rung "$R" NO)"
-if [[ "$rung" == "triage NO-allow" ]]; then
-  pass=$((pass + 1)); printf '  PASS  a triage allow reports its rung\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  a triage allow reports its rung  (got: %s)\n' "$rung"
-fi
+check_eq 'a triage allow reports its rung' "$rung" "triage NO-allow"
 rm -rf "$R"
 R="$(setup)"; write_transcript "$R" "The root cause is the stale index."
 rung="$(decided_rung "$R" YES)"
-if [[ "$rung" == "dossier FAIL-block" ]]; then
-  pass=$((pass + 1)); printf '  PASS  the re-entered audit child reports the rung that decided\n'
-else
-  fail=$((fail + 1)); printf '  FAIL  the re-entered audit child reports the rung that decided  (got: %s)\n' "$rung"
-fi
+check_eq 'the re-entered audit child reports the rung that decided' "$rung" "dossier FAIL-block"
 rm -rf "$R"
 
-echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

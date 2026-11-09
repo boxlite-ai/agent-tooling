@@ -17,21 +17,19 @@
 # permanent ones — resume-on-network-error.sh reads this file to avoid both.
 #
 # It cannot notify the human: Claude Code starts hooks detached, with no controlling
-# terminal, so there is no /dev/tty to write to (2.1.278: `ps` shows none, the open fails).
+# terminal, so there is no /dev/tty to write to.
 #
 # Everything here is best-effort by construction: a failure to record must never add a
 # second failure on top of the one being reported, so every path exits 0.
 set -uo pipefail
 
-state_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/verdict-audit-state.sh"
 # perl is not used directly here; the sourced library's atomic publish needs it, and a
 # missing one would otherwise fail deep inside the write with nowhere to report it.
 for required_command in jq perl; do
   command -v "$required_command" >/dev/null 2>&1 || exit 0
 done
-[[ -r "$state_lib" ]] || exit 0
 # shellcheck source=../lib/verdict-audit-state.sh
-source "$state_lib" || exit 0
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/verdict-audit-state.sh" 2>/dev/null || exit 0
 
 payload="$(cat)"
 event="$(printf '%s' "$payload" | jq -r '

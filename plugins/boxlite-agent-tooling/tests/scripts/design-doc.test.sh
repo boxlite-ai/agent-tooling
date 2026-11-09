@@ -71,8 +71,9 @@ expect 'show targets the bound repository from a writable cwd' 0 show "$scratch/
 expect 'an explicit unbound target cannot reuse another repository binding' 1 show "$scratch"
 cd "$scratch/repo" || exit 1
 rm -f "$state"
-expect 'legacy bind registers an unbound worktree' 0 bind "$url"
-expect 'legacy binding verifies again' 0 check
+expect 'bind is not a command' 2 bind "$url"
+expect 'register registers again after removal' 0 register "$url"
+expect 'the new binding verifies again' 0 check
 # The research auditor's verdict binds to the exact content it reviewed.
 content_hash() { # text -> SHA-256 hex
   printf '%s' "$1" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'
@@ -154,7 +155,7 @@ request_has() { # description, jq condition on the edit gate's request
 decide() {
   local status=0 history decision
   # Bind the choice to production state, including after a cycle has ended.
-  if ! history="$(bash -c 'source "$1/.agents/lib/design-doc.sh" || exit 2
+  if ! history="$(bash -c 'for lib in verdict-audit-state design-doc; do source "$1/.agents/lib/$lib.sh" || exit 2; done
       _design_doc_history_hash "$(cat "$2")"' history "$plugin" "$research_state")" \
     || ! decision="$(jq -c --arg choice "$3" --arg head "$(git rev-parse HEAD)" --arg history "$history" \
     '{choice:$choice, binding:{root,branch,url,content_sha256,head:$head,history_hash:$history}}' \
@@ -242,9 +243,12 @@ request_has 'rebinding cannot reset the count' '.blocked and .fails == 2'
 github_doc $'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented edits. Approach: verify a design doc. Validation: gate tests.'
 expect 'the original design is registered again' 0 register "$url"
 jq -nc --arg root "$(pwd -P)" --arg url "$url" --arg sha "$h" '{root:$root, branch:"feature",
-  url:$url, content_sha256:$sha, verdict:"FAIL", findings:["research: legacy finding"]}' > "$research_state"
-request_has 'a legacy FAIL counts once and carries its findings' \
-  '.prior_findings == ["research: legacy finding"] and .fails == 1'
+  url:$url, content_sha256:$sha, verdict:"FAIL", findings:["research: old finding"]}' > "$research_state"
+request="$(gate edit 2>"$scratch/err")" && status=0 || status=$?
+[[ -z "$request" ]] || status="request printed"
+grep -Fq "unsupported design-audit record; remove $research_state" "$scratch/err" \
+  || status="no fix named: $status"
+outcome 'a record without loop fields fails closed and names its removal' 3 "$status"
 jq '. + {advisories:[], failures:[], stop:"sideways", extra:false, reflection:null, overruled:[]}' \
   "$research_state" > "$scratch/malformed" && mv "$scratch/malformed" "$research_state"
 request="$(gate edit 2>/dev/null)" && status=0 || status=$?
@@ -252,18 +256,21 @@ request="$(gate edit 2>/dev/null)" && status=0 || status=$?
 outcome 'a malformed loop state fails closed' 3 "$status"
 record 'a malformed loop state takes no verdict' 1 "$(verdict "$reviewed" PASS '[]')"
 rm -f "$research_state"
-# Verdicts recorded before the rename stay readable until the next one is written.
-legacy="$(git rev-parse --absolute-git-dir)/agent-tooling-design-research.json"
+research_file="$(git rev-parse --absolute-git-dir)/agent-tooling-design-research.json"
 jq -nc --arg root "$(pwd -P)" --arg url "$url" --arg sha "$reviewed" '{root:$root, branch:"feature",
-  url:$url, content_sha256:$sha, verdict:"PASS", findings:[]}' > "$legacy"
-request_has 'a PASS in the old state file is still read and waits for advice' \
-  '.advice_due and .verdict == "PASS"'
-advise 'advice on the old-file PASS records' 0 "$(no_advice "$reviewed")"
+  url:$url, content_sha256:$sha, verdict:"PASS", findings:[]}' > "$research_file"
+request="$(gate edit 2>"$scratch/err")" && status=0 || status=$?
+[[ -z "$request" ]] || status="request printed"
+grep -Fq "unsupported design verdict file; remove $research_file" "$scratch/err" \
+  || status="no fix named: $status"
+outcome 'a research-named verdict file fails closed and names its removal' 3 "$status"
+record 'a research-named verdict file blocks recording' 1 "$(verdict "$reviewed" PASS '[]')"
+rm -f "$research_file"
+expect 'research is not a command' 2 research
+record 'a PASS records once the old file is gone' 0 "$(verdict "$reviewed" PASS '[]')"
+advise 'advice on that PASS records' 0 "$(no_advice "$reviewed")"
 status=0; gate edit >/dev/null 2>"$scratch/err" || status=$?
-outcome 'a PASS in the old state file, with advice, allows edits' 0 "$status"
-rm -f "$legacy"
-status=0; bash "$cli" research <<<"$(verdict "$reviewed" PASS '[]')" >/dev/null 2>"$scratch/err" || status=$?
-outcome 'research remains an alias of verdict' 0 "$status"
+outcome 'that PASS, with advice, allows edits' 0 "$status"
 git checkout -qb different
 expect 'another branch cannot reuse binding' 1 check
 expect 'another branch cannot show the binding' 1 show
@@ -313,12 +320,12 @@ $(printf 'word %.0s' {1..58})"
 github_doc "$design"
 expect 'compact multi-paragraph design passes' 0 check
 github_doc "$design word"
-expect 'a design over 120 words can be registered' 0 bind "$url"
+expect 'a design over 120 words can be registered' 0 register "$url"
 expect 'a bound design can exceed the reply word budget' 0 check
 github_doc $'## TL;DR\n\nA concise design.'
-expect 'untrusted hosts are rejected' 1 bind https://github.com.attacker.invalid/example/project/issues/1
+expect 'untrusted hosts are rejected' 1 register https://github.com.attacker.invalid/example/project/issues/1
 for unsafe_url in 'https://user:sensitive-fixture@github.com/example/project/issues/1' $'https://invalid.example/\nsensitive-fixture'; do
-  expect 'unsafe URL blocks' 1 bind "$unsafe_url"
+  expect 'unsafe URL blocks' 1 register "$unsafe_url"
   if [[ "$(cat "$scratch/err")" == *sensitive-fixture* ]]; then
     printf 'FAIL rejected URL leaks into diagnostics\n'; fail=$((fail+1))
   else
@@ -337,10 +344,10 @@ expect 'directory binding blocks' 1 check
 rmdir "$state"
 cp "$scratch/saved" "$state"
 linear=https://linear.app/example/issue/EX-1/design
-expect 'Linear needs credentials' 1 bind "$linear"
+expect 'Linear needs credentials' 1 register "$linear"
 export LINEAR_API_KEY=fixture-only
 jq -nc --arg url "$linear" '{data:{issue:{url:$url,description:"## TL;DR\n\nDesign and validation.",archivedAt:null}}}' > "$DOC_FIXTURE"
-expect 'Linear document verifies' 0 bind "$linear"
+expect 'Linear document verifies' 0 register "$linear"
 expect 'show reads a Linear design through its API' 0 show
 [[ "$(cat "$scratch/out")" == *'Design and validation.'* ]] || fail=$((fail+1))
 cp "$DOC_FIXTURE" "$scratch/linear-valid"
@@ -354,11 +361,11 @@ expect 'GraphQL partial errors block' 1 check
 jq -nc --arg url "$linear" '{data:{issue:{url:$url,description:"## TL;DR\n\nDesign and validation.",archivedAt:null}},padding:("x" * 70000)}' > "$DOC_FIXTURE"
 expect 'HTTP response bound is independent of curl version' 1 check
 notion=https://www.notion.so/Design-0123456789abcdef0123456789abcdef
-expect 'Notion needs credentials' 1 bind "$notion"
+expect 'Notion needs credentials' 1 register "$notion"
 export NOTION_TOKEN=fixture-only DOC_PAGE="$scratch/page.json"
 printf '{"object":"page","id":"01234567-89ab-cdef-0123-456789abcdef","archived":false}' > "$DOC_PAGE"
 jq -nc '{object:"list",has_more:false,results:[{type:"heading_2",heading_2:{rich_text:[{plain_text:"TL;DR"}]}},{type:"paragraph",paragraph:{rich_text:[{plain_text:"Design and validation."}]}}]}' > "$DOC_FIXTURE"
-expect 'Notion page and content both verify' 0 bind "$notion"
+expect 'Notion page and content both verify' 0 register "$notion"
 notion_block() {
   jq -nc --arg type "$1" --arg text "$2" --argjson children "${3:-false}" \
     '{object:"list",has_more:false,results:[{type:$type,has_children:$children,

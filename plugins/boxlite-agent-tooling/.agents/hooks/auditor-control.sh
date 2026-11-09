@@ -9,7 +9,7 @@ override_state_lib="$tooling_root/.agents/lib/auditor-override-state.sh"
 control_state_lib="$tooling_root/.agents/lib/auditor-control-state.sh"
 interactive_prompt_lib="$tooling_root/.agents/lib/hook-interactive-prompt.sh"
 host_lib="$tooling_root/.agents/lib/hook-host.sh"
-for required in jq perl git shasum; do
+for required in jq perl git; do
   command -v "$required" >/dev/null 2>&1 || {
     printf 'auditor-control.sh: required dependency not found: %s\n' "$required" >&2
     exit 2
@@ -325,8 +325,7 @@ auditor_control_write_override_grant() {  # scope epoch reason-hash
   local grant_file now expires nonce_hash repo_hash
   grant_file="$(auditor_override_grant_path "$repo" "$1")"
   now="$(date +%s)"; expires="$((now + 3600))"
-  nonce_hash="$(perl -e 'open(my $f,"<","/dev/urandom") or exit 1; read($f,my $b,32)==32 or exit 1; print unpack("H*",$b)' \
-    | shasum -a 256 | awk '{print $1}')" || return 1
+  nonce_hash="$(auditor_control_random_nonce | verdict_audit_sha256)" || return 1
   repo_hash="$(auditor_override_repo_identity "$repo")" || return 1
   jq -nc --arg repo_hash "$repo_hash" --arg scope "$1" --arg epoch "$2" \
     --arg nonce_hash "$nonce_hash" --arg reason_hash "$3" \
@@ -342,6 +341,28 @@ auditor_control_random_nonce() {
     read($random, my $bytes, 32) == 32 or exit 1;
     print unpack("H*", $bytes);
   '
+}
+
+auditor_control_prompt_after_seconds() {  # -> AUDITOR_PROMPT_AFTER_SECONDS, or 30 when invalid
+  local threshold="${AUDITOR_PROMPT_AFTER_SECONDS:-30}"
+  [[ "$threshold" =~ ^[0-9]+$ && ${#threshold} -le 4 ]] || threshold=30
+  printf '%s' "$threshold"
+}
+
+# A shell command that feeds one escalation choice back through `select`. The payload
+# travels base64-encoded so no field can break out of the command's quoting.
+auditor_control_select_command() {  # choice [reason]; reads session_id, auditor, generation, repo
+  local payload encoded project_q control_q
+  payload="$(jq -nc --arg session "$session_id" --arg auditor "$auditor" \
+    --arg generation "$generation" --arg choice "$1" --arg reason "${2-}" '
+    {hook_event_name:"AskUserQuestion",session_id:$session,choice:$choice}
+    + (if $reason == "" then {} else {reason:$reason} end)
+    + {auditor:$auditor,generation:$generation}')" || return 1
+  encoded="$(printf '%s' "$payload" | perl -MMIME::Base64 -0777 -ne 'print encode_base64($_,"")')" \
+    || return 1
+  printf -v project_q '%q' "$repo"
+  printf -v control_q '%q' "$tooling_root/.agents/hooks/auditor-control.sh"
+  printf '%s' "/usr/bin/printf '%s' '$encoded' | /usr/bin/perl -MMIME::Base64 -0777 -ne 'print decode_base64(\$_)' | CLAUDE_PROJECT_DIR=$project_q /usr/bin/env bash $control_q select"
 }
 
 if [[ "${1:-}" == --known-auditors ]]; then
@@ -400,8 +421,7 @@ case "${1:-}" in
     auditor_control_is_auditor "$auditor" || exit 1
     auditor_control_state_dispatch start "$scope" "$auditor" "$generation" "$epoch" \
       || exit $?
-    threshold="${AUDITOR_PROMPT_AFTER_SECONDS:-30}"
-    [[ "$threshold" =~ ^[0-9]+$ && ${#threshold} -le 4 ]] || threshold=30
+    threshold="$(auditor_control_prompt_after_seconds)"
     nohup /usr/bin/env bash "$0" --external-wait \
       "$auditor" "$generation" "$scope" "$epoch" "$threshold" \
       </dev/null >/dev/null 2>&1 &
@@ -492,7 +512,7 @@ case "${1:-}" in
       auditor_control_state_retire_cache_entry "$escalation_file" || exit 1
     fi
     wake_nonce="$(auditor_control_random_nonce)" || exit 1
-    wake_nonce_hash="$(printf '%s' "$wake_nonce" | shasum -a 256 | awk '{print $1}')"
+    wake_nonce_hash="$(printf '%s' "$wake_nonce" | verdict_audit_sha256)"
     jq -nc --arg auditor "$auditor" --arg generation "$generation" \
       --arg scope "$scope" --arg epoch "$epoch" --arg wake_nonce_hash "$wake_nonce_hash" \
       --argjson now "$(date +%s)" \
@@ -698,8 +718,7 @@ case "${1:-}" in
     override_context="$(subagent_prompt audit/auditor-override "$tooling_root")" || exit 2
     auditor_control_write_override_grant "$scope" "$new_epoch" "$reason_hash" || exit 1
     auditor_control_close_scope_state overridden-by-user || { rm -f "$grant_file"; exit 1; }
-    rm -f "$repo/.agents/state/last-audit.json" "$repo/.agents/state/last-audit-handoff.json" \
-      "$repo/.claude/.last-audit.json" "$repo/.claude/.last-audit-handoff.json"
+    rm -f "$repo/.agents/state/last-audit.json" "$repo/.agents/state/last-audit-handoff.json"
     auditor_control_append_event "$(jq -nc --arg event overridden --arg epoch "$new_epoch" \
       '{event:$event,prompt_epoch:$epoch,outcome:"OVERRIDDEN BY USER"}')"
     jq -nc --arg context "$override_context" \
@@ -748,8 +767,7 @@ case "${1:-}" in
         auditor_control_write_override_grant "$scope" "$epoch" "$reason_hash" || exit 1
         auditor_control_close_scope_state overridden-by-user \
           || { rm -f "$(auditor_override_grant_path "$repo" "$scope")"; exit 1; }
-        rm -f "$repo/.agents/state/last-audit.json" "$repo/.agents/state/last-audit-handoff.json" \
-          "$repo/.claude/.last-audit.json" "$repo/.claude/.last-audit-handoff.json"
+        rm -f "$repo/.agents/state/last-audit.json" "$repo/.agents/state/last-audit-handoff.json"
         auditor_control_append_event "$(jq -nc --arg event overridden --arg epoch "$epoch" \
           --arg auditor "$auditor" --arg generation "$generation" \
           '{event:$event,prompt_epoch:$epoch,auditor:$auditor,generation:$generation,
@@ -803,7 +821,7 @@ if [[ "${1:-}" == select ]]; then
     reason="$(printf '%s' "$payload" | jq -r '.reason // ""')"
     [[ "$reason" =~ [^[:space:]] ]] \
       || { printf 'auditor-control.sh: interactive override requires a reason.\n' >&2; exit 1; }
-    reason_hash="$(printf '%s' "$reason" | shasum -a 256 | awk '{print $1}')"
+    reason_hash="$(printf '%s' "$reason" | verdict_audit_sha256)"
   fi
   auditor_control_state_dispatch select "$scope" \
     "$auditor" "$generation" "$epoch" "$choice" "$reason_hash"
@@ -818,7 +836,7 @@ if [[ "$event" == UserPromptSubmit && "${1:-}" == handle-prompt ]]; then
   directive=normal; reason_hash=-
   if [[ "$first_line" =~ ^force-pass-auditors:[[:space:]]+([^[:space:]].*)$ ]]; then
     directive=override
-    reason_hash="$(printf '%s' "${BASH_REMATCH[1]}" | shasum -a 256 | awk '{print $1}')"
+    reason_hash="$(printf '%s' "${BASH_REMATCH[1]}" | verdict_audit_sha256)"
   fi
   auditor_control_state_dispatch handle-prompt "$scope" \
     "$old_epoch" "$new_epoch" "$directive" "$reason_hash"
@@ -848,8 +866,7 @@ case "$event" in
         || exit $?
     fi
     [[ "${1:-}" != publish-start ]] || exit 0
-    threshold="${AUDITOR_PROMPT_AFTER_SECONDS:-30}"
-    [[ "$threshold" =~ ^[0-9]+$ && ${#threshold} -le 4 ]] || threshold=30
+    threshold="$(auditor_control_prompt_after_seconds)"
     perl -e 'select(undef,undef,undef,$ARGV[0])' "$threshold"
     if escalation_result="$(auditor_control_state_dispatch escalate \
         "$scope" "$auditor" "$generation" "$epoch")"; then
@@ -857,29 +874,15 @@ case "$event" in
         '.wake_nonce | select(type == "string" and test("^[0-9a-f]{64}$"))')" || exit 2
       if [[ "$(hook_host_kind)" == claude ]]; then
         # Remote Control keeps native questions open, so only launcher sessions get the
-        # card; other sessions wake with the typed status and its default, keep waiting (#334).
+        # card; other sessions wake with the typed status and its default, keep waiting.
         if ! hook_interactive_prompt_claude_available; then
           message="$(subagent_prompt audit/auditor-wait-status "$tooling_root" "auditor=$auditor")" || exit 2
           printf '%s [auditor-wake:%s]\n' "$message" "$wake_nonce" >&2
           exit 2
         fi
-        control_script="$tooling_root/.agents/hooks/auditor-control.sh"
-        keep_payload="$(jq -nc --arg session "$session_id" --arg auditor "$auditor" \
-          --arg generation "$generation" \
-          '{hook_event_name:"AskUserQuestion",session_id:$session,choice:"keep_waiting",
-            auditor:$auditor,generation:$generation}')"
-        override_payload="$(jq -nc --arg session "$session_id" --arg auditor "$auditor" \
-          --arg generation "$generation" \
-          '{hook_event_name:"AskUserQuestion",session_id:$session,choice:"override_all",
-            reason:"auditor is taking too long",auditor:$auditor,generation:$generation}')"
-        keep_payload_b64="$(printf '%s' "$keep_payload" \
-          | perl -MMIME::Base64 -0777 -ne 'print encode_base64($_,"")')"
-        override_payload_b64="$(printf '%s' "$override_payload" \
-          | perl -MMIME::Base64 -0777 -ne 'print encode_base64($_,"")')"
-        printf -v project_q '%q' "$repo"
-        printf -v control_q '%q' "$control_script"
-        keep_command="/usr/bin/printf '%s' '$keep_payload_b64' | /usr/bin/perl -MMIME::Base64 -0777 -ne 'print decode_base64(\$_)' | CLAUDE_PROJECT_DIR=$project_q /usr/bin/env bash $control_q select"
-        override_command="/usr/bin/printf '%s' '$override_payload_b64' | /usr/bin/perl -MMIME::Base64 -0777 -ne 'print decode_base64(\$_)' | CLAUDE_PROJECT_DIR=$project_q /usr/bin/env bash $control_q select"
+        keep_command="$(auditor_control_select_command keep_waiting)" || exit 2
+        override_command="$(auditor_control_select_command override_all 'auditor is taking too long')" \
+          || exit 2
         prompt_spec="$(subagent_prompt audit/auditor-question "$tooling_root" \
           "auditor=$(jq -nr --arg value "$auditor" '$value | tojson | .[1:-1]')" \
           "keep_command_json=$(subagent_json_string "$keep_command")" \
