@@ -172,7 +172,7 @@ setup() {
   mkdir -p "$plugin/.agents"
   # The Git hooks delegate to the commit gate inside their own plugin copy.
   cp -R "$REPO_ROOT/.agents/hooks" "$REPO_ROOT/.agents/lib" "$REPO_ROOT/.agents/prompts" \
-    "$plugin/.agents/"
+    "$REPO_ROOT/.agents/auditor-models.tsv" "$plugin/.agents/"
   # No PR watcher here: pre-push skips arming without its helpers, and
   # tests/watch/pr-watch.test.sh owns that path.
   rm -f "$plugin/.agents/lib/pr-watch-state.sh"
