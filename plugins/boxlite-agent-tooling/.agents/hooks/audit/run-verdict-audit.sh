@@ -26,6 +26,7 @@
 #      only its final response through the host-owned --output-last-message channel;
 #      the parent runner validates and publishes those bytes.
 #   3. No matching CLI → exit 2 with instructions (the caller sees why).
+#   Every route takes its model and effort from .agents/auditor-models.tsv.
 #
 # Exit codes: 0 dossier written · 1 audit ran but no dossier · 2 no runner available ·
 #             130 canceled by a newer user prompt/INT · 143 canceled by TERM.
@@ -49,7 +50,6 @@ project_dir="$(cd "$repo_root" && pwd -P)"
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 spec_file="$tooling_root/.claude/agents/verdict-auditor.md"
 audit_timeout_seconds="${VERDICT_AUDITOR_TIMEOUT:-180}"
-auditor_model="${VERDICT_AUDITOR_MODEL:-claude-sonnet-5}"
 audit_pgid=0
 audit_group_identity_owned=false
 audit_group_event_monitor_pid=0
@@ -146,6 +146,27 @@ elif [[ "$audit_host" != codex ]] && command -v claude >/dev/null 2>&1 && [[ -r 
 elif [[ "$audit_host" != claude ]] && codex_bin="$(codex_cli_find)" && [[ -r "$spec_file" ]]; then
   audit_runner=codex
 fi
+# Model and effort come from the shared table (design #474). VERDICT_AUDITOR_MODEL
+# remains an explicit Claude Code override, recorded as such in diagnostics.
+# shellcheck source=../../lib/auditor-model.sh
+source "$tooling_root/.agents/lib/auditor-model.sh" || exit 2
+auditor_settings_host=claude
+if [[ "$audit_runner" == codex || ( "$audit_runner" == override && "$audit_host" == codex ) ]]; then
+  auditor_settings_host=codex
+fi
+auditor_model_load "$tooling_root" verdict-auditor "$auditor_settings_host" || exit 2
+auditor_model_source=table
+if [[ "$auditor_settings_host" == claude && -n "${VERDICT_AUDITOR_MODEL:-}" ]]; then
+  auditor_model="$VERDICT_AUDITOR_MODEL"
+  auditor_model_source=override
+fi
+# Print mode cannot report its effort, so a pinned effort runs without the user's
+# CLAUDE_CODE_EFFORT_LEVEL, which would otherwise win; diagnostics name what was dropped.
+auditor_dropped_effort=""
+if [[ "$audit_runner" == claude && "$auditor_effort" != unset ]]; then
+  auditor_dropped_effort="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+fi
+auditor_observed=unobserved
 if [[ -n "$provided_session_scope" ]]; then
   if [[ "$provided_session_scope" != "-" \
      && ! "$provided_session_scope" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
@@ -558,9 +579,15 @@ finish_audit_diagnostic() {
   fi
   if (( status == 130 || status == 143 )); then outcome=CANCELED
   elif (( status == 0 )); then outcome="${audit_verdict:-ERROR}"; fi
+  local auditor_settings=null
+  if [[ -n "${auditor_model:-}" ]]; then
+    auditor_settings="$(audit_diagnostic_auditor "$auditor_model" "$auditor_effort" \
+      "$auditor_model_source" "$auditor_observed" "$auditor_dropped_effort")" \
+      || auditor_settings=null
+  fi
   audit_diagnostic_record "$project_dir" "$session_scope" verdict "$audit_generation" \
     "$audit_token" "$audit_route" "$audit_started_at" "$audit_process_status" "$status" \
-    "$outcome" "$audit_stderr_file" || true
+    "$outcome" "$audit_stderr_file" "$auditor_settings" || true
   [[ -z "$audit_stderr_file" ]] || rm -f "$audit_stderr_file"
   if [[ -n "$audit_stderr_dir" ]]; then
     rm -f "$audit_stderr_dir/abort" "$audit_stderr_dir/group-ready" "$audit_stderr_dir/group-kill"
@@ -1265,6 +1292,7 @@ if [[ "$audit_runner" == override ]]; then
   if ! run_in_audit_group \
       "$audit_prompt" \
       perl -e 'alarm shift; exec @ARGV' "$audit_stop_seconds" \
+        env AUDITOR_MODEL="$auditor_model" AUDITOR_EFFORT="$auditor_effort" \
         bash -c "$VERDICT_AUDITOR_CMD"; then
     rm -f "$audit_output_file"
     remove_owned_verdict while-current
@@ -1276,6 +1304,9 @@ elif [[ "$audit_runner" == claude ]]; then
   audit_started=true
   remove_owned_verdict
   rm -f "$audit_output_file"
+  auditor_model_claude_args
+  claude_env=(env)
+  [[ "$auditor_effort" == unset ]] || claude_env+=(-u CLAUDE_CODE_EFFORT_LEVEL)
   # Safe mode retains OAuth/keychain auth while dropping project/plugin/memory/hook
   # context. Replace the coding-agent prompt with the stripped auditor procedure and
   # expose its audit tools; --name suppresses a separate title request. The driver's
@@ -1287,11 +1318,12 @@ elif [[ "$audit_runner" == claude ]]; then
   if ! run_in_audit_group \
       "$audit_prompt" \
       subagent_timed_drive "$audit_timeout_seconds" 30 "$audit_stop_seconds" "$record_message" \
-        claude -p --safe-mode --input-format stream-json --output-format stream-json --verbose \
-          --replay-user-messages \
+        "${claude_env[@]}" claude -p --safe-mode --input-format stream-json \
+          --output-format stream-json --verbose --replay-user-messages \
           --system-prompt "$spec_body" --tools Read Bash Write TaskStop \
-          --allowedTools "Read Bash Write TaskStop" --effort xhigh \
-          --name verdict-auditor --no-session-persistence --model "$auditor_model"; then
+          --allowedTools "Read Bash Write TaskStop" \
+          --name verdict-auditor --no-session-persistence \
+          ${auditor_model_args[@]+"${auditor_model_args[@]}"}; then
     rm -f "$audit_output_file"
     remove_owned_verdict while-current
     echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
@@ -1309,6 +1341,7 @@ elif [[ "$audit_runner" == codex ]]; then
   fi
   codex_prompt="$(subagent_prompt audit/verdict-codex-delivery "$tooling_root" \
     "spec_body=$spec_body" "audit_prompt=$audit_prompt" "codex_tree_hash=$codex_tree_hash")" || exit 2
+  auditor_model_codex_args
   if ! run_in_audit_group \
       "$codex_prompt" \
       perl -e 'alarm shift; exec @ARGV' "$audit_stop_seconds" \
@@ -1316,6 +1349,7 @@ elif [[ "$audit_runner" == codex ]]; then
           exec \
           --disable hooks \
           --ignore-user-config \
+          ${auditor_model_args[@]+"${auditor_model_args[@]}"} \
           --sandbox read-only \
           --cd "$project_dir" \
           --ephemeral \
@@ -1350,6 +1384,20 @@ if audit_output_snapshot="$(verdict_audit_read_json_snapshot \
 fi
 audit_json="$(printf '%s' "$audit_json" \
   | verdict_audit_normalize_dossier 2>/dev/null || true)"
+# A custom command may echo the pinned pair it received; an echo that differs means it
+# ran at other settings, so its dossier has no authority (design #474).
+if [[ "$audit_route" == override && -n "$audit_json" ]]; then
+  echoed_pair="$(jq -r '[.auditor_model // "", .auditor_effort // ""] | join(" ")' \
+    <<<"$audit_json" 2>/dev/null || echo '?')"
+  if [[ "$echoed_pair" == "$auditor_model $auditor_effort" ]]; then
+    auditor_observed=matched
+  elif [[ "$echoed_pair" != " " ]]; then
+    printf 'run-verdict-audit.sh: auditor ran at %s, expected %s %s.\n' \
+      "$echoed_pair" "$auditor_model" "$auditor_effort" >&2
+    auditor_observed=mismatch
+    audit_json=""
+  fi
+fi
 audit_output_generation="$(printf '%s' "$audit_json" \
   | jq -r '.generation // ""' 2>/dev/null || echo '')"
 audit_verdict="$(printf '%s' "$audit_json" \

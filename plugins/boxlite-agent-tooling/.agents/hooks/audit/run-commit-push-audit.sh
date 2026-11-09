@@ -126,10 +126,15 @@ cleanup_runner() {
     elif [[ "$audit_execution_outcome" == PASS || "$audit_execution_outcome" == FAIL ]]; then
       outcome="$audit_execution_outcome"
     fi
+    local auditor_settings=null
+    if [[ -n "${auditor_model:-}" ]]; then
+      auditor_settings="$(audit_diagnostic_auditor "$auditor_model" "$auditor_effort" \
+        table unobserved "")" || auditor_settings=null
+    fi
     audit_diagnostic_record "$project_dir" "${AUDITOR_SESSION_SCOPE:--}" "$kind" \
       "${auditor_generation:-legacy}" "${history_id:-$$}" "$audit_execution_route" "$audit_started_at" \
       "${codex_group_exit_status:-null}" "$original_status" "$outcome" \
-      "$audit_tmp_dir/codex-stderr.log" || true
+      "$audit_tmp_dir/codex-stderr.log" "$auditor_settings" || true
     rm -rf "$audit_tmp_dir"
   fi
   [[ -z "${push_context_tmp_dir:-}" ]] || rm -rf "$push_context_tmp_dir"
@@ -1097,6 +1102,7 @@ MKTEMP
         --ask-for-approval never \
         exec \
         --ignore-user-config \
+        ${auditor_model_args[@]+"${auditor_model_args[@]}"} \
         --disable hooks \
         --sandbox workspace-write \
         -c 'sandbox_workspace_write.writable_roots=[]' \
@@ -1301,6 +1307,14 @@ run_agentic_audit() {
   # lifecycle edge for the headless Codex process, after local validation and prompt
   # construction but before the external auditor actually begins.
   start_auditor_control
+
+  # The pinned pair comes from the shared table (design #474); no row, no audit.
+  # shellcheck source=../../lib/auditor-model.sh
+  if ! { source "$tooling_root/.agents/lib/auditor-model.sh" \
+         && auditor_model_load "$tooling_root" commit-push-auditor codex; } 2>"$prompt_err"; then
+    write_fail "Internal: $(head -1 "$prompt_err" 2>/dev/null || printf 'auditor model table unavailable')"
+  fi
+  auditor_model_codex_args
 
   local codex_group_rc=0
   audit_execution_route=codex

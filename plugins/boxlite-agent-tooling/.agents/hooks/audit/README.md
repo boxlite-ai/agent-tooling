@@ -188,13 +188,27 @@ Headless classification and both runners read the optional user file
 - **When:** configure the user file when a GUI or background host does not inherit shell exports.
 - **Never evaluated:** repository files and PAC programs.
 - **Diagnostics:** each runner records route, child/runner exit status, elapsed seconds, outcome, and a credential-masked stderr tail in the session's `audit-diagnostics.jsonl`.
+
+### Auditor model and effort
+
+[`auditor-models.tsv`](../../auditor-models.tsv) maps each auditor and host to a model and effort ([#474](https://github.com/boxlite-ai/agent-tooling/issues/474)).
+
+| Rule | Behavior |
+| --- | --- |
+| Rows | Read by the headless runners and the quick check; agent frontmatter must match the Claude Code rows (`tests/audit/auditor-model.test.sh`). |
+| `unset` | Sends no flag, as before the table; each row becomes explicit in its own change after its replay. |
+| Failures | A missing table or row, an empty or malformed cell, or a duplicate row stops the route; it never falls back to a CLI default. |
+| Claude Code | `--model`/`--effort`; a pinned effort runs without `CLAUDE_CODE_EFFORT_LEVEL`, and diagnostics name the dropped value. |
+| Codex | `-c model=` and `-c model_reasoning_effort=` after `--ignore-user-config`. |
+| `VERDICT_AUDITOR_CMD` | Receives `AUDITOR_MODEL`/`AUDITOR_EFFORT`; a dossier may echo them as `auditor_model`/`auditor_effort`, and a differing echo has no authority. |
+| Diagnostics | Each record carries `auditor`: model, effort, source, and whether the pair was observed. |
 - **Diagnostic limits:** each tail is at most 4 KiB; the shared log rotates at its existing 1 MiB bound. Stop errors name this local file. Diagnostics never grant dossier authority.
 
 | Variable | Read by | Default | Effect |
 | --- | --- | --- | --- |
 | `BOXLITE_HOOK_HOST` | Shared host detector | Legacy root inference | Set by each manifest: `claude`, `codex`, or `unknown`; invalid nonempty exported values yield unknown. Routing metadata only. |
 | `VERDICT_AUDITOR_CMD` | `run-verdict-audit.sh` | unset | Replaces the model CLI; reads the audit prompt on stdin and must write the requested dossier. |
-| `VERDICT_AUDITOR_MODEL` | `run-verdict-audit.sh` | `claude-sonnet-5` | Model for the `claude -p` route. |
+| `VERDICT_AUDITOR_MODEL` | `run-verdict-audit.sh` | Table row | Overrides the `claude -p` route's model; diagnostics record it as an override. |
 | `VERDICT_AUDITOR_TIMEOUT` | Native deadline hook, `run-verdict-audit.sh` | `180` seconds | Investigation, 1–3480. All headless routes add `min(60, budget)` seconds to record. Claude defaults: record 180 s, interrupt 210 s if undelivered, hard stop 240 s. Startup/cleanup add elapsed time. No valid report remains an execution error. |
 | `COMMIT_PUSH_AUDITOR_TIMEOUT` | `preflight-commit-push.sh`, `run-commit-push-audit.sh` | `900` seconds | Native investigation: 1–9999; headless: 1–3480 plus `min(60, budget)` record seconds. At deadline, no confirmed blockers means PASS with unchecked advisories; known blockers stay FAIL. Native hooks allow recording and owned-task cleanup. |
 | `DESIGN_AUDITOR_TIMEOUT` | `preflight-design-doc.sh` | `900` seconds | Design audit and advice deadline; past it, the auditor or advisor is told to record now. |

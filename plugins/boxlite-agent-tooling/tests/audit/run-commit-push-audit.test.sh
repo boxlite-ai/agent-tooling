@@ -75,7 +75,9 @@ setup() {  # [object format] -> repo path
     "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
     "$REPO_ROOT/.agents/lib/timed-user-prompt.sh" \
     "$REPO_ROOT/.agents/lib/git-audit-decision.sh" \
-    "$REPO_ROOT/.agents/lib/hook-host.sh" "$d/.agents/lib/"
+    "$REPO_ROOT/.agents/lib/hook-host.sh" \
+    "$REPO_ROOT/.agents/lib/auditor-model.sh" "$d/.agents/lib/"
+  cp "$REPO_ROOT/.agents/auditor-models.tsv" "$d/.agents/"
   cp -R "$REPO_ROOT/.agents/prompts/." "$d/.agents/prompts/"
   cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$d/.agents/lib/"
   printf 'base\n' > "$d/f"

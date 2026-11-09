@@ -1,0 +1,14 @@
+# Auditor model and effort per host (design #474). Tab-separated:
+# auditor	host	model	effort
+# `unset` sends no flag, as before this table existed; each row moves to an explicit
+# value in its own change, after its replay. A missing row or empty cell is an error.
+verdict-classifier	claude	claude-haiku-4-5-20251001	low
+verdict-classifier	codex	unset	unset
+verdict-auditor	claude	claude-sonnet-5	xhigh
+verdict-auditor	codex	unset	unset
+commit-push-auditor	claude	unset	high
+commit-push-auditor	codex	unset	unset
+design-auditor	claude	unset	unset
+design-auditor	codex	unset	unset
+design-advisor	claude	unset	unset
+design-advisor	codex	unset	unset

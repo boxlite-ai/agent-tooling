@@ -877,6 +877,7 @@ verdict_audit_normalize_turn_snapshot() {  # max-allowed-bytes; snapshot JSON on
 # Normalize exactly one verdict dossier only when it matches the published wire contract.
 # Legacy/manual dossiers may omit `generation`; a present generation is always a string.
 # `advisories` is optional on every verdict: non-blocking notes that never decide one.
+# `auditor_model`/`auditor_effort` are optional echoes of the pinned pair (design #474).
 # Keeping this policy in one function prevents the runner and Stop gate from drifting on
 # which JSON has authority.
 verdict_audit_normalize_dossier() {  # JSON on stdin
@@ -904,8 +905,10 @@ verdict_audit_normalize_dossier() {  # JSON on stdin
            end);
     if length == 1
        and (.[0] | type) == "object"
-       and (.[0] | del(.generation, .advisories, .history_review, .reflection_review)
+       and (.[0] | del(.generation, .advisories, .history_review, .reflection_review,
+                       .auditor_model, .auditor_effort)
             | exact_keys(["branch", "head", "tree_hash", "verdict", "proof", "findings"]))
+       and all(.[0].auditor_model, .[0].auditor_effort; . == null or nonempty_line)
        and (.[0].branch | type) == "string"
        and (.[0].head | type) == "string"
        and (.[0].tree_hash | type) == "string"
