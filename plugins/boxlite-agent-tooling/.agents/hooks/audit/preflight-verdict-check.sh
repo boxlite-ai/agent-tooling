@@ -1185,9 +1185,14 @@ classify_with_codex() { # scratch directory; stdin = triage instructions and tur
   # shellcheck source=../../lib/codex-cli.sh
   source "$tooling_root/.agents/lib/codex-cli.sh" || return 1
   codex_bin="$(codex_cli_find)" || return 1
+  # shellcheck source=../../lib/auditor-model.sh
+  source "$tooling_root/.agents/lib/auditor-model.sh" || return 1
+  auditor_model_load "$tooling_root" verdict-classifier codex || return 1
+  auditor_model_codex_args
   "$codex_bin" --ask-for-approval never exec \
     --disable hooks --disable shell_tool --disable multi_agent \
-    --ignore-user-config --sandbox read-only --ephemeral \
+    --ignore-user-config ${auditor_model_args[@]+"${auditor_model_args[@]}"} \
+    --sandbox read-only --ephemeral \
     --skip-git-repo-check --cd "$1" -c project_doc_max_bytes=0 -
 }
 
@@ -1231,13 +1236,22 @@ should_audit() {  # stdin-less; uses $1 as the stripped message; echoes YES/NO/U
     # Safe mode retains OAuth/keychain auth while dropping project/plugin/memory/hook
     # context. The custom system prompt + empty tools keep this a binary classifier;
     # --name also suppresses Claude Code's separate title-generation model request.
+    # The model and effort come from the shared table (design #474); a pinned effort
+    # runs without CLAUDE_CODE_EFFORT_LEVEL, which would otherwise override it.
+    local claude_env=(env)
+    # shellcheck source=../../lib/auditor-model.sh
+    source "$tooling_root/.agents/lib/auditor-model.sh" \
+      && auditor_model_load "$tooling_root" verdict-classifier claude \
+      || { echo UNKNOWN; return 0; }
+    auditor_model_claude_args
+    [[ "$auditor_effort" == unset ]] || claude_env+=(-u CLAUDE_CODE_EFFORT_LEVEL)
     if printf '<message>\n%s\n</message>\n' "$msg" \
         | verdict_audit_write_exclusive_regular "$classifier_input" \
        && capture_bounded_command "$classifier_input" "$classifier_output" \
           "$classifier_output_max_bytes" "$classifier_timeout_seconds" \
-          fixed claude -p --safe-mode --tools "" --system-prompt "$triage_prompt" \
-            --effort low --name verdict-classifier --no-session-persistence \
-            --model claude-haiku-4-5-20251001; then
+          fixed "${claude_env[@]}" claude -p --safe-mode --tools "" \
+            --system-prompt "$triage_prompt" --name verdict-classifier \
+            --no-session-persistence ${auditor_model_args[@]+"${auditor_model_args[@]}"}; then
       out="$(classifier_answer <"$classifier_output")"
     fi
   elif [[ "$audit_host" == codex ]]; then

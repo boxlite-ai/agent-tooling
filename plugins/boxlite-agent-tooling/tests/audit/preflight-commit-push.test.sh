@@ -51,7 +51,9 @@ stage_lib() {  # $1 = fake repo root
      "$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh" \
      "$REPO_ROOT/.agents/lib/timed-user-prompt.sh" \
      "$REPO_ROOT/.agents/lib/git-audit-decision.sh" \
-     "$REPO_ROOT/.agents/lib/hook-host.sh" "$1/.agents/lib/"
+     "$REPO_ROOT/.agents/lib/hook-host.sh" \
+     "$REPO_ROOT/.agents/lib/auditor-model.sh" "$1/.agents/lib/"
+  cp "$REPO_ROOT/.agents/auditor-models.tsv" "$1/.agents/"
   # The prompts travel with the library: they are the text it loads, and the hook
   # treats a missing prompt document as an error rather than improvising one.
   cp -R "$REPO_ROOT/.agents/prompts/." "$1/.agents/prompts/"
