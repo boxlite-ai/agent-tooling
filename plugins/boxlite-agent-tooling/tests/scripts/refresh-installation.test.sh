@@ -17,21 +17,13 @@ SCRIPT="$PLUGIN_ROOT/scripts/refresh-installation.sh"
 VERIFY="$PLUGIN_ROOT/scripts/verify-installation.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
+# shellcheck source=../lib/assert.sh
+source "$PLUGIN_ROOT/tests/lib/assert.sh"
 
-pass=0
-fail=0
 rc=""
 err=""
 REPO="$TMP/consumer"
 LOCK=""
-
-report() {  # description, predicate exit status, details on failure
-  if [[ "$2" == 0 ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$1"
-  else
-    fail=$((fail + 1)); printf '  FAIL  %s (%s)\n' "$1" "$3"
-  fi
-}
 
 make_consumer() {
   rm -rf "$REPO"
@@ -90,19 +82,19 @@ stale_stamp() {
 echo "## The refresh takes the lock and leaves none behind"
 make_consumer
 run_refresh
-installer_ran; report "an unlocked refresh reaches the installer" $? "rc=$rc err=$err"
-lock_held; report "the lock is released on exit" $((! $?)) "lock still at $LOCK"
+installer_ran; check_rc "an unlocked refresh reaches the installer" $? "rc=$rc err=$err"
+lock_held; check_rc "the lock is released on exit" $((! $?)) "lock still at $LOCK"
 
 echo "## A lock that is held keeps other refreshes out"
 make_consumer
 mkdir -p "$LOCK"
 run_refresh
-installer_ran; report "a locked refresh does not run the installer" $((! $?)) "rc=$rc err=$err"
-lock_held; report "and the lock is left exactly where it was" $? "lock gone from $LOCK"
+installer_ran; check_rc "a locked refresh does not run the installer" $((! $?)) "rc=$rc err=$err"
+lock_held; check_rc "and the lock is left exactly where it was" $? "lock gone from $LOCK"
 # Breaking a lock here would race its holder, so an abandoned one outlives the refresh by
 # design and is reported by the installation check instead of cleared behind a back.
 run_refresh
-installer_ran; report "a second attempt still stays out" $((! $?)) "rc=$rc err=$err"
+installer_ran; check_rc "a second attempt still stays out" $((! $?)) "rc=$rc err=$err"
 
 echo "## An abandoned lock is reported where a person is looking"
 # The bug this covers: the refresh takes its lock with a bare mkdir whose only failure path
@@ -113,24 +105,24 @@ run_verify
 clean_rc="$rc"
 starts_clean=1
 [[ "$clean_rc" == 0 ]] && starts_clean=0
-report "the fixture passes the installation check to begin with" $starts_clean "rc=$rc err=$err"
+check_rc "the fixture passes the installation check to begin with" $starts_clean "rc=$rc err=$err"
 mkdir -p "$LOCK"
 run_verify
 fresh_quiet=1
 [[ "$err" != *"no refresh has completed"* ]] && fresh_quiet=0
-report "a lock taken just now is not reported" $fresh_quiet "err=$err"
+check_rc "a lock taken just now is not reported" $fresh_quiet "err=$err"
 touch -t "$(stale_stamp)" "$LOCK"
 run_verify
 said_stale=1
 [[ "$err" == *"no refresh has completed"* ]] && said_stale=0
-report "a lock left for hours is reported" $said_stale "err=$err"
+check_rc "a lock left for hours is reported" $said_stale "err=$err"
 named_path=1
 [[ "$err" == *"$LOCK"* ]] && named_path=0
-report "and the report names the path to remove" $named_path "err=$err"
+check_rc "and the report names the path to remove" $named_path "err=$err"
 # The check still passes: a dead refresh leaves the recorded revision valid, just still.
 still_passes=1
 [[ "$rc" == 0 ]] && still_passes=0
-report "the report is a warning, not a new failure" $still_passes "rc=$rc err=$err"
+check_rc "the report is a warning, not a new failure" $still_passes "rc=$rc err=$err"
 
 echo "## Environment discovery must succeed before invoking any installer"
 export REAL_GIT
@@ -156,11 +148,11 @@ for discovery in failed empty malformed; do
     rc=$?
     expected_rc=1
     [[ "$entry" == sync ]] && expected_rc=0
-    [[ "$rc" == "$expected_rc" ]]; report "$entry preserves its exit contract on $discovery discovery" $? "rc=$rc err=$err"
-    installer_ran; report "$entry refuses the installer on $discovery discovery" $((! $?)) "err=$err"
+    [[ "$rc" == "$expected_rc" ]]; check_rc "$entry preserves its exit contract on $discovery discovery" $? "rc=$rc err=$err"
+    installer_ran; check_rc "$entry refuses the installer on $discovery discovery" $((! $?)) "err=$err"
     [[ "$err" == *'repository-local Git environment'* ]]
-    report "$entry explains $discovery discovery" $? "err=$err"
-    lock_held; report "$entry leaves no lock on $discovery discovery" $((! $?)) "lock=$LOCK"
+    check_rc "$entry explains $discovery discovery" $? "err=$err"
+    lock_held; check_rc "$entry leaves no lock on $discovery discovery" $((! $?)) "lock=$LOCK"
   done
 done
 
@@ -180,9 +172,9 @@ ENV_INSTALLER
     GIT_NAMESPACE=consumer GIT_CONFIG_GLOBAL="$TMP/global-config" EXPECTED_CONFIG="$TMP/global-config" \
     GIT_SSH_COMMAND='ssh -oBatchMode=yes' bash "$PLUGIN_ROOT/scripts/$entry-installation.sh" "$REPO" 2>&1 >/dev/null)"
   rc=$?
-  report "$entry accepts a valid repository environment" "$rc" "err=$err"
+  check_rc "$entry accepts a valid repository environment" "$rc" "err=$err"
   [[ "$(cat "$REPO/.git/agent-tooling/installer-ran" 2>/dev/null)" == 'caller input' ]]
-  report "$entry isolates repository variables while preserving input and transport config" $? "err=$err"
+  check_rc "$entry isolates repository variables while preserving input and transport config" $? "err=$err"
 done
 
 echo
@@ -218,30 +210,29 @@ run_due_refresh() {
 }
 touch "$REPO/.git/agent-tooling/last-check"
 run_due_refresh
-[[ ! -e "$REFRESH_POLL_LOG" ]]; report "fresh stamp skips the remote inside the lock" $? "$(cat "$TMP/refresh-err")"
+[[ ! -e "$REFRESH_POLL_LOG" ]]; check_rc "fresh stamp skips the remote inside the lock" $? "$(cat "$TMP/refresh-err")"
 AGENT_TOOLING_REFRESH=0 AGENT_TOOLING_REFRESH_MINUTES=0 run_due_refresh
-[[ ! -e "$REFRESH_POLL_LOG" ]]; report "refresh opt-out skips the remote" $? "$(cat "$TMP/refresh-err")"
+[[ ! -e "$REFRESH_POLL_LOG" ]]; check_rc "refresh opt-out skips the remote" $? "$(cat "$TMP/refresh-err")"
 touch -t 200001010000 "$REPO/.git/agent-tooling/last-check"
 run_due_refresh
-[[ "$(cat "$REFRESH_POLL_LOG" 2>/dev/null)" == poll ]]; report "expired stamp polls once" $? "$(cat "$TMP/refresh-err")"
+[[ "$(cat "$REFRESH_POLL_LOG" 2>/dev/null)" == poll ]]; check_rc "expired stamp polls once" $? "$(cat "$TMP/refresh-err")"
 run_due_refresh
-[[ "$(cat "$REFRESH_POLL_LOG" 2>/dev/null)" == poll ]]; report "successful poll throttles the next caller" $? "$(cat "$TMP/refresh-err")"
+[[ "$(cat "$REFRESH_POLL_LOG" 2>/dev/null)" == poll ]]; check_rc "successful poll throttles the next caller" $? "$(cat "$TMP/refresh-err")"
 AGENT_TOOLING_REFRESH_MINUTES=invalid run_due_refresh
-[[ "$?" == 1 ]]; report "invalid interval fails closed" $? "$(cat "$TMP/refresh-err")"
+[[ "$?" == 1 ]]; check_rc "invalid interval fails closed" $? "$(cat "$TMP/refresh-err")"
 started="$(date +%s)"
 AGENT_TOOLING_COMMAND_TIMEOUT_SECONDS=1 AGENT_TOOLING_REFRESH_MINUTES=0 REFRESH_STALL=1 run_due_refresh
 rc=$?
 elapsed=$(( $(date +%s) - started ))
-[[ "$rc" == 0 && "$elapsed" -le 2 ]]; report "stalled remote is bounded and retains the record" $? "rc=$rc elapsed=$elapsed"
+[[ "$rc" == 0 && "$elapsed" -le 2 ]]; check_rc "stalled remote is bounded and retains the record" $? "rc=$rc elapsed=$elapsed"
 [[ "$(head -n1 "$REPO/.git/agent-tooling/current")" == "$REFRESH_POLL_SHA" ]]
-report "timeout does not advance the record" $? "record changed"
-lock_held; report "timeout releases its refresh lock" $((! $?)) "lock remains"
+check_rc "timeout does not advance the record" $? "record changed"
+lock_held; check_rc "timeout releases its refresh lock" $((! $?)) "lock remains"
 child="$(cat "$REFRESH_CHILD")"
 kill -0 "$child" 2>/dev/null
-report "timeout stops the remote's descendant" $((! $?)) "child $child remains"
+check_rc "timeout stops the remote's descendant" $((! $?)) "child $child remains"
 started="$(date +%s)"
 AGENT_TOOLING_COMMAND_TIMEOUT_SECONDS=1 AGENT_TOOLING_REFRESH_MINUTES=0 REFRESH_DETACH=1 run_due_refresh
 elapsed=$(( $(date +%s) - started ))
-[[ "$elapsed" -le 2 ]]; report "deadline also stops inherited pipes after the direct child exits" $? "elapsed=$elapsed"
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+[[ "$elapsed" -le 2 ]]; check_rc "deadline also stops inherited pipes after the direct child exits" $? "elapsed=$elapsed"
+assert_result

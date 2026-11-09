@@ -34,19 +34,11 @@ flowchart TB
     changed retain@-->|"No"| keep
 ```
 
-Refresh honors holds, interval checks, and a lock.
-
-- Lifecycle-triggered installs defer committed guidance edits.
-- Explicit installation updates those instructions; `setup.sh` validates the profile and configures hooks.
-- Verification stays local and works offline.
+Refresh honors holds, interval checks, and a lock; `setup.sh` validates the profile and configures hooks; verification stays local and works offline.
 
 Design, audit-history, and confirmation commands are separate entry points. Their
 wrappers validate arguments and dependencies, then call libraries under
 [`../.agents/lib/`](../.agents/lib/); the libraries own provider reads and state transitions.
-
-`design-doc.sh show [repo-root]` reads the target's bound design without changing the
-working directory. Reviewers can run it from writable scratch when the repository is
-read-only; omitting the argument keeps the current-checkout behavior.
 
 ## Installation and guidance
 
@@ -73,7 +65,7 @@ Lifecycle-triggered installs defer instruction edits.
 Network commands have 30-second limits within a 30-second refresh or 120-second host phase.
 
 - `AGENT_TOOLING_COMMAND_TIMEOUT_SECONDS` can shorten each command's limit to 1–30 seconds.
-- The standalone first-install fallback still relies on its caller's deadline.
+- The consumer loader's first-install fetch relies on its caller's deadline.
 - Native CLI failures are visible; an updated repository and a host installation are separate transactions.
 
 ## Installation runtime
@@ -88,9 +80,9 @@ Consumers float on `tooling.ref`, run recorded `.git/agent-tooling/current`, and
 
 On supported local macOS and Linux filesystems, setup inherits the installation lock. A retry can recover after the last writer exits.
 
-- Keep `.install.guard` in place. The installer uses `.install.lock` as a hard link to the guard so older installers see an occupied path.
-- Windows, network mounts, and unidentified filesystems use the directory lock. Before moving a stale legacy directory aside, verify the installer and any setup children have stopped.
-- The bootstrap delegates to the cached runtime when present, preserving its update deadline.
+- The lease is an `flock` on `.install.guard`; keep that file in place.
+- Windows, network mounts, and unidentified filesystems use the `.install.lock` directory. Before removing a stale one, verify the installer and any setup children have stopped.
+- The consumer loader delegates to the cached runtime when present, preserving its update deadline.
 
 ### Lifecycle environment
 
@@ -100,7 +92,7 @@ Discovery/cleanup failure prevents installation; lifecycle sync stays nonblockin
 
 ### Offline installation repair
 
-`templates/install.sh` validates recorded cache under installation lock, runs revision check/setup, then verifier; invalid cache/profile denies.
+`scripts/install.sh` validates the recorded cache under the installation lock, runs revision check/setup, then the verifier; an invalid cache or profile denies.
 
 Repair restores worktree hooks without changing adoption/history/check timestamp; host bootstraps suppress initial probes but surface repair/refresh failures.
 
@@ -112,14 +104,14 @@ Restoration is armed before uninstall; persistent staleness/error keeps session 
 
 ### Startup updates
 
-Consumer templates select host implementation by recorded SHA; installer delegates to `scripts/install.sh`, with standalone empty-cache fallback.
+Consumer templates select the host implementation by recorded SHA. Without a cached runtime, the installer loader fetches the named release and runs its `scripts/install.sh`.
 
 | Owner | Contract |
 | --- | --- |
-| Released templates | Migration requires tooling 0.1.35 and all three loaders; automatic runs never overwrite tracked files. |
+| Released templates | Load the adopted runtime; automatic runs never overwrite tracked files. |
 | `.agents/lib/plugin-bootstrap.sh` | Shared release/adopted-runtime lookup; initialize failure state, refresh, then transfer original input to adopted implementation. |
-| Host reconciliation | Reconcile equal-old/ahead versions; opt-out mismatch needs explicit repair; Claude `--check` reads session state only. |
-| `scripts/refresh-installation.sh --if-due` | Shared locked polling stamp includes failures; retain old download fallback only after profile/install validation. |
+| Host reconciliation | Reconcile a host plugin version that differs from the adopted one; with refresh off or a hold, a mismatch fails and names the repair; Claude `--check` reads session state only. |
+| `scripts/refresh-installation.sh --if-due` | Shared locked polling stamp includes failures; a failed adoption keeps the recorded revision only while profile and installation validate. |
 | `.agents/lib/tooling-command.sh` | Process-group TERM/KILL/reap; 30-second poll/adoption, 120-second host reconciliation including repair. |
 
 Shell owners release locks on EXIT/INT/TERM; SIGKILL may prevent cleanup; no hot replacement of loaded sessions or automatic stale-lock recovery is claimed.
@@ -134,19 +126,7 @@ Shell owners release locks on EXIT/INT/TERM; SIGKILL may prevent cleanup; no hot
 | Consumer adoption | Run `.agent-tooling/install.sh`, refresh host plugin, then reload/start a new task. |
 | Verification | Separately check recorded revision, worktree hook path, managed guidance, and installed version; preserve holds/unrelated edits. |
 
-Use [one-time migration instructions](../../../README.md#migrate-existing-consumers-once) for adopted-package loaders; installers never rewrite tracked loaders.
-
-| Older installation | Migration caution |
-| --- | --- |
-| 0.1.29–0.1.34 | Refresh both runtime/plugin for size, API, research, summary, skill discovery, and declared-host routing. |
-| Code begun under 0.1.30 | Attempt an editor edit before next commit/push to trigger missing design review; merged work remains accepted risk. |
-| Before 0.1.35 | Migrate all three consumer loaders once; preserve customizations/held releases. |
-| Markerless Git wiring | Retain launcher/PID contract; see [Git gates](../.githooks/README.md#git-gates). |
-| Earlier design verdicts | Legacy record/`research` alias remain readable; PASS now needs fresh advice; refresh/reload, including displayed async cards. |
-| Review/retry updates | Refresh whole plugin and start a new session so prompts, Git gates, and callbacks agree. |
-| Before 0.1.50 | Auditors cannot read the commit/push claim-check pointer ([#407](https://github.com/boxlite-ai/agent-tooling/issues/407)); refresh the host plugin, then reload. |
-| Before 0.1.51 | Designs with an inline research log: store it with `design-doc.sh log` and remove it before the next audit, which otherwise reports it as high ([#388](https://github.com/boxlite-ai/agent-tooling/issues/388)); refresh/reload. |
-| Before 0.1.52 | A recorded design PASS stays valid until its text changes; the next audit applies the How it works overview ([#421](https://github.com/boxlite-ai/agent-tooling/pull/421)) and best-practice line ([#430](https://github.com/boxlite-ai/agent-tooling/pull/430)) as high; Stop and GitHub gates enforce structure limits ([#423](https://github.com/boxlite-ai/agent-tooling/pull/423)); refresh/reload. |
+Installers never rewrite tracked loaders; a breaking release follows [the upgrade steps](../../../README.md#upgrade-across-a-breaking-release).
 
 Check Claude installation by exact `projectPath`; updating one linked worktree can leave another stale.
 
@@ -158,10 +138,10 @@ Transcript discovery and runner contracts: [audit configuration](../.agents/hook
 
 | Script / arguments | Responsibility and effects |
 | --- | --- |
-| [design-doc.sh](design-doc.sh) `register <URL>` (alias `bind`), `check`, `verdict` (alias `research`), `reflect`, or `show` | Fetch and validate a design; bind it to the current worktree/branch, recheck the existing binding, record the design auditor's stdin verdict for the live content, store the stdin reflection a later audit waits for, or recheck it and print its content. |
+| [design-doc.sh](design-doc.sh) `register <URL>`, `check`, `log`, `verdict`, `advice`, `reflect`, or `show [repo-root]` | Fetch and validate a design; bind it to the current worktree/branch, recheck the existing binding, store the research log, record the auditor's verdict or the advisor's advice for the live content, store the reflection a later audit waits for, or recheck it and print its content. |
 | [api-compatibility.sh](api-compatibility.sh) `inspect\|inspect-push\|check\|push [repo-root] [base-ref]` | Check `*openapi*.yaml` changes, require user confirmation to skip breaking/default enforcement, and export per-file request-audit evidence; see [commands](api-compatibility.md). |
 | [pr-author-review.sh](pr-author-review.sh) `<github-event.json>` | CI publisher: update the author-review check and prompt, and return an unacknowledged PR to draft. Exit 0: acknowledged/irrelevant; 1: awaiting acknowledgment; 2: API/validation error. |
-| [audit-reflection.sh](audit-reflection.sh) `prepare\|record\|status\|submit\|checkpoint STATE` | Read bounded request JSON; persist audit transitions or check the Git retry decision, returning cycle JSON on stdout. |
+| [audit-reflection.sh](audit-reflection.sh) `prepare\|record\|status\|submit\|next-action STATE` | Read bounded request JSON; persist audit transitions or return the next Git retry action as JSON on stdout. |
 | [audit-reflection-gate.sh](audit-reflection-gate.sh) `CONTEXT OPERATION [ATTEMPT_ID]` | Adapt audit history to scoped gates: validate context, snapshot evidence, and reconcile outcomes; payload JSON arrives on stdin. |
 | [validate-audit-dossier.sh](validate-audit-dossier.sh) `verdict\|commit\|push HISTORY [DOSSIER]` | Read-only candidate validation; `-` means no history or dossier on stdin; writes no audit state or approval. |
 | [read-verdict-index.sh](read-verdict-index.sh) `REPO_ROOT SESSION_ID TRANSCRIPT` | Read-only checkpoint lookup for a resolved source. Exit 0 prints a tentative offset, 1 means no usable hint, and 2 means invocation or setup failed. |
@@ -176,10 +156,7 @@ Before delivery, run the validator with the task's immutable history input and c
 - Reads reject NUL and unsafe file types; limits are 1 MiB for dossiers, 10 MiB for history, and five seconds for stdin.
 - No network or Git operation is needed.
 
-From a consumer checkout, `bash <plugin-root>/scripts/design-doc.sh check`
-revalidates its registered design; `show` also prints it, which is how auditors
-read Linear and Notion designs without a browser login. Registration and provider authentication are
-documented in [Contributing](../CONTRIBUTING.md#pull-request-descriptions).
+`check` revalidates the registered design; `show [repo-root]` also prints it without changing directory. Auditors read Linear and Notion designs this way, without a browser login. Registration steps: [Contributing](../CONTRIBUTING.md#pull-request-descriptions).
 
 Native auditors use the [audit-history procedure](../.agents/prompts/audit/git-audit-history.md).
 History CLI context is JSON containing `repo_root`, `session`, `epoch`, `branch`,
@@ -198,7 +175,7 @@ See [state contracts](../.agents/hooks/audit/state.md#state-files) and the
 
 Git preparation checks the three-failure decision under the history lock.
 
-- `checkpoint` checks the same decision without creating an attempt; it returns exit 2 while waiting or stopped.
+- `next-action` reports the same decision without creating an attempt.
 - Five-minute expiry permits one reflected retry, preserving failed outcomes.
 - See [retry choices](../.agents/hooks/audit/README.md#commitpush-retry-choices).
 

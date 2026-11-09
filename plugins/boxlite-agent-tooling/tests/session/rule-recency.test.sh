@@ -7,10 +7,8 @@ HOOK="$REPO_ROOT/.agents/hooks/rule-recency.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 
 emit() {
   printf '{"session_id":"%s","prompt":"%s"}' "$1" "$2" \
@@ -108,9 +106,9 @@ else
   bad "unparseable prompt is silent on stderr"
 fi
 
-# Escaped quotes are ordinary JSON, not malformed input. The compact parser used to
-# stop at the first escaped quote, normalize `ok \\` to the bare acknowledgement `ok`,
-# and suppress a substantive request.
+# Escaped quotes are ordinary JSON, not malformed input. A parser that stopped at the
+# first escaped quote would normalize `ok \\` to the bare acknowledgement `ok` and
+# suppress a substantive request.
 quoted_request="$(jq -nc --arg p 'ok "now fix it"' \
   '{session_id:"quoted",prompt:$p}' | TMPDIR="$TMP" bash "$HOOK")"
 if [[ -n "$quoted_request" ]]; then
@@ -139,5 +137,4 @@ else
   ok "no dependency on the plugin tree"
 fi
 
-printf '\nRESULT: %d passed, %d failed\n' "$pass" "$fail"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

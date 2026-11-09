@@ -32,8 +32,9 @@ make test:plugin TEST_FILTER=<name>
 Plugin suites and fixtures live under [`tests/`](tests/) by subsystem. Bootstrap suites and fixtures live under [`tests/bootstrap/`](../../tests/bootstrap/).
 
 - `make test:plugin` discovers shell suites under the plugin test directory.
+- Shell suites source [`tests/lib/assert.sh`](tests/lib/assert.sh) for `check_*` assertions and the `RESULT` line.
 - `make test:bootstrap` runs the installer and both host bootstrap suites. Run [prompt rules](../../tests/bootstrap/prompt-rules.test.sh) separately.
-- `TEST_FILTER` matches substrings of current and previous suite paths. For example, `TEST_FILTER=tests/` selects every shell suite in the chosen Make target.
+- `TEST_FILTER` matches suite path substrings. For example, `TEST_FILTER=tests/` selects every shell suite in the chosen Make target.
 - Run each Python skill suite with `python3 -m unittest discover -s plugins/boxlite-agent-tooling/tests/skills/<skill>`.
 
 API changes also require `make test:api-compatibility test:api-lint` with oasdiff 1.33.0 or `OASDIFF_BIN`.
@@ -63,14 +64,14 @@ Apply [size/decomposition policy](guidance/workflow.md#pr-size-and-decomposition
 ### Pull request descriptions
 
 1. Apply `boxlite-design-doc`; use the design issue template, keeping its outline aligned with the skill, including `Problem` before `Scope`.
-2. Register and store the research log before code; `bind` remains an alias:
+2. Before code, register the design and store its log.
 
    ```sh
    bash <plugin-root>/scripts/design-doc.sh register <URL>
    bash <plugin-root>/scripts/design-doc.sh log < research-log.md
    ```
 
-   The design is for human reviewers; the log stays in the clone, bound to the audit, and is never published ([#388](https://github.com/boxlite-ai/agent-tooling/issues/388)). An empty log deletes it; any log change needs a new audit.
+   The design is for human reviewers; the log stays in the clone, bound to the audit, and is never published. An empty log deletes it; any log change needs a new audit.
 
 3. Follow the gate's auditor route, then advisor route; show advice to the human, who selects what to adopt.
 4. Read/apply `boxlite-pr-preparation` for drafts/revisions; include the registered full URL and substantive project-documentation link.

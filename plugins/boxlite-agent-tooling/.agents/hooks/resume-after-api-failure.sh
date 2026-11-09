@@ -48,7 +48,7 @@ readonly api_resume_wake_ttl_seconds=120
 readonly api_resume_state_max_bytes=4096
 api_resume_retryable_kinds=(server_error overloaded)
 
-for required_command in jq perl shasum awk git; do
+for required_command in jq perl git; do
   command -v "$required_command" >/dev/null 2>&1 || {
     printf 'resume-after-api-failure.sh: required dependency not found: %s\n' \
       "$required_command" >&2
@@ -56,18 +56,17 @@ for required_command in jq perl shasum awk git; do
   }
 done
 tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
-wake_lib="$tooling_root/.agents/lib/hook-wake.sh"
-for lib in "$state_lib" "$wake_lib"; do
-  [[ -r "$lib" ]] || {
-    printf 'resume-after-api-failure.sh: missing %s\n' "$lib" >&2
-    exit 1
-  }
-done
+lib_dir="$tooling_root/.agents/lib"
 # shellcheck source=../lib/verdict-audit-state.sh
-source "$state_lib"
+source "$lib_dir/verdict-audit-state.sh" || {
+  printf 'resume-after-api-failure.sh: missing %s\n' "$lib_dir/verdict-audit-state.sh" >&2
+  exit 1
+}
 # shellcheck source=../lib/hook-wake.sh
-source "$wake_lib"
+source "$lib_dir/hook-wake.sh" || {
+  printf 'resume-after-api-failure.sh: missing %s\n' "$lib_dir/hook-wake.sh" >&2
+  exit 1
+}
 
 # Exact per-element comparison, never a substring test against a space-joined list.
 api_resume_kind_is_retryable() {  # kind

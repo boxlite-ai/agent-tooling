@@ -8,13 +8,8 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$REPO_ROOT/.agents/hooks/record-test-run.sh"
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
-check_eq() {  # desc got want
-  if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got=$2 want=$3)"; fi
-}
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 
 R="$(mktemp -d)"
 git -C "$R" init -q
@@ -183,6 +178,4 @@ check_eq "same-second receipts across PID widths select this invocation" \
 check_eq "the fixture contains two old receipts and one new receipt" "$(receipt_count)" 3
 
 rm -rf "$R"
-echo
-printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
-(( fail == 0 ))
+assert_result

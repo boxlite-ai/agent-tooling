@@ -23,10 +23,15 @@ RUNNER="$REPO_ROOT/.agents/hooks/audit/run-commit-push-audit.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
+
+# Every run names its parent session. setup() writes this epoch; audit() starts a fresh
+# epoch per call so each run gets an empty audit history.
+AUDITOR_SESSION_SCOPE="git-$(printf '%s' run-commit-push-audit-test | git hash-object --stdin)"
+AUDITOR_PROMPT_EPOCH=1001-1002-0
+TEST_HISTORY_RESULT_HELPER="$REPO_ROOT/tests/audit/fixtures/audit-history-result.sh"
+export AUDITOR_SESSION_SCOPE AUDITOR_PROMPT_EPOCH TEST_HISTORY_RESULT_HELPER
 
 with_deadline() { # seconds command [args...]
   local seconds="$1"; shift
@@ -80,6 +85,8 @@ setup() {  # [object format] -> repo path
   cp "$REPO_ROOT/.agents/auditor-models.tsv" "$d/.agents/"
   cp -R "$REPO_ROOT/.agents/prompts/." "$d/.agents/prompts/"
   cp "$REPO_ROOT/.agents/lib/"audit-*.sh "$REPO_ROOT/.agents/lib/"audit-*.jq "$d/.agents/lib/"
+  printf '%s\n' "$AUDITOR_PROMPT_EPOCH" \
+    > "$d/.agents/state/verdict-prompt-epoch.$AUDITOR_SESSION_SCOPE"
   printf 'base\n' > "$d/f"
   git -C "$d" add -A
   git -C "$d" commit -qm base
@@ -365,7 +372,13 @@ run_resource_case() {  # repo, mode, configured timeout, outer deadline
 # Run the producer and echo the dossier it left behind ("" when it wrote none).
 audit() {  # $1 = repo, $2 = fake auditor output, [$3 = mode], [$4 = command]
   local repo="$1" out="$2" mode="${3:-agentic}" target_command="${4:-$CMD}" real_mktemp
+  local counter="$repo/.git/test-epoch-counter" run
+  run="$(( $(cat "$counter" 2>/dev/null || echo 0) + 1 ))"
+  printf '%s\n' "$run" > "$counter"
+  printf '1001-1002-%s\n' "$run" \
+    > "$repo/.agents/state/verdict-prompt-epoch.$AUDITOR_SESSION_SCOPE"
   ( cd "$repo" || exit
+    export AUDITOR_PROMPT_EPOCH="1001-1002-$run"
     if [[ -n "${AUDIT_TEST_TMPDIR:-}" ]]; then
       export TMPDIR="$AUDIT_TEST_TMPDIR"
       real_mktemp="$(command -v mktemp)"
@@ -409,6 +422,11 @@ bound_output_for() {  # repo, command, subject, verdict, findings JSON
       commit_subject_hash:$s, verdict:$v, findings:$f, advisories:[]}'
 }
 
+# Bytes before the fixed-size history appendix: the part that could grow with the change.
+evidence_prompt_bytes() {  # prompt file
+  sed '/^History schema JSON: /,$d' "$1" 2>/dev/null | LC_ALL=C wc -c | tr -d ' '
+}
+
 verdict_of() { printf '%s' "$1" | jq -r '.verdict // "NONE"' 2>/dev/null || printf 'NONE'; }
 finding_of() { printf '%s' "$1" | jq -r '.findings[0] // ""' 2>/dev/null || printf ''; }
 
@@ -437,6 +455,26 @@ if [[ "$(verdict_of "$timer_output")" == PASS ]] \
 else
   bad "the headless commit audit prompt carries no timer procedure"
 fi
+
+echo
+echo "## A run without its parent session's scope and epoch fails closed"
+expect_no_launch() {  # label
+  if [[ -e "$R/prompt.txt" ]]; then bad "$1"; else ok "$1"; fi
+}
+for mode in agentic local; do
+  rm -f "$R/prompt.txt"
+  unscoped_output="$(AUDITOR_SESSION_SCOPE='' audit "$R" "$(bound_output "$R" PASS '[]')" "$mode")"
+  expect_fail "$mode run without AUDITOR_SESSION_SCOPE → FAIL" "$unscoped_output" \
+    "AUDITOR_SESSION_SCOPE and AUDITOR_PROMPT_EPOCH must name"
+  expect_no_launch "$mode run without scope never launches the auditor"
+done
+rm -f "$R/prompt.txt"
+( cd "$R" && CLAUDE_PROJECT_DIR="$R" FAKE_DIR="$R" CODEX_BIN="$R/bin/codex" \
+    CODEX_FAKE_OUTPUT="$(bound_output "$R" PASS '[]')" AUDITOR_PROMPT_EPOCH='' \
+    bash "$R/.agents/hooks/audit/run-commit-push-audit.sh" commit "$CMD" ) >/dev/null 2>&1
+expect_fail "run without AUDITOR_PROMPT_EPOCH → FAIL" \
+  "$(cat "$R/.agents/state/last-audit.json")" "AUDITOR_SESSION_SCOPE and AUDITOR_PROMPT_EPOCH must name"
+expect_no_launch "run without epoch never launches the auditor"
 
 echo
 echo "## Headless timing follows the actual auditor process"
@@ -475,7 +513,7 @@ printf '%s\n' "$open_epoch" > "$R_OPEN/.agents/state/verdict-prompt-epoch.$open_
 open_context="$(jq -nc --arg root "$(cd "$R_OPEN" && pwd -P)" --arg session "$open_scope" \
   --arg epoch "$open_epoch" --arg branch "$(git -C "$R_OPEN" branch --show-current)" \
   '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"commit"}')"
-printf '{"binding":{"head":"preflight"},"snapshot":{"tree":"t","command":"c"}}' \
+printf '{"binding":{"head":"preflight"},"snapshot":{"tree":"t","command":"c"},"deadline":4102444800}' \
   | bash "$REPO_ROOT/scripts/audit-reflection-gate.sh" "$open_context" prepare >/dev/null
 ( cd "$R_OPEN" && CLAUDE_PROJECT_DIR="$R_OPEN" FAKE_DIR="$R_OPEN" \
     CODEX_BIN="$R_OPEN/bin/codex" CODEX_FAKE_OUTPUT="$(bound_output "$R_OPEN" PASS '[]')" \
@@ -729,7 +767,7 @@ for matrix_case in valid pass-findings fail-empty no-advisories null-history wro
   case "$matrix_case" in
     pass-findings) matrix_output="$(jq '.findings=["high: unresolved"]' <<<"$matrix_output")"; expected=1 ;;
     fail-empty) matrix_output="$(jq '.verdict="FAIL"' <<<"$matrix_output")"; expected=1 ;;
-    no-advisories) matrix_output="$(jq 'del(.advisories)' <<<"$matrix_output")" ;;
+    no-advisories) matrix_output="$(jq 'del(.advisories)' <<<"$matrix_output")"; expected=1 ;;
     null-history) matrix_output="$(jq '.history_review=null | .reflection_review=null' <<<"$matrix_output")" ;;
     wrong-kind) matrix_output="$(jq '.command_kind="push"' <<<"$matrix_output")"; expected=1 ;;
   esac
@@ -760,17 +798,10 @@ too_many_output="$(bound_output "$R" PASS '[]' \
 expect_fail "too many advisory items → FAIL" \
   "$(audit "$R" "$too_many_output")" "malformed"
 
-# Older native/headless fixtures predate the advisory channel. Absence means no
-# advisory; it must not invalidate an otherwise exact, bound dossier. Unknown fields,
-# wrong types, and over-budget arrays remain malformed above and below this boundary.
-legacy_without_advisories="$(bound_output "$R" PASS '[]' | jq -c 'del(.advisories)')"
-legacy_out="$(audit "$R" "$legacy_without_advisories")"
-if [[ "$(verdict_of "$legacy_out")" == PASS ]] \
-   && [[ "$(printf '%s' "$legacy_out" | jq -c '.advisories')" == '[]' ]]; then
-  ok "missing legacy advisories normalize to an empty bounded array"
-else
-  bad "missing legacy advisories normalize to an empty bounded array (output=$legacy_out)"
-fi
+# Every dossier carries `advisories`, even when empty.
+expect_fail "dossier without advisories key → FAIL" \
+  "$(audit "$R" "$(bound_output "$R" PASS '[]' | jq -c 'del(.advisories)')")" \
+  "malformed"
 expect_fail "explicit null advisories remain malformed" \
   "$(audit "$R" "$(bound_output "$R" PASS '[]' | jq -c '.advisories = null')")" \
   "malformed"
@@ -1059,7 +1090,7 @@ long_command="$CMD --cleanup=$long_command_tail"
 long_command_out="$(audit "$R_COMMAND" \
   "$(bound_output_for "$R_COMMAND" "$long_command" "$SUBJ" PASS '[]')" \
   agentic "$long_command")"
-long_command_prompt_bytes="$(LC_ALL=C wc -c < "$R_COMMAND/prompt.txt" 2>/dev/null | tr -d ' ')"
+long_command_prompt_bytes="$(evidence_prompt_bytes "$R_COMMAND/prompt.txt")"
 if [[ "$(verdict_of "$long_command_out")" == PASS ]] \
    && (( long_command_prompt_bytes <= 6144 )) \
    && ! grep -q 'END_LEAK' "$R_COMMAND/prompt.txt" \
@@ -1085,7 +1116,7 @@ done
 git -C "$R_LARGE" add -A
 git -C "$R_LARGE" reset -q -- bin/codex
 large_out="$(audit "$R_LARGE" "$(bound_output "$R_LARGE" PASS '[]')")"
-large_prompt_bytes="$(wc -c < "$R_LARGE/prompt.txt" | tr -d ' ')"
+large_prompt_bytes="$(evidence_prompt_bytes "$R_LARGE/prompt.txt")"
 if [[ "$(verdict_of "$large_out")" == PASS ]] && (( large_prompt_bytes <= 6144 )) \
     && ! grep -q 'LARGE_DIFF_END' "$R_LARGE/prompt.txt"; then
   ok "large diff and many long paths stay within the 6 KiB prompt ceiling (${large_prompt_bytes} bytes)"
@@ -1664,6 +1695,4 @@ else
   bad "native commit/push auditor has explicit model-visible evidence ceilings"
 fi
 
-echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

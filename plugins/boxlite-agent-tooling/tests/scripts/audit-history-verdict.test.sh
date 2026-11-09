@@ -43,7 +43,7 @@ for attempt in 1 2 3 4 5 6 7 8; do
   if (( attempt >= 3 )); then
     audit_test_reflection "$state" | bash "$plugin/scripts/audit-reflection.sh" submit "$state" >/dev/null
   fi
-  printf '{"binding":{"head":"fixture"},"snapshot":{"diff":"unchanged"}}' \
+  printf '{"binding":{"head":"fixture"},"snapshot":{"diff":"unchanged"},"deadline":4102444800}' \
     | bash "$history_cli" "$context" prepare "budget-$attempt" >/dev/null
   printf '"transport unavailable"' | bash "$history_cli" "$context" error "budget-$attempt" >/dev/null
 done

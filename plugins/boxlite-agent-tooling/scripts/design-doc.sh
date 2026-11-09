@@ -17,12 +17,10 @@ source "$plugin_root/.agents/lib/reply-summary.sh" || exit 2
 source "$plugin_root/.agents/lib/concise-writing.sh" || exit 2
 # shellcheck source=../.agents/lib/design-doc.sh
 source "$plugin_root/.agents/lib/design-doc.sh" || exit 2
-# Keep bind for existing callers; register avoids Claude Code's worktree false positive.
 case "${1:-}:$#" in
-  register:2|bind:2) design_doc_binding bind "$PWD" "$2" ;;
+  register:2) design_doc_binding bind "$PWD" "$2" ;;
   check:1) design_doc_binding check "$PWD" ;;
-  # research stays an alias of verdict for auditors from older plugin versions.
-  verdict:1|research:1) design_doc_audit_record "$PWD" ;;
+  verdict:1) design_doc_audit_record "$PWD" ;;
   reflect:1) design_doc_audit_reflect "$PWD" ;;
   advice:1) design_doc_advice_record "$PWD" ;;
   log:1) design_doc_log_store "$PWD" ;;

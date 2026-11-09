@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claim check for commit/push audit text (design #407): the gate stores the task, or a
+# Claim check for commit/push audit text: the gate stores the task, or a
 # FAIL's findings, in a file named by its SHA-256 and puts only the path, hash, and size
 # in its deny reason, so the reason stays far below the 8,192-byte cap.
 # Requires perl and verdict-audit-state.sh. Source only.
@@ -17,8 +17,7 @@ audit_task_file_write() { # state directory, text -> pointer JSON
     return 1
   }
   mkdir -p "$directory" && chmod 700 "$directory" || return 1
-  digest="$(printf '%s' "$text" | perl -MDigest::SHA=sha256_hex -0777 -e \
-    'print sha256_hex(scalar(<STDIN>) // "")')" || return 1
+  digest="$(printf '%s' "$text" | verdict_audit_sha256)" || return 1
   bytes="$(LC_ALL=C printf '%s' "$text" | wc -c | tr -d ' ')"
   path="$directory/$digest.md"
   printf '%s' "$text" | verdict_audit_write_atomic "$path" || return 1

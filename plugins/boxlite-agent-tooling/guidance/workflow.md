@@ -91,13 +91,16 @@ For each test added with a fix, run these steps manually, in order:
 ### Cross-cutting (apply at every phase)
 
 - Verify external findings against the working tree with `git grep` and `git diff` before acting; reviews, lint, and PR comments may reference stale code.
-- Stay inside the ask: do and discuss only what the request needs; "drop X" means drop X.
-- File adjacent bugs, cleanup, or topics in a GitHub/Linear issue or docs note; mention them in one closing line, never a change or section.
-- If SessionStart supplies a follow-up queue, record verified unresolved findings there. Acknowledge the exact pending revisions before Stop, including an empty list.
 - Fix every evidenced site of the same defect in one pass; do not speculate.
 - Different nearby defects are adjacent work; one site does not resolve a systemic bug.
 - When behavior changes, remove superseded code, comments, prose, old-contract tests, and broken references in the same change.
 - Search all replaced terms, not just edited files; contradictory prose misleads readers.
+
+Scope:
+
+- Stay inside the ask: do and discuss only what the request needs; "drop X" means drop X.
+- File adjacent bugs, cleanup, or topics in a GitHub/Linear issue or docs note; mention them in one closing line, never a change or section.
+- If SessionStart supplies a follow-up queue, record verified unresolved findings there. Acknowledge the exact pending revisions before Stop, including an empty list.
 
 ### Disclosure
 

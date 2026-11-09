@@ -12,13 +12,8 @@ FIXTURE="$REPO_ROOT/tests/audit/fixtures/audit-history-result.sh"
 source "$REPO_ROOT/tests/audit/fixtures/audit-reflection-fixture.sh"
 unset CODEX_SANDBOX CLAUDECODE AGENT_GATED GITHOOK_DELEGATED GITHOOK_KEEP_AUDIT
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
-check_eq() {
-  if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got=$2 want=$3)"; fi
-}
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 
 R="$(mktemp -d)"
 trap 'rm -rf "$R"' EXIT
@@ -192,35 +187,34 @@ check_eq "SubagentStop records the dossier verdict" "$(attempts | sed 's/.*://')
 
 for host in claude codex; do
   echo "SubagentStop preserves unchecked lifecycle decisions ($host)"
-  for prefix in 'unchecked:' 'high: unchecked:'; do
-    findings="$(jq -nc --arg prefix "$prefix" \
-      '[$prefix + " design doc not read. Evidence: required read absent. Pass if: read the bound design."]')"
-    use_session "attempt-$host-${prefix%%:*}-early"
-    stage_change
-    preflight >/dev/null
-    write_dossier FAIL "$findings"
-    check_eq "$host $prefix before deadline blocks" \
-      "$(stop_as_host "$host" false | jq -r .decision)" "block"
-    check_eq "$host $prefix early attempt stays open" "$(attempts | sed 's/.*://')" "open"
-    check_eq "$host $prefix early link stays present" \
-      "$([[ -e "$LINK" ]] && echo present || echo gone)" "present"
-    check_eq "$host $prefix already-resumed stop allows" \
-      "$(stop_as_host "$host" true | jq -r '.decision // "allow"')" "allow"
-    check_eq "$host $prefix resumed attempt records FAIL" "$(attempts | sed 's/.*://')" "FAIL"
-    check_eq "$host $prefix resumed link is removed" \
-      "$([[ -e "$LINK" ]] && echo present || echo gone)" "gone"
+  prefix='high: unchecked:'
+  findings="$(jq -nc --arg prefix "$prefix" \
+    '[$prefix + " design doc not read. Evidence: required read absent. Pass if: read the bound design."]')"
+  use_session "attempt-$host-${prefix%%:*}-early"
+  stage_change
+  preflight >/dev/null
+  write_dossier FAIL "$findings"
+  check_eq "$host $prefix before deadline blocks" \
+    "$(stop_as_host "$host" false | jq -r .decision)" "block"
+  check_eq "$host $prefix early attempt stays open" "$(attempts | sed 's/.*://')" "open"
+  check_eq "$host $prefix early link stays present" \
+    "$([[ -e "$LINK" ]] && echo present || echo gone)" "present"
+  check_eq "$host $prefix already-resumed stop allows" \
+    "$(stop_as_host "$host" true | jq -r '.decision // "allow"')" "allow"
+  check_eq "$host $prefix resumed attempt records FAIL" "$(attempts | sed 's/.*://')" "FAIL"
+  check_eq "$host $prefix resumed link is removed" \
+    "$([[ -e "$LINK" ]] && echo present || echo gone)" "gone"
 
-    use_session "attempt-$host-${prefix%%:*}-late"
-    stage_change
-    preflight >/dev/null
-    write_dossier FAIL "$findings"
-    jq -c '.deadline = 0' "$LINK" > "$LINK.tmp" && mv "$LINK.tmp" "$LINK"
-    check_eq "$host $prefix after deadline allows" \
-      "$(stop_as_host "$host" false | jq -r '.decision // "allow"')" "allow"
-    check_eq "$host $prefix late attempt records FAIL" "$(attempts | sed 's/.*://')" "FAIL"
-    check_eq "$host $prefix late link is removed" \
-      "$([[ -e "$LINK" ]] && echo present || echo gone)" "gone"
-  done
+  use_session "attempt-$host-${prefix%%:*}-late"
+  stage_change
+  preflight >/dev/null
+  write_dossier FAIL "$findings"
+  jq -c '.deadline = 0' "$LINK" > "$LINK.tmp" && mv "$LINK.tmp" "$LINK"
+  check_eq "$host $prefix after deadline allows" \
+    "$(stop_as_host "$host" false | jq -r '.decision // "allow"')" "allow"
+  check_eq "$host $prefix late attempt records FAIL" "$(attempts | sed 's/.*://')" "FAIL"
+  check_eq "$host $prefix late link is removed" \
+    "$([[ -e "$LINK" ]] && echo present || echo gone)" "gone"
 
   use_session "attempt-$host-ordinary-high"
   stage_change
@@ -306,6 +300,4 @@ for host in claude codex; do
     "$([[ "$accepted" == *'unchecked at deadline'* ]] && echo yes || echo no)" yes
 done
 
-echo
-printf 'RESULT: %s passed, %s failed\n' "$pass" "$fail"
-(( fail == 0 ))
+assert_result

@@ -23,16 +23,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$REPO_ROOT/.agents/hooks/stop-gate.sh"
 VERDICT_CHECK="$REPO_ROOT/.agents/hooks/audit/preflight-verdict-check.sh"
 CANCEL_HOOK="$REPO_ROOT/.agents/hooks/cancel-verdict-audit.sh"
-
-pass=0
-fail=0
-expect() {  # desc predicate-status detail
-  if [[ "$2" == 0 ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$1"
-  else
-    fail=$((fail + 1)); printf '  FAIL  %s  (%s)\n' "$1" "$3"
-  fi
-}
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
 
 # Fresh git repo with one committed file and the state directory ignored, as in the
 # real repository.
@@ -151,24 +143,23 @@ check_writing_continuations() {
     payload="$(stop_payload "$R" "$S" false '' | jq --arg m "$long_reply" '.last_assistant_message = $m')"
     out="$(run_in_repo "$R" "$HOOK" NO "$host" "$payload")"
     jq -e '.decision == "block" and (.reason | contains("TL;DR"))' <<<"$out" >/dev/null
-    expect "$host: the first missing summary gets a correction" "$?" "out=$out"
+    check_rc "$host: the first missing summary gets a correction" "$?" "out=$out"
     append_assistant "$R" "$long_reply"
     out="$(gate_stop "$R" "$S" true "$long_reply" NO "$host")"
     [[ "$(classifier_ran "$R")" == yes && "$(decision_of "$out")" == allow ]] && no_request "$out"
-    expect "$host: the corrected dense reply is judged and ends" "$?" "out=$out"
+    check_rc "$host: the corrected dense reply is judged and ends" "$?" "out=$out"
     append_tool_call "$R"
     append_assistant "$R" "$long_claim"
     payload="$(stop_payload "$R" "$S" true '' | jq '.last_assistant_message = "The root cause is the stale index."')"
     out="$(TEST_AUDIT_VERDICT=FAIL run_in_repo "$R" "$HOOK" YES "$host" "$payload")"
     audit_ran "$R" && [[ "$(decision_of "$out")" == block && "$out" != *'TL;DR heading missing'* ]]
-    expect "$host: new work in a continuation still reaches the failing audit without TL;DR" "$?" "out=$out"
+    check_rc "$host: new work in a continuation still reaches the failing audit without TL;DR" "$?" "out=$out"
     rm -rf "$R"
   done
 }
 if [[ "${1:-}" == writing-continuations ]]; then
   check_writing_continuations
-  printf 'RESULT: %s passed, %s failed\n' "$pass" "$fail"
-  exit $(( fail > 0 ? 1 : 0 ))
+  assert_result
 fi
 
 printf '## A TL;DR-led reply, long or short, gets exactly the verdict check'"'"'s output\n'
@@ -184,7 +175,7 @@ for host in claude codex; do
     out="$(gate_stop "$R" "$S" false "$reply" NO "$host")"
     direct="$(run_in_repo "$T" "$VERDICT_CHECK" NO "$host" "$(stop_payload "$T" "$S" false "$reply")")"
     [[ -n "$out" && "$out" == "$direct" ]] && keeps_triage_note "$out" && no_request "$out"
-    expect "$host: a $size TL;DR-led reply ends with the verdict check's output" "$?" \
+    check_rc "$host: a $size TL;DR-led reply ends with the verdict check's output" "$?" \
       "gate=$out direct=$direct"
     rm -rf "$R" "$T"
   done
@@ -200,7 +191,7 @@ for host in claude codex; do
   out="$(gate_stop "$R" "$S" false "$bare_reply" NO "$host")"
   direct="$(run_in_repo "$T" "$VERDICT_CHECK" NO "$host" "$(stop_payload "$T" "$S" false "$bare_reply")")"
   [[ -n "$out" && "$out" == "$direct" ]] && keeps_triage_note "$out" && no_request "$out"
-  expect "$host: a short reply without a TL;DR ends with the verdict check's output" "$?" \
+  check_rc "$host: a short reply without a TL;DR ends with the verdict check's output" "$?" \
     "gate=$out direct=$direct"
   rm -rf "$R" "$T"
 done
@@ -212,14 +203,14 @@ huge_reply="$(printf 'x%.0s' {1..8001})"
 payload="$(stop_payload "$R" "$S" false '' | jq --arg m "$huge_reply" '.last_assistant_message = $m')"
 out="$(run_in_repo "$R" "$HOOK" NO claude "$payload")"
 [[ "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *'TL;DR heading missing'* ]]
-expect "a one-word reply over 8000 characters still needs a TL;DR" "$?" "out=$out"
+check_rc "a one-word reply over 8000 characters still needs a TL;DR" "$?" "out=$out"
 rm -rf "$R"
 
 S="pass"; R="$(new_repo "$S")"
 append_assistant "$R" "$long_claim"
 out="$(TEST_AUDIT_VERDICT=PASS gate_stop "$R" "$S" false "$long_claim" YES claude)"
 audit_ran "$R" && [[ "$(decision_of "$out")" == allow ]] && no_request "$out"
-expect "an audited PASS on a dense reply ends without a shortening request" "$?" "out=$out"
+check_rc "an audited PASS on a dense reply ends without a shortening request" "$?" "out=$out"
 rm -rf "$R"
 
 # A user's override ends the turn without an audit and without a shortening request.
@@ -244,7 +235,7 @@ append_assistant "$R" "$long_claim"
 out="$(gate_stop "$R" "$S" false "$long_claim" YES claude)"
 [[ "$(field "$out" '.systemMessage')" == *"OVERRIDDEN BY USER"* && "$(decision_of "$out")" == allow ]] \
   && no_request "$out"
-expect "a user's override on a dense reply ends without a shortening request" "$?" "out=$out"
+check_rc "a user's override on a dense reply ends without a shortening request" "$?" "out=$out"
 rm -rf "$R"
 
 check_writing_continuations
@@ -258,7 +249,7 @@ out="$(gate_stop "$R" "$S" false "$api_error" YES claude)"
 summary_prefix="$saved_summary_prefix"
 unjudged() { [[ "$(classifier_ran "$1")" == no ]]; }
 unjudged "$R" && [[ "$(decision_of "$out")" == block && "$out" == *"TL;DR"* ]]
-expect "nonempty harness text without TL;DR is blocked before judgment" \
+check_rc "nonempty harness text without TL;DR is blocked before judgment" \
   "$?" "out=$out classifier=$(classifier_ran "$R")"
 rm -rf "$R"
 
@@ -266,7 +257,7 @@ S="fail"; R="$(new_repo "$S")"
 append_assistant "$R" "$long_claim"
 out="$(gate_stop "$R" "$S" false "$long_claim" YES claude)"
 audit_ran "$R" && [[ "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *"Verdict proof check FAILED"* ]]
-expect "an audited FAIL blocks with its findings" "$?" "out=$out"
+check_rc "an audited FAIL blocks with its findings" "$?" "out=$out"
 rm -rf "$R"
 
 R="$(setup)"
@@ -276,7 +267,7 @@ reported_by_verdict_check() {  # status stderr
   [[ "$1" == 1 && "$2" == *"preflight-verdict-check: expected exactly one JSON hook object."* ]]
 }
 reported_by_verdict_check "$status" "$err"
-expect "a malformed payload gets the verdict check's own error and exit status" "$?" \
+check_rc "a malformed payload gets the verdict check's own error and exit status" "$?" \
   "status=$status err=$err"
 rm -rf "$R"
 
@@ -335,23 +326,23 @@ stopped_cleanly() {  # expected-status status elapsed gone scratch-gone reached
 }
 read -r status elapsed gone clean reached audited <<<"$(signal_gate INT triage group)"
 stopped_cleanly 130 "$status" "$elapsed" "$gone" "$clean" "$reached" && [[ "$audited" == no ]]
-expect "a group interrupt during triage ends the gate with 130 before any audit" \
+check_rc "a group interrupt during triage ends the gate with 130 before any audit" \
   "$?" "status=$status after=${elapsed}s gone=$gone scratch_gone=$clean reached=$reached audit=$audited"
 read -r status elapsed gone clean reached audited <<<"$(signal_gate INT audit group)"
 stopped_cleanly 130 "$status" "$elapsed" "$gone" "$clean" "$reached"
-expect "a group interrupt during the audit stops it and ends the gate with 130" \
+check_rc "a group interrupt during the audit stops it and ends the gate with 130" \
   "$?" "status=$status after=${elapsed}s gone=$gone scratch_gone=$clean reached=$reached"
 read -r status elapsed gone clean reached audited <<<"$(signal_gate TERM audit group)"
 stopped_cleanly 143 "$status" "$elapsed" "$gone" "$clean" "$reached"
-expect "a group termination during the audit stops it and ends the gate with 143" \
+check_rc "a group termination during the audit stops it and ends the gate with 143" \
   "$?" "status=$status after=${elapsed}s gone=$gone scratch_gone=$clean reached=$reached"
 read -r status elapsed gone clean reached audited <<<"$(signal_gate INT triage gate)"
 stopped_cleanly 130 "$status" "$elapsed" "$gone" "$clean" "$reached" && [[ "$audited" == no ]]
-expect "an interrupt to the gate alone during triage stops the check before any audit" \
+check_rc "an interrupt to the gate alone during triage stops the check before any audit" \
   "$?" "status=$status after=${elapsed}s gone=$gone scratch_gone=$clean reached=$reached audit=$audited"
 read -r status elapsed gone clean reached audited <<<"$(signal_gate TERM triage gate)"
 stopped_cleanly 143 "$status" "$elapsed" "$gone" "$clean" "$reached" && [[ "$audited" == no ]]
-expect "a termination to the gate alone during triage stops the check before any audit" \
+check_rc "a termination to the gate alone during triage stops the check before any audit" \
   "$?" "status=$status after=${elapsed}s gone=$gone scratch_gone=$clean reached=$reached audit=$audited"
 
 printf '\n## Writing denials reference the skill without reading its body\n'
@@ -382,7 +373,7 @@ for host in claude codex; do
   done
   rm -rf "$R"
 done
-expect "Stop and GitHub hooks on both hosts name the skill without copying its body" \
+check_rc "Stop and GitHub hooks on both hosts name the skill without copying its body" \
   "$edits_status" "stop=$out github=$github_output"
 
 rm -f "$prompt_file"
@@ -391,7 +382,7 @@ out="$(run_in_repo "$R" "$HOOK" NO codex "$(missing_summary "$R" "$S")")"
 status=$?
 [[ "$status" == 0 && "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *'apply boxlite-writing'* ]] \
   && ! grep -q 'no such prompt' "$HOOK_STDERR"
-expect "a missing local skill does not prevent the host from receiving its name" \
+check_rc "a missing local skill does not prevent the host from receiving its name" \
   "$?" "status=$status out=$out stderr=$(cat "$HOOK_STDERR")"
 rm -rf "$R"
 HOOK="$original_hook"
@@ -406,25 +397,25 @@ for host in claude codex; do
   reason="$(field "$out" '.reason')"
   [[ "$(decision_of "$out")" == block && "$reason" == *'A sentence has 26 words; keep 25 or fewer'* \
      && "$reason" != *'TL;DR'* && "$(grep -o boxlite-writing <<<"$reason" | wc -l | tr -d ' ')" == 1 ]]
-  expect "$host: a TL;DR-led reply over a sentence limit gets one correction" "$?" "out=$out"
+  check_rc "$host: a TL;DR-led reply over a sentence limit gets one correction" "$?" "out=$out"
   append_assistant "$R" "$long_sentence"
   out="$(gate_stop "$R" "$S" true "$long_sentence" NO "$host")"
   [[ "$(decision_of "$out")" == allow && "$(classifier_ran "$R")" == yes ]]
-  expect "$host: the retry is judged, never corrected again" "$?" "out=$out"
+  check_rc "$host: the retry is judged, never corrected again" "$?" "out=$out"
   rm -rf "$R"
 done
 saved_summary_prefix="$summary_prefix"; summary_prefix=""
 S="structure-short"; R="$(new_repo "$S")"
 out="$(gate_stop "$R" "$S" false 'One. Two. Three. Four.' NO claude)"
 [[ "$(decision_of "$out")" == block && "$(field "$out" '.reason')" == *'A prose block has 4 sentences'* ]]
-expect "a short reply over the sentence limit gets a correction" "$?" "out=$out"
+check_rc "a short reply over the sentence limit gets a correction" "$?" "out=$out"
 rm -rf "$R"
 S="structure-and-summary"; R="$(new_repo "$S")"
 out="$(gate_stop "$R" "$S" false "$long_reply"$'\n\n'"$long_sentence" NO claude)"
 reason="$(field "$out" '.reason')"
 [[ "$(decision_of "$out")" == block && "$reason" == *'TL;DR heading missing'* \
    && "$reason" == *'A sentence has 26 words'* && "$(grep -o boxlite-writing <<<"$reason" | wc -l | tr -d ' ')" == 1 ]]
-expect "one correction lists the TL;DR and structure fixes and names the skill once" "$?" "out=$out"
+check_rc "one correction lists the TL;DR and structure fixes and names the skill once" "$?" "out=$out"
 rm -rf "$R"
 summary_prefix="$saved_summary_prefix"
 
@@ -433,9 +424,7 @@ append_assistant "$R" "The root cause is the stale index."
 payload="$(stop_payload "$R" "$S" false '' | jq '.last_assistant_message = ""')"
 out="$(run_in_repo "$R" "$HOOK" YES '' "$payload")"
 [[ "$(decision_of "$out")" == block ]] && audit_ran "$R"
-expect "an empty reply still audits earlier claims" "$?" "$out"
+check_rc "an empty reply still audits earlier claims" "$?" "$out"
 rm -rf "$R"
 
-echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

@@ -9,7 +9,7 @@ Gates read dossiers; auditors write them. Full contracts: [audit producers](arch
 | File | Called by, with | Result |
 | --- | --- | --- |
 | [preflight-verdict-check.sh](preflight-verdict-check.sh) | [stop-gate.sh](../stop-gate.sh); `Stop` JSON on stdin | Blocks with findings or allows; consumes the turn dossier. |
-| [run-verdict-audit.sh](run-verdict-audit.sh) | The verdict gate, inside the same Stop; `<bookkeeping_path\|-> [session_id] [generation] [session_scope]` | The session's `last-verdict.json`, judged by an independent model CLI. |
+| [run-verdict-audit.sh](run-verdict-audit.sh) | The verdict gate, inside the same Stop; `<bookkeeping_path\|-> <session_id> <generation> [session_scope]` | The session's `last-verdict.json`, judged by an independent model CLI. |
 | [run-commit-push-audit.sh](run-commit-push-audit.sh) | CI, a plain shell, or an agent on an unidentified host; [preflight-commit-push.sh](../preflight-commit-push.sh) for a delegated Codex push; `<commit\|push> <command>` | `last-audit.json`, the dossier the `commit-push-auditor` subagent also writes. |
 | [commit-push-audit.schema.json](commit-push-audit.schema.json) | `codex exec --output-schema` in the commit/push runner | The JSON shape the Codex auditor must answer in. |
 
@@ -83,8 +83,7 @@ sequenceDiagram
   preflight-->>parent_agent: PASS: allow · FAIL: deny
 ```
 
-- **Validated:** main `d694bbd`, `.agents/skills/boxlite-visualize/scripts/validate_diagrams.py`; inputs in the adding PR.
-- **Revalidate this sequence on changes to** (paths from the plugin root): `.claude/agents/commit-push-auditor.md`, `.agents/hooks/{preflight-commit-push,auditor-control,audit-deadline}.sh`, `.agents/hooks/audit/run-commit-push-audit.sh`, `.agents/lib/{commit-push-stop,audit-reflection,audit-reflection-gate,subagent-identity,auditor-control-state}.sh`, or `hooks/{hooks,codex-hooks,generic-hooks}.json`.
+Revalidate this sequence with `.agents/skills/boxlite-visualize/scripts/validate_diagrams.py` on changes to (paths from the plugin root): `.claude/agents/commit-push-auditor.md`, `.agents/hooks/{preflight-commit-push,auditor-control,audit-deadline}.sh`, `.agents/hooks/audit/run-commit-push-audit.sh`, `.agents/lib/{commit-push-stop,audit-reflection,audit-reflection-gate,subagent-identity,auditor-control-state}.sh`, or `hooks/{hooks,codex-hooks,generic-hooks}.json`.
 
 | Gate state | Outcome |
 | --- | --- |
@@ -113,47 +112,42 @@ sequenceDiagram
    - Claude Code uses `claude -p --safe-mode`; Codex uses read-only `codex exec` with hooks disabled.
    - The Claude route grants its auditor tools with `--allowedTools`, not only `--tools`.
    - Why: safe mode ignores user/project permission settings and print mode has no approver, so an ungranted `Write` leaves the auditor without a dossier.
-3. Unknown hosts retain availability order: Claude, then Codex.
+3. Unknown hosts try Claude, then Codex.
 4. No matching CLI: exit 2. A known host never falls through to another provider.
+
+Inputs:
 
 - **Task:** supplies parent session ID, host, repository, request time, and dossier bindings.
 - **Transcript:** the auditor discovers it using the skill's host hints or its own investigation, verifies parent identity, and revalidates a fixed evidence boundary.
 - **Bookkeeping:** the first runner argument supplies bounded bookkeeping only; `-` marks it unavailable. For example, a native auditor can receive a parent session ID without any transcript path.
 - **Unknown hosts:** discovery does not change how the independent auditor is launched.
 
-### Host routing
+### Host routing and classifier
 
-- Manifests set `BOXLITE_HOOK_HOST` ([variables](#configuration)) per invocation, overriding inherited values. This distinguishes Codex's root aliases from nested hosts.
-- Generic hooks set `unknown`; unmarked legacy callers retain single-root inference.
-- Claude commands prefer their own plugin root when both roots identify different installations.
+Manifests set `BOXLITE_HOOK_HOST` ([variables](#configuration)); [provider selection](architecture.md#provider-selection) owns routing, classifier sandbox, and Codex lookup rules.
 
-### Classifier
-
-The classifier uses the same host detector: Claude Haiku on Claude Code, the default Codex model on Codex. Unknown hosts retain Claude-or-regex behavior.
-
-- **Fallback:** missing or failed classifiers use the existing regex fallback; a failed auditor remains an audit failure.
-- **Codex sandbox:** classification runs in a private scratch directory, read-only and ephemeral, with hooks, shell tools, subagents, user config, and project instructions disabled. Global Codex instructions can still load.
-- **Limits:** binary discovery and execution share the existing 20-second capture deadline and 4096-byte output limit.
-- **Lookup:** both Stop stages use the inert [Codex lookup helper](../../lib/codex-cli.sh), including `CODEX_BIN` and desktop discovery. For example, installing Claude alongside Codex no longer changes which provider handles Codex Stop checks.
+- **Classifier:** Claude Haiku on Claude Code, the default Codex model on Codex; unknown hosts use Claude or the regex fallback.
+- **Fallback:** a missing or failed classifier uses the regex fallback; a failed auditor remains an audit failure.
+- **Limits:** binary discovery and execution share a 20-second capture deadline and 4096-byte output limit.
 
 ### Commit/push runner
 
 `run-commit-push-audit.sh` runs `codex exec` under these rules:
 
-| Concern | Rule | Reason |
-| --- | --- | --- |
-| Scratch | A private writable scratch directory; `TMPDIR` stays inside it; removed on exit. | — |
-| Repository and inputs | Read-only; general temporary-directory grants are disabled. | — |
-| Hooks and user config | Disabled. | — |
-| Network | Allowed. | Supports the authenticated design reader. |
-| Commit tests | Reconstruct the captured index tree, even when working files differ. | — |
-| Push tests | Use the validated context's new commit trees. | — |
-| Publication | Rechecks the index tree first; rejects an answer that is malformed or bound to another branch, HEAD, diff, command, or subject. | — |
-| `mktemp` | Default calls use a private adapter with an explicit scratch template. Explicit templates/options retain host behavior. The adapter is removed with scratch. | Darwin can ignore `TMPDIR`. |
-| `PATH` | The reviewer prepends the private bin directory inside each shell command. | Login-shell `PATH` ordering cannot silently select the system default. |
-| Design reader | Run `design-doc.sh show <repo-root>` from scratch. The explicit target still checks the original worktree and branch binding. | macOS Bash can use the current directory for here-strings when system temp paths are unavailable. |
-| Test evidence | Reviewers may verify tests from host receipts, complete native execution records, or safe reruns. Each route must establish the tested candidate tree and command completion; restricted process inspection is not a test failure. | — |
-| Parent identity | Hints support independent transcript discovery; missing execution proof still blocks approval. | — |
+| Concern | Rule |
+| --- | --- |
+| Scratch | A private writable scratch directory; `TMPDIR` stays inside it; removed on exit. |
+| Repository and inputs | Read-only; general temporary-directory grants are disabled. |
+| Hooks and user config | Disabled. |
+| Network | Allowed, for the authenticated design reader. |
+| Commit tests | Reconstruct the captured index tree, even when working files differ. |
+| Push tests | Use the validated context's new commit trees. |
+| Publication | Recheck the index tree; reject an answer malformed or bound to another branch, HEAD, diff, command, or subject. |
+| `mktemp` | Default calls use a private scratch adapter, because Darwin can ignore `TMPDIR`; explicit templates keep host behavior. |
+| `PATH` | Each shell command prepends the private bin directory, so login-shell ordering cannot pick the system default. |
+| Design reader | Run `design-doc.sh show <repo-root>` from scratch; the target still checks its worktree and branch binding. |
+| Test evidence | Host receipts, complete native execution records, or safe reruns must establish the tested tree and command completion. |
+| Parent identity | Hints support transcript discovery; missing execution proof still blocks approval. |
 
 The commit/push gate prints this command for hosts it cannot identify:
 
@@ -206,7 +200,7 @@ Headless classification and both runners read the optional user file
 
 | Variable | Read by | Default | Effect |
 | --- | --- | --- | --- |
-| `BOXLITE_HOOK_HOST` | Shared host detector | Legacy root inference | Set by each manifest: `claude`, `codex`, or `unknown`; invalid nonempty exported values yield unknown. Routing metadata only. |
+| `BOXLITE_HOOK_HOST` | Shared host detector | `unknown` | Set by each manifest: `claude`, `codex`, or `unknown`; invalid nonempty exported values yield unknown. Routing metadata only. |
 | `VERDICT_AUDITOR_CMD` | `run-verdict-audit.sh` | unset | Replaces the model CLI; reads the audit prompt on stdin and must write the requested dossier. |
 | `VERDICT_AUDITOR_MODEL` | `run-verdict-audit.sh` | Table row | Overrides the `claude -p` route's model; diagnostics record it as an override. |
 | `VERDICT_AUDITOR_TIMEOUT` | Native deadline hook, `run-verdict-audit.sh` | `180` seconds | Investigation, 1–3480. All headless routes add `min(60, budget)` seconds to record. Claude defaults: record 180 s, interrupt 210 s if undelivered, hard stop 240 s. Startup/cleanup add elapsed time. No valid report remains an execution error. |
@@ -229,12 +223,7 @@ After three FAIL/ERROR rounds, choose **Reflect again (Recommended)** or **Stop*
 
 ## Tests
 
-Run from the repository root, for example:
-
-```sh
-bash plugins/boxlite-agent-tooling/tests/audit/preflight-verdict-check.test.sh
-bash plugins/boxlite-agent-tooling/tests/audit/run-commit-push-audit.test.sh
-```
+Run suites as [Contributing](../../../CONTRIBUTING.md#validation) describes, for example `make test:plugin TEST_FILTER=audit/`.
 
 | Suite | Covers |
 | --- | --- |

@@ -3,7 +3,7 @@
 # INDEPENDENT auditor — the same cold-reader judgment Claude Code gets from its
 # verdict-auditor subagent — instead of degrading to self-audit.
 #
-#   bash .agents/hooks/audit/run-verdict-audit.sh <bookkeeping_path|-> [session_id] [generation] [session_scope]
+#   bash .agents/hooks/audit/run-verdict-audit.sh <bookkeeping_path|-> <session_id> <generation> [session_scope]
 #
 # Feeds boxlite-verdict-audit with the thin verdict-auditor launch adapter
 # as the system prompt to a model CLI with Read/Bash/Write tools, which audits the
@@ -33,8 +33,8 @@
 set -uo pipefail
 
 bookkeeping_source="${1:-}"
-if [[ -z "$bookkeeping_source" ]]; then
-  echo "usage: run-verdict-audit.sh <bookkeeping_path|-> [session_id] [generation]" >&2
+if [[ -z "$bookkeeping_source" || -z "${2:-}" || -z "${3:-}" ]]; then
+  echo "usage: run-verdict-audit.sh <bookkeeping_path|-> <session_id> <generation> [session_scope]" >&2
   exit 2
 fi
 session_id="${2:-}"
@@ -168,8 +168,7 @@ if [[ "$audit_runner" == claude && "$auditor_effort" != unset ]]; then
 fi
 auditor_observed=unobserved
 if [[ -n "$provided_session_scope" ]]; then
-  if [[ "$provided_session_scope" != "-" \
-     && ! "$provided_session_scope" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+  if [[ ! "$provided_session_scope" =~ ^git-[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
     printf 'run-verdict-audit.sh: invalid session scope.\n' >&2
     exit 2
   fi
@@ -180,11 +179,10 @@ else
     exit 2
   fi
 fi
-if [[ "$session_scope" != "-" && ! "$audit_generation" =~ ^[1-9][0-9]*-[0-9]+-[0-9]+$ ]]; then
-  printf 'run-verdict-audit.sh: a session-scoped audit requires a valid generation.\n' >&2
+if [[ ! "$audit_generation" =~ ^[1-9][0-9]*-[0-9]+-[0-9]+$ ]]; then
+  printf 'run-verdict-audit.sh: the audit requires a valid generation.\n' >&2
   exit 2
 fi
-audit_generation="${audit_generation:-legacy}"
 state_dir="$project_dir/.agents/state"
 verdict_file="$(verdict_audit_state_path "$state_dir/last-verdict.json" "$session_scope")"
 previous_verdict_file="$(verdict_audit_state_path "$state_dir/last-verdict.prev.json" "$session_scope")"
@@ -197,12 +195,9 @@ auditor_control="$tooling_root/.agents/hooks/auditor-control.sh"
 auditor_control_started=false
 audit_cancellation_file="$(verdict_audit_cancellation_path \
   "$state_dir" "$session_scope" "$audit_generation")"
-# Session-aware audits write to a runner-owned generation file first. Promotion happens
-# only after the entire process group is quiescent; legacy/manual runs keep their stable
-# path so older bare-CLI integrations remain compatible.
-audit_output_file="$verdict_file"
-[[ "$session_scope" == "-" ]] \
-  || audit_output_file="${verdict_file}.audit-${audit_token}"
+# Audits write to a runner-owned generation file first. Promotion happens only after the
+# entire process group is quiescent.
+audit_output_file="${verdict_file}.audit-${audit_token}"
 # shellcheck disable=SC2154 # Assigned by verdict-audit-state.sh above.
 audit_deadline="$(( $(date +%s) + audit_stop_seconds + verdict_audit_deadline_slack_seconds ))"
 runner_start_token="$(verdict_audit_process_start_token "$$" 2>/dev/null)" || {
@@ -425,8 +420,7 @@ acquire_audit_lock() {
           ;;
       esac
     else
-      # Legacy metadata has no reusable-PID discriminator. Keep its conservative
-      # handoff behavior until that older live process disappears.
+      # Malformed metadata from a live PID cannot prove the lease is stale: refuse.
       stop_audit_lease_holder
       return 1
     fi
@@ -486,7 +480,7 @@ cleanup_audit_lock() {
     auditor_control_started=false
   fi
   # A successful audit is not committed until the holder's clean-release handshake.
-  # Keep request revocation observable through that wait; non-success exits no longer
+  # Keep request revocation observable through that wait; non-success exits do not
   # need the monitor and tear it down immediately.
   (( original_status == 0 )) || stop_request_monitor
   if [[ "$owns_audit_lock" == true ]]; then
@@ -600,7 +594,6 @@ finish_audit_diagnostic() {
 # arrived earlier removes the request and is caught here; input that arrives later is
 # observed by the runner's request monitor.
 audit_request_is_current() {
-  [[ "$session_scope" != "-" ]] || return 0
   local body request_generation request_deadline message_id extra now
   [[ -r "$audit_request_file" ]] || return 1
   verdict_audit_cancellation_exists "$audit_cancellation_file" && return 1
@@ -642,7 +635,6 @@ rename_exact_path() {  # source destination
 }
 
 retire_matching_session_verdict() {
-  [[ "$session_scope" != "-" ]] || return 0
   local quarantined_verdict dossier_generation dossier_snapshot dossier_json
   quarantine_counter=$(( quarantine_counter + 1 ))
   quarantined_verdict="${verdict_file}.cancel-${audit_token}-${quarantine_counter}"
@@ -664,13 +656,10 @@ retire_matching_session_verdict() {
   restore_quarantined_state "$quarantined_verdict" "$verdict_file"
 }
 
-# Legacy runners own their established shared path. A session runner owns a matching
-# generation only on an ordinary rejection while its exact request is still current.
+# A runner owns a matching generation only on an ordinary rejection while its exact
+# request is still current.
 remove_owned_verdict() {  # [while-current]
-  if [[ "$session_scope" == "-" ]]; then
-    rm -f "$verdict_file"
-  elif [[ "${1:-}" == "while-current" ]] \
-    && audit_request_is_current; then
+  if [[ "${1:-}" == "while-current" ]] && audit_request_is_current; then
     retire_matching_session_verdict
   fi
 }
@@ -690,7 +679,6 @@ remove_verified_publication() {
 }
 
 publish_cancellation_tombstone() {
-  [[ "$session_scope" != "-" ]] || return 0
   local fallback_file="${audit_cancellation_file}.fallback-${audit_token}"
   mkdir -p "$(dirname "$audit_cancellation_file")" 2>/dev/null || return 1
   # Any pre-existing entry at the canonical path is already a visible fail-closed
@@ -706,7 +694,6 @@ publish_cancellation_tombstone() {
 }
 
 revoke_canceled_generation_authority() {
-  [[ "$session_scope" != "-" ]] || return 0
   publish_cancellation_tombstone && return 0
   # When a parent directory refuses new names, removing or invalidating the exact
   # authorized request still makes the canceled generation impossible to reload.
@@ -720,7 +707,6 @@ revoke_canceled_generation_authority() {
 }
 
 capture_matching_request_authority() {
-  [[ "$session_scope" != "-" ]] || return 0
   if [[ -z "$audit_request_body" ]]; then
     local body request_generation request_deadline message_id extra
     body="$(verdict_audit_read_single_record "$audit_request_file" 2>/dev/null)" \
@@ -736,7 +722,6 @@ capture_matching_request_authority() {
 }
 
 retire_canceled_request_authority() {
-  [[ "$session_scope" != "-" ]] || return 0
   capture_matching_request_authority || return 1
   verdict_audit_remove_record_if_matches \
     "$audit_request_file" "$audit_request_body" >/dev/null 2>&1
@@ -898,7 +883,6 @@ snapshot_previous_dossier() {
 # A generation identifies the request, not the file occupying its publication path.
 # Capture the prior FAIL before launch; never adopt a competing result seen later.
 snapshot_retry_dossier() {
-  [[ "$session_scope" != "-" ]] || return 0
   local identity snapshot normalized
   identity="$(verdict_audit_path_identity "$verdict_file" 2>/dev/null)" || return 0
   snapshot="$(verdict_audit_read_regular_state \
@@ -959,26 +943,24 @@ if ! snapshot_previous_dossier; then
   printf 'run-verdict-audit.sh: could not publish a bounded prior-dossier snapshot.\n' >&2
   exit 2
 fi
-if [[ "$session_scope" != "-" ]]; then
-  audit_prompt_epoch="$(verdict_audit_read_single_record \
-    "$prompt_epoch_file" 2>/dev/null)" || audit_prompt_epoch=""
-  if request_context="$(audit_request_context_read "$project_dir" "$session_scope" 2>/dev/null)"; then
-    audit_prompt_epoch="$(jq -r .origin_epoch <<< "$request_context")"
-    [[ "$audit_prompt_epoch" != - ]] || audit_prompt_epoch=""
+audit_prompt_epoch="$(verdict_audit_read_single_record \
+  "$prompt_epoch_file" 2>/dev/null)" || audit_prompt_epoch=""
+if request_context="$(audit_request_context_read "$project_dir" "$session_scope" 2>/dev/null)"; then
+  audit_prompt_epoch="$(jq -r .origin_epoch <<< "$request_context")"
+  [[ "$audit_prompt_epoch" != - ]] || audit_prompt_epoch=""
+fi
+if [[ -n "$audit_prompt_epoch" ]]; then
+  [[ -r "$auditor_control" ]] || {
+    printf 'run-verdict-audit.sh: auditor lifecycle control is unavailable.\n' >&2
+    exit 2
+  }
+  if ! CLAUDE_PROJECT_DIR="$project_dir" bash "$auditor_control" external-start \
+      verdict-auditor "$audit_generation" "$session_scope" "$audit_prompt_epoch" \
+      >/dev/null 2>&1; then
+    printf 'run-verdict-audit.sh: could not start auditor prompt state.\n' >&2
+    exit 2
   fi
-  if [[ -n "$audit_prompt_epoch" ]]; then
-    [[ -r "$auditor_control" ]] || {
-      printf 'run-verdict-audit.sh: auditor lifecycle control is unavailable.\n' >&2
-      exit 2
-    }
-    if ! CLAUDE_PROJECT_DIR="$project_dir" bash "$auditor_control" external-start \
-        verdict-auditor "$audit_generation" "$session_scope" "$audit_prompt_epoch" \
-        >/dev/null 2>&1; then
-      printf 'run-verdict-audit.sh: could not start auditor prompt state.\n' >&2
-      exit 2
-    fi
-    auditor_control_started=true
-  fi
+  auditor_control_started=true
 fi
 
 # Frontmatter (--- ... ---) is subagent WIRING — name, tools, and now the model and
@@ -1002,20 +984,21 @@ compute_audit_tree_hash() {
 expected_branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || printf '')"
 expected_head="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || printf '')"
 investigation_deadline="$(( $(date +%s) + audit_timeout_seconds ))"
-if [[ "$session_scope" != "-" ]]; then
-  reflection_context="$(jq -nc --arg root "$project_dir" --arg session "$session_scope" \
-    --arg epoch "${audit_prompt_epoch:-0}" --arg branch "${expected_branch:-HEAD}" \
-    '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"verdict"}')" || exit 2
-  history_tree="$(compute_audit_tree_hash)" || exit 2
-  history_input="$(jq -nc --arg branch "$expected_branch" --arg head "$expected_head" \
-    --arg tree "$history_tree" --arg generation "$audit_generation" --argjson deadline "$investigation_deadline" \
-    --slurpfile turn "$history_snapshot_path" \
-    '{binding:{branch:$branch,head:$head,tree_hash:$tree,generation:$generation},
-      snapshot:{transcript:$turn,tree:$tree},deadline:$deadline}')" || exit 2
-  history_request="$(audit_reflection_gate "$reflection_context" prepare "$audit_token" "$history_input")" || exit 2
-  reflection_pending=true
-  history_path="$(jq -r .history_path <<<"$history_request")"
-fi
+reflection_context="$(jq -nc --arg root "$project_dir" --arg session "$session_scope" \
+  --arg epoch "${audit_prompt_epoch:-0}" --arg branch "${expected_branch:-HEAD}" \
+  '{repo_root:$root,session:$session,epoch:$epoch,branch:$branch,gate:"verdict"}')" || exit 2
+history_tree="$(compute_audit_tree_hash)" || {
+  printf 'run-verdict-audit.sh: could not capture the working-tree hash that binds the audit history.\n' >&2
+  exit 2
+}
+history_input="$(jq -nc --arg branch "$expected_branch" --arg head "$expected_head" \
+  --arg tree "$history_tree" --arg generation "$audit_generation" --argjson deadline "$investigation_deadline" \
+  --slurpfile turn "$history_snapshot_path" \
+  '{binding:{branch:$branch,head:$head,tree_hash:$tree,generation:$generation},
+    snapshot:{transcript:$turn,tree:$tree},deadline:$deadline}')" || exit 2
+history_request="$(audit_reflection_gate "$reflection_context" prepare "$audit_token" "$history_input")" || exit 2
+reflection_pending=true
+history_path="$(jq -r .history_path <<<"$history_request")"
 task_input_json="$(jq -nc \
   --arg repo_root "$repo_root" \
   --arg parent_session_id "$session_id" \
@@ -1031,9 +1014,7 @@ task_input_json="$(jq -nc \
     dossier_path:$dossier_path, previous_dossier_path:$previous_dossier_path,
     audit_generation:$audit_generation, expected_branch:$expected_branch,
     expected_head:$expected_head}')"
-if [[ -n "$history_path" ]]; then
-  task_input_json="$(jq -c --arg history "$history_path" '. + {history_path:$history}' <<<"$task_input_json")"
-fi
+task_input_json="$(jq -c --arg history "$history_path" '. + {history_path:$history}' <<<"$task_input_json")"
 if ! audit_prompt="$(subagent_prompt audit/verdict-runner "$tooling_root" \
                       "task_input_json=${task_input_json}")"; then
   printf 'run-verdict-audit.sh: could not load .agents/prompts/audit/verdict-runner.md.\n' >&2
@@ -1044,23 +1025,20 @@ validation_prompt="$(subagent_prompt audit/dossier-validation "$tooling_root" \
 audit_prompt+=$'\n\n'"$validation_prompt"
 audit_prompt+=$'\nRuntime investigation deadline (Unix seconds): '"$investigation_deadline"
 audit_prompt+=$'\n\n'"$(subagent_prompt audit/deadline-policy "$tooling_root")" || exit 2
-if [[ -n "$history_path" ]]; then
-  reflection_prompt="$(subagent_prompt audit/audit-reflection "$tooling_root")" || exit 2
-  audit_prompt+=$'\nHistory schema JSON: '"$(jq -nc --arg path "$tooling_root/.agents/hooks/audit/commit-push-audit.schema.json" '{path:$path}')"
-  audit_prompt+=$'\n\n'"$reflection_prompt"
-fi
+reflection_prompt="$(subagent_prompt audit/audit-reflection "$tooling_root")" || exit 2
+audit_prompt+=$'\nHistory schema JSON: '"$(jq -nc --arg path "$tooling_root/.agents/hooks/audit/commit-push-audit.schema.json" '{path:$path}')"
+audit_prompt+=$'\n\n'"$reflection_prompt"
 if [[ "$audit_runner" == claude ]]; then
   record_message="$(subagent_prompt subagent/timed-subagent "$tooling_root")" || exit 2
   record_message="$(subagent_timed_message passed "${record_message#$'\n'}")" || exit 2
 fi
 
 # Each launch clears its output path to establish freshness without second-resolution
-# mtime comparisons. Legacy runs use the shared path; session runs use a unique stage
-# and hand off the captured prior FAIL only after validating the replacement. Clearing
+# mtime comparisons. Each run uses a unique stage and hands off the captured prior FAIL
+# only after validating the replacement. Clearing
 # stays inside the selected runner branch so no-runner exits preserve existing state.
 start_request_monitor() {
   local runner_pid="$$"
-  [[ "$session_scope" != "-" ]] || return 0
   # One process compares the exact authorized request without spawning cat/date/sleep on
   # every poll. getppid() binds the signal to this runner even if it is SIGKILLed and its
   # numeric PID is later reused. Mutex ownership lives in a separate parent-bound holder,
@@ -1403,12 +1381,7 @@ audit_output_generation="$(printf '%s' "$audit_json" \
 audit_verdict="$(printf '%s' "$audit_json" \
   | jq -r '.verdict // ""' 2>/dev/null || echo '')"
 generation_matches=false
-if [[ "$audit_generation" == "legacy" ]]; then
-  [[ -z "$audit_output_generation" || "$audit_output_generation" == "legacy" ]] \
-    && generation_matches=true
-elif [[ "$audit_output_generation" == "$audit_generation" ]]; then
-  generation_matches=true
-fi
+[[ "$audit_output_generation" == "$audit_generation" ]] && generation_matches=true
 
 audit_json_is_valid=false
 [[ -n "$audit_json" ]] && audit_json_is_valid=true

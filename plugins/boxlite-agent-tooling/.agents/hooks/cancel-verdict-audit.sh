@@ -14,7 +14,7 @@
 # primitive or prevent the newer prompt from entering the task.
 set -uo pipefail
 
-for required_command in jq perl shasum awk; do
+for required_command in jq perl; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     printf 'cancel-verdict-audit.sh: required dependency not found: %s\n' \
       "$required_command" >&2
@@ -193,7 +193,6 @@ verdict_file="$(verdict_audit_state_path "$state_dir/last-verdict.json" "$sessio
 previous_verdict_file="$(verdict_audit_state_path "$state_dir/last-verdict.prev.json" "$session_scope")"
 last_uuid_file="$(verdict_audit_state_path "$state_dir/verdict-last-uuid" "$session_scope")"
 payload_transcript_file="$(verdict_audit_state_path "$state_dir/verdict-stop-message.jsonl" "$session_scope")"
-prior_audit_input_file="$(verdict_audit_state_path "$state_dir/verdict-previous-dossier.json" "$session_scope")"
 prompt_epoch_file="$(verdict_audit_state_path "$state_dir/verdict-prompt-epoch" "$session_scope")"
 old_prompt_epoch="-"
 if [[ -e "$prompt_epoch_file" || -L "$prompt_epoch_file" ]]; then
@@ -243,7 +242,7 @@ fi
 # below closes the hidden-quarantine and late-publication races when the mutex is usable.
 if [[ "$retain_audit" != true ]]; then
 rm -f "$audit_request_file" "$previous_verdict_file" "$last_uuid_file" \
-  "$payload_transcript_file" "$prior_audit_input_file" "$verdict_file"
+  "$payload_transcript_file" "$verdict_file"
 request_context_file="$state_dir/verdict-request-context.json.$session_scope"
 rm -f "$request_context_file" 2>/dev/null || rmdir "$request_context_file" 2>/dev/null || true
 
@@ -254,7 +253,7 @@ rm -f "$request_context_file" 2>/dev/null || rmdir "$request_context_file" 2>/de
 # in one Perl process so the decision lock remains held through both cleanup passes.
 perl -MFcntl=:DEFAULT,:flock -e '
   my ($decision_path, $publish_path, $request, $previous, $last_uuid,
-      $payload_transcript, $prior_input, $cancel_prefix, $verdict, $request_context) = @ARGV;
+      $payload_transcript, $cancel_prefix, $verdict, $request_context) = @ARGV;
 
   sub unlink_prefixed {
     my ($prefix) = @_;
@@ -272,8 +271,7 @@ perl -MFcntl=:DEFAULT,:flock -e '
   }
 
   sub unlink_state {
-    unlink($request, $previous, $last_uuid, $payload_transcript, $prior_input, $verdict, $request_context);
-    unlink_prefixed($prior_input . ".input-");
+    unlink($request, $previous, $last_uuid, $payload_transcript, $verdict, $request_context);
     unlink_prefixed($cancel_prefix . ".");
     unlink_prefixed($verdict . ".audit-");
   }
@@ -322,7 +320,7 @@ perl -MFcntl=:DEFAULT,:flock -e '
   alarm 0;
 ' "$audit_decision_mutex_file" "$audit_publish_mutex_file" \
   "$audit_request_file" "$previous_verdict_file" "$last_uuid_file" \
-  "$payload_transcript_file" "$prior_audit_input_file" \
+  "$payload_transcript_file" \
   "$audit_cancellation_prefix" "$verdict_file" "$request_context_file" \
   >/dev/null 2>&1 || {
     printf 'cancel-verdict-audit.sh: could not serialize audit cancellation.\n' >&2

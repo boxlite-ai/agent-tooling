@@ -4,6 +4,8 @@ set -euo pipefail
 history="$(jq -r '.history_path // empty' <<<"$1")"
 [[ -n "$history" ]] || exit 0
 result="$(cat "$2")"
+# Malformed model output stays as written for the runner's own rejection.
+jq -e 'type == "object"' >/dev/null 2>&1 <<<"$result" || exit 0
 jq -c --argjson result "$result" --arg bind "${3:-}" '
   . as $h | $result + (if $bind == "bind" then $h.attempts[-1].input.binding else {} end)
   + {history_review:{attempt_id:$h.attempts[-1].id,history_hash:$h.history_hash,

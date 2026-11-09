@@ -4,12 +4,15 @@ These manifests connect Claude Code and Codex lifecycle events to the shared hoo
 
 ## Manifests
 
-| File | Loaded by | Host differences |
-| --- | --- | --- |
-| [hooks.json](hooks.json) | Claude Code convention | Uses `asyncRewake`; includes `StopFailure`, `PostToolUseFailure` and managed `AskUserQuestion` hooks. |
-| [codex-hooks.json](codex-hooks.json) | Generic and Codex plugin manifests | Uses `async`; omits Claude-only events and questions. |
+| File | Loaded by | Host marker | Host differences |
+| --- | --- | --- | --- |
+| [hooks.json](hooks.json) | Claude Code convention | `claude` | Uses `asyncRewake`; adds `StopFailure` and `PostToolUseFailure`; loads the prompt-origin module. |
+| [codex-hooks.json](codex-hooks.json) | Codex plugin manifest | `codex` | Uses `async`; omits Claude-only events. |
+| [generic-hooks.json](generic-hooks.json) | Generic `plugin.json` | `unknown` | Same events as Codex. |
+| [claude-prompt-origin.mjs](claude-prompt-origin.mjs) | `modules` in `hooks.json` | — | Marks a host background-command notification as verified for `UserPromptSubmit` hooks. |
 
-Commands resolve the plugin directory through `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`.
+Every command exports `BOXLITE_HOOK_HOST`, the only host signal hooks read; without it the host is `unknown`.
+Claude commands resolve the plugin directory through `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}`, the others through `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`.
 Implementations live in [`.agents/hooks/`](../.agents/hooks/README.md);
 [Git hooks](../.githooks/README.md) are installed separately.
 
@@ -38,8 +41,8 @@ flowchart LR
 ```
 
 The host resolves the plugin root and interprets the hook's result. Shell hooks
-use the same dispatch mechanism but inspect their own command text; a `Bash`
-matcher alone does not distinguish `git commit` from an unrelated command.
+inspect their own command text, because a `Bash` matcher alone does not
+distinguish `git commit` from an unrelated command.
 
 ## Event routing
 
@@ -47,8 +50,8 @@ matcher alone does not distinguish `git commit` from an unrelated command.
 | --- | --- |
 | `UserPromptSubmit` | [cancel-verdict-audit.sh](../.agents/hooks/cancel-verdict-audit.sh) |
 | `SubagentStart`, `SubagentStop` | [auditor-control.sh](../.agents/hooks/auditor-control.sh) |
-| `SubagentStop`; `PreToolUse` / `Read`, `Bash`, `Write`, `WebFetch`, `WebSearch`, `apply_patch` | [audit-deadline.sh](../.agents/hooks/audit-deadline.sh): the design and commit/push auditors’ and the design advisor’s deadline |
-| `PreToolUse` / `Read`, `Bash`, `Write`, `WebFetch`, `WebSearch`, `apply_patch` | [audit-privacy.sh](../.agents/hooks/audit-privacy.sh): no personal identifiers or key requests in design auditor and advisor probes |
+| `SubagentStart`, `SubagentStop`; `PreToolUse` / `Read`, `Bash`, `Write`, `WebFetch`, `WebSearch`, `apply_patch`, `TaskStop` | [audit-deadline.sh](../.agents/hooks/audit-deadline.sh): the design and commit/push auditors’ and the design advisor’s deadline |
+| `PreToolUse` / `Read`, `Bash`, `Write`, `WebFetch`, `WebSearch`, `apply_patch`, `TaskStop` | [audit-privacy.sh](../.agents/hooks/audit-privacy.sh): no personal identifiers or key requests in design auditor and advisor probes |
 | `PreToolUse` / editor or patch tools | [preflight-design-doc.sh](../.agents/hooks/preflight-design-doc.sh) |
 | `PreToolUse` / `Bash` | [preflight-commit-push.sh](../.agents/hooks/preflight-commit-push.sh), [preflight-pr-review.sh](../.agents/hooks/preflight-pr-review.sh) |
 | `PostToolUse` / `Bash` | [post-remote-write-watch.sh](../.agents/hooks/post-remote-write-watch.sh), [record-test-run.sh](../.agents/hooks/record-test-run.sh) |

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SubagentStart publishes dossier-worker ownership before tools; PreToolUse and
-# SubagentStop enforce the timed-subagent deadline for native auditors (#309, #328)
-# and the design advisor (#335). Past its deadline, every tool call except the agent's record
+# SubagentStop enforce the timed-subagent deadline for native auditors
+# and the design advisor. Past its deadline, every tool call except the agent's record
 # step is answered "record your verdict now". This hook blocks one record-less design-auditor
 # or design-advisor stop; auditor-control.sh closes commit/push stops with the same rule
 # (subagent_timed_stop). Other agents pass.
@@ -32,7 +32,7 @@ case "$auditor" in
     [[ -f "$task_path" && ! -L "$task_path" ]] || exit 0
     task="$(jq -ce 'select((.deadline | type) == "number" and (.state_hash | type) == "string")' \
       "$task_path" 2>/dev/null)" || exit 0
-    allow_command='design-doc\.sh"?[[:space:]]+(verdict|research)([[:space:]]|$)'
+    allow_command='design-doc\.sh"?[[:space:]]+verdict([[:space:]]|$)'
     allow_path=""
     state_path="$git_dir/agent-tooling-design-audit.json"
     record="Pipe {content_sha256, verdict, findings, advisories} to bash \"$plugin_root/scripts/design-doc.sh\" verdict. At deadline: confirmed blockers FAIL; otherwise PASS; unfinished checks and reasons are advisories." ;;
@@ -105,7 +105,7 @@ case "$event" in
     [[ "$resumed" != true ]] || exit 0
     current=""
     [[ ! -f "$state_path" ]] \
-      || current="$(perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$state_path")"
+      || current="$(verdict_audit_sha256 <"$state_path")"
     # A changed record (audit state or advice) means this agent recorded its result.
     if [[ "$current" != "$(jq -r .state_hash <<<"$task")" ]]; then
       rm -f "$task_path"

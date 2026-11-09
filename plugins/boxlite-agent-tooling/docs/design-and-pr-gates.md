@@ -20,7 +20,7 @@ Policy: `boxlite-design-doc`; commands: [Contributing](../CONTRIBUTING.md#pull-r
 | `agent-tooling-design-audit-task.json` | Fixed deadline per design content; `DESIGN_AUDITOR_TIMEOUT`, default 900 seconds. |
 | `agent-tooling-design-advice-task.json` | Advisor deadline using the same timeout. |
 
-`register`/`bind` share validation; `verdict`/`research` share recording, and legacy `agent-tooling-design-research.json` remains readable until replacement.
+A leftover `agent-tooling-design-research.json`, or an audit record without loop fields, fails closed and names the file to remove.
 
 - `.agents/lib/verdict-audit-state.sh` supplies safe reads/replacement; failed reads retain no success cache.
 - Notion child blocks fail closed; native block structure prevents literal text forging headings; design length has no total-word cap.
@@ -28,7 +28,7 @@ Policy: `boxlite-design-doc`; commands: [Contributing](../CONTRIBUTING.md#pull-r
 - The auditor reads through `show`, then records one live `{content_sha256, verdict, findings, advisories}` object.
 - Critical/high gaps FAIL; low/nit gaps remain advisory; every round checks the complete design skill and outline.
 
-The research log stays out of the design, which is for human reviewers ([design #388](https://github.com/boxlite-ai/agent-tooling/issues/388)):
+The research log stays out of the design, which is for human reviewers:
 
 | Part | Behavior |
 | --- | --- |
@@ -42,11 +42,13 @@ The research log stays out of the design, which is for human reviewers ([design 
 
 Specs own input/output; `design-criteria.md` owns steps/entry format (2048-byte cap); `design-outline.md` owns whole-design checks; tasks own deadlines and untrusted-record framing.
 
-How it works must open with a one-line overview and a concrete example before the mechanism ([design #418](https://github.com/boxlite-ai/agent-tooling/issues/418)). No overview, or no example before the mechanism, is high; other readability gaps, such as an undefined project-specific term, are low; mechanism and trade-off gaps keep their usual severity.
+| Section | Rule | Severity |
+| --- | --- | --- |
+| How it works | Opens with a one-line overview and a concrete example before the mechanism. | Missing overview or example first: high; other readability gaps: low |
+| Related work | Opens with sourced best practice and stance, or evidence that none is established; one method table marks the chosen row Pick; cited Lessons close it. | Missing best-practice line or column: high |
+| Projects column | Lists every eligible researched project under its cited methods; the auditor checks it against the log and sources. | Missing project or wrong grouping: high |
 
-Related work opens with sourced best practice and stance, or evidence that none is established. It compares methods in one table, marks the chosen row Pick, and closes with cited Lessons. [Design #424](https://github.com/boxlite-ai/agent-tooling/issues/424)
-
-The **Projects** column lists every eligible researched project under its cited methods. The auditor checks the table against the log and sources. A missing best-practice line, column, or eligible project is high severity, as is incorrect method grouping. [Design #458](https://github.com/boxlite-ai/agent-tooling/issues/458)
+Mechanism and trade-off gaps keep their usual severity.
 
 Design auditors, advisors, and commit or push auditors read the full design and log. Use public evidence or approval that covers every recipient.
 
@@ -97,7 +99,7 @@ Commit/push criteria compare the diff with authenticated `design-doc.sh show` ou
 
 #### Auditor report writes
 
-The design gate allows a native commit/push or verdict auditor to save its assigned report through `Write` or a single-file add/update patch. [Design #406](https://github.com/boxlite-ai/agent-tooling/issues/406)
+The design gate allows a native commit/push or verdict auditor to save its assigned report through `Write` or a single-file add/update patch.
 
 - `.agents/lib/audit-report-scope.sh` checks the repository, session, worker, open attempt, and current prompt epoch or verdict request before allowing the exact report path.
 - Aliases, links, special files, other reports, and unrelated agents still require design authority, as do deletes, moves, and mixed patches.
@@ -157,7 +159,7 @@ Use a direct launcher call with the host's session environment. Direct `gh` comm
 | Target input | Contract |
 | --- | --- |
 | Checkout | `workdir` → tool `cwd` → event `cwd` → process cwd; explicit invalid directories deny. |
-| Legacy state | Without metadata, retain `CLAUDE_PROJECT_DIR` review state. |
+| Review state | Without directory metadata, review state lives under `CLAUDE_PROJECT_DIR`. |
 | Alternate checkout | Literal `env -C /absolute/checkout` / supported `--chdir`; reject relative, dynamic, repeated, or other overrides. |
 | Repository | Literal `--repo`/`-R`, `[HOST/]OWNER/REPO`, before/after subcommand. |
 | Creation | Published head must match local HEAD; resolve fork network without guessing repository name. |
@@ -178,7 +180,6 @@ Creation becoming an existing PR changes identity; later GitHub writes cannot be
 | Exclude | `*.spec.ts`, `*_test.go`, `tests/`, recognized prose, assets/data/logs, lockfiles; classifier owns exact list. |
 | Renames | Test destinations excluded; otherwise either code name counts; repository attributes cannot override classification. |
 | Completeness | Validate names/statistics; ≥300 returned files deny because GitHub may truncate even prose-only comparisons. |
-| Threshold | 400 code lines pass; 401 asks **Bypass limit** or **Split PR**. |
 | Decision | Bypass needs no reason, binds exact diff; split persists on retry; changed HEAD invalidates bypass, even for excluded files. |
 
 Git pushes, API/browser writes, and stack commands bypass per-PR size checking; other publication checks still apply.

@@ -22,6 +22,8 @@ Markerless manifests retain `; exit $?` and `--launcher-pid "$$"`; PreToolUse va
 - Records activate audits and still require a matching dossier or receipt. Records survive consumption and stop matching after owner exit.
 - Reload updated host hooks to pick up markerless launcher wiring.
 
+Audit state lives only in `.agents/state/`. A leftover `.claude/.last-audit.json` or `.claude/.last-audit-handoff.json` blocks agent commits and pushes; the denial names the exact `rm -f` command.
+
 ## Hooks
 
 | Hook | Input | Behavior |
@@ -32,6 +34,9 @@ Markerless manifests retain `; exit $?` and `--launcher-pid "$$"`; PreToolUse va
 | [`.githooks/post-checkout`](post-checkout) | Previous/new HEAD and checkout flag. | Run `scripts/sync-installation.sh`, then forward arguments to the existing hook. |
 | [`.githooks/post-merge`](post-merge) | Squash flag. | Run `scripts/sync-installation.sh`, then forward arguments to the existing hook. |
 | [`.githooks/post-rewrite`](post-rewrite) | Rewrite command; old/new commit pairs on stdin. | Preserve stdin, synchronize installation, then replay the pairs and arguments to the existing hook. |
+
+The hooks share [hook-lib.sh](hook-lib.sh): the delegated-gate call and the sync-then-chain step.
+Each hook runs the gate from its own plugin copy; a missing gate blocks agent commits and pushes.
 
 Existing hooks are resolved beneath `git rev-parse --git-common-dir` in `hooks/`;
 this avoids resolving `core.hooksPath` back to the same hook. A chained hook's

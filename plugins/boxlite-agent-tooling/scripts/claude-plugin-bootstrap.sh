@@ -97,40 +97,18 @@ settings_file="$repo_root/.claude/settings.json"
 [[ -r "$settings_file" ]] || hook_fail "missing Claude project settings: $settings_file"
 command -v claude >/dev/null 2>&1 || hook_fail "Claude Code CLI is required"
 
-tooling_repo="$(jq -er '.tooling.repository | select(type == "string" and length > 0)' "$profile_file" 2>/dev/null)" \
-  || hook_fail "tooling.repository is required in $profile_file"
-[[ "$tooling_repo" == "boxlite-ai/agent-tooling" ]] \
-  || hook_fail "unsupported tooling repository: $tooling_repo"
-tooling_ref="$(jq -er '.tooling.ref | select(type == "string" and length > 0)' "$profile_file" 2>/dev/null)" \
-  || hook_fail "tooling.ref must name the branch to float on in $profile_file"
-[[ ! "$tooling_ref" =~ ^[0-9a-f]{40}$ ]] \
-  || hook_fail "tooling.ref names a branch; freeze a revision in .agent-tooling/hold"
-if [[ "$tooling_ref" == -* ]] || ! git check-ref-format "refs/heads/$tooling_ref" >/dev/null 2>&1; then
-  hook_fail "tooling.ref is not a valid branch name: $tooling_ref"
-fi
+plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=../.agents/lib/tooling-profile.sh
+source "$plugin_root/.agents/lib/tooling-profile.sh" || hook_fail "cannot load the tooling profile library"
+# shellcheck source=../.agents/lib/plugin-bootstrap.sh
+source "$plugin_root/.agents/lib/plugin-bootstrap.sh" || hook_fail "cannot load the plugin bootstrap library"
+# shellcheck source=../.agents/lib/tooling-command.sh
+source "$plugin_root/.agents/lib/tooling-command.sh" || hook_fail "cannot load the tooling command library"
 
-jq -e --arg ref "$tooling_ref" '
-  .extraKnownMarketplaces["boxlite-agent-tooling"].source.source == "github" and
-  .extraKnownMarketplaces["boxlite-agent-tooling"].source.repo == "boxlite-ai/agent-tooling" and
-  .extraKnownMarketplaces["boxlite-agent-tooling"].source.ref == $ref and
-  .enabledPlugins["boxlite-agent-tooling@boxlite-agent-tooling"] == true
-' "$settings_file" >/dev/null 2>&1 \
+tooling_profile_read "$profile_file" || hook_fail "$tooling_profile_error"
+tooling_claude_settings_valid "$settings_file" "$tooling_ref" \
   || hook_fail "Claude project settings must enable boxlite-agent-tooling from the typed GitHub source at tooling.ref $tooling_ref: $settings_file"
 
-git_common_dir() {
-  local root="$1" common
-  common="$(git -C "$root" rev-parse --git-common-dir 2>/dev/null)" || return 1
-  if [[ "$common" != /* ]]; then
-    common="$root/$common"
-  fi
-  (cd "$common" 2>/dev/null && pwd -P)
-}
-
-plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-# shellcheck source=../.agents/lib/plugin-bootstrap.sh
-source "$plugin_root/.agents/lib/plugin-bootstrap.sh" || exit 1
-# shellcheck source=../.agents/lib/tooling-command.sh
-source "$plugin_root/.agents/lib/tooling-command.sh" || exit 1
 tooling_bootstrap_refresh "$repo_root" "$plugin_root" || hook_fail "automatic tooling refresh failed"
 next_runtime="$(tooling_bootstrap_runtime "$repo_root" claude)" || hook_fail "automatic tooling refresh failed"
 if [[ "$next_runtime" != "${BASH_SOURCE[0]}" ]]; then
@@ -140,72 +118,34 @@ host_cli="$(command -v claude)"
 host_deadline=$(( $(date +%s) + 120 ))
 claude() { tooling_command "$host_deadline" "$host_cli" "$@"; }
 
-repo_common_dir="$(git_common_dir "$repo_root")" \
-  || hook_fail "could not resolve the repository's common Git directory"
 canonical_repo_root="$(cd "$repo_root" 2>/dev/null && pwd -P)" \
   || hook_fail "could not resolve the repository's canonical worktree root"
 
-tooling_install_is_valid() {
-  local record verify
-  record="$(head -n1 "$repo_common_dir/agent-tooling/current" 2>/dev/null || true)"
-  [[ "$record" =~ ^[0-9a-f]{40}$ ]] || return 1
-  verify="$repo_common_dir/agent-tooling/$record/plugins/boxlite-agent-tooling/scripts/verify-installation.sh"
-  [[ -x "$verify" ]] || return 1
-  "$verify" "$repo_root" >/dev/null
-}
-
-if ! tooling_install_is_valid 2>/dev/null; then
-  install_output="$(cd "$repo_root" && AGENT_TOOLING_SYNC_ACTIVE=1 AGENT_TOOLING_UPDATE_DEADLINE="$host_deadline" /usr/bin/env bash "$installer" 2>&1)"
-  install_status="$?"
-  if [[ "$install_status" != 0 ]]; then
-    [[ -z "$install_output" ]] || printf '%s\n' "$install_output" >&2
-    hook_fail "automatic tooling installation failed"
-  fi
-  tooling_install_is_valid || {
-    [[ -z "$install_output" ]] || printf '%s\n' "$install_output" >&2
-    hook_fail "automatic tooling installation did not produce a valid local installation"
-  }
+if ! tooling_install_is_valid "$repo_root" 2>/dev/null; then
+  tooling_run_installer_verified "$repo_root" "$installer" "$host_deadline" || case "$?" in
+    1) hook_fail "automatic tooling installation failed" ;;
+    *) hook_fail "automatic tooling installation did not produce a valid local installation" ;;
+  esac
 fi
 
 read_expected_plugin_version() {
-  adopted_tooling_revision="$(head -n1 "$repo_common_dir/agent-tooling/current" 2>/dev/null || true)"
-  [[ "$adopted_tooling_revision" =~ ^[0-9a-f]{40}$ ]] \
-    || hook_fail "adopted tooling revision is invalid after verification"
-  expected_plugin_manifest="$repo_common_dir/agent-tooling/$adopted_tooling_revision/plugins/boxlite-agent-tooling/.claude-plugin/plugin.json"
-  expected_plugin_version="$(jq -er '
-    select(.name == "boxlite-agent-tooling") |
-    .version | select(type == "string" and length > 0)
-  ' "$expected_plugin_manifest" 2>/dev/null)" \
-    || hook_fail "adopted tooling has no valid Claude plugin version: $expected_plugin_manifest"
+  tooling_expected_plugin_version "$repo_root" claude Claude || hook_fail "$tooling_bootstrap_error"
 }
 
 refresh_adopted_tooling() {
   [[ "${AGENT_TOOLING_REFRESH:-1}" != 0 ]] || hook_fail "plugin version differs while AGENT_TOOLING_REFRESH=0; refresh explicitly"
-  local output status
-  output="$(cd "$repo_root" && AGENT_TOOLING_SYNC_ACTIVE=1 AGENT_TOOLING_UPDATE_DEADLINE="$host_deadline" /usr/bin/env bash "$installer" 2>&1)"
-  status="$?"
-  if [[ "$status" != 0 ]]; then
-    [[ -z "$output" ]] || printf '%s\n' "$output" >&2
-    hook_fail "could not refresh adopted tooling before plugin reconciliation"
-  fi
-  tooling_install_is_valid || {
-    [[ -z "$output" ]] || printf '%s\n' "$output" >&2
-    hook_fail "tooling refresh did not produce a valid local installation"
-  }
+  tooling_run_installer_verified "$repo_root" "$installer" "$host_deadline" || case "$?" in
+    1) hook_fail "could not refresh adopted tooling before plugin reconciliation" ;;
+    *) hook_fail "tooling refresh did not produce a valid local installation" ;;
+  esac
   read_expected_plugin_version
 }
 
 read_expected_plugin_version
 
-hold_file="$repo_root/.agent-tooling/hold"
-hold_sha=""
-if [[ -e "$hold_file" ]]; then
-  hold_sha="$(tr -d '\n' < "$hold_file")"
-  { [[ "$hold_sha" =~ ^[0-9a-f]{40}$ ]] && [[ "$(wc -c < "$hold_file")" -le 41 ]]; } \
-    || hook_fail "$hold_file must contain exactly one full lowercase commit SHA"
-  [[ "$hold_sha" == "$adopted_tooling_revision" ]] \
-    || hook_fail "hold $hold_sha is not the adopted tooling revision $adopted_tooling_revision"
-fi
+tooling_hold_read "$repo_root/.agent-tooling/hold" || hook_fail "$tooling_profile_error"
+[[ -z "$hold_sha" || "$hold_sha" == "$adopted_tooling_revision" ]] \
+  || hook_fail "hold $hold_sha is not the adopted tooling revision $adopted_tooling_revision"
 
 read_marketplaces() {
   local output status

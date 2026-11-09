@@ -35,7 +35,7 @@ run_hook() { # host, event, script basename; stdin is the native hook payload
   env -u PLUGIN_ROOT -u CLAUDE_PLUGIN_ROOT -u CLAUDE_PROJECT_DIR \
     "$root=$plugin" bash -c "$command"
 }
-# Comment and Stop gates exempt text of 80 words or fewer (#265), so matrix bodies get a
+# Comment and Stop gates exempt text of 80 words or fewer, so matrix bodies get a
 # 90-word list under its own heading and every gate applies the
 # TL;DR rules. check_short covers the exempt text itself.
 matrix_padding="$(printf -- '- These fifteen words keep the padded fixture long enough to require a summary during validation.\n%.0s' {1..6})"
@@ -65,7 +65,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
         design)
           wanted="${design_expected:-$reply_expected}"
           jq -nc --arg body "$body" '{html_url:"https://github.com/example/repo/issues/1",body:$body}' > "$DOC_FIXTURE"
-          output="$(bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 2>&1)" || actual=deny ;;
+          output="$(bash "$plugin/scripts/design-doc.sh" register https://github.com/example/repo/issues/1 2>&1)" || actual=deny ;;
         stop-*)
           wanted="$reply_expected"
           [[ "$active" != true && -z "$matrix_short" ]] || wanted=allow
@@ -75,7 +75,7 @@ check() { # label, text, expected allow|deny, optional reply/design expectation,
               content:[{type:"output_text",text:$body}]}} end' > "$scratch/turn.jsonl"
           output="$(jq -nc --arg body "$body" --argjson active "$active" \
             --arg gate "$gate" --arg transcript "$scratch/turn.jsonl" \
-            '{hook_event_name:"Stop",stop_hook_active:$active} +
+            '{hook_event_name:"Stop",session_id:"tldr-gates",stop_hook_active:$active} +
              (if $gate | startswith("stop-transcript") then {transcript_path:$transcript} else {last_assistant_message:$body} end)' \
             | run_hook "$host" Stop stop-gate.sh)"
           [[ "$(jq -r '.decision // "allow"' <<<"$output")" != block ]] || actual=deny ;;
@@ -99,7 +99,7 @@ check visible_alert 'PR #141 needs review.' deny deny 'TL;DR heading missing'
 check bold_label '**TL;DR:** A concise answer.' deny deny '`## TL;DR`, one short sentence'
 check empty $'## TL;DR\n\n## Details\nA concise answer.' deny deny 'summary missing or invalid'
 check symbol_start $'## TL;DR\n\n#120 is ready.' deny deny 'summary missing or invalid'
-# Inline code may open the sentence; a list or setext heading is no sentence (#257).
+# Inline code may open the sentence; a list or setext heading is no sentence.
 check code_start $'## TL;DR\n\n`stop-gate.sh` now leads every reply with a summary.' allow
 check list_start $'## TL;DR\n\n* A concise answer.' deny deny 'summary missing or invalid'
 check setext_start $'## TL;DR\n\nA concise answer.\n===' deny deny 'summary missing or invalid'
@@ -125,8 +125,8 @@ check nested_heading $'## TL;DR\n\nRetry failed requests once.\n\n### Details\n\
   deny deny 'same-level heading like `## Details`'
 check table_after $'## TL;DR\n\nA concise answer.\n\n| Gate | Result |\n|---|---|\n'"$(printf '| stop gate | denied the reply |\n%.0s' {1..10})" \
   deny deny 'keep one short sentence, then a same-level heading'
-# A leading TL;DR no longer exempts the details: replies and GitHub text keep the
-# structure limits, while design registration checks only the summary (#419).
+# A leading TL;DR does not exempt the details: replies and GitHub text keep the
+# structure limits, while design registration checks only the summary.
 dense="$(printf 'word %.0s' {1..81})"
 design_expected=allow
 check long_sentence_after_summary $'## TL;DR\n\nA concise answer.\n\n## Details\n\n'"$dense" \
@@ -146,7 +146,7 @@ check_short short_80_words "$(printf -- '- Each of these list items contains twe
 for host in claude codex; do
   jq -nc '{type:"assistant",message:{content:[{type:"text",text:"Earlier progress."}]}}' > "$scratch/turn.jsonl"
   output="$(jq -nc --arg transcript "$scratch/turn.jsonl" \
-    '{hook_event_name:"Stop",last_assistant_message:"",transcript_path:$transcript}' \
+    '{hook_event_name:"Stop",session_id:"tldr-gates",last_assistant_message:"",transcript_path:$transcript}' \
     | run_hook "$host" Stop stop-gate.sh)"
   if [[ "$(jq -r '.decision // "allow"' <<<"$output")" != block ]]; then
     pass=$((pass+1))

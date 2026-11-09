@@ -43,31 +43,10 @@
 # A missing spec file is a packaging bug, not a runtime branch: this still emits the
 # instruction, and subagent.test.sh asserts every referenced spec exists.
 
-# hook_host_kind is the only sanctioned way to name the caller's host. Loading it here
-# rather than in each caller keeps that single accessor next to the one decision it
-# feeds; a fixture that stages subagent.sh must stage hook-host.sh beside it.
-#
-# Sourced UNCONDITIONALLY, never behind a `declare -F` check. Bash carries exported
-# functions through the environment (BASH_FUNC_*), so a definition of this name can
-# arrive from any ancestor process — and skipping the load when one exists would hand
-# route selection to precisely the inherited state this accessor exists to ignore.
-# The library defines functions and nothing else, so reloading it costs nothing.
-#
-# Loading stays INERT: no variable left in the caller's scope, no output, and no return
-# or exit while sourcing. A library that can abort its own load takes the decision away
-# from callers that source several and report their own failures.
-#
-# The absence is caught where it can be reported instead — `source` on a missing file
-# only warns, and every caller runs under `set -uo pipefail` rather than `-e`, so
-# without a check the gate would continue with no accessor, take the unknown-host
-# branch, and print the full menu: a packaging bug rendered as a plausible instruction.
-#
-# The names are cleared FIRST, so a load that fails leaves nothing behind. Bash carries
-# exported functions in the environment, so without this an absent hook-host.sh would
-# leave whatever an ancestor exported in place and the guard below would accept it —
-# routing on exactly the inherited state this accessor exists to refuse, which is worse
-# than the missing file it was meant to catch.
-unset -f hook_host_kind hook_host_is_env_root hook_host_is_env_value 2>/dev/null || true
+# hook_host_kind names the caller's host. Always source hook-host.sh: an inherited
+# exported function must never stand in for it, so clear the names first. Callers
+# check `declare -F hook_host_kind` and report a missing library themselves.
+unset -f hook_host_kind hook_host_is_env_value 2>/dev/null || true
 # shellcheck source=./hook-host.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hook-host.sh" 2>/dev/null || true
 

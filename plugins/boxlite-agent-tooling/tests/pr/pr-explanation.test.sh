@@ -30,7 +30,7 @@ SH
 chmod +x "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH" CLAUDE_PROJECT_DIR="$scratch/repo"
 cd "$scratch/repo"
-bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 >/dev/null
+bash "$plugin/scripts/design-doc.sh" register https://github.com/example/repo/issues/1 >/dev/null
 pass=0 fail=0
 while IFS= read -r fixture; do
   # Keep the captured explanation intact and put fixture metadata in a list.

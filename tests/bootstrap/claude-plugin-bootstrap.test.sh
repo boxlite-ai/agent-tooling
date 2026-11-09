@@ -7,7 +7,6 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SETTINGS_FILE="$REPO_ROOT/templates/claude-plugin-bootstrap.json"
 MERGE_FILTER="$REPO_ROOT/templates/merge-claude-plugin-settings.jq"
-PRECANONICAL_SETTINGS="$REPO_ROOT/tests/bootstrap/fixtures/claude-plugin-bootstrap-precanonical.json"
 BOOTSTRAP="$REPO_ROOT/templates/claude-plugin-bootstrap.sh"
 FAKE_CLAUDE="$REPO_ROOT/tests/bootstrap/fixtures/fake-claude-plugin-cli.sh"
 FAKE_INSTALLER="$REPO_ROOT/tests/bootstrap/fixtures/fake-agent-tooling-install.sh"
@@ -59,15 +58,18 @@ canonical_session_hook="$(jq -c '
 ' "$SETTINGS_FILE" 2>/dev/null)"
 check_eq "SessionStart hook uses Claude Code canonical key order" \
   "$actual_session_hook" "$canonical_session_hook"
-if jq -s -f "$MERGE_FILTER" "$PRECANONICAL_SETTINGS" "$SETTINGS_FILE" \
+jq '. + {env: {KEEP: "1"}}' "$SETTINGS_FILE" > "$TMP/installed-settings.json"
+if jq -s -f "$MERGE_FILTER" "$TMP/installed-settings.json" "$SETTINGS_FILE" \
   > "$TMP/merged-settings.json" 2>/dev/null; then
   merge_status=0
 else
   merge_status="$?"
 fi
-check_eq "documented merge accepts settings from the previous template" "$merge_status" 0
+check_eq "documented merge re-applies to installed settings" "$merge_status" 0
+check_eq "documented merge keeps consumer keys" \
+  "$(jq -r '.env.KEEP // "MISSING"' "$TMP/merged-settings.json" 2>/dev/null)" 1
 merged_session_hook="$(jq -c '.hooks.SessionStart[0].hooks[0]' "$TMP/merged-settings.json" 2>/dev/null)"
-check_eq "documented merge replaces the previous hook with canonical key order" \
+check_eq "documented merge keeps the hook in canonical key order" \
   "$merged_session_hook" "$canonical_session_hook"
 check_eq "documented merge keeps one managed SessionStart hook" \
   "$(jq -r '.hooks.SessionStart | length' "$TMP/merged-settings.json" 2>/dev/null)" 1

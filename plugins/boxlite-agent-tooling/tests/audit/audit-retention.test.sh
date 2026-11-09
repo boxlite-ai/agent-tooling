@@ -8,11 +8,9 @@ export XDG_CONFIG_HOME="$scratch/config" BOXLITE_HOOK_HOST=unknown
 export CODEX_BIN="$scratch/no-model" TEST_HISTORY_RESULT_HELPER="$plugin_root/tests/audit/fixtures/audit-history-result.sh"
 export RETENTION_AUDITOR="$scratch/auditor.sh" VERDICT_AUDITOR_CMD='bash "$RETENTION_AUDITOR"'
 export VERDICT_CLASSIFIER_CMD='while IFS= read -r line; do :; done; printf "YES\n"'
-pass=0 fail=0 cases=0
-check() {
-  if [[ "$2" == "$3" ]]; then pass=$((pass+1)); printf 'PASS %s\n' "$1"
-  else fail=$((fail+1)); printf 'FAIL %s: got <%s>, want <%s>\n' "$1" "$2" "$3"; fi
-}
+# shellcheck source=../lib/assert.sh
+source "$plugin_root/tests/lib/assert.sh"
+cases=0
 cat > "$RETENTION_AUDITOR" <<'AUDITOR'
 set -euo pipefail
 state="$CLAUDE_PROJECT_DIR/.agents/state"
@@ -62,21 +60,21 @@ setup() {
 
 setup
 prompt "what's happening?" > "$state/nudge-output"
-check 'a status prompt retains the exact running request' "$(cat "$request" 2>/dev/null)" "$original_request"
-check 'retention still rotates prompt-scoped authority' "$([[ "$(cat "$epoch")" != "$original_epoch" ]] && echo changed)" changed
+check_eq 'a status prompt retains the exact running request' "$(cat "$request" 2>/dev/null)" "$original_request"
+check_eq 'retention still rotates prompt-scoped authority' "$([[ "$(cat "$epoch")" != "$original_epoch" ]] && echo changed)" changed
 prompt 'keep going' > "$state/nudge-output"
-check 'a second status prompt does not restart the worker' "$(cat "$state/starts")" started
+check_eq 'a second status prompt does not restart the worker' "$(cat "$state/starts")" started
 touch "$state/release"; wait "$stop_pid"; completion=$?
-check 'retained original audit completes and leaves its dossier' \
+check_eq 'retained original audit completes and leaves its dossier' \
   "status=$completion dossier=$([[ -f "$state/last-verdict.json.$scope" ]] && echo present || echo absent)" \
   'status=0 dossier=present'
 VERDICT_CLASSIFIER_CMD='while IFS= read -r line; do :; done; printf "NO\n"' \
   stop 'The tests passed.' > "$state/new-turn-output" 2> "$state/new-turn-error"
-check 'identical wording in a new turn cannot consume the old PASS' \
+check_eq 'identical wording in a new turn cannot consume the old PASS' \
   "$(grep -c 'dossier PASS-allow' "$state/verdict-decisions.log.$scope" || true)" 0
 stop 'The deployment is healthy.' > "$state/new-claim-output" 2> "$state/new-claim-error"
-check 'new claims require a second independent invocation' "$(wc -l < "$state/starts" | tr -d ' ')" 2
-check 'completed unchanged proof is supplied only as prior evidence' \
+check_eq 'new claims require a second independent invocation' "$(wc -l < "$state/starts" | tr -d ' ')" 2
+check_eq 'completed unchanged proof is supplied only as prior evidence' \
   "$(jq -r .verdict "$state/received-prior.json" 2>/dev/null)" PASS
 
 for change in tracked untracked head branch symlink fifo expired; do
@@ -91,10 +89,10 @@ for change in tracked untracked head branch symlink fifo expired; do
     expired) read -r generation _ message <<< "$original_request"; printf '%s 1 %s\n' "$generation" "$message" > "$request" ;;
   esac
   prompt 'keep going' > "$state/nudge-output"
-  check "changed or unsafe context ($change) revokes the request" \
+  check_eq "changed or unsafe context ($change) revokes the request" \
     "$([[ -e "$request" ]] && echo present || echo absent)" absent
   touch "$state/release"; wait "$stop_pid" || true
-  check "canceled result ($change) cannot publish a dossier" \
+  check_eq "canceled result ($change) cannot publish a dossier" \
     "$([[ -e "$state/last-verdict.json.$scope" ]] && echo present || echo absent)" absent
 done
 
@@ -104,8 +102,7 @@ touch "$state/release"; wait "$stop_pid"
 rm -f "$context"
 VERDICT_CLASSIFIER_CMD='while IFS= read -r line; do :; done; printf "NO\n"' \
   stop 'The tests passed.' > "$state/new-turn-output" 2> "$state/new-turn-error"
-check 'missing retained context cannot authorize a new turn' \
+check_eq 'missing retained context cannot authorize a new turn' \
   "$(grep -c 'dossier PASS-allow' "$state/verdict-decisions.log.$scope" || true)" 0
 
-printf '\nRESULT: %s passed, %s failed\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+assert_result

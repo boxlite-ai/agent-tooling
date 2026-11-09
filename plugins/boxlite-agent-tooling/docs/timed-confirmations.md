@@ -27,15 +27,9 @@ Only explicit human instruction renews an expired or declined size request. Reme
 
 The state machine archives the old record and instruction under lock, then publishes a fresh ID and 300-second deadline. A reply to the archived ID cannot answer the new request.
 
-### Upgrade recovery
+### Unsupported records
 
-Resolve outstanding requests before upgrading, then shut down old sessions. The new version reads only version-two state. Unsupported records block at the reported path and keep their original bytes.
-
-For a still-bound request, restore the matching repository tooling revision and host plugin. Use the repository hold and installer for tooling, then reload the old host plugin and resume the original checkout and session. [Installation and holds](../../../README.md#updates-and-troubleshooting)
-
-Resolve the request through its original flow. Keep an explicit Git **Stop** in effect until the human authorizes a fresh audit.
-
-After deciding explicitly to restart an abandoned request, stop all affected sessions and archive only the reported request file. Return to matching new runtime revisions and open a fresh request with a new ID.
+A request record in another format blocks at the reported path and keeps its bytes. To restart it, stop the affected sessions, archive only that file, and open a fresh request. An explicit Git **Stop** stays in effect until the human authorizes a fresh audit.
 
 ### Presentation and continuation
 
@@ -47,4 +41,4 @@ Native Force pass keeps its own auditor lifecycle. The launcher enables its Clau
 bash plugins/boxlite-agent-tooling/scripts/claude-with-timed-prompts.sh
 ```
 
-Card dismissal leaves the auditor running. Interaction can reset the idle timer. The auditor override retains its existing eligibility and expiry checks.
+Card dismissal leaves the auditor running. Interaction can reset the idle timer. The auditor override keeps its eligibility and expiry checks.

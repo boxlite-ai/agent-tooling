@@ -35,7 +35,7 @@ chmod +x "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH"
 export CLAUDE_PROJECT_DIR="$scratch/repo"
 cd "$scratch/repo"
-bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/123 >/dev/null
+bash "$plugin/scripts/design-doc.sh" register https://github.com/example/repo/issues/123 >/dev/null
 call_hook() {
   jq -nc --arg command "$1" '{tool_input:{command:$command}}' \
     | bash "$plugin/.agents/hooks/preflight-pr-review.sh"

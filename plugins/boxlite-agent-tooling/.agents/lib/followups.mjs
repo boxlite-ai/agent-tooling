@@ -56,14 +56,11 @@ export function containsPath(root, path) {
   return !difference || (!isAbsolute(difference) && difference !== '..' && !difference.startsWith(`..${sep}`));
 }
 
-/** Match worktrees by filesystem identity and derive old keys only for recovery. */
-export function cloneIdentity(cwd, { legacy = false, legacyPath } = {}) {
-  requireValue(legacyPath === undefined || isAbsolute(legacyPath), 'Previous Git common directory must be absolute');
+/** Match worktrees by filesystem identity, so a renamed checkout keeps its journal. */
+export function cloneIdentity(cwd) {
   const dir = realpathSync(git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'));
   const { dev, ino, birthtimeNs } = statSync(dir, { bigint: true });
-  return legacy || legacyPath
-    ? digest([legacyPath ?? dir, dev.toString(), ino.toString()])
-    : digest([dev.toString(), ino.toString(), birthtimeNs.toString()]);
+  return digest([dev.toString(), ino.toString(), birthtimeNs.toString()]);
 }
 
 function privateDirectory(path, create) {
@@ -110,19 +107,22 @@ function draftStatus(state, { draft, grant, release, attempt }) {
  * Use separate SQLite databases for transport ownership and durable attempts.
  * A crash releases transport ownership while preserving the recorded attempt.
  */
-export function openFollowupQueue(stateRoot, clone, { initialize = false, registryRoot, legacyClone, requireLegacy = false } = {}) {
+export function openFollowupQueue(stateRoot, clone, { initialize = false, registryRoot } = {}) {
   requireValue(/^[a-f0-9]{64}$/.test(clone), 'Invalid clone identity');
-  requireValue(!legacyClone || /^[a-f0-9]{64}$/.test(legacyClone), 'Invalid legacy clone identity');
   privateDirectory(stateRoot, initialize);
   const root = realpathSync(stateRoot);
-  let journal = clone;
-  const journalFile = name => join(root, journal, name);
+  const journal = join(root, clone);
+  const journalFile = name => join(journal, name);
+  const registryPath = registryRoot && join(registryRoot, 'roots.sqlite');
+  /** Journals from releases before the current format fail closed with re-initialization steps. */
+  const unsupported = () => new Error(`Follow-up journal is missing or from an unsupported release: ${journal}; ` +
+    `move it aside if present${registryPath ? `, delete ${registryPath}` : ''}, and run init`);
 
   /** Validate both database paths before opening a bound journal. */
   function checkQueue(create) {
-    const directory = join(root, journal);
-    if (create && !existsSync(directory)) initializeQueue(root, directory, journal);
-    privateDirectory(directory, false);
+    if (create && !existsSync(journal)) initializeQueue(root, journal, clone);
+    if (!existsSync(journal)) throw unsupported();
+    privateDirectory(journal, false);
     for (const name of ['queue.sqlite', 'lock.sqlite']) {
       requireValue(lstatSync(journalFile(name)).isFile(), 'Follow-up state is missing or unsafe');
     }
@@ -130,39 +130,20 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
 
   if (registryRoot) {
     privateDirectory(registryRoot, initialize);
-    const registryPath = join(registryRoot, 'roots.sqlite');
     if (existsSync(registryPath)) requireValue(lstatSync(registryPath).isFile(), 'Follow-up registry is unsafe');
     const registry = new DatabaseSync(registryPath);
     try {
       registry.exec(`PRAGMA busy_timeout = 1000;
         CREATE TABLE IF NOT EXISTS roots (clone TEXT PRIMARY KEY, path TEXT NOT NULL, identity TEXT NOT NULL);
         BEGIN IMMEDIATE;`);
-      registry.exec('CREATE TABLE IF NOT EXISTS journal_keys (clone TEXT PRIMARY KEY, journal TEXT NOT NULL)');
-      const rootFor = registry.prepare('SELECT path, identity FROM roots WHERE clone = ?');
-      const current = rootFor.get(clone);
-      const previous = legacyClone ? rootFor.get(legacyClone) : undefined;
-      const bound = current ?? previous;
-      journal = current
-        ? registry.prepare('SELECT journal FROM journal_keys WHERE clone = ?').get(clone)?.journal ?? clone
-        : previous ? legacyClone : clone;
-      if (requireLegacy) {
-        requireValue(previous && journal === legacyClone, 'Legacy follow-up journal was not found for this clone');
-      }
+      const bound = registry.prepare('SELECT path, identity FROM roots WHERE clone = ?').get(clone);
       requireValue(bound || initialize, 'Run init to bind this clone to its follow-up state directory');
       requireValue(!bound || bound.path === root, 'Clone already uses another follow-up state directory');
-      requireValue(/^[a-f0-9]{64}$/.test(journal), 'Invalid follow-up journal key');
-      if (!bound) {
-        const unknown = registry.prepare(`SELECT 1 FROM roots WHERE NOT EXISTS (
-          SELECT 1 FROM journal_keys WHERE roots.clone IN (journal_keys.clone, journal_keys.journal)
-        ) LIMIT 1`).get();
-        requireValue(!unknown, 'Open existing follow-up journals before initializing a new clone, or supply the previous Git common directory');
-      }
       checkQueue(!bound);
       const { dev, ino } = statSync(journalFile('queue.sqlite'), { bigint: true });
       const identity = `${dev}:${ino}`;
       requireValue(!bound || bound.identity === identity, 'Bound follow-up journal was replaced');
-      if (!current) registry.prepare('INSERT INTO roots VALUES (?, ?, ?)').run(clone, root, identity);
-      registry.prepare('INSERT OR IGNORE INTO journal_keys VALUES (?, ?)').run(clone, journal);
+      if (!bound) registry.prepare('INSERT INTO roots VALUES (?, ?, ?)').run(clone, root, identity);
       registry.exec('COMMIT');
     } finally {
       registry.close();
@@ -185,8 +166,8 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
       const raw = db.prepare('SELECT document FROM queue WHERE id = 1').get()?.document;
       requireValue(typeof raw === 'string' && Buffer.byteLength(raw) <= MAX_STATE_BYTES, 'Unreadable follow-up state');
       const state = JSON.parse(raw);
-      requireValue((state.version === 1 || state.version === STATE_VERSION) && state.clone === journal,
-        'Follow-up state belongs to another clone or version');
+      if (state.version !== STATE_VERSION) throw unsupported();
+      requireValue(state.clone === clone, 'Follow-up state belongs to another clone or version');
       db.exec('CREATE TABLE IF NOT EXISTS completed (id TEXT PRIMARY KEY, record TEXT NOT NULL)');
       const completed = {
         get: id => JSON.parse(db.prepare('SELECT record FROM completed WHERE id = ?').get(id)?.record ?? 'null'),
@@ -219,14 +200,6 @@ export function openFollowupQueue(stateRoot, clone, { initialize = false, regist
           throw error;
         }
       };
-      if (state.version === 1) {
-        // Fence older writers under the same lock before moving any drafts to history.
-        state.version = STATE_VERSION;
-        for (const [handle, session] of Object.entries(state.sessions)) {
-          if (session.owner === undefined) delete state.sessions[handle];
-        }
-        save();
-      }
       const result = action(state, save, completed);
       if (result instanceof Promise) {
         deferred = true;

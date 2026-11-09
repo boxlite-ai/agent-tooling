@@ -2,6 +2,8 @@
 # Start/recover a producer independently of the invoking execution session.
 set -uo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/verdict-audit-state.sh
+source "$script_dir/../lib/verdict-audit-state.sh" || exit 127
 # shellcheck source=../lib/pr-watch-state.sh
 source "$script_dir/../lib/pr-watch-state.sh" || exit 127
 branch="" sha="" pr=""
@@ -22,7 +24,7 @@ done
   exit 2
 }
 [[ -n "$branch" ]] || branch="pr-$pr"
-for dependency in git jq perl shasum gh; do
+for dependency in git jq perl gh; do
   command -v "$dependency" >/dev/null || exit 127
 done
 directory="$(git rev-parse --absolute-git-dir)/pr-watch" || exit 1

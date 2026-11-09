@@ -24,11 +24,11 @@ context() { # host plugin-path [command-field] [response]
   payload="$(jq -nc --arg field "${3:-command}" --argjson response "$response" \
     '{tool_input:{($field):"gh pr create"},tool_response:$response}')"
   case "$host" in
-    codex) printf '%s' "$payload" | env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$root" \
+    codex) printf '%s' "$payload" | env BOXLITE_HOOK_HOST=codex \
       bash "$root/.agents/hooks/post-remote-write-watch.sh" ;;
-    claude) printf '%s' "$payload" | env -u PLUGIN_ROOT CLAUDE_PLUGIN_ROOT="$root" \
+    claude) printf '%s' "$payload" | env BOXLITE_HOOK_HOST=claude \
       bash "$root/.agents/hooks/post-remote-write-watch.sh" ;;
-    unknown) printf '%s' "$payload" | env -u PLUGIN_ROOT -u CLAUDE_PLUGIN_ROOT \
+    unknown) printf '%s' "$payload" | env -u BOXLITE_HOOK_HOST \
       bash "$root/.agents/hooks/post-remote-write-watch.sh" ;;
   esac | jq -er '.hookSpecificOutput.additionalContext'
 }

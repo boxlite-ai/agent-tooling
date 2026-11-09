@@ -2,11 +2,6 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd -P)"
-if (( $# == 0 )); then
-  bash "$0" bootstrap
-  bash "$0" runtime
-  exit 0
-fi
 # shellcheck source=../../.agents/lib/install-lock.sh
 source "$root/plugins/boxlite-agent-tooling/.agents/lib/install-lock.sh"
 scratch="$(mktemp -d)"
@@ -51,11 +46,7 @@ git -C "$source_cache" add .
 git -C "$source_cache" -c user.name=test -c user.email=test@example.invalid commit -qm setup
 sha="$(git -C "$source_cache" rev-parse HEAD)"
 
-case "${1:-bootstrap}" in
-  bootstrap) installer="$root/templates/install.sh" ;;
-  runtime) installer="$root/plugins/boxlite-agent-tooling/scripts/install.sh" ;;
-  *) fail 'unknown test mode' ;;
-esac
+installer="$root/plugins/boxlite-agent-tooling/scripts/install.sh"
 consumer="$scratch/consumer"
 git init -q "$consumer"
 mkdir -p "$consumer/.agent-tooling" "$consumer/.git/agent-tooling"
@@ -65,26 +56,15 @@ printf '%s\n' '{"tooling":{"repository":"boxlite-ai/agent-tooling","ref":"main"}
 cache="$consumer/.git/agent-tooling"
 git clone -q "$source_cache" "$cache/$sha"
 cd "$consumer"
-cmp "$root/templates/install.sh" "$root/.agent-tooling/install.sh"
-sed -n '/^# BEGIN installer lease helper$/,/^# END installer lease helper$/p' \
-  "$root/templates/install.sh" > "$scratch/embedded"
-sed -n '/^# BEGIN installer lease helper$/,/^# END installer lease helper$/p' \
-  "$root/plugins/boxlite-agent-tooling/.agents/lib/install-lock.sh" | cmp - "$scratch/embedded"
 
-check_legacy_lock() {
-  mkdir "$cache/.install.lock"
-  printf '%s\n' 2147483647 > "$cache/.install.lock/pid"
-  if bash "$installer" > "$scratch/legacy.log" 2>&1; then fail 'legacy directory was reaped'; fi
-  [[ -f "$cache/.install.lock/pid" ]] || fail 'ambiguous legacy state was modified'
-  unlink "$cache/.install.lock/pid"
-  rmdir "$cache/.install.lock"
-}
 if ! install_lock_native "$cache"; then
   bash "$installer"
   [[ "$(cat "$cache/current")" == "$sha" && ! -e "$cache/.install.guard" ]] \
-    || fail 'fallback did not use the legacy lock'
-  check_legacy_lock
-  printf 'install-lock: legacy fallback passed (%s)\n' "$1"
+    || fail 'fallback did not use the directory lock'
+  mkdir "$cache/.install.lock"
+  if bash "$installer" > "$scratch/held.log" 2>&1; then fail 'a held directory lock was ignored'; fi
+  rmdir "$cache/.install.lock"
+  printf 'install-lock: directory lock fallback passed\n'
   exit 0
 fi
 
@@ -101,9 +81,6 @@ if bash "$installer" > "$scratch/contender.log" 2>&1; then
 fi
 grep -Fq 'installation is already in progress' "$scratch/contender.log" \
   || { cat "$scratch/contender.log" >&2; fail 'contender did not hit the lock'; }
-if mkdir "$cache/.install.lock" 2>/dev/null; then
-  fail 'legacy directory lock was able to race orphaned setup'
-fi
 printf 'release\n' > "$INSTALL_TEST_RELEASE"
 wait_file "$INSTALL_TEST_WRITES"
 setup_pid=""
@@ -113,31 +90,16 @@ if ! bash "$installer" > "$scratch/retry.log" 2>&1; then
   fail 'a stopped installation stranded its lock'
 fi
 [[ "$(cat "$cache/current")" == "$sha" ]] || fail 'retry did not adopt the held revision'
-[[ ! -e "$cache/.install.lock" ]] || fail 'successful install left the exclusion marker'
+[[ -f "$cache/.install.guard" && ! -e "$cache/.install.lock" ]] || fail 'native lease left an unexpected lock path'
 [[ "$(wc -l < "$INSTALL_TEST_WRITES" | tr -d ' ')" == 2 ]] || fail 'a writer ran during contention'
 
-check_legacy_lock
-ln -s "$cache/.install.guard" "$cache/.install.lock"
-if bash "$installer" > "$scratch/symlink.log" 2>&1; then fail 'unexpected marker was accepted'; fi
-[[ -L "$cache/.install.lock" ]] || fail 'unexpected marker was changed'
-unlink "$cache/.install.lock"
+mv "$cache/.install.guard" "$scratch/guard"
+ln -s "$scratch/guard" "$cache/.install.guard"
+if bash "$installer" > "$scratch/symlink.log" 2>&1; then fail 'a symlinked guard was accepted'; fi
+[[ -L "$cache/.install.guard" ]] || fail 'the symlinked guard was changed'
+unlink "$cache/.install.guard"
 
 # Force the guard open onto descriptor 9 so dup2 is a no-op.
 bash "$installer" 3</dev/null 4</dev/null 5</dev/null 6</dev/null 7</dev/null 8</dev/null \
   || fail 'lease descriptor did not survive when already numbered 9'
-
-if [[ "$1" == bootstrap ]]; then
-  runtime="$cache/$sha/plugins/boxlite-agent-tooling/scripts/install.sh"
-  cat > "$runtime" <<'LEGACY'
-#!/usr/bin/env bash
-set -eu
-[[ "$AGENT_TOOLING_UPDATE_DEADLINE" == 12345 && "$1" == "caller argument" ]]
-if mkdir "$INSTALL_TEST_CACHE/.install.lock"; then rmdir "$INSTALL_TEST_CACHE/.install.lock"; else exit 42; fi
-LEGACY
-  chmod +x "$runtime"
-  export INSTALL_TEST_CACHE="$cache"
-  ln "$cache/.install.guard" "$cache/.install.lock"
-  AGENT_TOOLING_UPDATE_DEADLINE=12345 bash "$installer" 'caller argument' \
-    || fail 'stale marker or bootstrap delegation changed the old runtime'
-fi
-printf 'install-lock: orphan exclusion and retry passed (%s)\n' "${1:-bootstrap}"
+printf 'install-lock: orphan exclusion and retry passed\n'

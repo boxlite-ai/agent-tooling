@@ -52,7 +52,7 @@ check() { # label, command, expected reason fragment (empty means allow)
 }
 draft="gh pr create --draft --title 'feat: test design links' --body"
 check 'missing binding blocks drafts' "$draft '$DESIGN_TEST_BODY'" 'design doc'
-bash "$plugin/scripts/design-doc.sh" bind "$DESIGN_TEST_URL" >/dev/null
+bash "$plugin/scripts/design-doc.sh" register "$DESIGN_TEST_URL" >/dev/null
 check 'missing link blocks drafts' "$draft '${SUMMARY_PREFIX}A concise change.'" 'link the registered design doc'
 check 'different issue cannot satisfy the link' "$draft '${SUMMARY_PREFIX}${DESIGN_TEST_URL}2'" 'link the registered design doc'
 if [[ "${1:-}" == --reproducer ]]; then
@@ -88,7 +88,7 @@ check 'code example is not a link' "$draft '${SUMMARY_PREFIX}\`$DESIGN_TEST_URL\
 fenced_body=$'```text\n'"$DESIGN_TEST_URL"
 check 'unclosed code fence is not a link' "$draft '${SUMMARY_PREFIX}$fenced_body'" 'link the registered design doc'
 # shellcheck disable=SC2016 # Literal Markdown backticks, never shell substitution.
-# The fenced list item has a sibling: one-item lists break the structure limits (#419).
+# The fenced list item has a sibling: one-item lists break the structure limits.
 for fenced_body in $'> ```\n> '"$DESIGN_TEST_URL"$'\n> ```' $'- ```\n  '"$DESIGN_TEST_URL"$'\n  ```\n- Second item.' '``example` '"$DESIGN_TEST_URL"' `example``'; do
   check 'nested and multi-backtick examples are not links' "$draft '${SUMMARY_PREFIX}$fenced_body'" 'link the registered design doc'
 done

@@ -87,15 +87,11 @@ design_doc_verify() { # URL -> SHA-256 of the verified content, only after a liv
   [[ "$body" == *[![:space:]]* ]] || { _design_doc_error 'document is empty'; return 1; }
   (( ${#body} <= 32000 )) || { _design_doc_error 'document exceeds the bounded content check'; return 1; }
   concise_writing_check_summary "$body" first 39 >&2 || return 1
-  printf '%s' "$body" | perl -MDigest::SHA=sha256_hex -0777 -e 'print sha256_hex(scalar(<STDIN>) // "")'
-}
-
-_design_doc_sha256() { # stdin -> SHA-256 hex of its exact bytes
-  perl -MDigest::SHA=sha256_hex -0777 -e 'print sha256_hex(scalar(<STDIN>) // "")'
+  printf '%s' "$body" | verdict_audit_sha256
 }
 
 # A design's identity apart from its URL spelling: a Notion title slug, a `www` host, or a
-# dashed page ID names the same page, so they share one research log (design #388).
+# dashed page ID names the same page, so they share one research log.
 _design_doc_id() { # canonical provider URL -> design ID
   if [[ "$1" =~ ^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)$ ]]; then
     printf 'github:%s#%s' "$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')" \
@@ -110,7 +106,7 @@ _design_doc_id() { # canonical provider URL -> design ID
 }
 
 # Logs live in the clone's common directory, so every worktree of the clone sees one store
-# and removing a worktree keeps them; one file per design ID (design #388).
+# and removing a worktree keeps them; one file per design ID.
 _design_doc_log_dir() { # repository root -> research log directory
   local common
   common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)" || return 1
@@ -121,7 +117,7 @@ _design_doc_log_path() { # repository root, URL -> that design's log record path
   local directory id
   directory="$(_design_doc_log_dir "$1")" || return 1
   id="$(_design_doc_id "$2")" || return 1
-  printf '%s/%s.json' "$directory" "$(printf '%s' "$id" | _design_doc_sha256)"
+  printf '%s/%s.json' "$directory" "$(printf '%s' "$id" | verdict_audit_sha256)"
 }
 
 # Prints the validated {id, log} record; status 2 means no log was ever stored. A record
@@ -149,7 +145,7 @@ _design_doc_digest() { # repository root, URL -> content SHA-256
   record="$(_design_doc_log_record "$1" "$2")" || status=$?
   case "$status" in
     0) printf 'agent-tooling-design-log-v1\n%s\n%s\n' "$digest" \
-         "$(jq -j .log <<<"$record" | _design_doc_sha256)" | _design_doc_sha256 ;;
+         "$(jq -j .log <<<"$record" | verdict_audit_sha256)" | verdict_audit_sha256 ;;
     2) printf '%s' "$digest" ;;
     *) return 1 ;;
   esac
@@ -167,7 +163,7 @@ _design_doc_show_text() { # repository root, URL -> text
   esac
   [[ -n "$(jq -r .log <<<"$record")" ]] || note=' (deleted)'
   printf '%s\n\n## Research log (local)\n\nsha256: %s%s\n\n' "$body" \
-    "$(jq -j .log <<<"$record" | _design_doc_sha256)" "$note"
+    "$(jq -j .log <<<"$record" | verdict_audit_sha256)" "$note"
   jq -j .log <<<"$record"
 }
 
@@ -177,24 +173,32 @@ _design_doc_jq() { # jq arguments -> jq with this library's modules on its path
 
 # The loop state for this root and branch (design-audit.jq). A missing file starts
 # fresh; an unreadable or malformed one fails closed, so it cannot reset the count.
+# A research-named verdict file or a record without the loop fields fails, naming the file
+# to remove; removing it starts a fresh design audit.
 _design_doc_audit_state() { # verdict path, root, branch
-  local path="$1" snapshot record=null
-  # Verdicts recorded before the rename stay readable until the next one is written.
-  [[ -e "$path" || -L "$path" ]] || path="${path%/*}/agent-tooling-design-research.json"
+  local path="$1" snapshot record=null old="${1%/*}/agent-tooling-design-research.json"
+  if [[ -e "$old" || -L "$old" ]]; then
+    _design_doc_error "unsupported design verdict file; remove $old, then rerun the design audit"
+    return 1
+  fi
   if [[ -e "$path" || -L "$path" ]]; then
     snapshot="$(verdict_audit_read_json_snapshot "$path" 2>/dev/null)" || return 1
     record="${snapshot#*$'\n'}"
+  fi
+  if _design_doc_jq -e 'include "design-audit"; da_pre_loop' <<<"$record" >/dev/null 2>&1; then
+    _design_doc_error "unsupported design-audit record; remove $path, then rerun the design audit"
+    return 1
   fi
   _design_doc_jq -c --arg root "$2" --arg branch "$3" \
     'include "design-audit"; da_state($root; $branch)' <<<"$record" 2>/dev/null
 }
 
 _design_doc_history_hash() { # state JSON -> SHA-256 that a reflection must bind
-  jq -cS 'del(.reflection)' <<<"$1" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'
+  jq -cS 'del(.reflection)' <<<"$1" | verdict_audit_sha256
 }
 
 _design_doc_file_hash() { # path -> SHA-256 of its bytes, or nothing when it is missing
-  [[ ! -f "$1" ]] || perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$1"
+  [[ ! -f "$1" ]] || verdict_audit_sha256 <"$1"
 }
 
 # The deadline a design agent works to: DESIGN_AUDITOR_TIMEOUT (default 900 s).
@@ -226,13 +230,13 @@ design_doc_audit_task() { # repo root, URL, content SHA-256 -> deadline (Unix se
     agent-tooling-design-audit.json
 }
 
-# The advisor works to the same timeout; its record is the advice file (design #335).
+# The advisor works to the same timeout; its record is the advice file.
 design_doc_advice_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
   _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-advice-task.json \
     agent-tooling-design-advice.json
 }
 
-# Prints nothing and succeeds when an overrule, or a PASS with its advice (design #335),
+# Prints nothing and succeeds when an overrule, or a PASS with its advice,
 # matches the live content. Otherwise prints the gate's request: the auditor's task input,
 # the prior findings, the loop state and the advice status; a missing, unreadable, or
 # mismatched verdict never counts.
@@ -276,7 +280,7 @@ _design_doc_advice_status() { # advice path, root, branch, request JSON -> reque
 
 # Keeps an advice item only when its Why resolves: each quote without a URL appears in the
 # design (whitespace-normalized), each "finding N" exists, and each file:line names a tracked
-# file with that line. Skill rules and outside quotes stay unchecked (design #335, after CAPRA).
+# file with that line. Skill rules and outside quotes stay unchecked.
 _design_doc_advice_anchor() { # repo root, design body, findings count, advice JSON -> kept JSON
   local files kept='[]' item reason
   files="$(git -C "$1" ls-files 2>/dev/null)" || files=''
@@ -331,7 +335,7 @@ _design_doc_advice_write() { # verdict path, root, branch, URL, live SHA-256, ad
   [[ -n "$verdict_id" ]] || {
     _design_doc_error 'no PASS or FAIL matches the live design; advice follows a recorded verdict'; return 1;
   }
-  # Advice may quote the stored log too, since the advisor reads both (design #388).
+  # Advice may quote the stored log too, since the advisor reads both.
   body="$(_design_doc_show_text "$2" "$4")" || {
     _design_doc_error 'cannot read the design to check advice anchors'; return 1;
   }
@@ -401,7 +405,7 @@ design_doc_audit_record() { # working directory -> verified URL
   design_doc_binding verdict "$1" "$verdict"
 }
 
-# Records a design advisor's advice for the verdict on the live content (design #335).
+# Records a design advisor's advice for the verdict on the live content.
 # stdin: one {content_sha256, advice} object; at most 5 one-line items of at most 500
 # characters, none with a severity.
 design_doc_advice_record() { # working directory -> verified URL
@@ -502,7 +506,7 @@ design_doc_show() { # working directory -> content of the verified binding and i
   }
 }
 
-# Stores the bound design's research log from stdin (design #388). Empty input is the
+# Stores the bound design's research log from stdin. Empty input is the
 # tombstone of a deleted log; the record is replaced atomically and never removed.
 design_doc_log_store() { # working directory -> verified URL
   local input url directory id

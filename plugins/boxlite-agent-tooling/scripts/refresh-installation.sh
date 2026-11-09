@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
-# Advance the recorded tooling revision to the current tip of tooling.ref.
-#
-# This is the ONLY place besides the bootstrap that touches the network, and it is
-# never on the commit path: sync-installation.sh spawns it in the background after
-# lifecycle events, throttled by the last-check stamp, and the gates keep verifying
-# against the existing record until an adoption completes. Adoption itself is
-# delegated to the consumer's committed install.sh — one canonical path that
-# validates before it records, so a broken tip is fetched, rejected, and never
-# becomes current.
-#
-# Best-effort by design when the network is the problem (offline is a normal state
-# for a laptop), loud when the configuration is the problem (a broken profile or an
-# unusable installer would otherwise fail silently forever).
+# Advance the recorded tooling revision to the tip of tooling.ref through the consumer's
+# install.sh, which validates before it records. Never on the commit path.
+# Exits 0 when the network is the problem; non-zero when the configuration is.
 set -uo pipefail
 
 if_due=0
@@ -24,6 +14,8 @@ plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$plugin_root/.agents/lib/git-environment.sh" || exit 1
 # shellcheck source=../.agents/lib/tooling-command.sh
 source "$plugin_root/.agents/lib/tooling-command.sh" || exit 1
+# shellcheck source=../.agents/lib/tooling-profile.sh
+source "$plugin_root/.agents/lib/tooling-profile.sh" || exit 1
 tooling_git_clear_repository_environment || exit 1
 cd -- "$repo_root" || exit 1
 repo_root="$(pwd -P)"
@@ -66,26 +58,7 @@ if [[ -e "$repo_root/.agent-tooling/hold" ]]; then
   exit $?
 fi
 
-tooling_repo="$(jq -er '.tooling.repository | select(type == "string" and length > 0)' "$profile_file")" || {
-  printf 'agent-tooling: tooling.repository is required\n' >&2
-  exit 1
-}
-[[ "$tooling_repo" == "boxlite-ai/agent-tooling" ]] || {
-  printf 'agent-tooling: unsupported tooling repository: %s\n' "$tooling_repo" >&2
-  exit 1
-}
-tooling_ref="$(jq -er '.tooling.ref | select(type == "string" and length > 0)' "$profile_file")" || {
-  printf 'agent-tooling: tooling.ref must name the branch to float on\n' >&2
-  exit 1
-}
-[[ ! "$tooling_ref" =~ ^[0-9a-f]{40}$ ]] || {
-  printf 'agent-tooling: tooling.ref names a branch; to freeze a revision write it to .agent-tooling/hold\n' >&2
-  exit 1
-}
-if [[ "$tooling_ref" == -* ]] || ! git check-ref-format "refs/heads/$tooling_ref" >/dev/null 2>&1; then
-  printf 'agent-tooling: tooling.ref is not a valid branch name: %s\n' "$tooling_ref" >&2
-  exit 1
-fi
+tooling_profile_read "$profile_file" || { printf 'agent-tooling: %s\n' "$tooling_profile_error" >&2; exit 1; }
 
 if [[ "$if_due" == 1 && "$minutes" != 0 ]]; then
   [[ -z "$(find "$cache_parent" -maxdepth 1 -name last-check -mmin "-$minutes")" ]] || exit 0

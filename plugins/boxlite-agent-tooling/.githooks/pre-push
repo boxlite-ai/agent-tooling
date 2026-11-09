@@ -13,12 +13,12 @@ tooling_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$tooling_root/.agents/lib/verdict-audit-state.sh" || exit 1
 # shellcheck source=../.agents/lib/git-agent-origin.sh
 source "$tooling_root/.agents/lib/git-agent-origin.sh" || exit 1
+# shellcheck source=hook-lib.sh
+source "$tooling_root/.githooks/hook-lib.sh" || exit 1
 is_agent="$(git_agent_origin_classify "$repo_root")" || {
   printf 'agent-tooling: cannot determine agent origin; push remains gated.\n' >&2
   exit 1
 }
-verdict_state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
-receipt_state_lib="$tooling_root/.agents/lib/commit-audit-receipt.sh"
 watch_binding_command_hash=""
 watch_binding_session_scope=""
 watch_binding_prompt_epoch=""
@@ -41,27 +41,7 @@ verify_installation="$tooling_root/scripts/verify-installation.sh"
 
 # Same guidance-block check as pre-commit: the second mounting point, so a commit
 # made with --no-verify still cannot push a missing or hand-edited block.
-sync_guidance="$tooling_root/scripts/sync-guidance.sh"
-if [[ -x "$sync_guidance" ]]; then
-  "$sync_guidance" --check "$repo_root" || exit 1
-fi
-
-# Resolve the delegated gate. A worktree checked out at a pre-migration commit
-# has no .agents/hooks/, yet it can still be THIS hook that runs. `make setup`
-# sets core.hooksPath RELATIVE, where each worktree uses its own copy and this
-# cannot happen; a clone configured with an ABSOLUTE path has one installed hook
-# serving every worktree, whatever commit each sits on, and then it can.
-# Try the current path, fall back to the legacy one, and fail closed
-# when neither exists: a missing gate must never read as an ungated change.
-resolve_gate() {
-  local candidate
-  for candidate in "$tooling_root/.agents/hooks/preflight-commit-push.sh" \
-                   "$repo_root/.agents/hooks/preflight-commit-push.sh" \
-                   "$repo_root/.claude/hooks/preflight-commit-push.sh"; do
-    [[ -r "$candidate" ]] && { printf '%s' "$candidate"; return 0; }
-  done
-  return 1
-}
+"$tooling_root/scripts/sync-guidance.sh" --check "$repo_root" || exit 1
 
 stdin_file="$(mktemp)" || {
   printf 'agent-tooling: could not allocate pre-push ref-update state\n' >&2
@@ -129,27 +109,9 @@ elif (( ref_capture_status != 0 )); then
 fi
 
 if [[ "$is_agent" == 1 ]]; then
-  [[ -r "$verdict_state_lib" ]] || {
-    printf 'agent-tooling: verdict state library is unavailable; refusing agent push\n' >&2
-    exit 1
-  }
-  # shellcheck source=../.agents/lib/verdict-audit-state.sh
-  source "$verdict_state_lib" || exit 1
-  # Optional by design: without it no push can claim a receipt, which is exactly the
-  # pre-receipt behavior of auditing every push. Never a reason to reject one.
-  if [[ -r "$receipt_state_lib" ]]; then
-    # shellcheck source=../.agents/lib/commit-audit-receipt.sh
-    source "$receipt_state_lib" || true
-  fi
+  # shellcheck source=../.agents/lib/commit-audit-receipt.sh
+  source "$tooling_root/.agents/lib/commit-audit-receipt.sh" || exit 1
 fi
-
-hash_file() {
-  shasum -a 256 "$1" | awk '{print $1}'
-}
-
-hash_stdin() {
-  shasum -a 256 | awk '{print $1}'
-}
 
 is_zero_sha() {
   [[ "$1" =~ ^0+$ ]]
@@ -313,7 +275,6 @@ push_is_single_audited_commit() {  # remote-name
   local ref_updates local_ref local_sha remote_ref remote_sha
   local commit_facts parents parent tree="" subject="" subject_hash
 
-  declare -F commit_audit_receipt_claim >/dev/null 2>&1 || return 1
   # A receipt cannot dismiss findings from this session's current push review.
   if [[ -n "$watch_binding_session_scope" ]]; then
     local context history current_epoch
@@ -364,7 +325,7 @@ push_is_single_audited_commit() {  # remote-name
   # commit-msg hashes the bare subject with no trailing newline; %s is read the same
   # way here. A subject differing only through git's message cleanup fails the claim
   # and costs a re-audit — the safe direction.
-  subject_hash="$(printf '%s' "$subject" | hash_stdin)"
+  subject_hash="$(printf '%s' "$subject" | verdict_audit_sha256)"
 
   commit_audit_receipt_claim "$repo_root" "$parent" "$tree" "$subject_hash" || return 1
   printf '%s' "$local_sha"
@@ -375,11 +336,8 @@ push_is_single_audited_commit() {  # remote-name
 # checks its current epoch and unresolved audit history before skipping review.
 capture_pr_watch_binding() {
   local handoff="$repo_root/.agents/state/last-audit-handoff.json"
-  local state_lib="$tooling_root/.agents/lib/verdict-audit-state.sh"
   local snapshot body current_branch current_head owner_pid owner_token
-  [[ "$is_agent" == 1 && -r "$state_lib" && -r "$handoff" ]] || return 0
-  # shellcheck source=../.agents/lib/verdict-audit-state.sh
-  source "$state_lib" 2>/dev/null || return 0
+  [[ "$is_agent" == 1 && -r "$handoff" ]] || return 0
   snapshot="$(verdict_audit_read_json_snapshot "$handoff" 2>/dev/null)" || return 0
   [[ "$snapshot" == *$'\n'* ]] || return 0
   body="${snapshot#*$'\n'}"
@@ -427,8 +385,8 @@ run_push_audit() {  # remote-name remote-url
       "$audited_commit" >&2
     return 0
   fi
-  remote_url_hash="$(printf '%s' "$remote_url" | shasum -a 256 | awk '{print $1}')"
-  ref_updates_hash="$(hash_file "$stdin_file")"
+  remote_url_hash="$(printf '%s' "$remote_url" | verdict_audit_sha256)"
+  ref_updates_hash="$(verdict_audit_sha256 < "$stdin_file")"
   write_pushed_diff | capture_bounded_stream \
     "$pushed_diff_file" "$expanded_push_max_bytes"
   pushed_diff_status=("${PIPESTATUS[@]}")
@@ -440,39 +398,18 @@ run_push_audit() {  # remote-name remote-url
     printf 'agent-tooling: could not generate bounded pre-push audit context\n' >&2
     exit 1
   fi
-  pushed_diff_hash="$(hash_file "$pushed_diff_file")"
+  pushed_diff_hash="$(verdict_audit_sha256 < "$pushed_diff_file")"
   audit_command="git push --pre-push-hook remote=${remote_name} remote_url_sha256=${remote_url_hash} ref_updates_sha256=${ref_updates_hash} pushed_diff_sha256=${pushed_diff_hash}"
-  audit_command_hash="$(printf '%s' "$audit_command" | hash_stdin)"
+  audit_command_hash="$(printf '%s' "$audit_command" | verdict_audit_sha256)"
   if ! write_push_audit_context "$audit_command_hash" "$ref_updates_hash" \
       "$pushed_diff_hash" "$remote_name" "$remote_url_hash"; then
     printf 'agent-tooling: could not publish bounded pre-push audit context\n' >&2
     exit 1
   fi
-  if ! out="$(jq -nc --arg command "$audit_command" '{tool_input:{command:$command}}' \
-        | GITHOOK_DELEGATED=1 bash "$(resolve_gate || echo /nonexistent-gate)" 2>&1)"; then
-    printf 'commit-push-auditor delegated preflight failed\n%s\n' "$out" >&2
-    exit 1
-  fi
-  if [[ -n "$out" ]]; then
-    if ! decision="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)"; then
-      printf 'commit-push-auditor delegated preflight returned invalid output\n%s\n' "$out" >&2
-      exit 1
-    fi
-    if [[ "$decision" == "deny" ]]; then
-      printf 'Synthetic pre-push audit command:\n%s\n\n' "$audit_command" >&2
-      printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason' >&2
-      exit 1
-    fi
-    # Keep this arm identical to pre-commit's — the two parses are byte-for-byte the
-    # same by design, and a fix applied to only one boundary leaves the other
-    # rejecting a passing audit as invalid output.
-    advisory="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null || true)"
-    if [[ -z "$advisory" ]]; then
-      printf 'commit-push-auditor delegated preflight returned invalid output\n%s\n' "$out" >&2
-      exit 1
-    fi
-    printf '%s\n' "$advisory" >&2
-  fi
+  printf -v deny_preamble 'Synthetic pre-push audit command:\n%s\n\n' "$audit_command"
+  githook_run_delegated_gate "$tooling_root/.agents/hooks/preflight-commit-push.sh" \
+    "$(jq -nc --arg command "$audit_command" '{tool_input:{command:$command}}')" \
+    "$deny_preamble" || exit 1
   cleanup_push_audit_context
 }
 run_push_audit "${1:-?}" "${2:-}"
@@ -493,7 +430,6 @@ run_push_audit "${1:-?}" "${2:-}"
 arm_pr_watch() {
   local watcher="$tooling_root/.agents/watch/pr-watch.sh"
   local watch_helpers="$tooling_root/.agents/lib/pr-watch-state.sh"
-  [[ -r "$watcher" && -r "$watch_helpers" ]] || return 0
   # shellcheck source=../.agents/lib/pr-watch-state.sh
   source "$watch_helpers" 2>/dev/null || return 0
 
@@ -551,7 +487,6 @@ arm_pr_watch() {
   [[ "$armed_refs" -gt 0 && "$omitted_refs_overflow" -eq 0 \
      && -n "$watch_binding_command_hash" \
      && -n "$watch_binding_session_scope" ]] || return 0
-  declare -F verdict_audit_write_atomic >/dev/null 2>&1 || return 0
   manifest_key="$(pr_watch_attachment_key \
     "$watch_binding_session_scope" "$watch_binding_command_hash" 2>/dev/null)" || return 0
   manifest_path="$log_dir/${manifest_key}.json"

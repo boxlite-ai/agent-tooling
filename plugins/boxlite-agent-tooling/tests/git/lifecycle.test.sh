@@ -2,17 +2,8 @@
 set -uo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-pass=0
-fail=0
-
-check_eq() {
-  local desc="$1" got="$2" want="$3"
-  if [[ "$got" == "$want" ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$desc"
-  else
-    fail=$((fail + 1)); printf '  FAIL  %s (got=%s want=%s)\n' "$desc" "$got" "$want"
-  fi
-}
+# shellcheck source=../lib/assert.sh
+source "$PLUGIN_ROOT/tests/lib/assert.sh"
 
 ROOT="$(mktemp -d)"
 trap 'rm -rf -- "$ROOT"' EXIT
@@ -107,11 +98,14 @@ chmod +x "$COMMON/hooks/post-rewrite"
 printf 'old-sha new-sha refs/heads/main\n' | (cd "$CONSUMER" && "$HOOKS_TWO/post-rewrite" rebase)
 check_eq "post-rewrite preserves arguments and stdin" "$(cat "$ROOT/rewrite.log")" $'rewrite rebase\nold-sha new-sha refs/heads/main'
 
+# Occupy both lock forms: the native lease file and the directory fallback.
 mkdir "$COMMON/agent-tooling/.install.lock"
+rm -f "$COMMON/agent-tooling/.install.guard"
+mkdir "$COMMON/agent-tooling/.install.guard"
 (cd "$CONSUMER" && ./.agent-tooling/install.sh > /dev/null 2> "$ROOT/lock.err")
 check_eq "installer rejects a concurrent cache mutation" "$?" 1
 check_eq "installer explains the lock" "$(grep -c 'another installation is already in progress' "$ROOT/lock.err")" 1
-rmdir "$COMMON/agent-tooling/.install.lock"
+rmdir "$COMMON/agent-tooling/.install.lock" "$COMMON/agent-tooling/.install.guard"
 
 BOGUS_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 printf '%s\n' "$BOGUS_SHA" > "$CONSUMER/.agent-tooling/hold"
@@ -124,5 +118,4 @@ check_eq "lifecycle failure gives a recovery command" "$(grep -c 'run ./.agent-t
 check_eq "commit rejects a stale installation" "$?" 1
 check_eq "commit gives the same recovery command" "$(grep -c 'run ./.agent-tooling/install.sh before committing' "$ROOT/pre-commit.err")" 1
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[[ "$fail" == 0 ]]
+assert_result

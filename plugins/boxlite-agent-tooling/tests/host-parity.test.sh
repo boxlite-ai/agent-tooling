@@ -57,12 +57,8 @@ COPILOT_MKT="$REPO_ROOT/.github/plugin/marketplace.json"
 CLAUDE_SETTINGS="$REPO_ROOT/.claude/settings.json"
 COPILOT_SETTINGS="$REPO_ROOT/.github/copilot/settings.json"
 
-pass=0
-fail=0
-# Increment pass counter and print a PASS line.  # $1 = test name
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-# Increment fail counter and print a FAIL line.  # $1 = test name
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=lib/assert.sh
+source "$PLUGIN/tests/lib/assert.sh"
 
 command -v jq >/dev/null 2>&1 || { printf 'jq is required to run these tests\n' >&2; exit 2; }
 
@@ -232,7 +228,7 @@ done
                    || bad "agent specs exist"
 known_auditors="$("$PLUGIN/.agents/hooks/auditor-control.sh" --known-auditors 2>/dev/null | sort)"
 # The one exception: design-auditor blocks only edits, never a turn's end or
-# a commit, so the user can always redirect it without an override (design #253).
+# a commit, so the user can always redirect it without an override.
 shipped_auditors="$(find "$PLUGIN/.claude/agents" -maxdepth 1 -name '*-auditor.md' \
   ! -name design-auditor.md -exec basename {} .md \; | sort)"
 [ "$known_auditors" = "$shipped_auditors" ] \
@@ -500,6 +496,4 @@ while IFS= read -r cmd; do
 done < <(jq -r '.hooks[][].hooks[].command' "$file" | sort -u)
 done
 
-echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

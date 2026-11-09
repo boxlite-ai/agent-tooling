@@ -10,7 +10,7 @@ trap 'rm -rf "$scratch"' EXIT
 state="$scratch/history.json"
 context='{"repo_root":"/fixture","session":"session-a","epoch":"1","branch":"main","gate":"verdict"}'
 request() { jq -nc --argjson context "$context" --arg id "$1" \
-  '{context:$context,attempt:{id:$id,binding:{head:"before"},snapshot:{text:"original evidence"}}}'; }
+  '{context:$context,attempt:{id:$id,binding:{head:"before"},snapshot:{text:"original evidence"},deadline:4102444800}}'; }
 run() { bash "$cli" "$1" "$state"; }
 expect() { jq -e "$2" <<<"$1" >/dev/null || { printf 'FAIL: %s\n' "$2" >&2; exit 1; }; }
 record() { jq -nc --argjson context "$context" --arg id "$1" --arg verdict "$2" \

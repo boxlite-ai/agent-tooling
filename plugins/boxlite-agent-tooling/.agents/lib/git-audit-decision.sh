@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source-only Git retry checkpoint; requires verdict-audit-state.sh and timed-user-prompt.sh.
+# Source-only Git retry decision; requires verdict-audit-state.sh and timed-user-prompt.sh.
 # History owns preparation; lock order is history -> timed request, never the reverse.
 
 git_audit_decision_current() { # request JSON; caller separately verifies the host session
@@ -17,7 +17,7 @@ git_audit_decision_current() { # request JSON; caller separately verifies the ho
   ' <<<"$request" >/dev/null
 }
 
-git_audit_checkpoint_result() { # library, validated history, path; typed result under history lock
+git_audit_decision_result() { # library, validated history, path; typed result under history lock
   local library="$1" state="$2" history="$3" root scope kind path spec request id instruction
   root="$(jq -r .context.repo_root <<<"$state")"
   scope="$(jq -r .context.session <<<"$state")"

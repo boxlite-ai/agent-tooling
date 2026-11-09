@@ -45,12 +45,12 @@ github_writing_check_body() { # body [comment]
     printf 'GitHub text is empty.'
     return 1
   fi
-  # No length limit: GitHub enforces its own, and these checks stay linear (#310).
+  # No length limit: GitHub enforces its own, and these checks stay linear.
   github_writing_check_privacy "$body" || return 1
   # Complete artifacts need room for evidence, so no total word cap applies. The PR
   # gate appends the shared skill reminder to every writing denial. Short comments
   # need no summary; documents keep theirs. Structure limits apply to every body, and
-  # one denial lists both kinds of correction (#419).
+  # one denial lists both kinds of correction.
   if ! { [[ "$kind" == comment ]] && reply_summary_is_short "$body"; }; then
     summary_error="$(concise_writing_check_summary "$body" anywhere 39 no-hint)"
   fi
@@ -87,7 +87,7 @@ _github_writing_graphql_nonwriting() { # literal query
 # gh 2.92.0 options per covered command, as `gh help <command>` lists them: `long` is a
 # boolean, `long=` takes a value, and `s/` adds its shorthand. Every command inherits
 # the boolean --help; none defines -h, which pflag then reads as a help request.
-# When gh adds options, regenerate these lines from `gh help` (#308).
+# When gh adds options, regenerate these lines from `gh help`.
 _github_writing_spec() { # group:operation -> spec
   case "$1" in
     api:*) printf '%s' 'F/field= H/header= X/method= cache= f/raw-field= help hostname= i/include input= p/preview= paginate q/jq= silent slurp t/template= verbose' ;;

@@ -4,14 +4,8 @@ set -uo pipefail
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 fixture_root="$(mktemp -d)"
 trap 'rm -rf "$fixture_root"' EXIT
-pass=0 fail=0
-check() {
-  if [[ "$2" == "$3" ]]; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$1"
-  else
-    fail=$((fail + 1)); printf '  FAIL  %s (got=%s want=%s)\n' "$1" "$2" "$3"
-  fi
-}
+# shellcheck source=../lib/assert.sh
+source "$plugin_root/tests/lib/assert.sh"
 
 fixture_stop() (
   cd "$repo" &&
@@ -180,9 +174,13 @@ for host in claude codex unknown; do
     if [[ "$entry" != stop ]]; then
       bookkeeping="$source_path"
       [[ "$entry" != no-source ]] || bookkeeping=-
+      # The runner audits only the generation its session request names.
+      runner_generation="101-102-3"
+      printf '%s %s cksum-1-1\n' "$runner_generation" "$(( $(date +%s) + 600 ))" \
+        > "$state/verdict-request.git-$(printf '%s' "$session" | git -C "$repo" hash-object --stdin)"
       (cd "$repo" && CLAUDE_PROJECT_DIR="$repo" BOXLITE_HOOK_HOST="$host" \
         TMPDIR="$state/tmp" bash "$plugin_root/.agents/hooks/audit/run-verdict-audit.sh" \
-        "$bookkeeping" "$session" legacy -) > "$state/stdout" 2> "$state/stderr" || rc=$?
+        "$bookkeeping" "$session" "$runner_generation") > "$state/stdout" 2> "$state/stderr" || rc=$?
     else
       jq -nc --arg path "$source_path" --arg session "$session" \
         '{hook_event_name:"Stop",session_id:$session,transcript_path:$path,turn_id:"fixture-turn"}' \
@@ -190,10 +188,10 @@ for host in claude codex unknown; do
           > "$state/stdout" 2> "$state/stderr" || rc=$?
     fi
     finished="$(date +%s)"
-    check "$host $entry completes" "$rc" 0
+    check_eq "$host $entry completes" "$rc" 0
     validated=no
     jq -e '.valid == true' "$state/validation.out" >/dev/null 2>&1 && validated=yes
-    check "$host $entry exposes working pre-delivery validation" "$validated" yes
+    check_eq "$host $entry exposes working pre-delivery validation" "$validated" yes
     context=no
     if jq -e --arg host "$host" --arg session "$session" --arg root "$repo" \
         --argjson start "$started" --argjson finish "$finished" '
@@ -203,25 +201,25 @@ for host in claude codex unknown; do
         and (.audit_started_at | tonumber) >= $start
         and (.audit_started_at | tonumber) <= $finish
       ' "$state/task" >/dev/null 2>&1; then context=yes; fi
-    check "$host $entry sends parent context without a transcript path" "$context" yes
+    check_eq "$host $entry sends parent context without a transcript path" "$context" yes
     received="$(shasum -a 256 "$state/received.jsonl" 2>/dev/null | cut -d ' ' -f 1)"
-    check "$host $entry discovery retains all original evidence bytes" "$received" "$expected"
+    check_eq "$host $entry discovery retains all original evidence bytes" "$received" "$expected"
     clean=no
     [[ -z "$(find "$state/tmp" -mindepth 1 -print)" ]] && clean=yes
-    check "$host $entry cleans its private bookkeeping files" "$clean" yes
-    check "$host $entry does not create a full parent-selected copy" \
+    check_eq "$host $entry cleans its private bookkeeping files" "$clean" yes
+    check_eq "$host $entry does not create a full parent-selected copy" \
       "$(cat "$state/parent-copies" 2>/dev/null || printf missing)" ""
     skill=no
     grep -q '^## Read the transcript' "$state/prompt" 2>/dev/null && skill=yes
-    check "$host $entry loads the audit skill's transcript procedure" "$skill" yes
+    check_eq "$host $entry loads the audit skill's transcript procedure" "$skill" yes
     if [[ "$entry" == stop ]]; then
       history_bytes="$(wc -c < "$state/history-transcript.json" 2>/dev/null | tr -d ' ')"
       bounded=no
       if [[ "$history_bytes" =~ ^[0-9]+$ && "$history_bytes" -le 262146 ]] \
         && jq -e '.[0].type == "verdict_final_turn_snapshot"' \
           "$state/history-transcript.json" >/dev/null 2>&1; then bounded=yes; fi
-      check "$host history retains a bounded bookkeeping snapshot" "$bounded" yes
-      check "$host Stop accepts the bound PASS" "$(cat "$state/stdout")" ""
+      check_eq "$host history retains a bounded bookkeeping snapshot" "$bounded" yes
+      check_eq "$host Stop accepts the bound PASS" "$(cat "$state/stdout")" ""
       scope="$(printf '%s' "$session" | git -C "$repo" hash-object --stdin)"
       index="$state/last-verdict-index.json.git-$scope"
       generation="$(jq -r .audit_generation "$state/task")"
@@ -230,14 +228,14 @@ for host in claude codex unknown; do
           .version == 1 and .generation == $generation and .turn_id == "fixture-turn"
           and (.message_id | test("^cksum-")) and .native_range == $range
         ' "$index" >/dev/null 2>&1; then indexed=yes; fi
-      check "$host index keeps the accepted range across a transcript append" "$indexed" yes
+      check_eq "$host index keeps the accepted range across a transcript append" "$indexed" yes
       locator="$(bash "$plugin_root/scripts/read-verdict-index.sh" "$repo" "$session" "$source_path")"
-      check "$host reader accepts the consumed PASS index after append" \
+      check_eq "$host reader accepts the consumed PASS index after append" \
         "$locator" "$(jq -r .end_byte <<<"$expected_range")"
       history_range=no
       if jq -e --argjson range "$expected_range" '.[0].native_range == $range' \
           "$state/history-transcript.json" >/dev/null; then history_range=yes; fi
-      check "$host auditor receives the complete latest native range" "$history_range" yes
+      check_eq "$host auditor receives the complete latest native range" "$history_range" yes
       native_snapshot="$(jq -c '.[0]' "$state/history-transcript.json")"
 
       jq -nc --arg session "$session" '
@@ -249,7 +247,7 @@ for host in claude codex unknown; do
       if jq -e --arg old "$generation" '
           .generation != $old and .turn_id == "payload-turn" and (has("native_range") | not)
         ' "$index" >/dev/null 2>&1; then indexed=yes; fi
-      check "$host payload-only PASS replaces the position without inheriting an old range" "$indexed" yes
+      check_eq "$host payload-only PASS replaces the position without inheriting an old range" "$indexed" yes
 
       payload_index="$(cat "$index" 2>/dev/null)"
       jq -nc --arg session "$session" '
@@ -257,30 +255,30 @@ for host in claude codex unknown; do
          last_assistant_message:"Which fixture should I inspect?"}' \
         | fixture_stop \
           > "$state/chat-stdout" 2> "$state/chat-stderr"
-      check "$host classifier-only allow keeps the last verdict index" \
+      check_eq "$host classifier-only allow keeps the last verdict index" \
         "$(cat "$index" 2>/dev/null)" "$payload_index"
 
       if [[ "$host" == codex ]]; then
         if jq -c 'del(.native_range)' <<<"$native_snapshot" | normalize_snapshot >/dev/null; then
-          legacy=accepted
+          rangeless=accepted
         else
-          legacy=rejected
+          rangeless=rejected
         fi
-        check "legacy snapshots need no native range" "$legacy" accepted
+        check_eq "snapshots without a native range are accepted" "$rangeless" accepted
         if jq -c '.native_range.end_byte += 1' <<<"$native_snapshot" | normalize_snapshot >/dev/null; then
           malformed=accepted
         else
           malformed=rejected
         fi
-        check "a native range cannot run past its captured source" "$malformed" rejected
+        check_eq "a native range cannot run past its captured source" "$malformed" rejected
 
         jq -nc --arg session "$session" '
           {hook_event_name:"Stop",session_id:$session,transcript_path:null,
            last_assistant_message:"Verified the failing fixture."}' \
           | TEST_AUDIT_VERDICT=FAIL fixture_stop > "$state/fail-stdout" 2> "$state/fail-stderr"
         failure="$(jq -r '.reason | contains("fixture proof gap")' "$state/fail-stdout")"
-        check "fixture FAIL reaches Stop" "$failure" true
-        check "FAIL preserves the prior PASS index" "$(cat "$index")" "$payload_index"
+        check_eq "fixture FAIL reaches Stop" "$failure" true
+        check_eq "FAIL preserves the prior PASS index" "$(cat "$index")" "$payload_index"
 
         sibling_session="${session}-sibling"
         sibling_scope="$(printf '%s' "$sibling_session" | git -C "$repo" hash-object --stdin)"
@@ -292,12 +290,12 @@ for host in claude codex unknown; do
           {hook_event_name:"Stop",session_id:$session,transcript_path:null,
            last_assistant_message:"Verified the sibling fixture."}' \
           | fixture_stop > "$state/sibling-stdout" 2> "$state/sibling-stderr"
-        check "unwritable index leaves the sibling PASS valid" "$(cat "$state/sibling-stdout")" ""
+        check_eq "unwritable index leaves the sibling PASS valid" "$(cat "$state/sibling-stdout")" ""
         diagnosed=no
         if [[ -d "$sibling_index" ]] && grep -Fq 'could not save the last verdict index' "$state/sibling-stderr"; then
           diagnosed=yes
         fi
-        check "unwritable index reports a diagnostic and preserves the directory" "$diagnosed" yes
+        check_eq "unwritable index reports a diagnostic and preserves the directory" "$diagnosed" yes
 
         rmdir "$sibling_index"
         printf '{interrupted\n' > "$sibling_index"
@@ -310,11 +308,10 @@ for host in claude codex unknown; do
             "$sibling_index" >/dev/null 2>&1; then
           indexed=yes
         fi
-        check "a sibling PASS replaces a broken index and drops an invalid turn ID" "$indexed" yes
-        check "a sibling session cannot replace the prior index" "$(cat "$index")" "$payload_index"
+        check_eq "a sibling PASS replaces a broken index and drops an invalid turn ID" "$indexed" yes
+        check_eq "a sibling session cannot replace the prior index" "$(cat "$index")" "$payload_index"
       fi
     fi
   done
 done
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-(( fail == 0 ))
+assert_result

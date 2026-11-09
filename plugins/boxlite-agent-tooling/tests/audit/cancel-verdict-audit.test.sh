@@ -17,20 +17,10 @@ CONTROL="$REPO_ROOT/.agents/hooks/auditor-control.sh"
 RESUME="$REPO_ROOT/.agents/hooks/resume-after-api-failure.sh"
 PREFLIGHT="$REPO_ROOT/.agents/hooks/audit/preflight-verdict-check.sh"
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
-check_eq() {  # desc got want
-  if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got=$2 want=$3)"; fi
-}
-
-kill_test_pids() {  # signal pid...
-  local signal="$1" pid; shift
-  for pid in "$@"; do
-    [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill "-$signal" "$pid" 2>/dev/null || true
-  done
-}
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
+# shellcheck source=../lib/verdict-fixtures.sh
+source "$REPO_ROOT/tests/lib/verdict-fixtures.sh"
 
 dependency_bin="$(mktemp -d)"
 ln -s "$(command -v bash)" "$dependency_bin/bash"
@@ -65,13 +55,6 @@ prompt_hook() {  # repo session turn
     | ( cd "$repo" && CLAUDE_PROJECT_DIR="$repo" bash "$HOOK" )
 }
 
-session_scope_of() {  # repo session
-  printf 'git-%s' "$(printf '%s' "$2" | git -C "$1" hash-object --stdin)"
-}
-session_state_path() {  # repo basename session
-  printf '%s/.agents/state/%s.%s' "$1" "$2" "$(session_scope_of "$1" "$3")"
-}
-
 # The prompt Claude Code submits when an asyncRewake hook exits 2, captured from a live
 # 2.1.278 session: the envelope carries only the host's own summary, and the hook's stderr
 # follows it inside a system-reminder, so that is where a hook's marker lands.
@@ -80,20 +63,6 @@ rewake_prompt() {  # hook-name hook-stderr
     "$1" "$2"
 }
 
-process_state() {
-  local pid="$1" state
-  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || { printf 'invalid'; return; }
-  state="$(ps -p "$pid" -o stat= 2>/dev/null | tr -d '[:space:]')"
-  [[ -z "$state" || "$state" == Z* ]] && printf 'gone' || printf 'alive'
-}
-
-tree_hash_of() {
-  local repo="$1" idx; idx="$(mktemp)"
-  GIT_INDEX_FILE="$idx" git -C "$repo" read-tree HEAD >/dev/null 2>&1
-  GIT_INDEX_FILE="$idx" git -C "$repo" add -A >/dev/null 2>&1
-  GIT_INDEX_FILE="$idx" git -C "$repo" write-tree 2>/dev/null
-  rm -f "$idx"
-}
 
 echo "## Fresh and unsafe state fail closed without losing prompt scope"
 R="$(setup)"
@@ -110,7 +79,7 @@ wake_start="$(jq -nc --arg s session-a --arg id wake-audit \
 wake_rc=0
 printf '%s' "$wake_start" | (
   cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" \
-    CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
+    BOXLITE_HOOK_HOST=claude CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
 ) > "$R/wake.out" 2> "$R/wake.err" || wake_rc=$?
 wake_marker="$(sed -n 's/.*\(\[auditor-wake:[0-9a-f][0-9a-f]*\]\).*/\1/p' "$R/wake.err" | head -1)"
 wake_request="$(session_state_path "$R" verdict-request session-a)"
@@ -164,7 +133,7 @@ late_wake_start="$(jq -nc --arg s session-a --arg id late-wake-audit \
 late_wake_rc=0
 printf '%s' "$late_wake_start" | (
   cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" \
-    CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
+    BOXLITE_HOOK_HOST=claude CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
 ) > "$R/late-wake.out" 2> "$R/late-wake.err" || late_wake_rc=$?
 late_wake_marker="$(sed -n 's/.*\(\[auditor-wake:[0-9a-f][0-9a-f]*\]\).*/\1/p' \
   "$R/late-wake.err" | head -1)"
@@ -195,7 +164,7 @@ foreground_wake() {  # generation -> wake prompt payload; leaves the escalation 
     '{hook_event_name:"SubagentStart",session_id:$s,agent_id:$id,agent_type:"verdict-auditor"}')"
   printf '%s' "$start" | (
     cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" \
-      CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
+      BOXLITE_HOOK_HOST=claude CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
   ) > /dev/null 2> "$R/$generation.err"
   stop="$(jq -nc --arg s session-a --arg id "$generation" \
     '{hook_event_name:"SubagentStop",session_id:$s,agent_id:$id,agent_type:"verdict-auditor",last_assistant_message:"PASS"}')"
@@ -251,7 +220,7 @@ pre_escalation_start="$(jq -nc --arg s session-a --arg id pre-escalation-audit \
   '{hook_event_name:"SubagentStart",session_id:$s,agent_id:$id,agent_type:"verdict-auditor"}')"
 printf '%s' "$pre_escalation_start" | (
   cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" \
-    CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=2 bash "$CONTROL"
+    BOXLITE_HOOK_HOST=claude CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=2 bash "$CONTROL"
 ) > "$R/pre-escalation.out" 2> "$R/pre-escalation.err" &
 pre_escalation_start_pid=$!
 pre_escalation_active="$R/.agents/state/auditor-control/active.$(session_scope_of "$R" session-a).verdict-auditor.json"
@@ -390,7 +359,7 @@ auditor_run() {  # agent type, agent id: one Claude start and stop
   for event in SubagentStart SubagentStop; do
     jq -nc --arg event "$event" --arg type "$1" --arg id "$2" \
       '{hook_event_name:$event,session_id:"session-a",agent_id:$id,agent_type:$type,last_assistant_message:"PASS"}' \
-      | (cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+      | (cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" BOXLITE_HOOK_HOST=claude CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
           AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL") >/dev/null 2>&1
   done
 }
@@ -442,7 +411,7 @@ echo "## A hand-back that arrives before SubagentStop stays internal"
 auditor_event() {  # event, agent type, agent id
   jq -nc --arg event "$1" --arg type "$2" --arg id "$3" \
     '{hook_event_name:$event,session_id:"session-a",agent_id:$id,agent_type:$type,last_assistant_message:"PASS"}' \
-    | (cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+    | (cd "$R" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$R" BOXLITE_HOOK_HOST=claude CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
         AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL") >/dev/null 2>&1
 }
 auditor_event SubagentStart boxlite-agent-tooling:commit-push-auditor early-audit
@@ -504,16 +473,16 @@ printf '%s' "$multi_payload" \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$HOOK" ) >/dev/null 2>&1
 check_eq "multiple hook payload documents fail closed" "$?" 1
 
-# An event without a usable session has no owner to cancel. Treating it as the legacy
-# scope would let malformed/unrelated hook input erase a manual audit's state.
-    for legacy_name in verdict-request last-verdict.json last-verdict.prev.json verdict-last-uuid; do
-  printf 'keep\n' > "$R/.agents/state/$legacy_name"
+# An event without a usable session has no owner to cancel; it must not touch the
+# unscoped base paths that session suffixes extend.
+for unscoped_name in verdict-request last-verdict.json last-verdict.prev.json verdict-last-uuid; do
+  printf 'keep\n' > "$R/.agents/state/$unscoped_name"
 done
 missing_out="$(jq -nc '{hook_event_name:"UserPromptSubmit",prompt:"ok"}' \
   | ( cd "$R" && CLAUDE_PROJECT_DIR="$R" bash "$HOOK" ) 2>"$R/missing.err")"; missing_rc=$?
-legacy_state="rc=$missing_rc files=$(for legacy_name in verdict-request last-verdict.json last-verdict.prev.json verdict-last-uuid; do [[ -e "$R/.agents/state/$legacy_name" ]] && printf present, || printf gone,; done)"
-legacy_state="$legacy_state stdout=${missing_out:-} stderr=$(cat "$R/missing.err")"
-check_eq "missing session id cannot mutate legacy audit state" "$legacy_state" \
+unscoped_state="rc=$missing_rc files=$(for unscoped_name in verdict-request last-verdict.json last-verdict.prev.json verdict-last-uuid; do [[ -e "$R/.agents/state/$unscoped_name" ]] && printf present, || printf gone,; done)"
+unscoped_state="$unscoped_state stdout=${missing_out:-} stderr=$(cat "$R/missing.err")"
+check_eq "missing session id cannot mutate unscoped audit state" "$unscoped_state" \
   "rc=0 files=present,present,present,present, stdout= stderr="
 rm -f "$R/.agents/state/verdict-request" "$R/.agents/state/last-verdict.json" \
   "$R/.agents/state/last-verdict.prev.json" "$R/.agents/state/verdict-last-uuid"
@@ -549,15 +518,15 @@ rm -f "$newline_request" "$plain_request"
 
 newline_only_session=$'\n'
 newline_only_request="$(session_state_path "$R" verdict-request "$newline_only_session")"
-legacy_request="$R/.agents/state/verdict-request"
+unscoped_request="$R/.agents/state/verdict-request"
 printf 'newline-only\n' > "$newline_only_request"
-printf 'legacy\n' > "$legacy_request"
+printf 'unscoped\n' > "$unscoped_request"
 prompt_hook "$R" "$newline_only_session" turn-a >/dev/null 2>&1
 newline_only_state="newline=$([[ -e "$newline_only_request" ]] && echo present || echo gone)"
-newline_only_state="$newline_only_state legacy=$([[ -e "$legacy_request" ]] && echo present || echo gone)"
-check_eq "a newline-only session cannot collapse into the legacy scope" \
-  "$newline_only_state" "newline=gone legacy=present"
-rm -f "$newline_only_request" "$legacy_request"
+newline_only_state="$newline_only_state unscoped=$([[ -e "$unscoped_request" ]] && echo present || echo gone)"
+check_eq "a newline-only session cannot collapse into the unscoped path" \
+  "$newline_only_state" "newline=gone unscoped=present"
+rm -f "$newline_only_request" "$unscoped_request"
 
 # Cancellation-marker cleanup must enumerate a literal directory. A shell glob built from
 # a repository path containing `[]` can match a sibling repository instead of its owner.
@@ -825,8 +794,8 @@ echo "## A real prompt cancels only its session's live audit"
 R="$(setup)"
 # TERM reaches the auditor's entire process group. The auditor deliberately writes a
 # late PASS from its TERM handler; the runner must remove it before reporting cancel.
-CANCEL_STUB='target="${VERDICT_AUDITOR_OUTPUT_FILE:-$CLAUDE_PROJECT_DIR/.agents/state/last-verdict.json}"
-  generation="${VERDICT_AUDITOR_GENERATION:-legacy}"
+CANCEL_STUB='target="$VERDICT_AUDITOR_OUTPUT_FILE"
+  generation="$VERDICT_AUDITOR_GENERATION"
   trap '\''mkdir -p "$(dirname "$target")"; printf "{\"branch\":\"late\",\"head\":\"late\",\"tree_hash\":\"late\",\"generation\":\"%s\",\"verdict\":\"PASS\"}" "$generation" > "$target"; exit 143'\'' TERM INT
   sleep 30 & child=$!
   printf "%s %s\n" "$$" "$child" > "$CLAUDE_PROJECT_DIR/auditor-pids"
@@ -977,7 +946,7 @@ submit_outcome() {  # repo prompt label
 mint_wake() {  # repo agent-id
   jq -nc --arg id "$2" \
       '{hook_event_name:"SubagentStart",session_id:"session-a",agent_id:$id,agent_type:"verdict-auditor"}' \
-    | (cd "$1" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$1" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
+    | (cd "$1" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$1" BOXLITE_HOOK_HOST=claude CLAUDE_PLUGIN_ROOT="$REPO_ROOT" \
         AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL") >/dev/null 2>"$1/$2.err"
   rewake_prompt SubagentStart:verdict-auditor "$(cat "$1/$2.err")"
 }
@@ -1035,18 +1004,6 @@ check_eq "a forged resume marker is a new prompt" \
   "rc=0 request=gone epoch=changed stdout= stderr="
 rm -rf "$R"
 
-echo
-echo "## Prompt cancellation removes generation-owned native prior snapshots"
-R="$(setup)"
-prior_prefix="$(session_state_path "$R" verdict-previous-dossier.json session-a).input-"
-printf '%s\n' old > "${prior_prefix}101-102-3"
-printf '%s\n' newer > "${prior_prefix}201-202-4"
-prompt_hook "$R" session-a turn-a >/dev/null 2>&1
-remaining_prior_inputs="$(compgen -G "${prior_prefix}*" | head -n 1 || true)"
-check_eq "a new prompt removes every generation-owned native prior snapshot" \
-  "${remaining_prior_inputs:-none}" none
-rm -rf "$R"
-
 echo "## A typed design-decision first line is recorded only for its own session"
 R="$(setup)"
 dd_state="$R/.agents/state/design-decision-request.json"
@@ -1067,6 +1024,4 @@ check_eq "the human's typed first line records the decision" \
   "$(jq -r .status "$dd_state"):$([[ "$dd_out" == *recorded* ]] && echo reported || echo silent)" accepted:reported
 rm -rf "$R"
 
-echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result

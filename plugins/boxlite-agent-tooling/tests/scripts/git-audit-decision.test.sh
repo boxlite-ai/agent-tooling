@@ -24,7 +24,7 @@ scope="git-$(printf decision-session | git hash-object --stdin)"
 head="$(git rev-parse HEAD)"
 prepare() {
   jq -nc --argjson context "$context" --arg id "$1" --arg head "$head" \
-    '{context:$context,attempt:{id:$id,binding:{head:$head},snapshot:{diff:"candidate"}}}' \
+    '{context:$context,attempt:{id:$id,binding:{head:$head},snapshot:{diff:"candidate"},deadline:4102444800}}' \
     | bash "$cli" prepare "$state"
 }
 record_error() {
@@ -181,11 +181,11 @@ also change the task" >/dev/null
 [[ "$(cat ".agents/state/verdict-prompt-epoch.$scope")" != "$epoch" ]]
 printf 'PASS: replay and mixed text cannot preserve old authority\n'
 
-# An older Stop must block even when an ordinary prompt advances the session epoch.
+# A version-1 Stop decision must block even when an ordinary prompt advances the session epoch.
 select_kind push
 jq '.version=1 | del(.accepted_at) | .question_tool_id="old-card" | .response="Stop"
-  | .spec.minimum_words=1' "$decision" > "$scratch/legacy-stop"
-cp "$scratch/legacy-stop" "$decision"
+  | .spec.minimum_words=1' "$decision" > "$scratch/version1-stop"
+cp "$scratch/version1-stop" "$decision"
 user_prompt 'Continue with the current task' >/dev/null
 new_epoch="$(cat ".agents/state/verdict-prompt-epoch.$scope")"
 context="$(jq -c --arg epoch "$new_epoch" '.epoch=$epoch' <<<"$context")"
@@ -193,13 +193,13 @@ state="$scratch/push-new-epoch.json"
 next_action="$(jq -nc --argjson context "$context" '{context:$context}' |
   bash "$cli" next-action "$state")"
 jq -e --arg path "$decision" '.action=="stop" and (.reason|contains($path))' <<<"$next_action" >/dev/null
-if prepare after-legacy-stop >"$scratch/out" 2>"$scratch/err"; then
+if prepare after-version1-stop >"$scratch/out" 2>"$scratch/err"; then
   printf 'FAIL: unsupported Stop allowed a new audit cycle\n' >&2
   exit 1
 fi
 [[ ! -e "$state" ]]
 grep -Fq "unsupported request at $decision" "$scratch/err"
-cmp "$scratch/legacy-stop" "$decision"
+cmp "$scratch/version1-stop" "$decision"
 printf 'PASS: unsupported Stop survives epoch changes without retry or fallback\n'
 
 # Detached checkouts use the same HEAD branch binding in all host paths.

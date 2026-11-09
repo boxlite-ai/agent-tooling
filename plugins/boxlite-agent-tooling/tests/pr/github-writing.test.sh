@@ -27,7 +27,7 @@ GH
 chmod +x "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH" CLAUDE_PROJECT_DIR="$scratch/repo"
 cd "$scratch/repo" || exit 2
-bash "$PLUGIN/scripts/design-doc.sh" bind https://github.com/example/repo/issues/123 >/dev/null
+bash "$PLUGIN/scripts/design-doc.sh" register https://github.com/example/repo/issues/123 >/dev/null
 
 check() {
   local name="$1" command="$2" expected="$3" reason="${4:-}" output status=0 actual
@@ -43,7 +43,7 @@ check() {
   last_check_output="$output"
 }
 
-# One 41-word sentence: past the 25-word sentence limit (#419).
+# One 41-word sentence: past the 25-word sentence limit.
 dense="$(printf 'word %.0s' {1..41})"
 long="$(printf 'word %.0s' {1..121})"
 bullet="- $(printf 'word %.0s' {1..41})"
@@ -57,7 +57,7 @@ Allow complete structured documents.
 $details_list
 
 https://github.com/example/repo/issues/123"
-# A leading TL;DR no longer exempts the details from the structure limits (#419).
+# A leading TL;DR does not exempt the details from the structure limits.
 summary_first="## TL;DR
 
 Keep complete details after the summary.
@@ -148,7 +148,7 @@ check '40-word summary' "gh issue create --title Bug --body '## TL;DR
 
 $(printf 'word %.0s' {1..40})'" deny 'TL;DR has 40 words (limit 39)'
 # A comment of 80 words or fewer reads whole, so it needs no TL;DR; documents and
-# longer comments keep the summary (#265). Structure limits apply at any length (#419).
+# longer comments keep the summary. Structure limits apply at any length.
 eighty="$(printf -- '- Each of these list items contains twenty words and keeps the whole comment under the limit for requiring a summary.\n%.0s' {1..4})"
 check 'short comment needs no summary' "gh issue comment 7 --body 'Fixed in #263.'" allow
 check '80-word comment needs no summary' "gh pr comment 7 --body '$eighty'" allow
@@ -163,7 +163,7 @@ check 'short REST issue body keeps the summary' "gh api repos/o/r/issues -f titl
 check 'REST owner named comments keeps the summary' "gh api repos/comments/r/issues -f title=Bug -f body='Short.'" deny 'TL;DR'
 check 'short comment keeps the privacy check' "gh issue comment 7 --body 'See /Users/me/notes.'" deny 'private context'
 check 'short comment keeps the structure limits' "gh issue comment 7 --body '- $(printf 'word %.0s' {1..50})'" deny 'A sentence has 50 words'
-# GitHub enforces its own body limit, so the hook adds none (#310).
+# GitHub enforces its own body limit, so the hook adds none.
 long_document="$structured
 
 ## Example
@@ -295,7 +295,7 @@ check 'PR repo flag between noun and verb' "gh pr -R o/r comment 7 --body '$dens
 check 'compound command catches later write' "true && gh issue comment 7 --body '$dense'" deny
 check 'nested shell catches write' "bash -c \"gh issue comment 7 --body '$dense'\"" deny
 
-# gh parses options with pflag (#308): each spelling gh 2.92.0 accepts gets the same
+# gh parses options with pflag: each spelling gh 2.92.0 accepts gets the same
 # decision, and an option gh rejects gets a parse diagnostic instead of writing advice.
 for command in 'gh api --help' 'gh api -p corsair repos/o/r' 'gh issue close 7 --duplicate-of 5' \
   'gh release edit v1 --tag v2' 'gh release edit v1 --prerelease=false' \

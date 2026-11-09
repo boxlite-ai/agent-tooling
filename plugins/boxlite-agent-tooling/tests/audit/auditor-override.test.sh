@@ -12,13 +12,10 @@ VERDICT_GATE="$REPO_ROOT/.agents/hooks/audit/preflight-verdict-check.sh"
 CONTROL_STATE_LIB="$REPO_ROOT/.agents/lib/auditor-control-state.sh"
 INTERACTIVE_PROMPT_LIB="$REPO_ROOT/.agents/lib/hook-interactive-prompt.sh"
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
-check_eq() {
-  if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got=$2 want=$3)"; fi
-}
+# shellcheck source=../lib/assert.sh
+source "$REPO_ROOT/tests/lib/assert.sh"
+# shellcheck source=../lib/verdict-fixtures.sh
+source "$REPO_ROOT/tests/lib/verdict-fixtures.sh"
 
 setup() {
   local repo
@@ -34,14 +31,10 @@ setup() {
   printf '%s' "$repo"
 }
 
-scope_of() {
-  printf 'git-%s' "$(printf '%s' "$2" | git -C "$1" hash-object --stdin)"
-}
-
 portable_hook() {
   local repo="$1" payload="$2"
   printf '%s' "$payload" | (
-    cd "$repo" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT \
+    cd "$repo" && env -u BOXLITE_HOOK_HOST \
       CLAUDE_PROJECT_DIR="$repo" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
   )
 }
@@ -51,31 +44,30 @@ portable_hook() {
 claude_hook() {
   local repo="$1" payload="$2"
   printf '%s' "$payload" | (
-    cd "$repo" && env -u PLUGIN_ROOT CLAUDE_PROJECT_DIR="$repo" \
-      CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 \
+    cd "$repo" && env BOXLITE_HOOK_HOST=claude CLAUDE_PROJECT_DIR="$repo" \
+      AUDITOR_PROMPT_AFTER_SECONDS=0 \
       BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS=1 CLAUDE_AFK_TIMEOUT_MS=300000 bash "$CONTROL"
   )
 }
 
 # Any other Claude session, such as one under Remote Control, where a question stays
-# open until answered: a card there would block the turn (#334).
+# open until answered: a card there would block the turn.
 claude_remote_hook() {
   local repo="$1" payload="$2"
   printf '%s' "$payload" | (
-    cd "$repo" && env -u PLUGIN_ROOT -u BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS \
-      -u CLAUDE_AFK_TIMEOUT_MS CLAUDE_PROJECT_DIR="$repo" \
-      CLAUDE_PLUGIN_ROOT="$REPO_ROOT" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
+    cd "$repo" && env -u BOXLITE_CLAUDE_LOCAL_TIMED_PROMPTS \
+      -u CLAUDE_AFK_TIMEOUT_MS BOXLITE_HOOK_HOST=claude CLAUDE_PROJECT_DIR="$repo" \
+      AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
   )
 }
 
-# Codex exports the other plugin-root name. It has no AskUserQuestion, so it has to
-# land on the same non-blocking status a runtime with neither name gets: handing it the
-# interactive card would be an instruction it cannot carry out. Only the Claude branch
-# may take that path, and this is the case that pins the difference.
+# Codex has no AskUserQuestion, so it lands on the same non-blocking status as an
+# unknown host: the interactive card would be an instruction it cannot carry out.
+# Only the Claude branch may take that path; this case pins the difference.
 codex_hook() {
   local repo="$1" payload="$2"
   printf '%s' "$payload" | (
-    cd "$repo" && env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$REPO_ROOT" \
+    cd "$repo" && env BOXLITE_HOOK_HOST=codex \
       CLAUDE_PROJECT_DIR="$repo" AUDITOR_PROMPT_AFTER_SECONDS=0 bash "$CONTROL"
   )
 }
@@ -96,7 +88,7 @@ write_codex_subagent_transcript() {  # path, parent session, agent id, agent pat
 
 echo "## First completion creates a receipt without prior state"
 R="$(setup)"
-scope="$(scope_of "$R" fresh-receipt)"
+scope="$(session_scope_of "$R" fresh-receipt)"
 CLAUDE_PROJECT_DIR="$R" bash "$CONTROL" external-start verdict-auditor fresh "$scope" 101-102-3
 completion_rc=0
 CLAUDE_PROJECT_DIR="$R" bash "$CONTROL" external-stop verdict-auditor fresh "$scope" PASS \
@@ -109,7 +101,7 @@ rm -rf "$R"
 
 R="$(setup)"
 session="session-a"
-scope="$(scope_of "$R" "$session")"
+scope="$(session_scope_of "$R" "$session")"
 epoch_file="$R/.agents/state/verdict-prompt-epoch.$scope"
 event_file="$R/.agents/state/auditor-control/events.$scope.jsonl"
 grant_file="$R/.agents/state/auditor-control/grant.$scope.json"
@@ -582,7 +574,7 @@ rm -f "$uses_log" "$R/outside-use-log"
 echo "## Every shipped auditor is registered"
 known="$($CONTROL --known-auditors 2>/dev/null | sort)"
 # design-auditor blocks only edits, never a turn's end or a commit, so it has
-# no override (design #253); host-parity.test.sh pins the same exception.
+# no override; host-parity.test.sh pins the same exception.
 specs="$(find "$REPO_ROOT/.claude/agents" -maxdepth 1 -name '*-auditor.md' \
   ! -name design-auditor.md -exec basename {} .md \; | sort)"
 check_eq "the control plane maps every shipped auditor spec" "$known" "$specs"
@@ -637,7 +629,7 @@ rm -rf "$R"
 
 echo "## A new prompt retires expired closed escalations"
 R="$(setup)"
-scope="$(scope_of "$R" closed-retention)"
+scope="$(session_scope_of "$R" closed-retention)"
 control_dir="$R/.agents/state/auditor-control"
 mkdir -p "$control_dir"
 now="$(date +%s)"
@@ -664,5 +656,4 @@ check_eq "expired closed escalations are retired; recent and just-closed ones re
   "rc=0 remaining=open-now=closed recent=closed  stderr="
 rm -rf "$R"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-(( fail == 0 ))
+assert_result

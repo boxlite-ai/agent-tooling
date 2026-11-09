@@ -47,22 +47,17 @@
 set -uo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-state_helpers="$script_dir/../lib/pr-watch-state.sh"
-if [[ ! -r "$state_helpers" ]]; then
-  printf 'pr-watch: state helper not found: %s\n' "$state_helpers" >&2
+lib_dir="$script_dir/../lib"
+load_failure() {  # library file name
+  printf 'pr-watch: cannot load %s\n' "$lib_dir/$1" >&2
   exit 127
-fi
-# shellcheck source=../lib/pr-watch-state.sh
-source "$state_helpers" || exit 127
-safe_state_helpers="$script_dir/../lib/verdict-audit-state.sh"
-if [[ ! -r "$safe_state_helpers" ]]; then
-  printf 'pr-watch: safe state helper not found: %s\n' "$safe_state_helpers" >&2
-  exit 127
-fi
+}
 # shellcheck source=../lib/verdict-audit-state.sh
-source "$safe_state_helpers" || exit 127
+source "$lib_dir/verdict-audit-state.sh" || load_failure verdict-audit-state.sh
+# shellcheck source=../lib/pr-watch-state.sh
+source "$lib_dir/pr-watch-state.sh" || load_failure pr-watch-state.sh
 # shellcheck source=../lib/pr-watch-pending.sh
-source "$script_dir/../lib/pr-watch-pending.sh" || exit 127
+source "$lib_dir/pr-watch-pending.sh" || load_failure pr-watch-pending.sh
 
 readonly DEFAULT_INTERVAL=30
 # Time without a SUCCESSFUL poll — i.e. contact lost — not time without events.
@@ -80,11 +75,6 @@ readonly JOURNAL_TERMINAL_RESERVE_BYTES=16384
 readonly SEEN_RETAIN_MAX_BYTES=2097152
 readonly EXTERNAL_OUTPUT_MAX_BYTES=8388608
 readonly EXTERNAL_OUTPUT_MAX_KIB=8192
-
-watch_positive_decimal_is_bounded() {
-  local value="$1"
-  [[ "$value" =~ ^[1-9][0-9]*$ && ${#value} -le 18 ]]
-}
 
 watch_nonnegative_decimal_is_bounded() {
   local value="$1"
@@ -133,13 +123,13 @@ interval="${PR_WATCH_INTERVAL:-$DEFAULT_INTERVAL}"
 idle_timeout="${PR_WATCH_IDLE_TIMEOUT:-$DEFAULT_IDLE_TIMEOUT}"
 max_lifetime="${PR_WATCH_MAX_LIFETIME:-$DEFAULT_MAX_LIFETIME}"
 command_timeout="${PR_WATCH_COMMAND_TIMEOUT:-$DEFAULT_COMMAND_TIMEOUT}"
-if ! watch_positive_decimal_is_bounded "$interval" \
-   || ! watch_positive_decimal_is_bounded "$idle_timeout" \
+if ! pr_watch_positive_decimal_is_bounded "$interval" \
+   || ! pr_watch_positive_decimal_is_bounded "$idle_timeout" \
    || ! watch_nonnegative_decimal_is_bounded "$max_lifetime"; then
   printf 'pr-watch: polling limits must be integers (lifetime may be zero)\n' >&2
   exit 2
 fi
-if ! watch_positive_decimal_is_bounded "$command_timeout"; then
+if ! pr_watch_positive_decimal_is_bounded "$command_timeout"; then
   printf 'pr-watch: command timeout must be a positive integer\n' >&2
   exit 2
 fi
@@ -194,7 +184,6 @@ fi
 
 command -v gh >/dev/null 2>&1 || { printf 'pr-watch: gh not found\n' >&2; exit 127; }
 command -v jq >/dev/null 2>&1 || { printf 'pr-watch: jq not found\n' >&2; exit 127; }
-command -v shasum >/dev/null 2>&1 || { printf 'pr-watch: shasum not found\n' >&2; exit 127; }
 if [[ -n "$requested_watch_id" ]] && ! pr_watch_id_is_valid "$requested_watch_id"; then
   printf 'pr-watch: invalid watch-id\n' >&2
   exit 2
@@ -398,7 +387,7 @@ read_live_lock() {
   lock_observed_owner_state=regular
   lock_observed_owner_identity="$owner_identity"
   lock_observed_owner_hash="$(LC_ALL=C printf '%s' "$body" \
-    | shasum -a 256 | awk '{print $1}')" || return 2
+    | verdict_audit_sha256)" || return 2
   [[ "$lock_observed_owner_hash" =~ ^[0-9a-f]{64}$ ]] || return 2
   printf '%s' "$body" | jq -e '
     type == "object" and (keys | sort) == ["pid","ready","schema","start_token","watch_id"]
@@ -1091,7 +1080,7 @@ poll_checks() {
   local done_key
   done_key="checks_done:$(printf '%s' "$checks" \
     | jq -r '[.[] | "\(.link // .name):\(.bucket)"] | sort | join("|")' \
-    | shasum -a 256 | awk '{print $1}')"
+    | verdict_audit_sha256)"
   if (( concluded == total )) && ! seen "$done_key"; then
     emit checks_done \
       total "$total" \
@@ -1227,10 +1216,9 @@ while :; do
   fi
 
   # Give up on LOST CONTACT, never on silence. A PR with green CI awaiting human
-  # review emits nothing for hours or days; an earlier version measured "time
-  # since the last new event" and so stopped watching long before the merge it
-  # was supposed to report. A poll that reaches GitHub and confirms the PR is
-  # still open IS liveness, even when it yields no new events.
+  # review emits nothing for hours or days, so measuring time since the last
+  # new event would stop watching long before the merge. A poll that reaches
+  # GitHub and confirms the PR is still open IS liveness.
   if (( SECONDS - last_contact >= idle_timeout )); then
     emit watch_end reason "no contact with PR for ${idle_timeout}s"
     break

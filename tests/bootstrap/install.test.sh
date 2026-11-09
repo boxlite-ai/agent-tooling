@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests for the floating consumer bootstrap and its companions:
 #
-#   templates/install.sh                  resolve tooling.ref -> fetch -> validate -> record
+#   templates/install.sh                  validate profile -> fetch -> run the release installer
+#   scripts/install.sh                    resolve tooling.ref -> fetch -> validate -> record
 #   scripts/verify-installation.sh        gates hold commits to the RECORD, offline
 #   scripts/refresh-installation.sh       advances the record when the branch moves
 #   scripts/sync-installation.sh          spawns the refresh in the background, throttled
@@ -90,7 +91,7 @@ make_consumer() {  # $1 = directory
   cp "$c/.claude/settings.json" "$c/.github/copilot/settings.json"
   jq -nc '{plugins:[{name:"boxlite-agent-tooling",source:{source:"git-subdir",url:"https://github.com/boxlite-ai/agent-tooling.git",ref:"main",path:"./plugins/boxlite-agent-tooling"},policy:{installation:"INSTALLED_BY_DEFAULT",authentication:"ON_INSTALL"},category:"Developer Tools"}]}' \
     > "$c/.agents/plugins/marketplace.json"
-  printf '/.agents/state/\n/.claude/.*\n' > "$c/.gitignore"
+  printf '/.agents/state/\n' > "$c/.gitignore"
   printf 'base\n' > "$c/file"
   git -C "$c" add -A
   git -C "$c" commit -qm base
@@ -118,11 +119,10 @@ cat > "$GRANULAR_CONSUMER/.gitignore" <<'GRANULAR_IGNORE'
 /.agents/state/verdict-last-uuid
 /.agents/state/verdict-audit.lock
 /.agents/state/verdict-decisions.log
-/.claude/.*
 GRANULAR_IGNORE
 "$PLUGIN_ROOT/scripts/validate-profile.sh" "$GRANULAR_CONSUMER" \
   > "$TMP/granular.out" 2> "$TMP/granular.err"
-check_eq "granular legacy ignores cannot admit session-suffixed runtime state" "$?" 1
+check_eq "per-file state ignores cannot admit session-suffixed runtime state" "$?" 1
 grep -q '\.agents/state/' "$TMP/granular.err" \
   && ok "failure requires the whole runtime-state namespace" \
   || bad "runtime-state failure is actionable (stderr=$(cat "$TMP/granular.err"))"
@@ -289,6 +289,40 @@ make_consumer "$FRESH"
 check_eq "offline bootstrap without a record fails" "$?" 1
 grep -q 'no revision is installed' "$TMP/err" && ok "names the missing installation" \
                                               || bad "names the missing installation"
+check_eq "a failed first install leaves no scratch checkout" \
+  "$(find "$FRESH/.git/agent-tooling" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')" 0
+
+echo
+echo "## The loader rejects an unsafe profile before any network call"
+NETWORK_BIN="$TMP/network-bin"; mkdir -p "$NETWORK_BIN"
+export NETWORK_REAL_GIT NETWORK_LOG="$TMP/network-calls"
+NETWORK_REAL_GIT="$(command -v git)"
+cat > "$NETWORK_BIN/git" <<'NETWORK_GIT'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in ls-remote|fetch|clone) printf '%s\n' "$*" >> "$NETWORK_LOG"; break ;; esac
+done
+exec "$NETWORK_REAL_GIT" "$@"
+NETWORK_GIT
+chmod +x "$NETWORK_BIN/git"
+: > "$NETWORK_LOG"
+(cd "$FRESH" && PATH="$NETWORK_BIN:$PATH" ./.agent-tooling/install.sh) >/dev/null 2>&1
+grep -q '^ls-remote ' "$NETWORK_LOG" && ok "a valid profile reaches the network probe" \
+                                    || bad "a valid profile reaches the network probe (log=$(cat "$NETWORK_LOG"))"
+for unsafe in 'repository|"attacker/agent-tooling"|unsupported tooling repository: attacker/agent-tooling' \
+              'ref|"-evil"|not a valid branch name: -evil'; do
+  IFS='|' read -r unsafe_field unsafe_value unsafe_message <<< "$unsafe"
+  UNSAFE="$TMP/unsafe-$unsafe_field"
+  make_consumer "$UNSAFE"
+  jq --argjson value "$unsafe_value" ".tooling.$unsafe_field = \$value" "$UNSAFE/.agent-tooling/profile.json" \
+    > "$TMP/p" && cp "$TMP/p" "$UNSAFE/.agent-tooling/profile.json"
+  : > "$NETWORK_LOG"
+  (cd "$UNSAFE" && PATH="$NETWORK_BIN:$PATH" ./.agent-tooling/install.sh) > "$TMP/out" 2> "$TMP/err"
+  check_eq "loader refuses an unsafe tooling.$unsafe_field" "$?" 1
+  grep -Fq "$unsafe_message" "$TMP/err" && ok "loader names the unsafe tooling.$unsafe_field" \
+    || bad "loader names the unsafe tooling.$unsafe_field (stderr=$(cat "$TMP/err"))"
+  check_eq "unsafe tooling.$unsafe_field makes no network call" "$(cat "$NETWORK_LOG")" ""
+done
 
 echo
 echo "## A hold is obeyed without resolving anything"
@@ -458,13 +492,13 @@ grep -q 'unexpected HEAD' "$TMP/hooked-warm.err" \
   || ok "the warm cache is not misread as corrupt"
 
 echo
-echo "## Lifecycle synchronization isolates committed legacy installers"
-legacy_lifecycle() {
-  local mode="$1" consumer="$TMP/legacy-$1" worktree="$TMP/legacy-$1-wt"
+echo "## Lifecycle synchronization isolates the consumer's Git environment"
+isolated_lifecycle() {
+  local mode="$1" consumer="$TMP/isolated-$1" worktree="$TMP/isolated-$1-wt"
   local cache baseline target git_dir consumer_head hook_output foreign
   make_consumer "$consumer"
   git -C "$consumer" remote add origin https://github.com/boxlite-ai/example-consumer.git
-  git -C "$consumer" worktree add -q "$worktree" -b "legacy-$mode"
+  git -C "$consumer" worktree add -q "$worktree" -b "isolated-$mode"
   cp "$REPO_ROOT/templates/install.sh" "$worktree/.agent-tooling/install.sh"
   chmod +x "$worktree/.agent-tooling/install.sh"
   (cd "$worktree" && AGENT_TOOLING_SYNC_ACTIVE=1 ./.agent-tooling/install.sh) \
@@ -475,9 +509,6 @@ legacy_lifecycle() {
   git_dir="$(git -C "$worktree" rev-parse --absolute-git-dir)"
   consumer_head="$(git -C "$worktree" rev-parse HEAD)"
   cp "$consumer/.git/config" "$TMP/$mode-config"
-  # Model a committed bootstrap predating git_cache(), without copying another repo.
-  sed 's/git_cache -C/git -C/g' "$REPO_ROOT/templates/install.sh" \
-    > "$worktree/.agent-tooling/install.sh"
   cat > "$consumer/.git/hooks/post-checkout" <<'CHAINED'
 #!/usr/bin/env bash
 printf '%s\n' "${GIT_DIR:-unset}" "$@" > "$(git rev-parse --git-common-dir)/chained-args"
@@ -536,8 +567,14 @@ CHAINED
     "$(head -n1 "$cache/current" 2>/dev/null || true)" "$target"
 }
 for lifecycle_mode in foreground background warm direct; do
-  legacy_lifecycle "$lifecycle_mode"
+  isolated_lifecycle "$lifecycle_mode"
 done
+
+echo
+echo "## This repository's consumer installer matches the template"
+cmp -s "$REPO_ROOT/templates/install.sh" "$REPO_ROOT/.agent-tooling/install.sh" \
+  && ok "this repository's consumer installer matches the template" \
+  || bad "this repository's consumer installer matches the template"
 
 echo
 echo "## Failed downloads keep a validated installation usable"

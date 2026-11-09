@@ -18,42 +18,19 @@ marketplace_file="$repo_root/.agents/plugins/marketplace.json"
 command -v jq >/dev/null 2>&1 || { printf 'agent-tooling: jq is required\n' >&2; exit 1; }
 command -v codex >/dev/null 2>&1 || { printf 'agent-tooling: Codex CLI is required\n' >&2; exit 1; }
 
-tooling_repo="$(jq -er '.tooling.repository | select(type == "string" and length > 0)' "$profile_file")" || {
-  printf 'agent-tooling: tooling.repository is required\n' >&2
-  exit 1
-}
-[[ "$tooling_repo" == "boxlite-ai/agent-tooling" ]] || {
-  printf 'agent-tooling: unsupported tooling repository: %s\n' "$tooling_repo" >&2
-  exit 1
-}
-tooling_ref="$(jq -er '.tooling.ref | select(type == "string" and length > 0)' "$profile_file")" || {
-  printf 'agent-tooling: tooling.ref must name the branch to float on\n' >&2
-  exit 1
-}
-[[ ! "$tooling_ref" =~ ^[0-9a-f]{40}$ ]] || {
-  printf 'agent-tooling: tooling.ref names a branch; to freeze a revision write it to .agent-tooling/hold\n' >&2
-  exit 1
-}
-if [[ "$tooling_ref" == -* ]] || ! git check-ref-format "refs/heads/$tooling_ref" >/dev/null 2>&1; then
-  printf 'agent-tooling: tooling.ref is not a valid branch name: %s\n' "$tooling_ref" >&2
-  exit 1
-fi
+plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=../.agents/lib/tooling-profile.sh
+source "$plugin_root/.agents/lib/tooling-profile.sh"
+# shellcheck source=../.agents/lib/plugin-bootstrap.sh
+source "$plugin_root/.agents/lib/plugin-bootstrap.sh"
+# shellcheck source=../.agents/lib/tooling-command.sh
+source "$plugin_root/.agents/lib/tooling-command.sh"
+
+tooling_profile_read "$profile_file" || { printf 'agent-tooling: %s\n' "$tooling_profile_error" >&2; exit 1; }
 
 validate_codex_marketplace_file() {
-  local file="$1"
-  [[ -r "$file" ]] || return 1
-  jq -e --arg ref "$tooling_ref" '
-    .name == "boxlite-agent-tooling" and
-    any(.plugins[];
-      .name == "boxlite-agent-tooling" and
-      .source.source == "git-subdir" and
-      .source.url == "https://github.com/boxlite-ai/agent-tooling.git" and
-      .source.ref == $ref and
-      .source.path == "./plugins/boxlite-agent-tooling" and
-      .policy.installation == "INSTALLED_BY_DEFAULT" and
-      .policy.authentication == "ON_INSTALL" and
-      .category == "Developer Tools")
-  ' "$file" >/dev/null 2>&1
+  jq -e '.name == "boxlite-agent-tooling"' "$1" >/dev/null 2>&1 &&
+    tooling_codex_marketplace_valid "$1" "$tooling_ref"
 }
 
 validate_codex_marketplace_file "$marketplace_file" || {
@@ -61,11 +38,6 @@ validate_codex_marketplace_file "$marketplace_file" || {
   exit 1
 }
 
-plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-# shellcheck source=../.agents/lib/plugin-bootstrap.sh
-source "$plugin_root/.agents/lib/plugin-bootstrap.sh" || exit 1
-# shellcheck source=../.agents/lib/tooling-command.sh
-source "$plugin_root/.agents/lib/tooling-command.sh" || exit 1
 tooling_bootstrap_refresh "$repo_root" "$plugin_root" || exit 1
 next_runtime="$(tooling_bootstrap_runtime "$repo_root" codex)" || exit 1
 if [[ "$next_runtime" != "${BASH_SOURCE[0]}" ]]; then
@@ -75,49 +47,22 @@ host_cli="$(command -v codex)"
 host_deadline=$(( $(date +%s) + 120 ))
 codex() { tooling_command "$host_deadline" "$host_cli" "$@"; }
 
-tooling_install_is_valid() {
-  local common_git_dir record verify
-  common_git_dir="$(git -C "$repo_root" rev-parse --git-common-dir)"
-  [[ "$common_git_dir" == /* ]] || common_git_dir="$repo_root/$common_git_dir"
-  record="$(head -n1 "$common_git_dir/agent-tooling/current" 2>/dev/null || true)"
-  [[ "$record" =~ ^[0-9a-f]{40}$ ]] || return 1
-  verify="$common_git_dir/agent-tooling/$record/plugins/boxlite-agent-tooling/scripts/verify-installation.sh"
-  [[ -x "$verify" ]] || return 1
-  "$verify" "$repo_root" >/dev/null
-}
-
-if ! tooling_install_is_valid 2>/dev/null; then
-  install_output=""
-  if install_output="$(cd "$repo_root" && AGENT_TOOLING_SYNC_ACTIVE=1 AGENT_TOOLING_UPDATE_DEADLINE="$host_deadline" /usr/bin/env bash "$installer" 2>&1)"; then
-    :
-  else
-    status="$?"
-    [[ -z "$install_output" ]] || printf '%s\n' "$install_output" >&2
-    printf 'agent-tooling: automatic tooling installation failed\n' >&2
-    exit "$status"
-  fi
-  tooling_install_is_valid || {
-    [[ -z "$install_output" ]] || printf '%s\n' "$install_output" >&2
-    printf 'agent-tooling: automatic tooling installation did not produce a valid local installation\n' >&2
-    exit 1
-  }
+if ! tooling_install_is_valid "$repo_root" 2>/dev/null; then
+  tooling_run_installer_verified "$repo_root" "$installer" "$host_deadline" || case "$?" in
+    1)
+      printf 'agent-tooling: automatic tooling installation failed\n' >&2
+      exit "$tooling_installer_status"
+      ;;
+    *)
+      printf 'agent-tooling: automatic tooling installation did not produce a valid local installation\n' >&2
+      exit 1
+      ;;
+  esac
 fi
 
-common_git_dir="$(git -C "$repo_root" rev-parse --git-common-dir)"
-[[ "$common_git_dir" == /* ]] || common_git_dir="$repo_root/$common_git_dir"
 read_expected_plugin_version() {
-  adopted_tooling_revision="$(head -n1 "$common_git_dir/agent-tooling/current" 2>/dev/null || true)"
-  [[ "$adopted_tooling_revision" =~ ^[0-9a-f]{40}$ ]] || {
-    printf 'agent-tooling: adopted tooling revision is invalid after verification\n' >&2
-    return 1
-  }
-  expected_plugin_manifest="$common_git_dir/agent-tooling/$adopted_tooling_revision/plugins/boxlite-agent-tooling/.codex-plugin/plugin.json"
-  expected_plugin_version="$(jq -er '
-    select(.name == "boxlite-agent-tooling") |
-    .version | select(type == "string" and length > 0)
-  ' "$expected_plugin_manifest" 2>/dev/null)" || {
-    printf 'agent-tooling: adopted tooling has no valid Codex plugin version: %s\n' \
-      "$expected_plugin_manifest" >&2
+  tooling_expected_plugin_version "$repo_root" codex Codex || {
+    printf 'agent-tooling: %s\n' "$tooling_bootstrap_error" >&2
     return 1
   }
 }
@@ -127,38 +72,27 @@ refresh_adopted_tooling() {
     printf 'agent-tooling: plugin version differs while AGENT_TOOLING_REFRESH=0; refresh explicitly\n' >&2
     return 1
   }
-  local output status
-  output="$(cd "$repo_root" && AGENT_TOOLING_SYNC_ACTIVE=1 AGENT_TOOLING_UPDATE_DEADLINE="$host_deadline" /usr/bin/env bash "$installer" 2>&1)"
-  status="$?"
-  if [[ "$status" != 0 ]]; then
-    [[ -z "$output" ]] || printf '%s\n' "$output" >&2
-    printf 'agent-tooling: could not refresh adopted tooling before plugin reconciliation\n' >&2
-    return "$status"
-  fi
-  tooling_install_is_valid || {
-    [[ -z "$output" ]] || printf '%s\n' "$output" >&2
-    printf 'agent-tooling: tooling refresh did not produce a valid local installation\n' >&2
-    return 1
-  }
+  tooling_run_installer_verified "$repo_root" "$installer" "$host_deadline" || case "$?" in
+    1)
+      printf 'agent-tooling: could not refresh adopted tooling before plugin reconciliation\n' >&2
+      return "$tooling_installer_status"
+      ;;
+    *)
+      printf 'agent-tooling: tooling refresh did not produce a valid local installation\n' >&2
+      return 1
+      ;;
+  esac
   read_expected_plugin_version
 }
 
 read_expected_plugin_version || exit 1
 
-hold_file="$repo_root/.agent-tooling/hold"
-hold_sha=""
-if [[ -e "$hold_file" ]]; then
-  hold_sha="$(tr -d '\n' < "$hold_file")"
-  { [[ "$hold_sha" =~ ^[0-9a-f]{40}$ ]] && [[ "$(wc -c < "$hold_file")" -le 41 ]]; } || {
-    printf 'agent-tooling: %s must contain exactly one full lowercase commit SHA\n' "$hold_file" >&2
-    exit 1
-  }
-  [[ "$hold_sha" == "$adopted_tooling_revision" ]] || {
-    printf 'agent-tooling: hold %s is not the adopted tooling revision %s\n' \
-      "$hold_sha" "$adopted_tooling_revision" >&2
-    exit 1
-  }
-fi
+tooling_hold_read "$repo_root/.agent-tooling/hold" || { printf 'agent-tooling: %s\n' "$tooling_profile_error" >&2; exit 1; }
+[[ -z "$hold_sha" || "$hold_sha" == "$adopted_tooling_revision" ]] || {
+  printf 'agent-tooling: hold %s is not the adopted tooling revision %s\n' \
+    "$hold_sha" "$adopted_tooling_revision" >&2
+  exit 1
+}
 
 codex_plugin_catalog() {
   local catalog
@@ -194,15 +128,18 @@ codex_plugin_catalog() {
   printf '%s' "$catalog"
 }
 
+installed_target='def installed_target: .pluginId == "boxlite-agent-tooling@boxlite-agent-tooling" and .installed == true;'
+
+installed_enabled_state() { # prints the single installed plugin's boolean enabled state
+  jq -r "$installed_target"' [.installed[] | select(installed_target) | .enabled | booleans]
+    | if length == 1 then .[0] else error("no boolean enabled state") end' <<< "$catalog" 2>/dev/null
+}
+
 read_catalog_plugin_state() {
   local available_plugin_version
-  installed_count="$(jq -r '[.installed[] | select(
-    .pluginId == "boxlite-agent-tooling@boxlite-agent-tooling" and .installed == true
-  )] | length' <<< "$catalog")"
+  installed_count="$(jq -r "$installed_target"' [.installed[] | select(installed_target)] | length' <<< "$catalog")"
   if [[ "$installed_count" == 1 ]]; then
-    catalog_plugin_version="$(jq -er '.installed[] | select(
-      .pluginId == "boxlite-agent-tooling@boxlite-agent-tooling" and .installed == true
-    ) | .version' <<< "$catalog")" || {
+    catalog_plugin_version="$(jq -er "$installed_target"' .installed[] | select(installed_target) | .version' <<< "$catalog")" || {
       printf 'agent-tooling: Codex installed plugin has no usable version\n' >&2
       return 1
     }
@@ -225,15 +162,19 @@ read_catalog_plugin_state() {
   catalog_plugin_version="$configured_plugin_version"
 }
 
-marketplaces="$(codex plugin marketplace list --json)" || {
-  printf 'agent-tooling: could not list Codex marketplaces\n' >&2
-  exit 1
+read_codex_marketplaces() { # verb, message suffix; sets marketplaces and marketplace_count
+  marketplaces="$(codex plugin marketplace list --json)" || {
+    printf 'agent-tooling: could not %s Codex marketplaces%s\n' "$1" "$2" >&2
+    exit 1
+  }
+  jq -e '.marketplaces | type == "array"' <<< "$marketplaces" >/dev/null || {
+    printf 'agent-tooling: Codex returned an invalid marketplace list%s\n' "$2" >&2
+    exit 1
+  }
+  marketplace_count="$(jq -r '[.marketplaces[] | select(.name == "boxlite-agent-tooling")] | length' <<< "$marketplaces")"
 }
-jq -e '.marketplaces | type == "array"' <<< "$marketplaces" >/dev/null || {
-  printf 'agent-tooling: Codex returned an invalid marketplace list\n' >&2
-  exit 1
-}
-marketplace_count="$(jq -r '[.marketplaces[] | select(.name == "boxlite-agent-tooling")] | length' <<< "$marketplaces")"
+
+read_codex_marketplaces list ""
 canonical_marketplace_url="https://github.com/$tooling_repo.git"
 codex_marketplace_source_is_canonical() {
   local marketplace_list="$1"
@@ -281,15 +222,7 @@ esac
 # Installed plugins legitimately report their cache directory as a local source.
 # Verify the configured marketplace root separately so that source transition cannot
 # hide a same-name marketplace pointed at a different Git repository or branch.
-marketplaces="$(codex plugin marketplace list --json)" || {
-  printf 'agent-tooling: could not re-read Codex marketplaces after configuration\n' >&2
-  exit 1
-}
-jq -e '.marketplaces | type == "array"' <<< "$marketplaces" >/dev/null || {
-  printf 'agent-tooling: Codex returned an invalid marketplace list after configuration\n' >&2
-  exit 1
-}
-marketplace_count="$(jq -r '[.marketplaces[] | select(.name == "boxlite-agent-tooling")] | length' <<< "$marketplaces")"
+read_codex_marketplaces re-read " after configuration"
 [[ "$marketplace_count" == 1 ]] || {
   printf 'agent-tooling: Codex marketplace boxlite-agent-tooling is ambiguous after configuration\n' >&2
   exit 1
@@ -341,15 +274,10 @@ fi
 if [[ "$catalog_plugin_version" != "$expected_plugin_version" ]]; then
   installed_enabled_before=""
   if [[ "$installed_count" == 1 ]]; then
-    jq -e 'any(.installed[]; select(
-      .pluginId == "boxlite-agent-tooling@boxlite-agent-tooling" and .installed == true
-    ) | (.enabled | type == "boolean"))' <<< "$catalog" >/dev/null || {
+    installed_enabled_before="$(installed_enabled_state)" || {
       printf 'agent-tooling: Codex installed plugin has no boolean enabled state\n' >&2
       exit 1
     }
-    installed_enabled_before="$(jq -r '.installed[] | select(
-      .pluginId == "boxlite-agent-tooling@boxlite-agent-tooling" and .installed == true
-    ) | .enabled' <<< "$catalog")"
   fi
 
   if ! upgrade_output="$(codex plugin marketplace upgrade boxlite-agent-tooling --json)"; then
@@ -384,15 +312,10 @@ if [[ "$catalog_plugin_version" != "$expected_plugin_version" ]]; then
       printf 'agent-tooling: Codex marketplace upgrade removed the installed plugin\n' >&2
       exit 1
     }
-    jq -e 'any(.installed[]; select(
-      .pluginId == "boxlite-agent-tooling@boxlite-agent-tooling" and .installed == true
-    ) | (.enabled | type == "boolean"))' <<< "$catalog" >/dev/null || {
+    installed_enabled_after="$(installed_enabled_state)" || {
       printf 'agent-tooling: upgraded Codex plugin has no boolean enabled state\n' >&2
       exit 1
     }
-    installed_enabled_after="$(jq -r '.installed[] | select(
-      .pluginId == "boxlite-agent-tooling@boxlite-agent-tooling" and .installed == true
-    ) | .enabled' <<< "$catalog")"
     [[ "$installed_enabled_after" == "$installed_enabled_before" ]] || {
       printf 'agent-tooling: Codex marketplace upgrade changed the plugin enabled state\n' >&2
       exit 1
@@ -413,11 +336,8 @@ if [[ "$installed_count" == 0 ]]; then
   fi
   changed=1
   catalog="$(codex_plugin_catalog)" || exit 1
-  jq -e --arg version "$expected_plugin_version" 'any(.installed[];
-    .pluginId == "boxlite-agent-tooling@boxlite-agent-tooling" and
-    .installed == true and
-    .version == $version
-  )' <<< "$catalog" >/dev/null || {
+  jq -e --arg version "$expected_plugin_version" "$installed_target"' any(.installed[];
+    installed_target and .version == $version)' <<< "$catalog" >/dev/null || {
     printf 'agent-tooling: Codex did not install boxlite-agent-tooling at expected version %s\n' \
       "$expected_plugin_version" >&2
     exit 1

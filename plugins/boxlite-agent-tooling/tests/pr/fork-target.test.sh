@@ -78,7 +78,7 @@ chmod +x "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH" CLAUDE_PROJECT_DIR="$scratch/repo"
 unset GH_REPO GH_HOST GIT_DIR GIT_WORK_TREE
 cd "$scratch/repo"
-bash "$plugin/scripts/design-doc.sh" bind https://github.com/example/repo/issues/1 >/dev/null
+bash "$plugin/scripts/design-doc.sh" register https://github.com/example/repo/issues/1 >/dev/null
 hook() {
   jq -nc --arg command "$1" '{tool_input:{command:$command}}' \
     | bash "$plugin/.agents/hooks/preflight-pr-review.sh"

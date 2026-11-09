@@ -28,9 +28,21 @@ readonly HARD_MAX_BYTES=65536
 readonly HARD_MAX_INPUT_BYTES=2097152
 readonly SUMMARY_RESERVE_BYTES=512
 
-stream_positive_decimal_is_bounded() {
-  local value="$1"
-  [[ "$value" =~ ^[1-9][0-9]*$ && ${#value} -le 18 ]]
+command -v jq >/dev/null 2>&1 || {
+  printf 'pr-watch-stream: jq not found\n' >&2
+  exit 127
+}
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+lib_dir="$script_dir/../lib"
+# shellcheck source=../lib/verdict-audit-state.sh
+source "$lib_dir/verdict-audit-state.sh" || {
+  printf 'pr-watch-stream: cannot load %s\n' "$lib_dir/verdict-audit-state.sh" >&2
+  exit 127
+}
+# shellcheck source=../lib/pr-watch-state.sh
+source "$lib_dir/pr-watch-state.sh" || {
+  printf 'pr-watch-stream: cannot load %s\n' "$lib_dir/pr-watch-state.sh" >&2
+  exit 127
 }
 
 log="${1:-}"
@@ -45,7 +57,7 @@ expected_pr_url=""
 ready_fd=""
 while (( $# )); do
   case "$1" in
-    --watch-id|--cursor)
+    --watch-id)
       [[ -n "${2+set}" ]] || {
         printf 'pr-watch-stream: %s requires a value\n' "$1" >&2
         exit 2
@@ -74,10 +86,10 @@ while (( $# )); do
 done
 
 if [[ -z "$log" ]]; then
-  printf 'usage: pr-watch-stream.sh <event-log> [poll-seconds] [--watch-id <id>] [--ready-fd 4]\n' >&2
+  printf 'usage: pr-watch-stream.sh <event-log> [poll-seconds] [--watch-id <id>] [--expect-pr-url <url>] [--ready-fd 4]\n' >&2
   exit 2
 fi
-stream_positive_decimal_is_bounded "$poll" || {
+pr_watch_positive_decimal_is_bounded "$poll" || {
   printf 'pr-watch-stream: poll-seconds must be a positive integer\n' >&2
   exit 2
 }
@@ -97,7 +109,7 @@ wait_seconds="${PR_WATCH_STREAM_WAIT:-$DEFAULT_WAIT}"
 max_events="${PR_WATCH_STREAM_MAX_EVENTS:-$DEFAULT_MAX_EVENTS}"
 max_bytes="${PR_WATCH_STREAM_MAX_BYTES:-$DEFAULT_MAX_BYTES}"
 for numeric in "$wait_seconds" "$max_events" "$max_bytes"; do
-  stream_positive_decimal_is_bounded "$numeric" || {
+  pr_watch_positive_decimal_is_bounded "$numeric" || {
     printf 'pr-watch-stream: limits must be positive integers\n' >&2
     exit 2
   }
@@ -125,25 +137,6 @@ done
   exit 2
 }
 
-command -v jq >/dev/null 2>&1 || {
-  printf 'pr-watch-stream: jq not found\n' >&2
-  exit 127
-}
-command -v shasum >/dev/null 2>&1 || {
-  printf 'pr-watch-stream: shasum not found\n' >&2
-  exit 127
-}
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-safe_state_helpers="$script_dir/../lib/verdict-audit-state.sh"
-watch_state_helpers="$script_dir/../lib/pr-watch-state.sh"
-[[ -r "$safe_state_helpers" && -r "$watch_state_helpers" ]] || {
-  printf 'pr-watch-stream: state helper not found\n' >&2
-  exit 127
-}
-# shellcheck source=../lib/verdict-audit-state.sh
-source "$safe_state_helpers" || exit 127
-# shellcheck source=../lib/pr-watch-state.sh
-source "$watch_state_helpers" || exit 127
 if [[ -n "$expected_pr_url" ]] \
    && { ! pr_watch_url_is_valid "$expected_pr_url" || ! pr_watch_id_is_valid "$requested_watch_id"; }; then
   printf 'pr-watch-stream: --expect-pr-url requires a canonical PR URL and watch ID\n' >&2
@@ -317,30 +310,8 @@ if [[ "${log##*/}" =~ ^branch-[0-9a-f]{64}\.jsonl$ ]]; then
 fi
 
 producer_is_live() {
-  local lock_identity snapshot body owner_pid owner_token current_token
   (( producer_liveness_is_bound )) || return 0
-  lock_identity="$(pr_watch_state_directory_identity \
-    "$producer_lock" 2>/dev/null)" || return 1
-  snapshot="$(verdict_audit_read_json_snapshot \
-    "$producer_lock/owner.json" 2>/dev/null)" || return 1
-  [[ "$(pr_watch_state_directory_identity "$producer_lock" 2>/dev/null)" \
-      == "$lock_identity" ]] || return 1
-  body="${snapshot#*$'\n'}"
-  printf '%s' "$body" | jq -e --arg watch_id "$watch_id" '
-    type == "object"
-    and (keys | sort) == ["pid","ready","schema","start_token","watch_id"]
-    and .schema == 1 and .watch_id == $watch_id
-    and (.pid | type == "number" and . > 0 and floor == .)
-    and (.start_token | type == "string"
-         and test("^cksum-[0-9]+-[0-9]+$"))
-    and (.ready | type == "boolean")' >/dev/null 2>&1 || return 1
-  owner_pid="$(printf '%s' "$body" | jq -r '.pid')"
-  owner_token="$(printf '%s' "$body" | jq -r '.start_token')"
-  current_token="$(verdict_audit_process_start_token \
-    "$owner_pid" 2>/dev/null)" || return 1
-  [[ "$current_token" == "$owner_token" \
-     && "$(pr_watch_state_directory_identity "$producer_lock" 2>/dev/null)" \
-        == "$lock_identity" ]]
+  pr_watch_owner_read "$producer_lock" "$watch_id" >/dev/null
 }
 
 pause_until_deadline() {  # absolute-seconds
@@ -355,7 +326,7 @@ line_fingerprint() {
   local line_number="$1"
   (( line_number > 0 )) || { printf ''; return 0; }
   read_log_range "$line_number" "$line_number" \
-    | shasum -a 256 | awk '{print $1}'
+    | verdict_audit_sha256
 }
 
 deadline=$(( SECONDS + wait_seconds ))

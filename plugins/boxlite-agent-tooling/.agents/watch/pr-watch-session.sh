@@ -2,10 +2,10 @@
 # Reconcile durable watch intent and return a bounded delivery batch.
 set -uo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/pr-watch-state.sh
-source "$script_dir/../lib/pr-watch-state.sh" || exit 127
 # shellcheck source=../lib/verdict-audit-state.sh
 source "$script_dir/../lib/verdict-audit-state.sh" || exit 127
+# shellcheck source=../lib/pr-watch-state.sh
+source "$script_dir/../lib/pr-watch-state.sh" || exit 127
 # shellcheck source=../lib/pr-watch-pending.sh
 source "$script_dir/../lib/pr-watch-pending.sh" || exit 127
 locked=0 start=0 cancel=0 keepalive=0 branch="" pr="" acknowledgments=()
@@ -37,7 +37,7 @@ if (( keepalive && (start || cancel || ${#acknowledgments[@]} > 0) )); then
 fi
 [[ -z "$pr" || "$pr" =~ ^[1-9][0-9]*$ ]] || exit 2
 [[ -n "$branch" ]] || { printf 'pr-watch-session: --branch is required\n' >&2; exit 2; }
-for dependency in git jq perl shasum gh; do
+for dependency in git jq perl gh; do
   command -v "$dependency" >/dev/null || exit 127
 done
 git_directory="$(git rev-parse --absolute-git-dir)" || exit 1
@@ -108,16 +108,10 @@ events="$(pr_watch_pending read "$pending")" || exit 1
 for event_id in ${acknowledgments[@]+"${acknowledgments[@]}"}; do
   pr_watch_pending ack "$pending" "$event_id" || exit 1
 done
-owner="" pid="" live=0 health="" status=starting
-if snapshot="$(verdict_audit_read_json_snapshot "$directory/$key.lock/owner.json" 2>/dev/null)"; then
-  owner="${snapshot#*$'\n'}"
-  pid="$(jq -er '.pid | select(type == "number" and floor == . and . > 0)' <<< "$owner" 2>/dev/null)" || pid=""
-  token="$(verdict_audit_process_start_token "$pid" 2>/dev/null)" || token=""
-  if [[ -n "$token" ]] && jq -e --arg token "$token" \
-      '.schema == 1 and .ready == true and .start_token == $token
-       and (.watch_id | test("^watch-[0-9a-f]{24}$"))' <<< "$owner" >/dev/null; then
-    live=1
-  fi
+owner_id="" pid="" live=0 health="" status=starting
+if owner="$(pr_watch_owner_read "$directory/$key.lock")"; then
+  IFS=$'\t' read -r pid owner_id owner_ready <<<"$owner"
+  [[ "$owner_ready" != true ]] || live=1
 fi
 if (( cancel )) || [[ "${BOXLITE_PR_WATCH:-1}" == 0 ]] \
     || (( now >= $(jq -r '.deadline' <<< "$state") )); then
@@ -134,7 +128,7 @@ if [[ "$(jq -r '.enabled' <<< "$state")" == false ]]; then
   (( ! live )) || kill -TERM "$pid" 2>/dev/null || true
   status=stopped
 elif (( live )); then
-  id="$(jq -r '.watch_id' <<< "$owner")"
+  id="$owner_id"
   state="$(jq -c --arg id "$id" --argjson now "$now" '
     if .watch_id != $id then .watch_id=$id | .started_at=$now else . end' <<< "$state")" || exit 1
   if snapshot="$(verdict_audit_read_json_snapshot "$directory/$key.health.json" 2>/dev/null)"; then

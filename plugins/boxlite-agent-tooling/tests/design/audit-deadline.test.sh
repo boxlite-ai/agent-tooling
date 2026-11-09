@@ -50,8 +50,8 @@ result="$(call "$(tool "$auditor" Read '')")"
 ok 'past the deadline: a read is answered' "${result%%:*}" 2
 has 'the answer says record now' "$result" 'Deadline passed: record your verdict now'
 ok 'past the deadline: the verdict command passes' "$(call "$(tool "$auditor" Bash "$verdict")")" '0:'
-ok 'past the deadline: the research alias passes' \
-  "$(call "$(tool design-auditor Bash 'bash design-doc.sh research < verdict.json')")" '0:'
+ok 'past the deadline: a research command is answered' \
+  "$(call "$(tool design-auditor Bash 'bash design-doc.sh research < verdict.json')" | cut -c1-2)" '2:'
 ok 'past the deadline: other commands are answered' "$(call "$(tool "$auditor" Bash 'rg -n claim .')" | cut -c1-2)" '2:'
 ok 'other agents never wait on it' "$(call "$(tool general-purpose Read '')")" '0:'
 ok 'the main agent never waits on it' "$(call "$(tool '' Read '')")" '0:'

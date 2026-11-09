@@ -20,7 +20,7 @@ reject() {
   fi
 }
 for kind in verdict commit push; do
-  for timing in legacy future elapsed; do
+  for timing in missing future elapsed; do
     now="$(date +%s)"; deadline="$((now + 600))"
     [[ "$timing" != elapsed ]] || deadline="$((now - 1))"
     context="$(jq -nc --arg root "$scratch" --arg kind "$kind" --arg session "$kind-$timing" \
@@ -37,7 +37,10 @@ for kind in verdict commit push; do
     fi
     input="$(jq -nc --argjson binding "$binding" --argjson deadline "$deadline" \
       '{binding:$binding,snapshot:{evidence:"captured candidate"},deadline:$deadline}')"
-    [[ "$timing" != legacy ]] || input="$(jq 'del(.deadline)' <<<"$input")"
+    if [[ "$timing" == missing ]]; then # an attempt input without a deadline is unsupported
+      reject audit_reflection_gate "$context" prepare "" "$(jq 'del(.deadline)' <<<"$input")"
+      continue
+    fi
     request="$(audit_reflection_gate "$context" prepare "" "$input")"
     id="$(jq -r .attempt_id <<<"$request")"; history="$(jq -r .history_path <<<"$request")"
     state="$(jq -r .state_path <<<"$request")"

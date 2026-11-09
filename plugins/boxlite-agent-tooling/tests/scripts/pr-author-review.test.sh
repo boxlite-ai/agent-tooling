@@ -9,8 +9,8 @@ trap 'rm -rf -- "$TEST_DIR"' EXIT
 HEAD_SHA=0123456789abcdef0123456789abcdef01234567
 OLD_SHA=1111111111111111111111111111111111111111
 BASE_REPO=boxlite-ai/agent-tooling
-pass=0
-fail=0
+# shellcheck source=../lib/assert.sh
+source "$PLUGIN_ROOT/tests/lib/assert.sh"
 rc=0
 
 cat > "$TEST_DIR/gh" <<'STUB'
@@ -114,9 +114,9 @@ run_gate() {
 
 report() {
   if "$2"; then
-    pass=$((pass + 1)); printf '  PASS  %s\n' "$1"
+    ok "$1"
   else
-    fail=$((fail + 1)); printf '  FAIL  %s (exit=%s)\n' "$1" "$rc"
+    bad "$1" "exit=$rc"
     cat "$TEST_DIR/stderr"
   fi
 }
@@ -559,5 +559,4 @@ edit_json "$TEST_DIR/comments-1.json" '. += [{id:90,
 run_gate
 report "private context cannot replace an existing bot comment" private_prompt_rejected
 
-printf '\nRESULT: %s passed, %s failed\n' "$pass" "$fail"
-(( fail == 0 ))
+assert_result

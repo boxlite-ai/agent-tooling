@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for .agents/lib/concise-writing.sh: what may open a TL;DR summary (#257).
+# Tests for .agents/lib/concise-writing.sh: what may open a TL;DR summary.
 #
 # The summary's first block must be a paragraph that opens with a word, emphasis, a
 # link or a closed code span of one or two backticks. Each row puts Markdown under
@@ -18,10 +18,8 @@ source "$LIB_DIR/reply-summary.sh"
 # shellcheck source=../../.agents/lib/concise-writing.sh
 source "$LIB_DIR/concise-writing.sh"
 
-pass=0
-fail=0
-ok()  { pass=$((pass + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=assert.sh
+source "$LIB_DIR/../../tests/lib/assert.sh"
 expect() {  # name allow|deny markdown-under-the-heading
   local actual=allow
   concise_writing_check_summary "## TL;DR"$'\n\n'"$3" first 39 >/dev/null || actual=deny
@@ -171,6 +169,4 @@ listed="$(grep -c '^- A sentence has 26 words; keep 25 or fewer' <<<"$structure_
 _reply_summary_measure() { return 1; }
 structure fails_closed 2 'Structure checker (perl) failed' 'One sentence.'
 
-echo
-echo "RESULT: $pass passed, $fail failed"
-exit $(( fail > 0 ? 1 : 0 ))
+assert_result
