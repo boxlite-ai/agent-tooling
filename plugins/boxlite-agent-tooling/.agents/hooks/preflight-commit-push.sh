@@ -870,6 +870,16 @@ ${advisories}"
 
 # A `.claude/.last-audit*.json` file blocks agent commits and pushes until removed,
 # so a stale copy can never pass for current audit state.
+# A 0.1.53 session still mirrors each state file it writes (#489). Remove a regular
+# copy identical to its original; remove this loop once 0.1.55 ships, since a 0.1.53
+# session then stops at the version check before writing (#491).
+for state_name in last-audit.json last-audit-handoff.json; do
+  mirror="$project_dir/.claude/.$state_name"
+  if [[ -f "$mirror" && ! -L "$mirror" ]] \
+      && cmp -s "$mirror" "$project_dir/.agents/state/$state_name"; then
+    rm -f -- "$mirror"
+  fi
+done
 stale_approvals=()
 for stale_approval in "$project_dir/.claude/.last-audit.json" \
     "$project_dir/.claude/.last-audit-handoff.json"; do
