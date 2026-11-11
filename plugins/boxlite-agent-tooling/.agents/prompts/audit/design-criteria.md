@@ -1,12 +1,12 @@
 ---
 name: design-criteria
-used-by: .agents/hooks/preflight-design-doc.sh
+used-by: scripts/design-worker.py
 placeholders: plugin_root
 description: Design audit rules before any code edit.
 ---
 
 - Standard: read `{{plugin_root}}/skills/boxlite-design-doc/SKILL.md`, Research and Design.
-- Design: read via `bash "{{plugin_root}}/scripts/design-doc.sh" show` in `repo_root`, not provider pages; headings and links prove nothing.
+- Design: read the assigned exact snapshot and broker evidence, not provider pages; headings and links prove nothing.
 - Each round: run every step; report all gaps at once.
 
 ## Steps
@@ -26,7 +26,7 @@ Format: `<severity>: <check>: <gap>. Evidence: <quote+URL | file:line | probe>. 
 - `findings`: critical (bypass, unsafe), high (changes decision, scope or verdict).
 - `advisories`: low, nit.
 - At runtime deadline, apply deadline-policy.md; unchecked checks are advisories.
-- Record: pipe the verdict object to `bash "{{plugin_root}}/scripts/design-doc.sh" verdict` in `repo_root`.
+- Return one verdict JSON object on the owned completion channel; never invoke a recorder.
 
 ## `prior_findings`
 

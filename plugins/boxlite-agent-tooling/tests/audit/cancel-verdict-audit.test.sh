@@ -1007,8 +1007,16 @@ rm -rf "$R"
 echo "## A typed design-decision first line is recorded only for its own session"
 R="$(setup)"
 dd_state="$R/.agents/state/design-decision-request.json"
+# Bind this fixture to the same production history identity as the design gate.
+dd_history="$(
+  source "$REPO_ROOT/.agents/lib/verdict-audit-state.sh"
+  source "$REPO_ROOT/.agents/lib/design-doc.sh"
+  dd_current="$(_design_doc_audit_state "$R/.git/agent-tooling-design-audit.json" \
+    "$(cd "$R" && pwd -P)" "$(git -C "$R" branch --show-current)")"
+  _design_doc_history_hash "$dd_current"
+)"
 dd_spec="$(jq -nc --arg root "$(cd "$R" && pwd -P)" --arg branch "$(git -C "$R" branch --show-current)" \
-  --arg head "$(git -C "$R" rev-parse HEAD)" '{binding:{root:$root,branch:$branch,head:$head,
+  --arg head "$(git -C "$R" rev-parse HEAD)" --arg history "$dd_history" '{binding:{root:$root,branch:$branch,head:$head,history_hash:$history,
   session:"dd-session",url:"u",fails:3,stop:"cap"},prefix:"design-decision:",fallback:"keep-blocked"}')"
 dd_id="$(bash "$REPO_ROOT/scripts/timed-user-prompt.sh" request "$dd_state" "$dd_spec" | jq -er .id)"
 decide_prompt() {  # session prompt -> what the prompt hook printed

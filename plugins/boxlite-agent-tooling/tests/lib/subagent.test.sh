@@ -474,10 +474,10 @@ design_task_rendered="$(subagent_prompt audit/design-task "$PLUGIN_ROOT" \
   "audit_criteria=$design_criteria" deadline=DYNAMIC_DESIGN_DEADLINE \
   'task_input_json={"marker":"DYNAMIC_DESIGN_TASK"}')"
 static_precedes_dynamic "design task keeps reusable policy before run data" \
-  "$design_task_rendered" 'design-doc.sh" verdict' DYNAMIC_DESIGN_DEADLINE
+  "$design_task_rendered" 'owned completion channel' DYNAMIC_DESIGN_DEADLINE
 # The advice task follows the same order: its rules and probe rule before run data (#335).
 advice_task_rendered="$(subagent_prompt audit/design-advice-task "$PLUGIN_ROOT" \
-  "plugin_root=$PLUGIN_ROOT" "probe_rules=$(subagent_prompt audit/probe-privacy "$PLUGIN_ROOT")" \
+  "probe_rules=$(subagent_prompt audit/probe-privacy "$PLUGIN_ROOT")" \
   deadline=DYNAMIC_ADVICE_DEADLINE 'task_input_json={"marker":"DYNAMIC_ADVICE_TASK"}')"
 static_precedes_dynamic "advice task keeps reusable policy before run data" \
   "$advice_task_rendered" 'request no account or key' DYNAMIC_ADVICE_DEADLINE
@@ -512,7 +512,7 @@ echo "## Plain-text asks never wait and keep a safe default (#334)"
 # deny message the design gate renders when a design decision expires.
 compatibility_text="$(subagent_strip_frontmatter "$compatibility_policy" | tr '\n' ' ')"
 for rule in \
-  'Ask once whether to discuss or skip the compatibility gate, and do not wait for a reply' \
+  'Use the shared question from the compatibility check. Ask once and continue without waiting.' \
   'keep the gate, continue authorized work that needs no skip, and report the blocked commit or push' \
   'Never infer confirmation from silence'; do
   check "compatibility ask: $rule" "$rule" "$compatibility_text"

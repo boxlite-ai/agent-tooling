@@ -26,6 +26,7 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 | `SubagentStart`, `SubagentStop` | `.agents/hooks/auditor-control.sh` | Track workers, escalation, completion, overrides, and Git attempt closure. |
 | Auditor/advisor start, tool, stop | `.agents/hooks/audit-deadline.sh` | Publish native dossier-worker ownership, enforce deadlines, and clean up owned tasks. |
 | Design auditor/advisor tools | `.agents/hooks/audit-privacy.sh` | Reject recognizable personal identifiers and key requests; see [privacy limits](docs/design-and-pr-gates.md#audit-rule-ownership). |
+| Exact design-run Bash action | `.agents/hooks/preflight-design-worker.sh` | Own fresh CLI launch, broker, bounded collection, and publication; timeout 10,120 seconds. |
 | Editor, notebook, patch `PreToolUse` | `.agents/hooks/preflight-design-doc.sh` | Require current design authority, with exceptions for outside targets and [owned auditor reports](docs/design-and-pr-gates.md#auditor-report-writes). |
 | Commit/push `PreToolUse` | `.agents/hooks/preflight-commit-push.sh` | Delegate to installed Git gates; deny with an explicit next action. A leftover `.claude/.last-audit*.json` blocks agent commits and pushes; the denial names the `rm` command. Until 0.1.55, the gate removes a regular copy identical to its `.agents/state/` original, which a 0.1.53 session writes on every attempt (#489). |
 | GitHub/PR shell `PreToolUse` | `.agents/hooks/preflight-pr-review.sh` | Check writing, privacy, design, description, size, and human review acknowledgment. |
@@ -87,8 +88,8 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | Boundary | Contract |
 | --- | --- |
 | Host to hook | `BOXLITE_HOOK_HOST` declares routing only. Claude prefers `CLAUDE_PLUGIN_ROOT`, Codex and generic prefer `PLUGIN_ROOT`, and both fall back to the alternate root. Session markers do not route. Codex may export both aliases. Generic identity stays unknown. |
-| Hook to agent | Hooks emit routes. Only the parent dispatches auditors through `.agents/lib/subagent.sh`. |
-| Agent to auditor | Auditors write verdicts. Gates validate and consume them without creating a PASS. |
+| Hook to agent | Dossier audits use parent dispatch through `.agents/lib/subagent.sh`; the fixed design action launches fresh CLI workers inside the host hook. |
+| Agent to auditor | Dossier auditors write their reports; design workers return JSON on an owned channel. Gates validate publication without authoring judgments. |
 
 ### Gate to state
 
@@ -97,7 +98,7 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | Turn dossier | Branch, HEAD, tree, generation, session, epoch; stale/mismatched evidence discards into fresh detection. |
 | Commit/push dossier | Branch, HEAD, staged/pushed diff, command, commit subject; five-hour validity; mismatch/age denies. |
 | Receipt | Parent, tree, subject; never diff hash alone. |
-| Design verdict | Root, branch, URL, live-content SHA-256. |
+| Design verdict | Root, branch, URL, live-content SHA-256; automatic results require worker provenance and advice bound to the verdict task. Human overrules retain their content binding. |
 
 ## Invariants
 
@@ -110,6 +111,8 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | Retry | Timeouts permit reflected review, never approval; preserve failed cycles and candidate-bound execution proof. |
 | Override | `.agents/lib/auditor-override-state.sh` records `OVERRIDDEN BY USER`, never PASS, prompt-scoped and ≤1 hour. |
 | Host/config | Closed Codex event set; declared host/root precedence; invalid hold denies; `.agents/state/` stays ignored. |
+
+The [result ownership contract](docs/design-and-pr-gates.md#result-ownership) binds fresh design workers to exact snapshots and serializes their results with human decisions.
 
 ## Glossary
 
@@ -157,6 +160,17 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 Entry paths stay stable. Runtime helpers live in subsystem directories. Tests resolve implementation paths from the plugin root.
 
 Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's canonical paths in symlink-free cache copies.
+
+### Design worker implementation
+
+| Module | Responsibility |
+| --- | --- |
+| `.agents/hooks/design-worker-state.sh` | Private snapshot, assignment, human acceptance, and publication transitions under the clone transaction. |
+| `.agents/hooks/design-worker-group.sh` | POSIX leader adapter over the shared in-group controller. |
+| `scripts/design-worker.py` | Exact snapshot identities, installed profiles, canonical tasks, native result parsing, and setup/review supervisors. |
+| `scripts/design-worker-broker.py` | Typed read-only source/history/cache tools and isolated public prefetch. |
+| `scripts/design-worker-process.py` | Separate POSIX lifetimes and suspended Windows Job Object assignment. |
+| `.agents/design-worker-policy.json` | Installed CLI versions and models; optional qualified administrative paths and provider settings. |
 
 ### Shared libraries
 

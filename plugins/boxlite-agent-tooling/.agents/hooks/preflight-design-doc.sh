@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Library subprocesses use their own request local; this hook captures the returned request.
+# shellcheck disable=SC2031
 # PreToolUse: before repository edits, require the current design, an independent
 # audit verdict for its exact content, and advice on that verdict. Active auditors
 # may write their assigned reports.
@@ -71,6 +73,7 @@ if (( status != 3 )); then
 fi
 # The design is bound and readable, but no audit PASS matches its content yet.
 jq -e 'type == "object"' <<<"$request" >/dev/null 2>&1 || deny 'audit request unreadable'
+[[ "$(jq -r '.running // false' <<<"$request")" != true ]] || deny 'The assigned design worker is running; wait for the current Bash action.'
 listed() { jq -r --arg key "$1" '.[$key][] | "- " + .' <<<"$request"; }
 session="$(jq -r '.session_id // "" | strings' <<<"$payload")" || session=''
 
@@ -133,54 +136,18 @@ if [[ "$(jq -r .reflection_due <<<"$request")" == true ]]; then
     "findings=$(listed open_findings)")" || deny 'audit instruction unavailable'
   deny "$message"
 fi
-# After any audit-loop stop, a recorded PASS or FAIL waits for one fresh advisor run
-# before findings are shown. Advice never changes the verdict.
+# Result publication belongs to the fixed host-owned action, not native subagents.
+instruction="$(subagent_prompt design/worker-required "$plugin_root" "plugin_root=$plugin_root")" \
+  || deny 'design worker instruction unavailable'
 if [[ "$(jq -r .advice_due <<<"$request")" == true ]]; then
-  advice_input="$(jq -c '{repo_root, design_url, content_sha256, verdict, findings, advisories}' \
-    <<<"$request")" || deny 'advice request unreadable'
-  advice_deadline="$(design_doc_advice_task "$(jq -r .repo_root <<<"$request")" \
-    "$(jq -r .design_url <<<"$request")" "$(jq -r .content_sha256 <<<"$request")")" \
-    || deny 'design advice deadline unavailable'
-  advisories="$(listed advisories)" || deny 'advice request unreadable'
-  if ! privacy="$(subagent_prompt audit/probe-privacy "$plugin_root")" \
-     || ! task="$(subagent_prompt audit/design-advice-task "$plugin_root" "plugin_root=$plugin_root" \
-       "probe_rules=$privacy" "deadline=$advice_deadline" "task_input_json=$advice_input")" \
-     || ! instruction="$(subagent_instruction --agent design-advisor --root "$plugin_root" \
-       --description 'Design advice' --task "$task")" \
-     || ! message="$(user_question render "$plugin_root" design/advice-required \
-       "verdict=$(jq -r .verdict <<<"$request")" "advisories=${advisories:-- none}" \
-       "instruction=$instruction")"; then
-    deny 'design advice instruction unavailable'
-  fi
-  deny "$message"
-fi
-if ! task_input="$(jq -c '{repo_root, design_url, content_sha256}
-       + (if (.prior_findings | length) > 0 then {prior_findings} else {} end)' <<<"$request")" \
-   || ! findings="$(listed findings)"; then
-  deny 'audit request unreadable'
-fi
-# The task states the deadline that audit-deadline.sh enforces.
-deadline="$(design_doc_audit_task "$(jq -r .repo_root <<<"$request")" \
-  "$(jq -r .design_url <<<"$request")" "$(jq -r .content_sha256 <<<"$request")")" \
-  || deny 'design audit deadline unavailable'
-# The outline checks sit beside the criteria, which keep their 2,048-byte cap; the
-# probe rule rides in the task too, because Codex receives the spec only by path.
-if ! criteria="$(subagent_prompt audit/design-criteria "$plugin_root" "plugin_root=$plugin_root")" \
-   || ! outline="$(subagent_prompt audit/design-outline "$plugin_root")" \
-   || ! privacy="$(subagent_prompt audit/probe-privacy "$plugin_root")" \
-   || ! deadline_policy="$(subagent_prompt audit/deadline-policy "$plugin_root")" \
-   || ! task="$(subagent_prompt audit/design-task "$plugin_root" \
-     "audit_criteria=$criteria"$'\n\n'"$outline"$'\n\n'"$privacy"$'\n\n'"$deadline_policy" "deadline=$deadline" \
-     "task_input_json=$task_input")" \
-   || ! instruction="$(subagent_instruction --agent design-auditor --root "$plugin_root" \
-     --description 'Design audit' --task "$task")"; then
-  deny 'design audit instruction unavailable'
-fi
-if [[ -n "$findings" ]]; then
-  advice="$(listed advice)" || deny 'audit request unreadable'
-  message="$(subagent_prompt design/audit-failed "$plugin_root" \
-    "findings=$findings" "advice=${advice:-- none}" "instruction=$instruction")"
+  message="$(user_question render "$plugin_root" design/advice-required \
+    "verdict=$(jq -r .verdict <<<"$request")" "advisories=$(listed advisories)" "instruction=$instruction")" \
+    || deny 'advice instruction unavailable'
+elif [[ -n "$(listed findings)" ]]; then
+  message="$(subagent_prompt design/audit-failed "$plugin_root" "findings=$(listed findings)" \
+    "advice=$(listed advice)" "instruction=$instruction")" || deny 'audit instruction unavailable'
 else
-  message="$(subagent_prompt design/audit-required "$plugin_root" "instruction=$instruction")"
-fi || deny 'audit instruction unavailable'
+  message="$(subagent_prompt design/audit-required "$plugin_root" "instruction=$instruction")" \
+    || deny 'audit instruction unavailable'
+fi
 deny "$message"

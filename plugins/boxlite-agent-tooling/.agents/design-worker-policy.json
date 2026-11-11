@@ -1,0 +1,4 @@
+{
+  "versions": {"codex": ["0.162.1"], "claude": ["2.1.322"]},
+  "models": {"codex": "gpt-6.1-sol", "claude": "sonnet"}
+}

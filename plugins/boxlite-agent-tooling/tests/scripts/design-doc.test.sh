@@ -4,6 +4,8 @@ set -uo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
+# shellcheck source=../design/fixtures/worker-fixture.sh
+source "$plugin/tests/design/fixtures/worker-fixture.sh"
 mkdir "$scratch/bin" "$scratch/repo"
 export DOC_FIXTURE="$scratch/response.json" DOC_CALLS="$scratch/calls"
 : > "$DOC_CALLS"
@@ -30,7 +32,7 @@ git -C "$scratch/repo" -c core.hooksPath=/dev/null -c user.name=test \
   -c user.email=test@example.invalid commit -qm initial --allow-empty
 git -C "$scratch/repo" branch -m feature
 cd "$scratch/repo" || exit 1
-cli="$plugin/scripts/design-doc.sh"
+cli="$fixture_cli"
 url=https://github.com/example/project/issues/1
 state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-doc.json"
 pass=0 fail=0
@@ -102,25 +104,8 @@ record 'a FAIL with findings is recorded' 0 "$(verdict "$reviewed" FAIL '["resea
 record 'a PASS for the reviewed content is recorded' 0 "$(verdict "$reviewed" PASS '[]')"
 expect 'recording leaves the binding intact' 0 check
 
-# Runtime task state, not auditor input, supplies deadline provenance.
-deadline="$(env DESIGN_AUDITOR_TIMEOUT=1 bash -c '
-  for lib in verdict-audit-state subagent design-doc; do source "$1/.agents/lib/$lib.sh"; done
-  design_doc_audit_task "$PWD" "$2" "$3"' task "$plugin" "$url" "$reviewed")"
-perl -e 'my $wait=$ARGV[0]-time+1; sleep $wait if $wait>0' "$deadline"
-partial="$(verdict "$reviewed" PASS '[]' | jq '.advisories=["low: unchecked at deadline: citation chase; finish remaining sources"]')"
-record 'deadline PASS records unfinished work as advisory' 0 "$partial"
-deadline_state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
-if jq -e --argjson deadline "$deadline" '.deadline_review.deadline == $deadline and
-    .deadline_review.recorded_at >= $deadline and .verdict == "PASS" and (.advisories | length) == 1' \
-    "$deadline_state" >/dev/null; then
-  printf 'PASS design deadline provenance persisted\n'; pass=$((pass+1))
-else
-  printf 'FAIL design deadline provenance missing\n'; fail=$((fail+1))
-fi
-original_deadline_record="$(cat "$deadline_state")"
-rm "${deadline_state%/*}/agent-tooling-design-audit-task.json"
-record 'deadline PASS replay survives task cleanup' 0 "$partial"
-[[ "$(cat "$deadline_state")" == "$original_deadline_record" ]] || fail=$((fail+1))
+# Owned deadlines and exact replay are exercised through the runner in design-worker.test.sh.
+partial="$(verdict "$reviewed" PASS '[]')"
 record 'an auditor cannot supply its own deadline marker' 1 \
   "$(jq '.deadline_review={deadline:1,recorded_at:2}' <<<"$partial")"
 

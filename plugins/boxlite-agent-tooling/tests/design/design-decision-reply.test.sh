@@ -6,6 +6,8 @@ plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 scratch="$(mktemp -d)"
 scratch="$(cd "$scratch" && pwd -P)"
 trap 'rm -rf "$scratch"' EXIT
+# shellcheck source=../design/fixtures/worker-fixture.sh
+source "$plugin/tests/design/fixtures/worker-fixture.sh"
 mkdir "$scratch/bin"
 export DESIGN_REPLY_CLOCK="$scratch/clock" DOC_RESPONSE="$scratch/doc.json"
 printf '1000\n' > "$DESIGN_REPLY_CLOCK"
@@ -30,7 +32,7 @@ SH
 chmod +x "$scratch/bin/date" "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH" BOXLITE_HOOK_HOST=codex PLUGIN_ROOT="$plugin"
 unset GIT_DIR GIT_WORK_TREE GH_HOST GH_REPO CLAUDE_PLUGIN_ROOT
-cli="$plugin/scripts/design-doc.sh"
+cli="$fixture_cli"
 timed="$plugin/scripts/timed-user-prompt.sh"
 url=https://github.com/example/project/issues/1
 design=$'## TL;DR\n\nBind design decisions to their requests.\n\n## Approach\n\nValidate the question before applying a human choice.'
@@ -181,6 +183,7 @@ cp "$audit" "$scratch/prior-audit"
 cp "$state" "$scratch/prior-request"
 prompt "design-decision: $id Overrule Close the first cycle"
 gate
+rm -f "$audit" "${audit%/*}/agent-tooling-design-advice.json"
 record_fail; record_fail
 cp "$audit" "$scratch/later-audit"
 cp "$scratch/prior-audit" "$audit"

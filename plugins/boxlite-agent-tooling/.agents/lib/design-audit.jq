@@ -9,8 +9,23 @@ def da_lines: type == "array" and length <= 50 and all(.[]; da_line);
 def da_empty($root; $branch):
   {root:$root, branch:$branch, url:"", content_sha256:"", verdict:"NONE", findings:[],
    advisories:[], failures:[], stop:"none", extra:false, reflection:null, overruled:[]};
+# Provenance is supplied by the runner that owns the worker's output channel.
+def da_worker_provenance($role):
+  . as $record | .worker_provenance |
+  type == "object" and keys == ["content_sha256","result_sha256","role","snapshot_sha256",
+    "task_id","task_sha256","verdict_task_id","version","worker_pid","worker_sha256"]
+  and .version == 1 and .role == $role
+  and .content_sha256 == $record.content_sha256
+  and all(.content_sha256,.result_sha256,.snapshot_sha256,.task_sha256,.worker_sha256;
+    type == "string" and test("^[0-9a-f]{64}$"))
+  and (.task_id | type == "string" and test("^[0-9a-f]{32}$"))
+  and (.worker_pid | type == "number" and . > 0 and . <= 4294967295 and . == floor)
+  and (if $role == "auditor" then .verdict_task_id == ""
+    else (.verdict_task_id | type == "string" and test("^[0-9a-f]{32}$")) end);
 def da_valid:
-  (del(.deadline_review) | keys) == da_keys and all(.url, .content_sha256; type == "string")
+  (del(.deadline_review,.worker_provenance) | keys) == da_keys
+  and (.worker_provenance == null or da_worker_provenance("auditor"))
+  and all(.url, .content_sha256; type == "string")
   and (.deadline_review == null or (.deadline_review |
     ar_keys(["deadline","recorded_at"]) and all(.deadline,.recorded_at; ar_timestamp)
     and .recorded_at >= .deadline))
@@ -43,6 +58,7 @@ def da_request($root; $url; $digest; $history):
   | {repo_root:$root, design_url:$url, content_sha256:$digest,
    verdict:(if $live then .verdict else "NONE" end),
    verdict_id:(if $live then da_verdict_id else "" end),
+   worker_task_id:(.worker_provenance.task_id // ""),
    advisories:(if $live then .advisories else [] end),
    prior_findings:(if .url == $url then (if .verdict == "FAIL" then .findings else [] end)
      + (.overruled | map("overruled: " + .)) else [] end),
@@ -58,7 +74,8 @@ def da_record($v; $url; $digest):
   elif da_reflection_due then error("submit the reflection before this audit: design-doc.sh reflect")
   elif da_redesign($digest) then error("Redesign needs a fresh draft; this content already failed")
   else
-    (if .verdict == "FAIL" then .findings else [] end) as $previous
+    del(.worker_provenance)
+    | (if .verdict == "FAIL" then .findings else [] end) as $previous
     | (if .verdict == "FAIL" then .failures else [] end) as $failures
     | (if .url == $url then .overruled else [] end) as $overruled
     | if $v.verdict == "PASS" then .verdict = "PASS" | .findings = [] | .failures = [] | .stop = "none"
@@ -84,9 +101,11 @@ def da_decide($choice; $url; $digest):
   elif $choice == "Overrule" then
     .overruled = ((if .url == $url then .overruled else [] end) + .findings | unique | .[:50])
     | .verdict = "OVERRIDDEN" | .findings = [] | .failures = [] | .stop = "none"
-    | .extra = false | .reflection = null | .url = $url | .content_sha256 = $digest | del(.deadline_review)
+    | .extra = false | .reflection = null | .url = $url | .content_sha256 = $digest
+    | del(.deadline_review,.worker_provenance)
   elif $choice == "Reflect again" then .extra = true | .reflection = null
   elif $choice == "Redesign" then
     .verdict = "NONE" | .findings = [] | .advisories = [] | .failures = [] | .stop = "none"
-    | .extra = false | .reflection = null | .url = $url | .content_sha256 = $digest | del(.deadline_review)
+    | .extra = false | .reflection = null | .url = $url | .content_sha256 = $digest
+    | del(.deadline_review,.worker_provenance)
   else error("unknown research decision") end;
