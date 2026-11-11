@@ -373,6 +373,10 @@ _design_doc_audit_write() { # verdict path, root, branch, URL, live SHA-256, ver
   jq -e --arg digest "$5" '.content_sha256 == $digest' <<<"$6" >/dev/null || {
     _design_doc_error 'the design changed after this review; review the current design'; return 1;
   }
+  if [[ "${design_worker_deadline:-}" =~ ^[1-9][0-9]*$ ]]; then
+    verdict="$(jq -c --argjson deadline "$design_worker_deadline" 'if now >= $deadline
+      then .deadline_review={deadline:$deadline,recorded_at:(now|floor)} else . end' <<<"$verdict")" || return 1
+  else
   task="$(verdict_audit_read_single_record "${1%/*}/agent-tooling-design-audit-task.json" 2>/dev/null)" || task=null
   previous="$(_design_doc_audit_state "$1" "$2" "$3")" || return 1
   marker="$(printf '%s\n' "$previous" | _design_doc_jq -c --argjson task "$task" \
@@ -387,6 +391,7 @@ _design_doc_audit_write() { # verdict path, root, branch, URL, live SHA-256, ver
     then $previous.deadline_review else null end')" || return 1
   verdict="$(jq -c --argjson marker "$marker" \
     'if $marker == null then . else . + {deadline_review:$marker} end' <<<"$verdict")" || return 1
+  fi
   _design_doc_audit_update "$1" "$2" "$3" "$4" "$5" \
     'da_record($argument | fromjson; $url; $digest)' "$verdict"
 }
