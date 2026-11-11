@@ -3,6 +3,7 @@
 # the design auditor's verdict or the design advisor's advice (stdin) for its live content,
 # or store the reflection a later audit waits for.
 set -uo pipefail
+unset design_worker_proof design_worker_deadline
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 for dependency in jq perl git curl; do
   command -v "$dependency" >/dev/null 2>&1 || {
