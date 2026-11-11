@@ -32,14 +32,14 @@ _design_doc_http() { # credential header, URL, optional curl arguments
     '
 }
 
-_design_doc_content() { # canonical provider URL -> Markdown/text
+_design_doc_content_json() { # canonical provider URL -> JSON string, preserving trailing newlines
   local url="$1" response endpoint identifier page
   if [[ "$url" =~ ^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)$ ]]; then
     endpoint="repos/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/issues/${BASH_REMATCH[3]}"
     response="$(perl -e 'alarm 15; exec @ARGV' gh api --hostname github.com "$endpoint" \
       2>/dev/null | head -c 65537)" || return 1
     (( ${#response} <= 65536 )) || return 1
-    jq -er --arg url "$url" \
+    jq -ec --arg url "$url" \
       'select(.html_url == $url and (.pull_request == null)) | .body | strings' <<<"$response"
   elif [[ "$url" =~ ^https://linear\.app/[A-Za-z0-9_-]+/issue/([A-Za-z0-9]+-[1-9][0-9]*)(/[A-Za-z0-9_-]+)?$ ]]; then
     identifier="${BASH_REMATCH[1]}"
@@ -47,7 +47,7 @@ _design_doc_content() { # canonical provider URL -> Markdown/text
     response="$(_design_doc_http "$LINEAR_API_KEY" https://api.linear.app/graphql \
       -H 'Content-Type: application/json' --data-binary \
       "$(jq -nc --arg id "$identifier" '{query:"query($id: String!) { issue(id: $id) { url description archivedAt } }",variables:{id:$id}}')")" || return 1
-    jq -er --arg url "$url" 'select((.errors // []) | length == 0) | .data.issue |
+    jq -ec --arg url "$url" 'select((.errors // []) | length == 0) | .data.issue |
       select(.url == $url and .archivedAt == null) | .description | strings' <<<"$response"
   elif [[ "$url" =~ ^https://(www\.)?notion\.so/([A-Za-z0-9_-]+/)?([A-Za-z0-9_-]*-)?([0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$ ]]; then
     identifier="${BASH_REMATCH[4]}"
@@ -61,7 +61,7 @@ _design_doc_content() { # canonical provider URL -> Markdown/text
     response="$(_design_doc_http "Bearer $NOTION_TOKEN" "$endpoint/blocks/$identifier/children?page_size=100" \
       -H 'Notion-Version: 2025-09-03')" || return 1
     # Reject unread children; block types, not literal Markdown, define structure.
-    jq -er 'select(.object == "list" and .has_more == false and
+    jq -ec 'select(.object == "list" and .has_more == false and
       all(.results[]; .has_children != true)) |
       [.results[] | .type as $type | .[$type].rich_text // [] |
         map(.plain_text) | join("") | select(test("[^[:space:]]")) |
@@ -75,6 +75,10 @@ _design_doc_content() { # canonical provider URL -> Markdown/text
   else
     _design_doc_error 'use a canonical GitHub issue, notion.so page, or Linear issue URL'
   fi
+}
+
+_design_doc_content() { # canonical URL -> provider rendering
+  _design_doc_content_json "$1" | jq -er .
 }
 
 # A leading TL;DR gives readers the short version, so the details may be dense.
@@ -524,4 +528,21 @@ design_doc_log_store() { # working directory -> verified URL
     return 1
   }
   printf '%s\n' "$url"
+}
+
+design_doc_transaction() { # root, private state operation, arguments
+  local common directory script
+  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  directory="$common/agent-tooling-design-transaction"
+  [[ ! -L "$directory" ]] && mkdir -p "$directory" || return 1
+  script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../hooks" && pwd -P)/design-worker-state.sh"
+  shift
+  # A dedicated directory vnode avoids recursive locking of the atomic writer's anchor.
+  perl -MFcntl=:DEFAULT,:flock -e '
+    my $path=shift; my @before=lstat($path); exit 1 unless @before && -d _ && !-l _;
+    sysopen(my $lock,$path,O_RDONLY) or exit 1;
+    my @opened=stat($lock); exit 1 unless "$before[0]:$before[1]" eq "$opened[0]:$opened[1]";
+    $SIG{ALRM}=sub { exit 1 }; alarm 30; flock($lock,LOCK_EX) or exit 1; alarm 0;
+    fcntl($lock,F_SETFD,0) or exit 1; exec @ARGV; exit 1;
+  ' "$directory" bash "$script" "$@"
 }
