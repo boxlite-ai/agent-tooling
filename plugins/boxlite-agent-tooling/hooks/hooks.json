@@ -1,5 +1,7 @@
 {
-  "modules": ["./claude-prompt-origin.mjs"],
+  "modules": [
+    "./claude-prompt-origin.mjs"
+  ],
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -50,6 +52,17 @@
       }
     ],
     "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env BOXLITE_HOOK_HOST=claude bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}/.agents/hooks/preflight-design-worker.sh\"",
+            "timeout": 10120,
+            "statusMessage": "Running assigned design worker"
+          }
+        ]
+      },
       {
         "matcher": "^(Write|Edit|MultiEdit|NotebookEdit|apply_patch)$",
         "hooks": [

@@ -474,10 +474,10 @@ design_task_rendered="$(subagent_prompt audit/design-task "$PLUGIN_ROOT" \
   "audit_criteria=$design_criteria" deadline=DYNAMIC_DESIGN_DEADLINE \
   'task_input_json={"marker":"DYNAMIC_DESIGN_TASK"}')"
 static_precedes_dynamic "design task keeps reusable policy before run data" \
-  "$design_task_rendered" 'design-doc.sh" verdict' DYNAMIC_DESIGN_DEADLINE
+  "$design_task_rendered" 'owned completion channel' DYNAMIC_DESIGN_DEADLINE
 # The advice task follows the same order: its rules and probe rule before run data (#335).
 advice_task_rendered="$(subagent_prompt audit/design-advice-task "$PLUGIN_ROOT" \
-  "plugin_root=$PLUGIN_ROOT" "probe_rules=$(subagent_prompt audit/probe-privacy "$PLUGIN_ROOT")" \
+  "probe_rules=$(subagent_prompt audit/probe-privacy "$PLUGIN_ROOT")" \
   deadline=DYNAMIC_ADVICE_DEADLINE 'task_input_json={"marker":"DYNAMIC_ADVICE_TASK"}')"
 static_precedes_dynamic "advice task keeps reusable policy before run data" \
   "$advice_task_rendered" 'request no account or key' DYNAMIC_ADVICE_DEADLINE

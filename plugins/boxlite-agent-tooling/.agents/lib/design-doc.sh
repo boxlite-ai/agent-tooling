@@ -235,7 +235,6 @@ _design_doc_audit_passed() { # verdict path, root, branch, URL, content SHA-256,
       return 1
     fi
   fi
-  if [[ "${7:-}" == worker ]]; then
   if _design_doc_jq -e 'include "design-audit";
       (.verdict | IN("PASS","FAIL")) and (da_worker_provenance("auditor") | not)' \
       <<<"$state" >/dev/null; then
@@ -246,7 +245,6 @@ _design_doc_audit_passed() { # verdict path, root, branch, URL, content SHA-256,
       .verdict != "PASS" or (.worker_provenance.snapshot_sha256 == $exact)' <<<"$state" >/dev/null; then
     state="$(_design_doc_jq -c --arg root "$2" --arg branch "$3" 'include "design-audit";
       . as $old | da_empty($root; $branch) | .overruled=$old.overruled' <<<"$state")" || return 1
-  fi
   fi
   request="$(_design_doc_jq -c --arg root "$2" --arg url "$4" --arg digest "$5" \
     --arg history "$(_design_doc_history_hash "$state")" \
@@ -277,8 +275,8 @@ _design_doc_advice_status() { # advice path, root, branch, request JSON -> reque
     | ($record | type == "object" and .root == $root and .branch == $branch
         and .url == $request.design_url and .content_sha256 == $request.content_sha256
         and $request.verdict_id != "" and .verdict_id == $request.verdict_id
-        and (.advice | type == "array") and (if ($request.worker_task_id // "")=="" then true
-          else da_worker_provenance("advisor") and .worker_provenance.verdict_task_id == $request.worker_task_id end)) as $advised
+        and (.advice | type == "array") and da_worker_provenance("advisor")
+        and .worker_provenance.verdict_task_id == $request.worker_task_id) as $advised
     | . + {advice_due: ((.verdict | IN("PASS", "FAIL")) and ($advised | not)),
            advice: (if $advised then $record.advice else [] end)}' <<<"$4" 2>/dev/null
 }
@@ -369,28 +367,13 @@ _design_doc_audit_update() { # verdict path, root, branch, URL, live SHA-256, fi
 }
 
 _design_doc_audit_write() { # verdict path, root, branch, URL, live SHA-256, verdict JSON
-  local verdict="$6" task previous marker
-  jq -e --arg digest "$5" '.content_sha256 == $digest' <<<"$6" >/dev/null || {
+  local verdict="$6"
+  jq -e --arg digest "$5" '.content_sha256 == $digest' <<<"$verdict" >/dev/null || {
     _design_doc_error 'the design changed after this review; review the current design'; return 1;
   }
   if [[ "${design_worker_deadline:-}" =~ ^[1-9][0-9]*$ ]]; then
     verdict="$(jq -c --argjson deadline "$design_worker_deadline" 'if now >= $deadline
       then .deadline_review={deadline:$deadline,recorded_at:(now|floor)} else . end' <<<"$verdict")" || return 1
-  else
-  task="$(verdict_audit_read_single_record "${1%/*}/agent-tooling-design-audit-task.json" 2>/dev/null)" || task=null
-  previous="$(_design_doc_audit_state "$1" "$2" "$3")" || return 1
-  marker="$(printf '%s\n' "$previous" | _design_doc_jq -c --argjson task "$task" \
-    --argjson verdict "$verdict" --arg url "$4" --arg digest "$5" \
-    --arg state "$(_design_doc_file_hash "$1")" 'include "audit-reconciliation"; . as $previous |
-    (now | floor) as $now |
-    if $task.url == $url and $task.content_sha256 == $digest and $task.state_hash == $state
-      and ($task.deadline | ar_timestamp) and $now >= $task.deadline
-    then {deadline:$task.deadline,recorded_at:$now}
-    elif $previous.url == $url and $previous.content_sha256 == $digest
-      and ($previous | {content_sha256,verdict,findings,advisories}) == $verdict
-    then $previous.deadline_review else null end')" || return 1
-  verdict="$(jq -c --argjson marker "$marker" \
-    'if $marker == null then . else . + {deadline_review:$marker} end' <<<"$verdict")" || return 1
   fi
   _design_doc_audit_update "$1" "$2" "$3" "$4" "$5" \
     'da_record($argument | fromjson; $url; $digest)' "$verdict"
@@ -557,35 +540,3 @@ _design_doc_log_store() { # working directory -> verified URL; caller holds tran
 }
 
 design_doc_log_store() { design_doc_transaction "$1" log "$1"; }
-
-
-_design_doc_timed_task() { # repo root, URL, content SHA-256, task file, record file -> deadline
-  local timeout git_dir path now snapshot
-  timeout="$(subagent_timed_timeout DESIGN_AUDITOR_TIMEOUT "${DESIGN_AUDITOR_TIMEOUT:-900}" 9999)" \
-    || return 1
-  git_dir="$(git -C "$1" rev-parse --absolute-git-dir)" || return 1
-  path="$git_dir/$4"
-  now="$(date +%s)" || return 1
-  if [[ -e "$path" ]] && snapshot="$(verdict_audit_read_json_snapshot "$path" 2>/dev/null)" \
-     && jq -er --arg url "$2" --arg digest "$3" --arg state "$(_design_doc_file_hash "$git_dir/$5")" \
-       'select(.url == $url and .content_sha256 == $digest and .state_hash == $state
-         and (.deadline | type == "number" and . > 0 and . == floor)) | .deadline' \
-       <<<"${snapshot#*$'\n'}" 2>/dev/null; then
-    return 0
-  fi
-  jq -nc --arg url "$2" --arg digest "$3" --argjson deadline "$(( now + timeout ))" \
-    --arg state "$(_design_doc_file_hash "$git_dir/$5")" \
-    '{url:$url, content_sha256:$digest, deadline:$deadline, state_hash:$state}' \
-    | verdict_audit_write_atomic "$path" || return 1
-  printf '%s\n' "$(( now + timeout ))"
-}
-
-design_doc_audit_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
-  _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-audit-task.json \
-    agent-tooling-design-audit.json
-}
-
-design_doc_advice_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
-  _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-advice-task.json \
-    agent-tooling-design-advice.json
-}

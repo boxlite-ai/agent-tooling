@@ -6,6 +6,8 @@ set -uo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
+# shellcheck source=../design/fixtures/worker-fixture.sh
+source "$plugin/tests/design/fixtures/worker-fixture.sh"
 mkdir "$scratch/bin" "$scratch/repo"
 export DOC_FIXTURE="$scratch/response.json"
 cat > "$scratch/bin/gh" <<'SH'
@@ -20,7 +22,7 @@ git -C "$scratch/repo" -c core.hooksPath=/dev/null -c user.name=test \
   -c user.email=test@example.invalid commit -qm initial --allow-empty
 git -C "$scratch/repo" branch -m feature
 cd "$scratch/repo" || exit 1
-cli="$plugin/scripts/design-doc.sh"
+cli="$fixture_cli"
 url=https://github.com/example/project/issues/1
 other=https://github.com/example/project/issues/2
 logs="$(git rev-parse --path-format=absolute --git-common-dir)/agent-tooling-design-log"

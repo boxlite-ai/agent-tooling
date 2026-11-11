@@ -1,6 +1,6 @@
 ---
 name: design-outline
-used-by: .agents/hooks/preflight-design-doc.sh
+used-by: scripts/design-worker.py
 placeholders:
 description: Whole-design audit checks (design #335).
 ---

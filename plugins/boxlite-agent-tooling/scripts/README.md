@@ -138,7 +138,7 @@ Transcript discovery and runner contracts: [audit configuration](../.agents/hook
 
 | Script / arguments | Responsibility and effects |
 | --- | --- |
-| [design-doc.sh](design-doc.sh) `register <URL>`, `check`, `log`, `verdict`, `advice`, `reflect`, or `show [repo-root]` | Fetch and validate a design; bind it to the current worktree/branch, recheck the existing binding, store the research log, record the auditor's verdict or the advisor's advice for the live content, store the reflection a later audit waits for, or recheck it and print its content. |
+| [design-doc.sh](design-doc.sh) `register <URL>`, `check`, `run`, `log`, `reflect`, or `show [repo-root]` | Bind and inspect designs, request a host-owned worker through the exact Bash action, or store the log/reflection; standalone result submissions are rejected. |
 | [api-compatibility.sh](api-compatibility.sh) `inspect\|inspect-push\|check\|push [repo-root] [base-ref]` | Check `*openapi*.yaml` changes, require user confirmation to skip breaking/default enforcement, and export per-file request-audit evidence; see [commands](api-compatibility.md). |
 | [pr-author-review.sh](pr-author-review.sh) `<github-event.json>` | CI publisher: update the author-review check and prompt, and return an unacknowledged PR to draft. Exit 0: acknowledged/irrelevant; 1: awaiting acknowledgment; 2: API/validation error. |
 | [audit-reflection.sh](audit-reflection.sh) `prepare\|record\|status\|submit\|next-action STATE` | Read bounded request JSON; persist audit transitions or return the next Git retry action as JSON on stdout. |
@@ -156,7 +156,7 @@ Before delivery, run the validator with the task's immutable history input and c
 - Reads reject NUL and unsafe file types; limits are 1 MiB for dossiers, 10 MiB for history, and five seconds for stdin.
 - No network or Git operation is needed.
 
-`check` revalidates the registered design; `show [repo-root]` also prints it without changing directory. Auditors read Linear and Notion designs this way, without a browser login. Registration steps: [Contributing](../CONTRIBUTING.md#pull-request-descriptions).
+`check` revalidates the registered design; `show [repo-root]` also prints it without changing directory. Owned design workers receive the same authenticated snapshot through the supervisor, without a browser login. Registration steps: [Contributing](../CONTRIBUTING.md#pull-request-descriptions).
 
 Native auditors use the [audit-history procedure](../.agents/prompts/audit/git-audit-history.md).
 History CLI context is JSON containing `repo_root`, `session`, `epoch`, `branch`,

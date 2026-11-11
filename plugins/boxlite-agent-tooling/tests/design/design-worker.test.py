@@ -60,9 +60,11 @@ class OwnedWorker(unittest.TestCase):
                               env=self.env, input=body, capture_output=True, check=check, text=True)
 
     def hook(self, command=None, host="codex"):
-        self.assertIsNone(command)
-        return subprocess.run([sys.executable, "-I", str(self.plugin / "scripts/design-worker.py"), host, str(self.repo)],
-                              cwd=self.repo,env=self.env,capture_output=True,text=True,timeout=45)
+        payload = {"tool_name": "Bash", "cwd": str(self.repo), "tool_input": {
+            "command": command or f'bash "{self.plugin}/scripts/design-doc.sh" run'}}
+        return subprocess.run(["bash", str(self.plugin / ".agents/hooks/preflight-design-worker.sh")],
+            input=json.dumps(payload), cwd=self.repo, env={**self.env, "BOXLITE_HOOK_HOST": host},
+            capture_output=True, text=True, timeout=45)
 
     def gate(self):
         payload = {"tool_name": "Edit", "cwd": str(self.repo), "session_id": "fixture",
@@ -89,7 +91,23 @@ class OwnedWorker(unittest.TestCase):
                 advisor = self.record("advice")
                 self.assertEqual(advisor["worker_provenance"]["verdict_task_id"], auditor["worker_provenance"]["task_id"])
                 self.assertEqual(self.gate().returncode, 0)
+                # v1 deliberately ignores provider trailing LF; the exact worker hash does not.
+                self.doc["body"] += "\n"
+                (self.bin / "document.json").write_text(json.dumps(self.doc))
+                self.assertNotEqual(self.gate().returncode, 0)
 
+    def test_direct_and_altered_actions(self):
+        before = sorted(path.name for path in (self.repo / ".git").glob("agent-tooling-design-*.json"))
+        for command in (f'PATH=/tmp bash "{self.plugin}/scripts/design-doc.sh" run',
+                        f'CODEX_BIN=/tmp/fake bash "{self.plugin}/scripts/design-doc.sh" run',
+                        f'bash "{self.plugin}/scripts/design-doc.sh"\nrun',
+                        f'bash "{self.plugin}/scripts/design-doc.sh" run; true',
+                        f'bash "{self.plugin}/scripts/design-doc.sh" run auditor'):
+            self.assertNotEqual(self.hook(command).returncode, 0)
+        self.assertEqual(before, sorted(path.name for path in (self.repo / ".git").glob("agent-tooling-design-*.json")))
+        self.assertNotEqual(self.cli("verdict", body='{"verdict":"PASS"}').returncode, 0)
+        self.assertNotEqual(self.cli("advice", body='{"advice":[]}').returncode, 0)
+        self.assertNotEqual(self.cli("run").returncode, 0)
 
     def test_managed_cache_blocks_before_native_worker_starts(self):
         configuration = self.root / "claude-config"
@@ -133,6 +151,28 @@ class OwnedWorker(unittest.TestCase):
         self.assertGreaterEqual(outcome["deadline_review"]["recorded_at"], assignment["review_deadline"])
         self.assertTrue(any(not item["allowed"] for item in self.record("worker-execution")["broker_calls"]))
 
+    def test_public_reflection_preserves_owned_provenance(self):
+        spec=importlib.util.spec_from_file_location("worker_runtime",self.plugin/"scripts/design-worker.py")
+        runtime=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime)
+        with patch.dict(os.environ,self.env,clear=True):capture=runtime.bridge(self.repo,"snapshot")
+        digest=capture["snapshot"]["content_sha256"]
+        outcomes=[{"content_sha256":digest,"verdict":"FAIL","findings":["high: first finding","high: second finding"],"advisories":[]},
+                  {"content_sha256":digest,"advice":[]},
+                  {"content_sha256":digest,"verdict":"FAIL","findings":["high: third finding"],"advisories":[]}]
+        for outcome in outcomes:
+            (self.bin/"result.json").write_text(json.dumps(outcome))
+            result=self.hook();self.assertEqual(result.returncode,0,result.stderr)
+        with patch.dict(os.environ,self.env,clear=True):capture=runtime.bridge(self.repo,"snapshot")
+        self.assertTrue(capture["request"]["reflection_due"])
+        state=self.record("audit")
+        reflection={"history_hash":capture["request"]["history_hash"],"failure_ids":capture["request"]["failure_ids"],
+                    "diagnosis":"Verify the reflection boundary.","previous_fixes_failed_because":"The fixture returns different findings.",
+                    "changed_approach":"Preserve the assigned proof during reflection.","auditor_gaps":[],
+                    "checks":[{"command":"assigned worker fixture","expected":"owned FAIL","observed":"owned FAIL","evidence":"stored assignment"}]}
+        self.env["design_worker_proof"]=json.dumps({**state["worker_provenance"],"task_id":"0"*32})
+        result=self.cli("reflect",body=json.dumps(reflection));self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(self.record("audit")["worker_provenance"],state["worker_provenance"])
+
     def test_replay_is_idempotent(self):
         result = self.hook()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -159,9 +199,9 @@ class OwnedWorker(unittest.TestCase):
                 (self.bin / "release").unlink(missing_ok=True)
                 payload = {"tool_name":"Bash","cwd":str(self.repo),"tool_input":{
                     "command":f'bash "{self.plugin}/scripts/design-doc.sh" run'}}
-                child = subprocess.Popen([sys.executable,"-I",str(self.plugin / "scripts/design-worker.py"),"codex",str(self.repo)],
+                child = subprocess.Popen(["bash",str(self.plugin / ".agents/hooks/preflight-design-worker.sh")],
                     cwd=self.repo,env=self.env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-                child.stdin.close(); child.stdin = None
+                child.stdin.write(json.dumps(payload)); child.stdin.close(); child.stdin = None
                 try:
                     until = time.monotonic() + 10
                     while not (self.bin / "ready").exists() and child.poll() is None and time.monotonic() < until:
@@ -192,9 +232,9 @@ class OwnedWorker(unittest.TestCase):
         (self.bin / "mode").write_text("pause")
         payload = {"tool_name":"Bash","cwd":str(self.repo),"tool_input":{
             "command":f'bash "{self.plugin}/scripts/design-doc.sh" run'}}
-        child = subprocess.Popen([sys.executable, "-I", str(self.plugin / "scripts/design-worker.py"), "codex", str(self.repo)],
+        child = subprocess.Popen(["bash", str(self.plugin / ".agents/hooks/preflight-design-worker.sh")],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=self.repo, env=self.env, text=True)
-        child.stdin.close(); child.stdin = None
+        child.stdin.write(json.dumps(payload)); child.stdin.close(); child.stdin = None
         try:
             until = time.monotonic() + 10
             while not (self.bin / "ready").exists() and child.poll() is None and time.monotonic() < until:
@@ -266,10 +306,10 @@ class OwnedWorker(unittest.TestCase):
                 (self.bin / "ready").unlink(missing_ok=True)
                 payload = {"tool_name":"Bash","cwd":str(self.repo),"tool_input":{
                     "command":f'bash "{self.plugin}/scripts/design-doc.sh" run'}}
-                child = subprocess.Popen([sys.executable,"-I",str(self.plugin / "scripts/design-worker.py"),"codex",str(self.repo)],
+                child = subprocess.Popen(["bash",str(self.plugin / ".agents/hooks/preflight-design-worker.sh")],
                     cwd=self.repo,env={**self.env,"DESIGN_AUDITOR_TIMEOUT":"1"},stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-                child.stdin.close(); child.stdin = None
+                child.stdin.write(json.dumps(payload)); child.stdin.close(); child.stdin = None
                 try:
                     until = time.monotonic() + 10
                     while not (self.bin / "ready").exists() and child.poll() is None and time.monotonic() < until:

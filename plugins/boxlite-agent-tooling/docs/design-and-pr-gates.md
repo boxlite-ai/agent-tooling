@@ -15,17 +15,16 @@ Policy: `boxlite-design-doc`; commands: [Contributing](../CONTRIBUTING.md#pull-r
 | Record in worktree Git directory | Binding / validation |
 | --- | --- |
 | `agent-tooling-design-doc.json` | Canonical root, branch/detached HEAD, readable nonempty provider content, leading TL;DR under 40 words. |
-| `agent-tooling-design-audit.json` | Root, branch, URL, live-content SHA-256, PASS or human overrule. |
-| `agent-tooling-design-advice.json` | Fresh advice bound to the FAIL attempt or PASSed content; overrules need none. |
-| `agent-tooling-design-audit-task.json` | Fixed deadline per design content; `DESIGN_AUDITOR_TIMEOUT`, default 900 seconds. |
-| `agent-tooling-design-advice-task.json` | Advisor deadline using the same timeout. |
+| `agent-tooling-design-audit.json` | Root, branch, URL, live-content SHA-256; automatic results require worker provenance, while human overrules retain their binding. |
+| `agent-tooling-design-advice.json` | Fresh advice bound to the verdict and its worker task ID, with advisor provenance; overrules need none. |
+| `agent-tooling-design-worker.json` | Owned task ID, exact snapshot, review and collection deadlines, consumed or aborted status. |
 
 A leftover `agent-tooling-design-research.json`, or an audit record without loop fields, fails closed and names the file to remove.
 
 - `.agents/lib/verdict-audit-state.sh` supplies safe reads/replacement; failed reads retain no success cache.
 - Notion child blocks fail closed; native block structure prevents literal text forging headings; design length has no total-word cap.
 - Missing/stale authority names the auditor route; fresh PASS also waits for advice; changed content requires review again.
-- The auditor reads through `show`, then records one live `{content_sha256, verdict, findings, advisories}` object.
+- Standalone `verdict` and `advice` submissions exit 2 with a diagnostic on stderr and cannot authorize edits.
 - Critical/high gaps FAIL; low/nit gaps remain advisory; every round checks the complete design skill and outline.
 
 The research log stays out of the design, which is for human reviewers:
@@ -35,7 +34,7 @@ The research log stays out of the design, which is for human reviewers:
 | Store | `design-doc.sh log` stores stdin (≤32,000 characters) as `{id, log}` in `agent-tooling-design-log/<sha256 of design ID>.json` under the clone's common directory (Git 2.31+). Normalized IDs (GitHub `owner/repo#N` lowercase, Linear uppercase, Notion lowercase without dashes) let URL spellings, worktrees, and re-registration share one log; removing a worktree keeps it. |
 | Write | Empty input tombstones the log; records are replaced atomically, never removed, and read only as bounded regular files; a failed write keeps the stored log. |
 | Hash | With no log ever stored, the bound SHA-256 is the provider body's; otherwise it hashes `agent-tooling-design-log-v1`, the body hash, and the log hash, one per line, so any log change needs a new audit in every bound worktree. |
-| Show | `design-doc.sh show` appends `## Research log (local)`, the log's `sha256:` line, and the log; advice anchors resolve against that text. The log is never published; deleting the clone loses it. |
+| Show | `design-doc.sh show` renders one verified capture and appends `## Research log (local)`, the log's `sha256:` line, and the log; advice anchors resolve against that text. The log is never published; deleting the clone loses it. |
 | Template | The design and [issue template](../../../.github/ISSUE_TEMPLATE/design.md) stay tool-free; the skill and audit prompts own the research protocol. |
 
 ### Audit rule ownership
@@ -106,12 +105,82 @@ The design gate allows a native commit/push or verdict auditor to save its assig
 - The synchronous deadline Start publishes ownership through `auditor-control.sh publish-start`; asynchronous `monitor-start` only observes that ownership.
 - The deadline still ends investigation, and Stop validates and records the report as PASS, FAIL, or an execution error.
 
+### Result ownership
+
+Run the exact action printed by the edit gate:
+
+```sh
+bash "/absolute/installed/plugin/scripts/design-doc.sh" run
+```
+
+The host Bash hook derives the role and launches a fresh CLI; the command itself only reports status.
+The first run records an auditor result; the next edit requests an advisor before showing findings.
+A matching human overrule retains its authority; an explicit run with complete automatic approval starts a fresh audit.
+
+```mermaid
+flowchart LR
+    A[Exact Bash action] --> B[Host-owned supervisor]
+    B --> C[Freeze public research]
+    C --> D[Capture design, log, and tracked source]
+    D --> E[Fresh auditor or advisor]
+    E --> F[Validate result under clone transaction]
+    F --> G[Atomic result plus consumed task ID]
+```
+
+- Public `verdict` and `advice` commands exit 2; native Handback, Stop, and parent messages cannot publish.
+- Automatic results require versioned provenance; advice references the exact verdict worker task.
+- The v1 human key preserves provider trailing-newline normalization and absent-versus-deleted log semantics; automatic authority additionally checks an exact framed snapshot hash.
+- Unproven results are retained as history and require fresh review; a fresh automatic audit revokes its earlier PASS before launch.
+- One clone-wide directory lock serializes binding, log, human acceptance, and result publication across worktrees; existing atomic state helpers own replacement.
+
+Python's standard library owns bounded streams, typed MCP messages, and Windows Job Objects; Bash/JQ retain validation and atomic state publication.
+This runtime dependency avoids separate platform-specific JSON and process supervisors.
+
+#### Worker profile
+
+The installed `.agents/design-worker-policy.json` pins supported CLI versions and models.
+Executable discovery uses fixed installation locations, including native Codex npm bundles; `PATH`, `CODEX_BIN`, and tool-call endpoint overrides cannot choose workers.
+The runner hashes the CLI, interpreter, broker, policy, task rules, and generated startup inputs, rejecting replacements.
+
+Claude uses restricted non-bare print, explicit settings, empty built-ins, and strict broker configuration, preserving host authentication.
+Detected managed files, drop-ins, MCP configuration, OS policy, or nonempty remote caches require separate qualification and block the launch.
+Codex disables user configuration, rules, hooks, shell, search, extensions, and delegation; a private model catalogue excludes independently registered capabilities.
+Both use a neutral directory and receive no parent history.
+
+The administrative policy can pin `executables` and `authentication` for a qualified deployment; keep credentials out of committed policy.
+`offline_research: true` prohibits prefetch; the worker must report missing research coverage honestly.
+Model proxy settings come from the validated user network file; public probes receive no inherited credentials or proxy configuration.
+
+#### Broker and lifetime
+
+The broker exposes tracked-source discovery, literal search, bounded reads, local history, and frozen research-cache reads.
+It excludes untracked files, links, submodules, repository metadata, general shell, and arbitrary HTTP requests.
+A clean Git object reader ignores replacements and grafts; fixed Git commands disable lazy fetches, filters, hooks, and pagers.
+
+Anonymous public design content authorizes exact prefetch URLs and fixed index queries before private evidence is read.
+Private providers get no outbound plan without separate approval; workers cannot submit new queries or locators after seeing private material.
+Transport requires public DNS answers, pinned IPv4 HTTPS peers, certificate verification, no redirects, and bounded streams.
+
+An outer supervisor independently caps setup at 30 seconds; review uses `DESIGN_AUDITOR_TIMEOUT`, default 900, maximum 9,999 seconds.
+Collection and cleanup each allow at most 30 seconds; the dedicated host hook allows 10,120 seconds.
+The broker rejects research at the cutoff, while valid collection reports retain the owned deadline marker.
+
+POSIX workers and brokers have separate in-group controllers; supervisor EOF or leader death terminates remaining group members.
+Windows starts suspended workers inside kill-on-close Job Objects; broker descendants must remain inside the supervisor job.
+Interruption, malformed output, stale content, duplicate delivery, and an accepted human decision cannot grant new authority.
+
+Platform and authentication qualification must be recorded before release; fixture coverage does not establish native-host compatibility.
+Fresh server-delivered policy and managed deployments need effective-policy qualification beyond these local source checks.
+These are local workflow checks; same-user state tampering and forged private hook invocations remain outside the boundary.
+
 ### Design operations
+
+Public commands clear reserved publication inputs; a reflection preserves the recorded worker proof.
 
 | Design operation | Contract |
 | --- | --- |
-| Audit | `design-doc.sh verdict`, default 900 seconds; only critical/high gaps FAIL; content edits need fresh review. |
-| Advice | `design-doc.sh advice`; advice never changes verdict. |
+| Audit | Exact `design-doc.sh run` Bash action; the hook assigns a fresh auditor. |
+| Advice | The same action assigns the advisor required by the current verdict. |
 | Repeated FAIL | Submit `design-doc.sh reflect` or answer first-line `design-decision: <request-id> <Redesign\|Reflect again\|Overrule> <reason>`. |
 | Codex question | Exact async payload/request-ID title; matching late answers count, silence blocks, changed design/history needs new request. |
 | Provider auth | GitHub `gh`; Notion `NOTION_TOKEN`; Linear `LINEAR_API_KEY`; environment only. |
