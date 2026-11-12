@@ -54,6 +54,22 @@ def file_hash(path):
     return value.hexdigest()
 
 
+def installed_policy():
+    path = PLUGIN / ".agents/design-worker-policy.json"
+    status = path.lstat()
+    if path.is_symlink() or not stat.S_ISREG(status.st_mode) or status.st_mode & 0o022 or status.st_size > 32768:
+        raise ValueError("unsafe installed worker policy")
+    policy = json.loads(path.read_bytes())
+    if not isinstance(policy, dict) or set(policy) - {"versions", "models", "executables", "authentication", "offline_research", "private_identifiers"}:
+        raise ValueError("invalid installed worker policy")
+    for host in ("codex", "claude"):
+        if (not isinstance(policy.get("versions", {}).get(host), list)
+                or not policy["versions"][host] or not all(isinstance(item, str) and re.fullmatch(r"\d+\.\d+\.\d+", item) for item in policy["versions"][host])
+                or not isinstance(policy.get("models", {}).get(host), str)
+                or not re.fullmatch(r"[A-Za-z0-9._:/+-]{1,100}", policy["models"][host])):
+            raise ValueError("invalid qualified host profile")
+    return policy, file_hash(path)
+
 
 def snapshot(value):
     body, log, present = value["body"], value["log"], value["log_present"]
@@ -91,6 +107,42 @@ def trusted_binary(name, policy):
     raise ValueError(f"trusted {name} executable unavailable; install it in a documented location")
 
 
+def bridge(root, action, value=None):
+    boot = '''for part in verdict-audit-state reply-summary concise-writing design-doc; do
+      source "$1/.agents/lib/$part.sh" || exit 2
+    done
+    design_doc_transaction "$2" "$3" "$2"'''
+    result = subprocess.run(["bash", "-c", boot, "design-state", str(PLUGIN), str(root), action],
+        input=encoded(value) if value is not None else b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=35)
+    if result.returncode:
+        raise ValueError(result.stderr.decode(errors="replace")[-1000:] or "design state transition rejected")
+    return json.loads(result.stdout) if result.stdout.strip() else None
+
+
+def worker_environment(policy):
+    allowed = ("HOME", "USER", "LOGNAME", "USERNAME", "USERPROFILE", "SystemRoot", "WINDIR", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
+               "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY",
+               "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
+               "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS",
+               "GOOGLE_CLOUD_PROJECT", "CLOUD_ML_REGION")
+    environment = {key: os.environ[key] for key in allowed if key in os.environ}
+    environment.update({"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "NO_COLOR": "1",
+                        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
+    # Reuse the host configuration validator with inherited routing stripped.
+    if "XDG_CONFIG_HOME" in os.environ:
+        environment["XDG_CONFIG_HOME"] = os.environ["XDG_CONFIG_HOME"]
+    routing, _ = probe.bounded([trusted_binary("bash", policy), "-c", r'''source "$1/.agents/lib/verdict-audit-state.sh" || exit 2
+source "$1/.agents/lib/audit-network.sh" || exit 2
+audit_network_load || exit 2
+jq -nc 'env | with_entries(select(.key | test("^(https?|all|no)_proxy$";"i")))'
+''', "design-network", str(PLUGIN)], env=environment, timeout=5)
+    environment.update(json.loads(routing))
+    # An installed policy may pin a provider for a qualified deployment or isolated test.
+    for key, value in policy.get("authentication", {}).items():
+        if key not in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR") or not isinstance(value, str):
+            raise ValueError("unsupported administrative authentication setting")
+        environment[key] = value
+    return environment
 
 
 def managed_policy(host, policy):
@@ -219,6 +271,118 @@ def task_text(captured, role, deadline, research):
             "UNTRUSTED_RESEARCH_INVENTORY_JSON:\n" + json.dumps([{key: value for key, value in item.items() if key != "body"} for item in research]))
 
 
+def run(root, host, phase):
+    setup = time.monotonic() + 30
+    policy_path = PLUGIN / ".agents/design-worker-policy.json"
+    policy, policy_hash = installed_policy()
+    environment = worker_environment(policy)
+    cli, version, worker_hash = startup_policy(host, policy)
+    bash, git, curl = (trusted_binary(name, policy) for name in ("bash", "git", "curl"))
+    # Public plan construction precedes every log and checkout read.
+    public_url = bridge(root, "public")["url"]
+    research = [] if policy.get("offline_research") is True else probe.prefetch(public_url, curl, setup - 15, policy.get("private_identifiers", []))
+    captured = bridge(root, "snapshot")
+    if captured["request"].get("granted") and captured["state"]["verdict"] == "OVERRIDDEN":
+        print("design-doc: current design authority already complete")
+        return
+    if any(captured["request"].get(key) for key in ("blocked", "reflection_due", "redesign")):
+        raise ValueError("resolve the design decision or reflection before running a worker")
+    role = "advisor" if captured["request"].get("advice_due") else "auditor"
+    timeout_text = os.environ.get("DESIGN_AUDITOR_TIMEOUT", "900")
+    if not re.fullmatch(r"[1-9][0-9]{0,3}", timeout_text) or int(timeout_text) > 9999:
+        raise ValueError("DESIGN_AUDITOR_TIMEOUT must be 1..9999")
+    timeout = int(timeout_text)
+    task_id = uuid.uuid4().hex
+    with tempfile.TemporaryDirectory(prefix="design-worker-") as temporary:
+        directory = Path(temporary).resolve()
+        source = probe.sources(root, directory, git)
+        if time.monotonic() > setup:
+            raise ValueError("worker setup exceeded 30 seconds")
+        cutoff = time.monotonic() + timeout
+        deadline = int(time.time()) + timeout
+        events_path = directory / "broker-events.jsonl"
+        broker_data = {"sources": source, "research": research, "cutoff": cutoff, "events": str(events_path)}
+        task = task_text(captured, role, deadline, research)
+        task += "\nBroker snapshot SHA-256: " + probe.digest(encoded(broker_data))
+        runtime_hash = file_hash(Path(sys.executable).resolve())
+        pins = [policy_path, Path(__file__).resolve(), Path(probe.__file__), Path(processes.__file__),
+                PLUGIN / ".agents/hooks/design-worker-group.sh", PLUGIN / ".agents/hooks/design-worker-state.sh",
+                PLUGIN / ".agents/lib/design-doc.sh", PLUGIN / ".agents/lib/design-audit.jq"]
+        pins += list((PLUGIN / ".agents/prompts/audit").glob("design-*.md"))
+        pins += list((PLUGIN / ".claude/agents").glob("design-*.md"))
+        pins += [PLUGIN / ".agents/skills" / skill / "SKILL.md" for skill in
+                 ("boxlite-design-doc", "boxlite-writing", "boxlite-clean-code")]
+        installed = {str(path): file_hash(path) for path in pins}
+        if installed[str(policy_path)] != policy_hash:
+            raise ValueError("installed worker policy changed during setup")
+        owner = processes.Owner(directory, task_id, str(Path(sys.executable).resolve()), bash,
+                                PLUGIN / ".agents/hooks/design-worker-group.sh")
+        published = False
+        output, errors = b"", b""
+        try:
+            payload = directory / "broker.json"
+            payload.write_bytes(encoded(broker_data))
+            launch = command(host, cli, directory, owner.broker_command(Path(probe.__file__), payload), result_schema(role), policy)
+            startup_files = {str(path): file_hash(path) for path in directory.glob("*.json")}
+            task += "\nLaunch manifest SHA-256: " + probe.digest(encoded({"command": launch, "inputs": startup_files,
+                "installed": installed, "worker": worker_hash, "interpreter": runtime_hash, "version": version,
+                "environment_sha256": probe.digest(encoded(environment))}))
+            task_hash = probe.digest(task.encode())
+            assignment = bridge(root, "claim", {"snapshot": captured, "task_id": task_id, "role": role,
+                "expires": deadline + 30, "review_deadline": deadline, "task_sha256": task_hash, "worker_sha256": worker_hash})
+            if any(file_hash(path) != sha for path, sha in installed.items()) or file_hash(cli) != worker_hash:
+                raise ValueError("pinned startup inputs changed")
+            child = owner.launch(launch, environment)
+            phase_pending = phase.with_suffix(".pending")
+            phase_pending.write_bytes(encoded({"hard_stop": cutoff + 30, "task_id": task_id}))
+            os.replace(phase_pending, phase)
+            # The exact immutable task is sent only after startup inputs and assignment are pinned.
+            output, errors = collect(child, task.encode(), cutoff + 30, owner)
+            if child.returncode or len(output) > 1048576 or len(errors) > 1048576:
+                raise ValueError("worker failed or returned excessive output")
+            if not owner.broker_registered.is_set():
+                raise ValueError("assigned broker did not register with its supervisor")
+            if not events_path.is_file() or events_path.stat().st_size > 65536:
+                raise ValueError("worker did not complete a permitted broker call")
+            events = [json.loads(line) for line in events_path.read_bytes().splitlines()]
+            if not any(event["allowed"] for event in events):
+                raise ValueError("worker did not complete a permitted broker call")
+            if host == "claude":
+                native = json.loads(output)
+                if native.get("is_error"):
+                    raise ValueError("native worker reported an error")
+                result = native.get("structured_output") or json.loads(native["result"])
+            else:
+                messages = [json.loads(line) for line in output.splitlines() if line.strip()]
+                finals = [item["item"]["text"] for item in messages if item.get("type") == "item.completed"
+                          and item.get("item", {}).get("type") == "agent_message"]
+                if len(finals) != 1:
+                    raise ValueError("expected exactly one native final result")
+                result = json.loads(finals[0])
+            if (file_hash(cli) != worker_hash or file_hash(Path(sys.executable).resolve()) != runtime_hash
+                    or any(file_hash(path) != sha for path, sha in {**installed, **startup_files}.items())):
+                raise ValueError("worker or interpreter changed during review")
+            managed_policy(host, policy)
+            proof = {"version": 1, "role": role, "content_sha256": captured["snapshot"]["content_sha256"],
+                     "snapshot_sha256": captured["snapshot"]["snapshot_sha256"], "task_id": task_id,
+                     "task_sha256": task_hash, "worker_sha256": worker_hash, "worker_pid": child.pid,
+                     "result_sha256": probe.digest(encoded(result)),
+                     "verdict_task_id": captured["state"].get("worker_provenance", {}).get("task_id", "") if role == "advisor" else ""}
+            bridge(root, "publish", {"task_id": task_id, "proof": proof, "result": result})
+            published = True
+            bridge(root, "execution", {"task_id": task_id, "host": host, "cli_version": version,
+                "task_sha256": task_hash, "worker_pid": child.pid, "broker_calls": events})
+            print("design-doc: assigned " + role + " result recorded; retry the edit gate")
+        finally:
+            owner.close()
+            if not published:
+                try:
+                    bridge(root, "diagnostics", {"task_id": task_id,
+                        "stdout": output.decode(errors="replace")[-16000:], "stderr": errors.decode(errors="replace")[-16000:]})
+                    bridge(root, "abort", {"task_id": task_id})
+                except (ValueError, subprocess.SubprocessError):
+                    pass  # Expiring pending state stays unauthorized after interrupted cleanup.
+
 
 def collect(child, task, deadline, owner, phase=None, maximum_deadline=None):
     output, errors = bytearray(), bytearray()
@@ -274,7 +438,50 @@ def collect(child, task, deadline, owner, phase=None, maximum_deadline=None):
     child.stderr.close()
     return bytes(output), bytes(errors)
 
+
+def supervise(root, host):
+    """An outer owner bounds setup even while the coordinator is in a native blocking call."""
+    policy, _ = installed_policy()
+    bash = trusted_binary("bash", policy)
+    timeout_text = os.environ.get("DESIGN_AUDITOR_TIMEOUT", "900")
+    if not re.fullmatch(r"[1-9][0-9]{0,3}", timeout_text) or int(timeout_text) > 9999:
+        raise ValueError("DESIGN_AUDITOR_TIMEOUT must be 1..9999")
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="design-supervisor-") as temporary:
+        directory = Path(temporary).resolve()
+        owner = processes.Owner(directory, uuid.uuid4().hex, str(Path(sys.executable).resolve()),
+                                bash, PLUGIN / ".agents/hooks/design-worker-group.sh")
+        try:
+            phase = directory / "phase.json"
+            child = owner.launch([str(Path(sys.executable).resolve()), "-I", str(Path(__file__).resolve()),
+                                  "coordinate", host, str(root), str(phase)], dict(os.environ))
+            output, errors = collect(child, b"", started + 30, owner, phase,
+                                     started + 30 + int(timeout_text) + 30)
+            sys.stdout.buffer.write(output)
+            sys.stderr.buffer.write(errors)
+            if child.returncode:
+                raise ValueError("assigned design run failed")
+        finally:
+            owner.close()
+
+
+def main():
+    if sys.argv[1:] == ["snapshot"]:
+        print(json.dumps(snapshot(json.load(sys.stdin))))
+        return
+    for event in (signal.SIGTERM, signal.SIGINT, getattr(signal, "SIGHUP", signal.SIGTERM)):
+        signal.signal(event, lambda *_: (_ for _ in ()).throw(InterruptedError("worker supervisor interrupted")))
+    if len(sys.argv) == 5 and sys.argv[1] == "coordinate" and sys.argv[2] in ("claude", "codex"):
+        run(Path(sys.argv[3]).resolve(), sys.argv[2], Path(sys.argv[4]))
+        return
+    if len(sys.argv) != 3 or sys.argv[1] not in ("claude", "codex"):
+        raise ValueError("gate-owned host and repository required")
+    supervise(Path(sys.argv[2]).resolve(), sys.argv[1])
+
+
 if __name__ == "__main__":
-    if sys.argv[1:] != ["snapshot"]:
-        raise SystemExit("snapshot action required")
-    print(json.dumps(snapshot(json.load(sys.stdin))))
+    try:
+        main()
+    except (ValueError, OSError, OverflowError, KeyError, subprocess.SubprocessError, InterruptedError) as error:
+        print("design-doc: " + str(error), file=sys.stderr)
+        sys.exit(2)
