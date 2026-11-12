@@ -180,3 +180,8 @@ Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's can
 | `boxlite-visualize` | Source-grounded `diagram.md`/`evidence.json`; render/fit/trace validation in `validation.json`, then visual inspection. |
 
 Share whole skill directories, including references. Skill discovery adds no publication authority; [instruction owners](CONTRIBUTING.md#instruction-ownership) keep policies and checkers.
+
+
+## Assigned design runtime
+
+See [runtime preparation](docs/design-worker-runtime.md) for the broker, stream, process, snapshot, and publication contracts.

@@ -512,7 +512,7 @@ echo "## Plain-text asks never wait and keep a safe default (#334)"
 # deny message the design gate renders when a design decision expires.
 compatibility_text="$(subagent_strip_frontmatter "$compatibility_policy" | tr '\n' ' ')"
 for rule in \
-  'Ask once whether to discuss or skip the compatibility gate, and do not wait for a reply' \
+  'Use the shared question from the compatibility check. Ask once and continue without waiting.' \
   'keep the gate, continue authorized work that needs no skip, and report the blocked commit or push' \
   'Never infer confirmation from silence'; do
   check "compatibility ask: $rule" "$rule" "$compatibility_text"
