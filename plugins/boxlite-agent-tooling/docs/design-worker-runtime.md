@@ -1,12 +1,17 @@
 ## TL;DR
 
-Prepare assigned design review through independently usable runtime layers.
+Prepare the assigned design-worker runtime in independently tested layers.
 
 ## Runtime preparation
 
-Explicit design transactions serialize binding and research-log operations across every worktree in a clone.
-Provider bodies are captured as JSON strings, preserving trailing newlines; snapshot capture and normal gate integration arrive in dependent layers.
+| Layer | Contract |
+| --- | --- |
+| Broker and streams | Read tracked snapshots and approved public research; bound worker input, output, and collection time. |
+| Process ownership | Own worker and broker lifetimes; serialize explicit design transactions across a clone. |
+| Launch inputs | Preserve exact snapshot bytes and construct restricted host profiles from installed policy. |
+| Publication | Assign a task, collect its result, and serialize publication with human decisions. |
+| Gate activation | Route normal host hooks through the assigned worker and reject public recorder submissions. |
 
-A transaction held in a secondary worktree prevents the main worktree from acquiring the same directory lock.
+The snapshot carries both the compatibility content digest and an exact framed digest, including trailing newlines.
 
-See the registered [design](https://github.com/boxlite-ai/agent-tooling/issues/354) for the complete gate contract.
+Controllers signal their own process groups; the parent signals only its owned child processes.

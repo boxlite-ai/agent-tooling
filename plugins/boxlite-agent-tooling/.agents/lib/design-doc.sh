@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Design-doc verification, worktree binding, and the audit verdict recorded for the
 # bound content. Requires jq, perl, git, curl, verdict-audit-state.sh, reply-summary.sh
-# and concise-writing.sh; design_doc_audit_task also needs subagent.sh. Source only.
+# and concise-writing.sh. Source only.
 # _design_doc_jq takes single-quoted jq programs, as jq itself does.
 # shellcheck disable=SC2016
 
@@ -81,6 +81,21 @@ _design_doc_content() { # canonical URL -> provider rendering
   _design_doc_content_json "$1" | jq -er .
 }
 
+_design_doc_snapshot() { # root, URL -> exact payload and both content identities
+  local body record status=0 rendered
+  body="$(_design_doc_content_json "$2")" || return 1
+  jq -e 'type == "string" and length > 0 and length <= 32000 and index("\u0000") == null' \
+    <<<"$body" >/dev/null || return 1
+  rendered="$(jq -jr . <<<"$body")" || return 1
+  concise_writing_check_summary "$rendered" first 39 >&2 || return 1
+  record="$(_design_doc_log_record "$1" "$2")" || status=$?
+  [[ "$status" == 0 || "$status" == 2 ]] || return 1
+  [[ "$status" == 0 ]] || record='{"log":""}'
+  jq -nc --argjson body "$body" --argjson record "$record" --argjson present "$((status == 0))" \
+    '{body:$body,log:$record.log,log_present:($present == 1)}' |
+    python3 -I "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)/scripts/design-worker.py" snapshot
+}
+
 # A leading TL;DR gives readers the short version, so the details may be dense.
 design_doc_verify() { # URL -> SHA-256 of the verified content, only after a live provider read
   local url="${1:-}" body
@@ -144,31 +159,18 @@ _design_doc_log_record() { # repository root, URL -> record JSON
 # log keeps its plain hash; a stored log, even the empty tombstone of a deleted one, is
 # bound under a version label, so the result never equals a plain hash.
 _design_doc_digest() { # repository root, URL -> content SHA-256
-  local digest record status=0
-  digest="$(design_doc_verify "$2")" || return 1
-  record="$(_design_doc_log_record "$1" "$2")" || status=$?
-  case "$status" in
-    0) printf 'agent-tooling-design-log-v1\n%s\n%s\n' "$digest" \
-         "$(jq -j .log <<<"$record" | verdict_audit_sha256)" | verdict_audit_sha256 ;;
-    2) printf '%s' "$digest" ;;
-    *) return 1 ;;
-  esac
+  _design_doc_snapshot "$1" "$2" | jq -er .content_sha256
 }
 
-# What the auditor and advisor read: the design, then its stored log and that log's hash.
-_design_doc_show_text() { # repository root, URL -> text
-  local body record status=0 note=''
-  body="$(_design_doc_content "$2")" || return 1
-  record="$(_design_doc_log_record "$1" "$2")" || status=$?
-  case "$status" in
-    2) printf '%s\n' "$body"; return 0 ;;
-    0) ;;
-    *) return 1 ;;
-  esac
-  [[ -n "$(jq -r .log <<<"$record")" ]] || note=' (deleted)'
+# Human rendering uses the same verified capture that supplies its content identity.
+_design_doc_render_snapshot() { # snapshot JSON -> design and optional research log
+  local body note=''
+  body="$(jq -jr .body <<<"$1")" || return 1
+  if ! jq -e .log_present <<<"$1" >/dev/null; then printf '%s\n' "$body"; return; fi
+  [[ -n "$(jq -jr .log <<<"$1")" ]] || note=' (deleted)'
   printf '%s\n\n## Research log (local)\n\nsha256: %s%s\n\n' "$body" \
-    "$(jq -j .log <<<"$record" | verdict_audit_sha256)" "$note"
-  jq -j .log <<<"$record"
+    "$(jq -j .log <<<"$1" | verdict_audit_sha256)" "$note"
+  jq -j .log <<<"$1"
 }
 
 _design_doc_jq() { # jq arguments -> jq with this library's modules on its path
@@ -205,50 +207,47 @@ _design_doc_file_hash() { # path -> SHA-256 of its bytes, or nothing when it is 
   [[ ! -f "$1" ]] || verdict_audit_sha256 <"$1"
 }
 
-# The deadline a design agent works to: DESIGN_AUDITOR_TIMEOUT (default 900 s).
-# Repeated edit attempts reuse the deadline until content or the recorded result changes.
-# The task file also records the hash of the agent's record, so a stop can tell whether it landed.
-_design_doc_timed_task() { # repo root, URL, content SHA-256, task file, record file -> deadline
-  local timeout git_dir path now snapshot
-  timeout="$(subagent_timed_timeout DESIGN_AUDITOR_TIMEOUT "${DESIGN_AUDITOR_TIMEOUT:-900}" 9999)" \
-    || return 1
-  git_dir="$(git -C "$1" rev-parse --absolute-git-dir)" || return 1
-  path="$git_dir/$4"
-  now="$(date +%s)" || return 1
-  if [[ -e "$path" ]] && snapshot="$(verdict_audit_read_json_snapshot "$path" 2>/dev/null)" \
-     && jq -er --arg url "$2" --arg digest "$3" --arg state "$(_design_doc_file_hash "$git_dir/$5")" \
-       'select(.url == $url and .content_sha256 == $digest and .state_hash == $state
-         and (.deadline | type == "number" and . > 0 and . == floor)) | .deadline' \
-       <<<"${snapshot#*$'\n'}" 2>/dev/null; then
-    return 0
-  fi
-  jq -nc --arg url "$2" --arg digest "$3" --argjson deadline "$(( now + timeout ))" \
-    --arg state "$(_design_doc_file_hash "$git_dir/$5")" \
-    '{url:$url, content_sha256:$digest, deadline:$deadline, state_hash:$state}' \
-    | verdict_audit_write_atomic "$path" || return 1
-  printf '%s\n' "$(( now + timeout ))"
-}
-
-design_doc_audit_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
-  _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-audit-task.json \
-    agent-tooling-design-audit.json
-}
-
-# The advisor works to the same timeout; its record is the advice file.
-design_doc_advice_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
-  _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-advice-task.json \
-    agent-tooling-design-advice.json
+_design_doc_worker_record() { # pending path -> bounded, typed assignment record
+  verdict_audit_read_regular_state "$1" 1048576 record | jq -ce '
+    select(type=="object" and keys==["expires","review_deadline","role","snapshot","status","task_id","task_sha256","worker_sha256"]
+      and (.role | IN("auditor","advisor")) and (.status | IN("pending","consumed","aborted"))
+      and (.task_id | type=="string" and test("^[0-9a-f]{32}$"))
+      and all(.task_sha256,.worker_sha256; type=="string" and test("^[0-9a-f]{64}$"))
+      and all(.expires,.review_deadline; type=="number" and .>0 and .==floor)
+      and .expires==.review_deadline+30 and (.snapshot | type=="object"))'
 }
 
 # Prints nothing and succeeds when an overrule, or a PASS with its advice,
 # matches the live content. Otherwise prints the gate's request: the auditor's task input,
 # the prior findings, the loop state and the advice status; a missing, unreadable, or
 # mismatched verdict never counts.
-_design_doc_audit_passed() { # verdict path, root, branch, URL, content SHA-256
-  local state request
+_design_doc_audit_passed() { # verdict path, root, branch, URL, content SHA-256, exact snapshot hash
+  local state request pending
   state="$(_design_doc_audit_state "$1" "$2" "$3")" || {
     _design_doc_error 'design-audit state is unreadable or malformed; inspect it before retrying'; return 1;
   }
+  if [[ "${7:-}" == edit ]] && [[ "$(jq -r .verdict <<<"$state")" != OVERRIDDEN ]] \
+      && [[ -e "${1%/*}/agent-tooling-design-worker.json" || -L "${1%/*}/agent-tooling-design-worker.json" ]]; then
+    pending="$(_design_doc_worker_record "${1%/*}/agent-tooling-design-worker.json")" || return 1
+    if jq -e --arg root "$2" --arg url "$4" '.status=="pending" and .expires>=now
+        and .snapshot.root==$root and .snapshot.url==$url' <<<"$pending" >/dev/null; then
+      jq -nc --arg root "$2" '{repo_root:$root,running:true}'
+      return 1
+    fi
+  fi
+  if [[ "${7:-}" == worker ]]; then
+  if _design_doc_jq -e 'include "design-audit";
+      (.verdict | IN("PASS","FAIL")) and (da_worker_provenance("auditor") | not)' \
+      <<<"$state" >/dev/null; then
+    state="$(_design_doc_jq -c --arg root "$2" --arg branch "$3" 'include "design-audit";
+      . as $old | da_empty($root; $branch) | .overruled=$old.overruled' <<<"$state")" || return 1
+  fi
+  if ! _design_doc_jq -e --arg exact "${6:-}" 'include "design-audit";
+      .verdict != "PASS" or (.worker_provenance.snapshot_sha256 == $exact)' <<<"$state" >/dev/null; then
+    state="$(_design_doc_jq -c --arg root "$2" --arg branch "$3" 'include "design-audit";
+      . as $old | da_empty($root; $branch) | .overruled=$old.overruled' <<<"$state")" || return 1
+  fi
+  fi
   request="$(_design_doc_jq -c --arg root "$2" --arg url "$4" --arg digest "$5" \
     --arg history "$(_design_doc_history_hash "$state")" \
     'include "design-audit"; da_request($root; $url; $digest; $history)' <<<"$state")" || return 1
@@ -273,11 +272,13 @@ _design_doc_advice_status() { # advice path, root, branch, request JSON -> reque
     snapshot="$(verdict_audit_read_json_snapshot "$1" 2>/dev/null)" || return 1
     record="${snapshot#*$'\n'}"
   fi
-  jq -ce --arg root "$2" --arg branch "$3" --argjson record "$record" '. as $request
+  _design_doc_jq -ce --arg root "$2" --arg branch "$3" --argjson record "$record" '
+    include "design-audit"; . as $request
     | ($record | type == "object" and .root == $root and .branch == $branch
         and .url == $request.design_url and .content_sha256 == $request.content_sha256
         and $request.verdict_id != "" and .verdict_id == $request.verdict_id
-        and (.advice | type == "array")) as $advised
+        and (.advice | type == "array") and (if ($request.worker_task_id // "")=="" then true
+          else da_worker_provenance("advisor") and .worker_provenance.verdict_task_id == $request.worker_task_id end)) as $advised
     | . + {advice_due: ((.verdict | IN("PASS", "FAIL")) and ($advised | not)),
            advice: (if $advised then $record.advice else [] end)}' <<<"$4" 2>/dev/null
 }
@@ -340,14 +341,15 @@ _design_doc_advice_write() { # verdict path, root, branch, URL, live SHA-256, ad
     _design_doc_error 'no PASS or FAIL matches the live design; advice follows a recorded verdict'; return 1;
   }
   # Advice may quote the stored log too, since the advisor reads both.
-  body="$(_design_doc_show_text "$2" "$4")" || {
+  body="$(_design_doc_render_snapshot "$design_worker_snapshot")" || {
     _design_doc_error 'cannot read the design to check advice anchors'; return 1;
   }
   kept="$(_design_doc_advice_anchor "$2" "$body" "$(jq '.findings | length' <<<"$state")" "$6")" \
     || return 1
   jq -nc --arg root "$2" --arg branch "$3" --arg url "$4" --arg digest "$5" --arg id "$verdict_id" \
-    --argjson advice "$kept" \
-    '{root:$root, branch:$branch, url:$url, content_sha256:$digest, verdict_id:$id, advice:$advice}' \
+    --argjson advice "$kept" --argjson proof "${design_worker_proof:-null}" \
+    '{root:$root, branch:$branch, url:$url, content_sha256:$digest, verdict_id:$id, advice:$advice}
+      | if $proof==null then . else .worker_provenance=$proof end' \
     | verdict_audit_write_atomic "${1%/*}/agent-tooling-design-advice.json"
 }
 
@@ -360,6 +362,9 @@ _design_doc_audit_update() { # verdict path, root, branch, URL, live SHA-256, fi
   output="$(_design_doc_jq -c --arg url "$4" --arg digest "$5" --arg argument "$7" \
     --arg history "$(_design_doc_history_hash "$state")" "include \"design-audit\"; $6" \
     <<<"$state" 2>&1)" || { _design_doc_error "${output#*): }"; return 1; }
+  if [[ -n "${design_worker_proof:-}" ]]; then
+    output="$(jq -c --argjson proof "$design_worker_proof" '.worker_provenance=$proof' <<<"$output")" || return 1
+  fi
   printf '%s\n' "$output" | verdict_audit_write_atomic "$1"
 }
 
@@ -447,8 +452,8 @@ _design_doc_context() { # repo root -> branch identity
 # edit also requires an audit PASS, with its advice, for the live content; its exit 3 prints
 # the gate's request instead of the URL. decide applies a human choice that a hook already
 # accepted, carrying its binding through the fresh provider read; advise stores advice.
-design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working directory, URL, verdict, reflection, choice or advice -> verified URL
-  local operation="$1" root branch git_dir state_path audit_path snapshot url record digest
+_design_doc_binding() { # caller holds the design transaction for mutations
+  local operation="$1" root branch git_dir state_path audit_path snapshot url record digest design_worker_snapshot
   root="$(git -C "$2" rev-parse --show-toplevel)" || return 1
   root="$(cd "$root" && pwd -P)" || return 1
   branch="$(_design_doc_context "$root")" || return 1
@@ -464,7 +469,7 @@ design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working 
         '{root:$root,branch:$branch,url:$url}' |
         verdict_audit_write_atomic "$state_path" || return 1
       ;;
-    check|edit|verdict|reflect|decide|advise)
+    check|edit|verdict|reflect|decide|advise|show)
       snapshot="$(verdict_audit_read_json_snapshot "$state_path")" || {
         _design_doc_error 'no readable binding; register the design doc before writing code'; return 1;
       }
@@ -474,10 +479,14 @@ design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working 
          .url | strings' <<<"$record")" || {
         _design_doc_error 'document binding does not match this worktree and branch'; return 1;
       }
-      digest="$(_design_doc_digest "$root" "$url")" || return 1
+      snapshot="$(_design_doc_snapshot "$root" "$url")" || return 1
+      digest="$(jq -er .content_sha256 <<<"$snapshot")" || return 1
+      design_worker_snapshot="$snapshot"
       [[ "$branch" == "$(_design_doc_context "$root")" ]] || return 1
       case "$operation" in
-        edit) _design_doc_audit_passed "$audit_path" "$root" "$branch" "$url" "$digest" || return 3 ;;
+        show) _design_doc_render_snapshot "$snapshot"; return ;;
+        edit) _design_doc_audit_passed "$audit_path" "$root" "$branch" "$url" "$digest" \
+          "$(jq -r .snapshot_sha256 <<<"$snapshot")" edit || return 3 ;;
         verdict) _design_doc_audit_write "$audit_path" "$root" "$branch" "$url" "$digest" "$3" || return 1 ;;
         reflect) _design_doc_audit_update "$audit_path" "$root" "$branch" "$url" "$digest" \
           'da_reflect($argument | fromjson; $history)' "$3" || return 1 ;;
@@ -501,18 +510,30 @@ design_doc_binding() { # bind|check|edit|verdict|reflect|decide|advise, working 
   printf '%s\n' "$url"
 }
 
-design_doc_show() { # working directory -> content of the verified binding and its log
-  local url
-  # Auditors read through the binder's authenticated reader; provider pages need a login.
-  url="$(design_doc_binding check "$1")" || return 1
-  _design_doc_show_text "$1" "$url" || {
-    _design_doc_error 'cannot read document (check URL, provider access, and credentials)'; return 1;
-  }
+design_doc_binding() { design_doc_transaction "$2" binding "$@"; }
+
+design_doc_transaction() { # root, private state operation, arguments
+  local common directory script
+  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  directory="$common/agent-tooling-design-transaction"
+  [[ ! -L "$directory" ]] && mkdir -p "$directory" || return 1
+  script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../hooks" && pwd -P)/design-worker-state.sh"
+  shift
+  # A dedicated directory vnode avoids recursive locking of the atomic writer's anchor.
+  perl -MFcntl=:DEFAULT,:flock -e '
+    my $path=shift; my @before=lstat($path); exit 1 unless @before && -d _ && !-l _;
+    sysopen(my $lock,$path,O_RDONLY) or exit 1;
+    my @opened=stat($lock); exit 1 unless "$before[0]:$before[1]" eq "$opened[0]:$opened[1]";
+    $SIG{ALRM}=sub { exit 1 }; alarm 30; flock($lock,LOCK_EX) or exit 1; alarm 0;
+    fcntl($lock,F_SETFD,0) or exit 1; exec @ARGV; exit 1;
+  ' "$directory" bash "$script" "$@"
 }
+
+design_doc_show() { design_doc_binding show "$1"; }
 
 # Stores the bound design's research log from stdin. Empty input is the
 # tombstone of a deleted log; the record is replaced atomically and never removed.
-design_doc_log_store() { # working directory -> verified URL
+_design_doc_log_store() { # working directory -> verified URL; caller holds transaction
   local input url directory id
   input="$(head -c 128001; printf x)" || return 1
   input="${input%x}"
@@ -530,19 +551,36 @@ design_doc_log_store() { # working directory -> verified URL
   printf '%s\n' "$url"
 }
 
-design_doc_transaction() { # root, private state operation, arguments
-  local common directory script
-  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)" || return 1
-  directory="$common/agent-tooling-design-transaction"
-  [[ ! -L "$directory" ]] && mkdir -p "$directory" || return 1
-  script="$(cd "$(dirname "${BASH_SOURCE[0]}")/../hooks" && pwd -P)/design-worker-state.sh"
-  shift
-  # A dedicated directory vnode avoids recursive locking of the atomic writer's anchor.
-  perl -MFcntl=:DEFAULT,:flock -e '
-    my $path=shift; my @before=lstat($path); exit 1 unless @before && -d _ && !-l _;
-    sysopen(my $lock,$path,O_RDONLY) or exit 1;
-    my @opened=stat($lock); exit 1 unless "$before[0]:$before[1]" eq "$opened[0]:$opened[1]";
-    $SIG{ALRM}=sub { exit 1 }; alarm 30; flock($lock,LOCK_EX) or exit 1; alarm 0;
-    fcntl($lock,F_SETFD,0) or exit 1; exec @ARGV; exit 1;
-  ' "$directory" bash "$script" "$@"
+design_doc_log_store() { design_doc_transaction "$1" log "$1"; }
+
+
+_design_doc_timed_task() { # repo root, URL, content SHA-256, task file, record file -> deadline
+  local timeout git_dir path now snapshot
+  timeout="$(subagent_timed_timeout DESIGN_AUDITOR_TIMEOUT "${DESIGN_AUDITOR_TIMEOUT:-900}" 9999)" \
+    || return 1
+  git_dir="$(git -C "$1" rev-parse --absolute-git-dir)" || return 1
+  path="$git_dir/$4"
+  now="$(date +%s)" || return 1
+  if [[ -e "$path" ]] && snapshot="$(verdict_audit_read_json_snapshot "$path" 2>/dev/null)" \
+     && jq -er --arg url "$2" --arg digest "$3" --arg state "$(_design_doc_file_hash "$git_dir/$5")" \
+       'select(.url == $url and .content_sha256 == $digest and .state_hash == $state
+         and (.deadline | type == "number" and . > 0 and . == floor)) | .deadline' \
+       <<<"${snapshot#*$'\n'}" 2>/dev/null; then
+    return 0
+  fi
+  jq -nc --arg url "$2" --arg digest "$3" --argjson deadline "$(( now + timeout ))" \
+    --arg state "$(_design_doc_file_hash "$git_dir/$5")" \
+    '{url:$url, content_sha256:$digest, deadline:$deadline, state_hash:$state}' \
+    | verdict_audit_write_atomic "$path" || return 1
+  printf '%s\n' "$(( now + timeout ))"
+}
+
+design_doc_audit_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
+  _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-audit-task.json \
+    agent-tooling-design-audit.json
+}
+
+design_doc_advice_task() { # repo root, URL, content SHA-256 -> deadline (Unix seconds)
+  _design_doc_timed_task "$1" "$2" "$3" agent-tooling-design-advice-task.json \
+    agent-tooling-design-advice.json
 }
