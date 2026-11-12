@@ -45,7 +45,7 @@ worker_snapshot() {
   snapshot="$(_design_doc_snapshot "$root" "$url")" || return 1
   state="$(_design_doc_audit_state "$directory/agent-tooling-design-audit.json" "$root" "$branch")" || return 1
   request="$(_design_doc_audit_passed "$directory/agent-tooling-design-audit.json" "$root" "$branch" "$url" \
-    "$(jq -r .content_sha256 <<<"$snapshot")" "$(jq -r .snapshot_sha256 <<<"$snapshot")" worker)" || status=$?
+    "$(jq -r .content_sha256 <<<"$snapshot")" "$(jq -r .snapshot_sha256 <<<"$snapshot")")" || status=$?
   [[ "$status" == 0 || "$status" == 1 ]] || return 1
   [[ -n "$request" ]] || request='{"granted":true}'
   jq -nc --arg root "$root" --arg branch "$branch" --arg url "$url" --arg directory "$directory" \

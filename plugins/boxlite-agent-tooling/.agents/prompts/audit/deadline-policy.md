@@ -1,6 +1,6 @@
 ---
 name: deadline-policy
-used-by: .agents/hooks/preflight-design-doc.sh, .agents/hooks/preflight-commit-push.sh, .agents/hooks/audit/run-commit-push-audit.sh, .agents/hooks/audit/run-verdict-audit.sh, .agents/skills/boxlite-verdict-audit/SKILL.md
+used-by: scripts/design-worker.py, .agents/hooks/preflight-commit-push.sh, .agents/hooks/audit/run-commit-push-audit.sh, .agents/hooks/audit/run-verdict-audit.sh, .agents/skills/boxlite-verdict-audit/SKILL.md
 ---
 
 ## Runtime deadline

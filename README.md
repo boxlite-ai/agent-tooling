@@ -48,7 +48,7 @@ These are local workflow checks, not a sandbox or a GitHub security boundary. Gi
 ./.agent-tooling/install.sh
 ```
 
-You need Bash, Git, `jq`, Perl, and the CLI for your host. GitHub operations require authenticated `gh`; declared project checks may need additional tools. First installation needs network access.
+You need Bash, Git, `jq`, Perl, Python 3.9+, and the CLI for your host. GitHub operations require authenticated `gh`; declared project checks may need additional tools. First installation needs network access.
 
 | Host | Activate after repository setup |
 | --- | --- |

@@ -4,6 +4,8 @@ set -uo pipefail
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
+# shellcheck source=../design/fixtures/worker-fixture.sh
+source "$plugin/tests/design/fixtures/worker-fixture.sh"
 mkdir "$scratch/repo" "$scratch/bin"
 git -C "$scratch/repo" init -q
 git -C "$scratch/repo" -c core.hooksPath=/dev/null -c user.name=test \
@@ -163,40 +165,36 @@ done
 record_research() { # PASS|FAIL, findings JSON
   jq -nc --arg sha "$(printf '%s' "$design" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" \
     --arg verdict "$1" --argjson findings "$2" '{content_sha256:$sha,verdict:$verdict,findings:$findings}' |
-    (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" verdict) >/dev/null ||
+    (cd "$scratch/repo" && bash "$fixture_cli" verdict) >/dev/null ||
     { printf 'FAIL recording a research %s\n' "$1"; fail=$((fail+1)); }
 }
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' deny
 done
-expect_denial 'Claude Code is routed to the design auditor' claude 'boxlite-agent-tooling:design-auditor'
-expect_denial 'Codex is routed to the design auditor spec' codex '.claude/agents/design-auditor.md'
-# Both hosts receive the task inline, so the probe rule must ride in it (#327).
 for host in claude codex; do
-  expect_denial "$host audit task forbids identifiers in probes" "$host" 'request no account or key'
-  expect_denial "$host audit task checks the whole design" "$host" 'testable acceptance'
+  expect_denial "$host requests only the fixed owned worker action" "$host" "scripts/design-doc.sh\" run"
 done
-# The task states the deadline audit-deadline.sh enforces: the one the gate recorded (#328).
-task_deadline="$(jq -r .deadline "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit-task.json")"
-expect_denial 'the design task states the deadline the hook enforces' claude "Deadline: Unix $task_deadline ("
 record_research FAIL '["research: no source supports the retry limit; cite one"]'
 check Write 'edit source' deny
 # A recorded verdict waits for one fresh advisor run, before findings are shown (design #335).
-expect_denial 'Claude Code is routed to the design advisor' claude 'boxlite-agent-tooling:design-advisor'
-expect_denial 'Codex is routed to the design advisor spec' codex '.claude/agents/design-advisor.md'
-expect_denial 'the advice task forbids identifiers in probes' codex 'request no account or key'
+expect_denial 'Claude Code requests its assigned advisor' claude 'assigned advisor'
+expect_denial 'Codex requests its assigned advisor' codex 'assigned advisor'
+said_task="$(cat "$fixture_bin/task.txt")"
+[[ "$said_task" == *'request no account or key'* && "$said_task" == *'testable acceptance'* ]] || {
+  printf 'FAIL owned auditor task retains privacy and whole-design rules\n'; fail=$((fail+1));
+}
 git_dir="$(git -C "$scratch/repo" rev-parse --absolute-git-dir)"
 digest_of() { printf '%s' "$1" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)'; }
 advise() { # advice items JSON -> design-doc.sh advice for the live design
   jq -nc --arg sha "$(digest_of "$design")" --argjson advice "$1" '{content_sha256:$sha, advice:$advice}' |
-    (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" advice) >/dev/null 2>&1
+    (cd "$scratch/repo" && bash "$fixture_cli" advice) >/dev/null 2>&1
 }
 equals() { # description, observed, wanted
   if [[ "$2" == "$3" ]]; then printf 'PASS %s\n' "$1"; pass=$((pass+1))
   else printf 'FAIL %s: got %s, wanted %s\n' "$1" "$2" "$3"; fail=$((fail+1)); fi
 }
 rejects() { # description, raw advice input
-  if (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" advice <<<"$2") >/dev/null 2>&1; then
+  if (cd "$scratch/repo" && bash "$fixture_cli" advice <<<"$2") >/dev/null 2>&1; then
     printf 'FAIL advice rejects %s\n' "$1"; fail=$((fail+1))
   else
     printf 'PASS advice rejects %s\n' "$1"; pass=$((pass+1))
@@ -212,7 +210,7 @@ rejects 'another design version' "$(jq -nc '{content_sha256:("0" * 64), advice:[
 # The rejection names the item cap the advice task states (#335 A/B: items of 583-789 characters).
 too_long="$(jq -nc --arg s "$live" --arg a "$(printf 'Scope: %0500d' 0)" '{content_sha256:$s, advice:[$a]}')"
 rejects 'an item over 500 characters' "$too_long"
-said="$(cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" advice <<<"$too_long" 2>&1 >/dev/null)"
+said="$(cd "$scratch/repo" && bash "$fixture_cli" advice <<<"$too_long" 2>&1 >/dev/null)"
 equals 'the advice rejection names the 500-character cap' "$([[ "$said" == *'500 characters'* ]] && echo yes)" yes
 # A Why quote that closes its own sentence still ends at Try:, so the replacement is not a design quote.
 natural='TL;DR: keep it. Why: "Verify designs before edits." Try: "Audit every design first."'
@@ -232,25 +230,17 @@ equals 'advice never writes the verdict state' \
   "$(perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$git_dir/agent-tooling-design-audit.json")" "$state_before"
 expect_denial 'a failed review lists its findings' codex 'no source supports the retry limit'
 expect_denial 'a failed review lists its advice' codex 'cite the retry source'
-# Advice stays out of the next audit: its task carries findings only.
-publish "$design"$'\n\nA revision.'
-denial="$(design_denial codex)"
-if [[ "$denial" == *'no source supports the retry limit'* && "$denial" != *'cite the retry source'* ]]; then
-  printf 'PASS the next audit task carries findings, never advice\n'; pass=$((pass+1))
-else
-  printf 'FAIL the next audit task carries findings, never advice: %s\n' "$denial"; fail=$((fail+1))
-fi
 publish "$design"
 record_research PASS '[]'
 check Write 'edit source' deny
-expect_denial 'a PASS waits for advice too' claude 'boxlite-agent-tooling:design-advisor'
+expect_denial 'a PASS waits for advice too' claude 'assigned advisor'
 advise '[]' || { printf 'FAIL recording empty advice\n'; fail=$((fail+1)); }
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' allow
 done
 publish "$design"$'\n\nA later decision.'
 check Write 'edit source' deny
-expect_denial 'an edited design needs a new review' codex 'design-auditor'
+expect_denial 'an edited design needs a new review' codex 'scripts/design-doc.sh" run'
 publish "$design"
 check Write 'edit source' allow
 # Stored advisories reach the parent with the advice route (design #335).
@@ -258,7 +248,7 @@ advised="$design"$'\n\nWith an advisory.'
 publish "$advised"
 jq -nc --arg sha "$(digest_of "$advised")" '{content_sha256:$sha, verdict:"PASS", findings:[],
   advisories:["low: search: log one more index. Evidence: probe. Pass if: logged"]}' |
-  (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" verdict) >/dev/null ||
+  (cd "$scratch/repo" && bash "$fixture_cli" verdict) >/dev/null ||
   { printf 'FAIL recording a PASS with an advisory\n'; fail=$((fail+1)); }
 expect_denial 'the advice route lists stored advisories' claude 'log one more index'
 # The research loop through the hook (design #309).
@@ -270,7 +260,7 @@ chmod +x "$scratch/bin/date"
 record_on() { # design text, findings JSON -> FAIL (PASS when empty) for that text
   jq -nc --arg sha "$(printf '%s' "$1" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" \
     --argjson findings "$2" '{content_sha256:$sha, verdict:(if $findings == [] then "PASS" else "FAIL" end),
-      findings:$findings}' | (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" verdict) >/dev/null ||
+      findings:$findings}' | (cd "$scratch/repo" && bash "$fixture_cli" verdict) >/dev/null ||
     { printf 'FAIL recording research for a revision\n'; fail=$((fail+1)); }
 }
 revision() { printf '%s\n\nRevision %s.' "$design" "$1"; }
@@ -285,8 +275,12 @@ typed() { # prompt text, session -> what the prompt hook's research helper repor
 two='["high: research: A","high: research: B"]'
 publish "$(revision 1)"; record_on "$(revision 1)" "$two"
 publish "$(revision 2)"
-expect_denial 'an edited design sends prior findings to the auditor' codex 'prior_findings'
 record_on "$(revision 2)" '["high: research: C"]'
+if jq -e --argjson previous "$two" '.prior_findings==$previous and (has("advice")|not)' "$fixture_bin/task-input.json" >/dev/null; then
+  printf 'PASS owned auditor receives prior findings without advice\n'; pass=$((pass+1))
+else
+  printf 'FAIL owned auditor receives prior findings without advice\n'; fail=$((fail+1))
+fi
 expect_denial 'a converging FAIL 2 asks for a reflection' codex "scripts/design-doc.sh\" reflect"
 rm -f "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
 record_on "$(revision 2)" "$two"
@@ -320,6 +314,7 @@ expect_denial 'Redesign asks for a fresh draft' codex 'The human chose Redesign'
 unset DESIGN_TEST_CLOCK
 said 'the prompt hook routes typed decisions' "$(cat "$plugin/.agents/hooks/cancel-verdict-audit.sh")" 'design-decision-prompt.sh'
 publish "$design"; record_on "$design" '[]'
+advise '[]' || { printf 'FAIL recording fresh advice\n'; fail=$((fail+1)); }
 check Write 'edit source' allow
 export DOC_ERROR=1
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do

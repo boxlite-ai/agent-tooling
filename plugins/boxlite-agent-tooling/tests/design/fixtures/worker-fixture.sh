@@ -1,5 +1,5 @@
 # Source after creating scratch. Existing validator/loop suites use a trusted fixture CLI.
-# Each submitted fixture judgment traverses the real coordinator and owned subprocess.
+# Each submitted fixture judgment still traverses the real owned hook and subprocess.
 fixture_source_plugin="$plugin"
 scratch="$(cd "$scratch" && pwd -P)"
 fixture_bin="$scratch/owned-worker-bin"
@@ -22,7 +22,9 @@ if [[ "${1:-}" != verdict && "${1:-}" != advice ]]; then
 fi
 input="$(cat)"
 run() {
-  python3 -I "$DESIGN_FIXTURE_PLUGIN/scripts/design-worker.py" codex "$PWD"
+  jq -nc --arg cwd "$PWD" --arg command "bash \"$DESIGN_FIXTURE_PLUGIN/scripts/design-doc.sh\" run" \
+    '{tool_name:"Bash",cwd:$cwd,tool_input:{command:$command}}' |
+    BOXLITE_HOOK_HOST=codex bash "$DESIGN_FIXTURE_PLUGIN/.agents/hooks/preflight-design-worker.sh"
 }
 if [[ "$1" == verdict ]]; then
   directory="$(git rev-parse --absolute-git-dir)"
