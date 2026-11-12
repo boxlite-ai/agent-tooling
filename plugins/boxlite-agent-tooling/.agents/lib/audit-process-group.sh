@@ -30,7 +30,7 @@ audit_group_process() {  # control directory grace | observe pgid
   local -a interpreter=(perl)
   [[ "$1" != control ]] || interpreter=(exec perl)
   # shellcheck disable=SC2016 # Variables belong to Perl.
-  "${interpreter[@]}" -MPOSIX -MTime::HiRes=alarm,sleep,time -e '
+  "${interpreter[@]}" -MPOSIX -MIO::Select -MTime::HiRes=alarm,sleep,time -e '
     sub live_members {
       my ($group, $leader, $controller) = @_;
       my $inspector = open(my $processes, "-|", "ps", "-axo", "pid=,pgid=,stat=");
@@ -77,8 +77,13 @@ audit_group_process() {  # control directory grace | observe pgid
     close($ready) or exit 125;
     alarm 0;
 
-    # The runner closes its sole request writer. The kernel selects our own group.
-    defined(sysread(STDIN, my $request, 1)) or exit 125;
+    # Either supervisor EOF or leader death ends the independently owned group.
+    my $input = IO::Select->new(\*STDIN);
+    while (getppid() == $leader) {
+      next unless $input->can_read(0.05);
+      defined(sysread(STDIN, my $request, 1)) or exit 125;
+      last;
+    }
     kill("TERM", 0) or exit 125;
     $SIG{ALRM} = sub { escalate($value) };
     alarm $grace + 1;
