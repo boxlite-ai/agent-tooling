@@ -186,4 +186,5 @@ Share whole skill directories, including references. Skill discovery adds no pub
 
 See [runtime preparation](docs/design-worker-runtime.md) for the broker, stream, process, snapshot, and publication contracts.
 
-`.agents/hooks/design-worker-group.sh` owns POSIX group teardown; `scripts/design-worker-process.py` owns process and broker lifetimes.
+`.agents/hooks/design-worker-group.sh` owns process-group lifetime.
+`.agents/hooks/design-worker-state.sh` dispatches explicit clone-wide binding and research-log transactions.
