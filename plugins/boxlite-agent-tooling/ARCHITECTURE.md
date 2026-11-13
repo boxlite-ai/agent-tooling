@@ -177,6 +177,7 @@ Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's can
 
 | Library | Used by | Owns |
 | --- | --- | --- |
+| `.agents/lib/audit-process-group.sh` | Headless audit runners; design worker group adapter | In-group termination and survivor checks; headless FIFO startup requires free descriptors12–17, checked in the parent shell. |
 | `.agents/lib/tooling-profile.sh` | Installer, refresh, verification, profile validation, host bootstraps | Profile `tooling` fields and hold policy; callers report its error. |
 | `.agents/lib/shell-scan.sh` | `.agents/hooks/preflight-pr-review.sh`, `.agents/hooks/preflight-design-worker.sh` | Splits shell source into simple commands without running it. |
 | `.agents/lib/pr-watch-attachment.jq` | `.agents/hooks/post-remote-write-watch.sh`, `.agents/watch/pr-watch-attach.sh` | Pre-push attachment manifest schema. |
