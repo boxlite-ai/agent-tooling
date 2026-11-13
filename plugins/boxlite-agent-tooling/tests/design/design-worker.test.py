@@ -109,6 +109,67 @@ class OwnedWorker(unittest.TestCase):
         self.assertNotEqual(self.cli("advice", body='{"advice":[]}').returncode, 0)
         self.assertNotEqual(self.cli("run").returncode, 0)
 
+    def test_runner_mentions_are_data_but_evaluated_commands_are_denied(self):
+        runner = f'bash "{self.plugin}/scripts/design-doc.sh" run'
+        inert = (
+            f'rg -n run "{self.plugin}/scripts/design-doc.sh"',
+            f'cat "{self.plugin}/scripts/design-doc.sh" # inspect run',
+            f"printf '%s\\n' '{runner}'",
+            f'printf "%s\\n" bash "{self.plugin}/scripts/design-doc.sh" run',
+            f"cat <<'EXAMPLE'\n{runner}\nEXAMPLE",
+            f"bash </dev/null; cat <<'EXAMPLE'\n{runner}\nEXAMPLE",
+            f"printf '%s\\n' '$PLUGIN_ROOT/scripts/design-doc.sh run'",
+        )
+        executable = (
+            f"bash -c '{runner}'",
+            f'printf "%s" "$({runner})"',
+            f"bash <<'EXAMPLE'\n{runner}\nEXAMPLE",
+            'bash "$PLUGIN_ROOT/scripts/design-doc.sh" run',
+            f'env PATH=/tmp {runner}',
+            f'true; {runner}',
+        )
+        before = sorted(path.name for path in (self.repo / ".git").glob("agent-tooling-design-*.json"))
+        for host in ("codex", "claude"):
+            for command in inert:
+                with self.subTest(host=host, command=command):
+                    result = self.hook(command, host)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+            for command in executable:
+                with self.subTest(host=host, command=command):
+                    self.assertNotEqual(self.hook(command, host).returncode, 0)
+        self.assertFalse((self.bin / "observed").exists())
+        self.assertEqual(before, sorted(path.name for path in (self.repo / ".git").glob("agent-tooling-design-*.json")))
+
+    def test_binding_failures_explain_registration_without_mutating_records(self):
+        binding = self.repo / ".git/agent-tooling-design-doc.json"
+        original = binding.read_bytes()
+        valid = json.loads(original)
+        cases = (None, b'{invalid', json.dumps({**valid, "branch": "other"}).encode(),
+                 json.dumps({**valid, "root": str(self.root / "other")}).encode(), "directory")
+        for content in cases:
+            with self.subTest(content=content):
+                if binding.is_dir():
+                    binding.rmdir()
+                elif binding.exists():
+                    binding.unlink()
+                if content == "directory":
+                    binding.mkdir()
+                elif content is not None:
+                    binding.write_bytes(content)
+                for host in ("codex", "claude"):
+                    result = self.hook(host=host)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("register", result.stderr.lower())
+                    self.assertFalse((self.bin / "observed").exists())
+                if isinstance(content, bytes):
+                    self.assertEqual(binding.read_bytes(), content)
+                elif content == "directory":
+                    self.assertTrue(binding.is_dir())
+                else:
+                    self.assertFalse(binding.exists())
+        binding.rmdir()
+        binding.write_bytes(original)
+
     def test_managed_cache_blocks_before_native_worker_starts(self):
         configuration = self.root / "claude-config"
         configuration.mkdir()

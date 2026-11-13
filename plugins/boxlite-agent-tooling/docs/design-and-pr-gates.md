@@ -114,6 +114,11 @@ bash "/absolute/installed/plugin/scripts/design-doc.sh" run
 ```
 
 The host Bash hook derives the role and launches a fresh CLI; the command itself only reports status.
+The hook distinguishes executable runner commands from literal arguments and quoted examples using the shared shell scanner.
+Only the exact canonical action launches a worker; prefixes, suffixes, compound execution, and evaluated runner payloads are denied.
+The scanner callback flushes the final word, classifies executable position, marks shell-consumed heredocs, and clears command arrays.
+Recursive scans retain a detected denial; quoted data passed to readers or printers remains inert.
+Missing, invalid, or mismatched registration fails with a registration diagnostic and preserves the original record.
 The first run records an auditor result; the next edit requests an advisor before showing findings.
 A matching human overrule retains its authority; an explicit run with complete automatic approval starts a fresh audit.
 
