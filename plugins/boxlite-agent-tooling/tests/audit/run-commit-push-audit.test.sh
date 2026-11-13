@@ -73,6 +73,7 @@ setup() {  # [object format] -> repo path
     "$d/.agents/hooks/audit/"
   cp "$REPO_ROOT/.agents/hooks/auditor-control.sh" "$d/.agents/hooks/"
   cp "$REPO_ROOT/.agents/lib/subagent.sh" \
+    "$REPO_ROOT/.agents/lib/commit-push-evidence.sh" \
     "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
     "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
     "$REPO_ROOT/.agents/lib/auditor-control-state.sh" \

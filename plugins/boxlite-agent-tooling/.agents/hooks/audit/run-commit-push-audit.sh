@@ -83,6 +83,8 @@ source "$verdict_state_lib" || exit 2
 source "$tooling_root/.agents/lib/audit-diagnostics.sh" || exit 2
 # shellcheck source=../../lib/audit-process-group.sh
 source "$tooling_root/.agents/lib/audit-process-group.sh" || exit 2
+# shellcheck source=../../lib/commit-push-evidence.sh
+source "$tooling_root/.agents/lib/commit-push-evidence.sh" || exit 2
 
 # Without subagent.sh, a check below fails the audit and names the file before the
 # timeout is first used.
@@ -439,20 +441,6 @@ extract_commit_message_file() {
   esac
 }
 
-check_subject() {
-  local subject="$1" context="$2"
-  local conventional='^[a-z]+(\([^)]+\))?:[[:space:]][^[:space:]].+'
-  if [[ -z "$subject" ]]; then
-    add_finding "$context: commit subject unavailable to local audit; use -m/--message, a readable -F/--file, or audit at push"
-    return
-  fi
-  if (( ${#subject} > 72 )); then
-    add_finding "$context: subject exceeds 72 characters"
-  fi
-  if [[ ! "$subject" =~ $conventional ]]; then
-    add_finding "$context: subject is not Conventional Commit format"
-  fi
-}
 
 current_commit_subject_hash() {
   local subject
@@ -473,53 +461,28 @@ if [[ "$kind" == "commit" && -n "$bound_commit_subject" ]]; then
   bound_commit_subject_hash="$(printf '%s' "$bound_commit_subject" | hash_stdin)"
 fi
 
-check_diff_file() {  # private raw audit snapshot
-  local diff_file="$1"
-  local openai_live_pattern="sk-"
-  openai_live_pattern+="live"
-  local slack_pattern="xox"
-  slack_pattern+="[baprs]-"
-  local github_pattern="ghp"
-  github_pattern+="_[A-Za-z0-9_]{20,}"
-  local private_key_pattern="-{5}BEGIN [A-Z0-9 ]*PRIVATE KEY-{5}"
-  local aws_access_key_pattern="(AKIA|ASIA)[0-9A-Z]{16}"
-  local authorization_pattern="[Aa]uthorization:[[:space:]]*([Bb]earer|[Bb]asic)[[:space:]]+[^[:space:]]+"
-  local bearer_pattern="[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{10,}"
-  local secret_pattern="(${openai_live_pattern}|${slack_pattern}|${github_pattern}|${private_key_pattern}|${aws_access_key_pattern}|${authorization_pattern}|${bearer_pattern})"
-  if [[ ! -s "$diff_file" ]]; then
-    add_finding "Verify: no diff found for ${kind}"
-    return
-  fi
-  if grep -qE "(^|\\+).*${secret_pattern}" "$diff_file"; then
-    add_finding "Security: diff appears to contain a secret-like token"
-  fi
-  if grep -qE '^diff --git a/.*\.pr-reviewed\.json b/.*\.pr-reviewed\.json$' \
-      "$diff_file"; then
-    add_finding "Cross-cutting: PR review gate marker must not be committed"
-  fi
-}
 
 run_local_checks() {  # private raw audit snapshot
   local diff_file="$1"
   findings=()
   case "$kind" in
     commit)
-      check_diff_file "$diff_file"
-      check_subject "$bound_commit_subject" "Commit"
+      commit_push_check_diff "$diff_file"
+      commit_push_check_subject "$bound_commit_subject" "Commit"
       ;;
     push)
       if [[ ! "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
         add_finding "Internal: push audit requires the synthetic pre-push command with pushed_diff_sha256"
         return
       fi
-      check_diff_file "$diff_file"
+      commit_push_check_diff "$diff_file"
       if [[ "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
         while IFS= read -r subject; do
-          check_subject "$subject" "Push"
+          commit_push_check_subject "$subject" "Push"
         done < <(sed -n 's/^commit-subject [0-9a-f][0-9a-f]* //p' "$diff_file")
       else
         while IFS= read -r subject; do
-          check_subject "$subject" "Push"
+          commit_push_check_subject "$subject" "Push"
         done < <(git -C "$repo_root" log origin/main..HEAD --format=%s 2>/dev/null || git -C "$repo_root" log -1 --format=%s)
       fi
       ;;
@@ -574,44 +537,6 @@ find_codex_bin() {
   return 1
 }
 
-redact_text() {
-  awk '
-    BEGIN {
-      secret_key = "([Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee][_-]?[Uu][Rr][Ll]|[Dd][Ss][Nn]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][_-]?[Ss][Tt][Rr][Ii][Nn][Gg])"
-      secret_sep = "[A-Za-z0-9_ -]*[[:space:]]*[:=][[:space:]]*"
-    }
-    {
-      is_diff_path = ($0 ~ /^diff --git / ||
-        $0 ~ /^--- (a\/|\/dev\/null|\")/ ||
-        $0 ~ /^\+\+\+ (b\/|\/dev\/null|\")/ ||
-        $0 ~ /^(rename|copy) (from|to) / ||
-        $0 ~ /^Binary files /)
-      gsub(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^[:space:]\"<>]*:[^[:space:]\"<>@]*@/, "<redacted@url@credentials>@")
-      gsub(/[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*([Bb][Ee][Aa][Rr][Ee][Rr]|[Bb][Aa][Ss][Ii][Cc])[[:space:]]+[^[:space:]\"<>]+/, "Authorization: <redacted-authorization>")
-      gsub(/[Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+[A-Za-z0-9._~+\/=-]{10,}/, "Bearer <redacted-token>")
-      gsub(/[?&][Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Tt][Oo][Kk][Ee][Nn]=[^&[:space:]\"<>]+/, "<redacted-query-secret>")
-      gsub(/[?&][Tt][Oo][Kk][Ee][Nn]=[^&[:space:]\"<>]+/, "<redacted-query-secret>")
-      gsub(/[?&][Aa][Pp][Ii][_-]?[Kk][Ee][Yy]=[^&[:space:]\"<>]+/, "<redacted-query-secret>")
-      gsub(/[?&][Cc][Ll][Ii][Ee][Nn][Tt][_-]?[Ss][Ee][Cc][Rr][Ee][Tt]=[^&[:space:]\"<>]+/, "<redacted-query-secret>")
-      gsub(/[?&][Ss][Ee][Cc][Rr][Ee][Tt]=[^&[:space:]\"<>]+/, "<redacted-query-secret>")
-      gsub(/[?&][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]=[^&[:space:]\"<>]+/, "<redacted-query-secret>")
-      if (!is_diff_path)
-        gsub(/[A-Za-z0-9_\/+=.-]{24,}/, "<redacted-token>")
-      gsub(/-{5}BEGIN [A-Z0-9 ]*PRIVATE KEY-{5}/, "<redacted-private-key-boundary>")
-      gsub(/-{5}END [A-Z0-9 ]*PRIVATE KEY-{5}/, "<redacted-private-key-boundary>")
-      gsub(/(AKIA|ASIA)[0-9A-Z]{16}/, "<redacted-aws-access-key-id>")
-      gsub(secret_key secret_sep "\"[^\"]*\"", "<redacted-secret-assignment>")
-      gsub(secret_key secret_sep "\047[^\047]*\047", "<redacted-secret-assignment>")
-      gsub(secret_key secret_sep "[^,;[:space:]]+", "<redacted-secret-assignment>")
-      gsub(/<redacted@url@credentials>/, "<redacted-url-credentials>")
-    }
-    { print }
-  '
-}
-
-redact_diff() {
-  redact_text
-}
 
 capture_audit_source() {
   case "$kind" in
@@ -696,33 +621,26 @@ audit_snapshot_matches_expected() {  # exact raw source file
 }
 
 build_audit_context() {  # exact raw source file
-  local raw_source_file="$1"
-  local instruction
+  local raw_source_file="$1" instruction
+  if [[ "$kind" == push && "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
+    commit_push_render_evidence "$raw_source_file"
+    return
+  fi
   instruction="$(subagent_prompt audit/commit-push-context "$tooling_root")" || return 1
   printf '%s\n\n' "$instruction"
   case "$kind" in
     commit)
       printf '## Sanitized staged diff\n'
-      redact_diff < "$raw_source_file"
+      commit_push_redact_diff < "$raw_source_file"
       ;;
     push)
-      if [[ "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
-        printf '## Commit subjects in the exact pre-push ref-update context as JSON strings\n'
-        sed -n 's/^commit-subject [0-9a-f][0-9a-f]* //p' "$raw_source_file" \
-          | redact_text | jq -R . | jq -s .
-        printf '\n## Sanitized pre-push ref-update diff\n'
-        redact_diff < "$raw_source_file"
-      else
-        printf '## Commit subjects on origin/main..HEAD as JSON strings\n'
-        (git -C "$repo_root" log origin/main..HEAD --format=%s 2>/dev/null || git -C "$repo_root" log -1 --format=%s) \
-          | redact_text | jq -R . | jq -s .
-        printf '\n## Sanitized branch diff\n'
-        redact_diff < "$raw_source_file"
-      fi
+      printf '## Commit subjects on origin/main..HEAD as JSON strings\n'
+      (git -C "$repo_root" log origin/main..HEAD --format=%s 2>/dev/null || git -C "$repo_root" log -1 --format=%s) \
+        | commit_push_redact_text | jq -R . | jq -s .
+      printf '\n## Sanitized branch diff\n'
+      commit_push_redact_diff < "$raw_source_file"
       ;;
-    *)
-      printf 'Unknown command kind: %s\n' "$kind"
-      ;;
+    *) printf 'Unknown command kind: %s\n' "$kind" ;;
   esac
 }
 
@@ -779,7 +697,7 @@ build_prompt() {  # evidence file, evidence sha256
   local command_json audit_context audit_criteria redacted_command command_bytes
   local target_command_truncated=false
   command_bytes="$(LC_ALL=C printf '%s' "$command" | wc -c | tr -d ' ')"
-  redacted_command="$(printf '%s' "$command" | redact_text)"
+  redacted_command="$(printf '%s' "$command" | commit_push_redact_text)"
   if (( command_bytes > 2048 )); then
     redacted_command='<omitted: target command exceeded 2048 bytes; use the bound hashes and locally checked subject>'
     target_command_truncated=true

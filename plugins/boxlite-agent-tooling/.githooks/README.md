@@ -78,6 +78,29 @@ Existing refs use advertised old SHA; new refs choose the nearest merge-base amo
 
 For `main → stack-1 → stack-2`, pushed `stack-1` becomes the base; no ancestor means full history/empty-tree diff; stale refs/merges limit precision.
 
+### Published-main merges
+
+One existing branch fast-forward ending in a two-parent merge can use scoped evidence when stock GitHub HTTPS proves the imported history is published.
+The optional query uses Git's noninteractive credentials and the exact `git-receive-pack` discovery service, verified TLS, and no redirects.
+Unsupported transports, custom transport configuration, unavailable credentials, ambiguous ancestry, or mixed updates retain the original endpoint evidence.
+
+For feature F merging published main P into N, the reviewer sees unpublished ordinary patches and selected F→N and P→N patches.
+Select every path both parents changed and every result differing from the expected inherited entry.
+Each selected path includes its reason and base/parent/result entries, including overlaps with two empty patches.
+
+| Preserved contract | Enforcement |
+| --- | --- |
+| Complete operation | Original ref headers, destination binding, subjects, endpoint SHA-256, and full endpoint path manifest. |
+| Local checks | Per-ref API checks and complete endpoint token, review-marker, and subject checks finish before substitution. |
+| Metadata independence | Private Git metadata borrows objects read-only; grafts, replacements, commit graphs, consumer attributes, and external transformations cannot change proof reads. |
+| Bounds | One ten-second proof/render deadline; 256-KiB receive response, 16-MiB aggregate tree staging, at most 128 ordinary commits. |
+| Evidence publication | Both raw scoped output and its complete sanitized rendering must fit 256 KiB; private staging replaces endpoint evidence only after success. |
+| Cleanup | The existing process owner terminates descendants; POSIX controller cleanup allows up to four additional seconds. |
+
+`scripts/push-merge-evidence.py` owns optional proof and rendering.
+`.agents/lib/commit-push-evidence.sh` shares full-source checks and sanitized push formatting between the hook and headless auditor.
+The synthetic push command hashes the selected artifact; its endpoint hash binds the complete source that preceded selection.
+
 ## Tests
 
 Run from the repository root:
@@ -85,6 +108,7 @@ Run from the repository root:
 ```sh
 bash plugins/boxlite-agent-tooling/tests/git/githooks.test.sh
 bash plugins/boxlite-agent-tooling/tests/git/lifecycle.test.sh
+bash plugins/boxlite-agent-tooling/tests/git/push-merge-evidence.test.sh
 ```
 
 The first suite covers gates, receipts, chaining, and push input; the second covers
