@@ -180,6 +180,10 @@ Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's can
 | `.agents/lib/shell-scan.sh` | `.agents/hooks/preflight-pr-review.sh` | Splits shell source into simple commands without running it. |
 | `.agents/lib/pr-watch-attachment.jq` | `.agents/hooks/post-remote-write-watch.sh`, `.agents/watch/pr-watch-attach.sh` | Pre-push attachment manifest schema. |
 | `.githooks/hook-lib.sh` | Git hooks | Delegated commit/push gate call and the sync-then-chain step. |
+| `.agents/lib/commit-push-evidence.sh` | Pre-push and headless commit/push auditor | Complete-source checks and identical sanitized push rendering; see [published-main merges](.githooks/README.md#published-main-merges). |
+
+`scripts/push-merge-evidence.py` stages optional receiving-service proof and committed-tree evidence under the existing process-lifetime owner.
+The pre-push hook retains the complete endpoint source through local checks and accepts only complete scoped output within both raw and sanitized limits.
 
 ### Skill ownership
 
