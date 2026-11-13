@@ -11,11 +11,15 @@ import re
 import socket
 import stat
 import subprocess
+import tempfile
 import threading
 import time
 from urllib.parse import unquote, urlencode, urlsplit
 
 LIMIT = 65536
+CURRENT_SOURCE_LIMIT = 32 * 1024 * 1024
+COMBINED_SOURCE_LIMIT = 64 * 1024 * 1024
+OBJECT_BATCH_SIZE = 64
 TOOLS = {
     "source_list": {"prefix": "string"},
     "source_search": {"query": "string"},
@@ -30,9 +34,9 @@ def digest(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def bounded(command, *, timeout=10, maximum=LIMIT, env=None, cwd=None):
+def bounded(command, *, timeout=10, maximum=LIMIT, env=None, cwd=None, stdin=subprocess.DEVNULL):
     """Bound stdout while it streams, including responses without Content-Length."""
-    with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+    with subprocess.Popen(command, stdin=stdin, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, env=env, cwd=cwd) as child:
         output, errors = bytearray(), bytearray()
         overflow = threading.Event()
@@ -147,14 +151,80 @@ def prefetch(design_url, curl, deadline, identifiers=()):
     return records
 
 
-def git(command, root, git_binary, maximum=LIMIT, timeout=10):
+def git(command, root, git_binary, maximum=LIMIT, timeout=10, input_file=subprocess.DEVNULL):
     environment = {"PATH": os.defpath, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1"}
     for key in ("SystemRoot", "WINDIR"):
         if key in os.environ:
             environment[key] = os.environ[key]
     return bounded([git_binary, "--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false",
-                    "-c", "core.hooksPath=" + os.devnull, *command], cwd=root, env=environment, maximum=maximum, timeout=timeout)[0]
+                    "-c", "core.hooksPath=" + os.devnull, *command], cwd=root, env=environment,
+                   maximum=maximum, timeout=timeout, stdin=input_file)[0]
+
+
+def git_objects(history, directory, git_binary, mode, oids, maximum):
+    """Use a private input file so bounded output readers cannot deadlock on stdin."""
+    if not oids:
+        return b""
+    with tempfile.TemporaryFile(dir=directory) as input_file:
+        input_file.write(("\n".join(oids) + "\n").encode("ascii"))
+        input_file.seek(0)
+        return git(["--git-dir=" + str(history), "cat-file", mode], directory, git_binary,
+                   maximum, input_file=input_file)
+
+
+def committed_blobs(history, directory, head, git_binary):
+    """Read bounded groups by full OID; parse bodies by byte length, not lines."""
+    entries = []
+    tree = git(["--git-dir=" + str(history), "ls-tree", "-rz", head], directory, git_binary, 1048576)
+    for entry in tree.split(b"\0"):
+        if not entry:
+            continue
+        header, name = entry.split(b"\t", 1)
+        mode, kind, oid = header.decode("ascii").split()
+        if mode not in ("100644", "100755") or kind != "blob":
+            continue
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
+            raise ValueError("invalid Git batch object identity")
+        entries.append((name.decode("utf-8"), oid))
+    metadata = git_objects(history, directory, git_binary, "--batch-check",
+                           [oid for _, oid in entries], 1048576)
+    headers = metadata.splitlines()
+    if len(headers) != len(entries) or (entries and not metadata.endswith(b"\n")):
+        raise ValueError("malformed Git batch metadata")
+    selected = []
+    for (path, oid), header in zip(entries, headers):
+        fields = header.split()
+        if fields == [oid.encode(), b"missing"]:
+            continue
+        if len(fields) != 3 or fields[:2] != [oid.encode(), b"blob"] or not fields[2].isdigit():
+            raise ValueError("malformed Git batch metadata")
+        size = int(fields[2])
+        if size <= LIMIT:
+            selected.append((path, oid, size))
+    for start in range(0, len(selected), OBJECT_BATCH_SIZE):
+        batch = selected[start:start + OBJECT_BATCH_SIZE]
+        maximum = sum(size for _, _, size in batch) + 128 * len(batch)
+        raw = git_objects(history, directory, git_binary, "--batch", [oid for _, oid, _ in batch], maximum)
+        offset, bodies = 0, []
+        for path, oid, size in batch:
+            end = raw.find(b"\n", offset)
+            if end < 0:
+                raise ValueError("truncated Git batch header")
+            fields = raw[offset:end].split()
+            offset = end + 1
+            if fields == [oid.encode(), b"missing"]:
+                continue
+            if fields != [oid.encode(), b"blob", str(size).encode()]:
+                raise ValueError("malformed Git batch body header")
+            finish = offset + size
+            if raw[finish:finish + 1] != b"\n":
+                raise ValueError("truncated or malformed Git batch body")
+            bodies.append((path, raw[offset:finish]))
+            offset = finish + 1
+        if offset != len(raw):
+            raise ValueError("unexpected trailing Git batch bytes")
+        yield from bodies
 
 
 def sources(root, directory, git_binary):
@@ -186,8 +256,8 @@ def sources(root, directory, git_binary):
         if len(data) > LIMIT or b"\0" in data:
             continue
         total += len(data)
-        if total > 16 * 1024 * 1024:
-            raise ValueError("tracked source snapshot exceeds limit")
+        if total > CURRENT_SOURCE_LIMIT:
+            raise ValueError("tracked source snapshot exceeds current-text limit (32 MiB)")
         manifest[path] = {"current": data.decode("utf-8", errors="replace")}
     # A clean object reader ignores local grafts, replacements, hooks, and filters.
     object_dir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root, git_binary).decode().strip()
@@ -198,23 +268,12 @@ def sources(root, directory, git_binary):
     git(["init", "--bare", "--object-format=" + object_format, str(history)], directory, git_binary)
     (history / "objects/info/alternates").write_text(str(Path(object_dir) / "objects") + "\n")
     head = git(["rev-parse", "HEAD"], root, git_binary).decode().strip()
-    for entry in git(["--git-dir=" + str(history), "ls-tree", "-rz", head], directory, git_binary, 1048576).split(b"\0"):
-        if not entry:
-            continue
-        header, name = entry.split(b"\t", 1)
-        mode, kind, oid = header.decode().split()
-        path = name.decode("utf-8")
-        if mode not in ("100644", "100755") or kind != "blob":
-            continue
-        try:
-            data = git(["--git-dir=" + str(history), "cat-file", "blob", oid], directory, git_binary)
-            if b"\0" not in data:
-                total += len(data)
-                if total > 32 * 1024 * 1024:
-                    raise OverflowError("tracked source snapshot exceeds limit")
-                manifest.setdefault(path, {})["base"] = data.decode("utf-8", errors="replace")
-        except ValueError:
-            pass  # The path remains discoverable only when bounded textual content exists.
+    for path, data in committed_blobs(history, directory, head, git_binary):
+        if b"\0" not in data:
+            total += len(data)
+            if total > COMBINED_SOURCE_LIMIT:
+                raise OverflowError("tracked source snapshot exceeds combined-text limit (64 MiB)")
+            manifest.setdefault(path, {})["base"] = data.decode("utf-8", errors="replace")
     return {"files": manifest, "history": str(history), "head": head, "git": git_binary}
 
 

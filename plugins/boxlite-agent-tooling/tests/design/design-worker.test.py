@@ -119,6 +119,15 @@ class OwnedWorker(unittest.TestCase):
             f"cat <<'EXAMPLE'\n{runner}\nEXAMPLE",
             f"bash </dev/null; cat <<'EXAMPLE'\n{runner}\nEXAMPLE",
             f"printf '%s\\n' '$PLUGIN_ROOT/scripts/design-doc.sh run'",
+            f'if rg -n run "{self.plugin}/scripts/design-doc.sh"; then :; fi',
+            f'>/dev/null rg -n run "{self.plugin}/scripts/design-doc.sh"',
+            f'rg -n run "{self.plugin}/scripts/design-doc.sh">/dev/null',
+            f'rg -n run {self.plugin}/scripts/design-doc."sh"',
+            f"'if' printf '%s' '{runner}'",
+            f'command -v "{self.plugin}/scripts/design-doc.sh"',
+            f'command -V "{self.plugin}/scripts/design-doc.sh"',
+            f'bash -n "{self.plugin}/scripts/design-doc.sh" run',
+            f"env -S 'printf \"%s\" \"{self.plugin}/scripts/design-doc.sh run\"'",
         )
         executable = (
             f"bash -c '{runner}'",
@@ -127,6 +136,22 @@ class OwnedWorker(unittest.TestCase):
             'bash "$PLUGIN_ROOT/scripts/design-doc.sh" run',
             f'env PATH=/tmp {runner}',
             f'true; {runner}',
+            f'if {runner}; then :; fi',
+            f'while {runner}; do :; done',
+            f'if false; then :; else {runner}; fi',
+            f'! {runner}',
+            f'time -p {runner}',
+            f'>/dev/null {runner}',
+            f'2> /dev/null {runner}',
+            f'bash 2>/dev/null "{self.plugin}/scripts/design-doc.sh" run',
+            f'bash "{self.plugin}/scripts/design-doc.sh">/dev/null run',
+            f'{self.plugin}/scripts/design-doc.sh>/dev/null run',
+            f'bash {self.plugin}/scripts/design-doc."sh" run',
+            f"env -S '{runner}'",
+            f'env -S bash "{self.plugin}/scripts/design-doc.sh" run',
+            f"env --split-string='{runner}'",
+            f'bash -o errexit "{self.plugin}/scripts/design-doc.sh" run',
+            f'bash -O extglob "{self.plugin}/scripts/design-doc.sh" run',
         )
         before = sorted(path.name for path in (self.repo / ".git").glob("agent-tooling-design-*.json"))
         for host in ("codex", "claude"):
@@ -139,6 +164,139 @@ class OwnedWorker(unittest.TestCase):
                     self.assertNotEqual(self.hook(command, host).returncode, 0)
         self.assertFalse((self.bin / "observed").exists())
         self.assertEqual(before, sorted(path.name for path in (self.repo / ".git").glob("agent-tooling-design-*.json")))
+
+    def test_many_tracked_blobs_reach_owned_review_within_setup_budget(self):
+        bulk = self.repo / "many-files"
+        bulk.mkdir()
+        for index in range(1000):
+            (bulk / str(index)).write_text("x")
+        self.git("add", "many-files")
+        self.git("-c", "core.hooksPath=/dev/null", "commit", "-qm", "many blobs")
+        actual_git = shutil.which("git")
+        delayed_git = self.bin / "delayed-git"
+        delayed_git.write_text(
+            "#!/usr/bin/env python3\nimport os,sys,time\n"
+            "if 'cat-file' in sys.argv[1:]: time.sleep(0.04)\n"
+            f"os.execv({actual_git!r}, [{actual_git!r}, *sys.argv[1:]])\n")
+        delayed_git.chmod(0o755)
+        policy_path = self.plugin / ".agents/design-worker-policy.json"
+        policy = json.loads(policy_path.read_text())
+        policy["executables"]["git"] = str(delayed_git)
+        policy_path.write_text(json.dumps(policy))
+        result = self.hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.record("audit")["verdict"], "PASS")
+
+    def test_git_batch_protocol_accepts_object_formats_and_rejects_malformed_data(self):
+        spec = importlib.util.spec_from_file_location("source_broker", self.plugin / "scripts/design-worker-broker.py")
+        broker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(broker)
+        actual_git = shutil.which("git")
+        sha256_repo = self.root / "sha256-repo"
+        subprocess.run([actual_git, "init", "-q", "--object-format=sha256", str(sha256_repo)], check=True)
+        (sha256_repo / "source.txt").write_text("tracked evidence\n")
+        subprocess.run([actual_git, "-C", str(sha256_repo), "add", "source.txt"], check=True)
+        subprocess.run([actual_git, "-C", str(sha256_repo), "-c", "core.hooksPath=/dev/null",
+                        "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-qm", "sha256 fixture"], check=True)
+        for index, root in enumerate((self.repo, sha256_repo)):
+            directory = self.root / f"valid-format-{index}"
+            directory.mkdir()
+            snapshot = broker.sources(root, directory, actual_git)
+            self.assertEqual(snapshot["files"]["source.txt"]["base"], "tracked evidence\n")
+
+        control = self.bin / "batch-mode"
+        malformed_git = self.bin / "malformed-git"
+        malformed_git.write_text(
+            "#!/usr/bin/env python3\nimport subprocess,sys\nfrom pathlib import Path\n"
+            f"real_git={actual_git!r}\ncontrol={str(control)!r}\n" + """
+mode=Path(control).read_text()
+result=subprocess.run([real_git,*sys.argv[1:]],input=sys.stdin.buffer.read(),capture_output=True)
+out=result.stdout
+if 'cat-file' in sys.argv and '--batch-check' in sys.argv and mode=='metadata':
+    out=b'invalid metadata\\n'
+if 'cat-file' in sys.argv and '--batch-check' in sys.argv and mode=='missing':
+    out=out.split()[0]+b' missing\\n'
+if 'cat-file' in sys.argv and '--batch' in sys.argv:
+    end=out.index(b'\\n')
+    fields=out[:end].split()
+    if mode=='missing-content':
+        sys.stdout.buffer.write(fields[0]+b' missing\\n')
+        sys.exit(0)
+    if mode=='identity': fields[0]=b'0'*len(fields[0])
+    if mode=='size': fields[2]=str(int(fields[2])+1).encode()
+    out=b' '.join(fields)+out[end:]
+    if mode=='truncated': out=out[:-1]
+    if mode=='delimiter':
+        offset=end+1+int(fields[2])
+        out=out[:offset]+b'x'+out[offset+1:]
+    if mode=='trailing': out+=b'unexpected'
+sys.stdout.buffer.write(out)
+sys.stderr.buffer.write(result.stderr)
+sys.exit(result.returncode)
+""")
+        malformed_git.chmod(0o755)
+        for mode in ("missing", "missing-content"):
+            control.write_text(mode)
+            directory = self.root / f"accepted-{mode}"
+            directory.mkdir()
+            snapshot = broker.sources(self.repo, directory, str(malformed_git))
+            self.assertEqual(snapshot["files"]["source.txt"], {"current": "tracked evidence\n"})
+        for mode in ("metadata", "identity", "size", "truncated", "delimiter", "trailing"):
+            with self.subTest(mode=mode):
+                control.write_text(mode)
+                directory = self.root / f"malformed-{mode}"
+                directory.mkdir()
+                with self.assertRaisesRegex(ValueError, "batch"):
+                    broker.sources(self.repo, directory, str(malformed_git))
+
+    def test_source_snapshot_accepts_exact_capacity_and_rejects_each_overflow(self):
+        spec = importlib.util.spec_from_file_location("source_broker", self.plugin / "scripts/design-worker-broker.py")
+        broker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(broker)
+        capacity = 32 * 1024 * 1024
+        (self.repo / "binary").write_bytes(b"private\0binary")
+        (self.repo / "oversized").write_bytes(b"x" * 65537)
+        (self.repo / "empty").write_bytes(b"")
+        (self.repo / "exact-limit").write_bytes(b"x" * 65536)
+        remaining = capacity - (self.repo / "source.txt").stat().st_size - 65536
+        bulk = self.repo / "bulk"
+        bulk.mkdir()
+        index = 0
+        while remaining:
+            size = min(60 * 1024, remaining)
+            (bulk / str(index)).write_bytes(b"x" * size)
+            remaining -= size
+            index += 1
+        self.git("add", "bulk", "binary", "oversized", "empty", "exact-limit")
+        self.git("-c", "core.hooksPath=/dev/null", "commit", "-qm", "capacity fixture")
+        snapshot_dir = self.root / "source-snapshot"
+        snapshot_dir.mkdir()
+        snapshot = broker.sources(self.repo, snapshot_dir, shutil.which("git"))
+        self.assertEqual(sum(len(v["current"].encode()) for v in snapshot["files"].values()), capacity)
+        self.assertEqual(sum(len(v["base"].encode()) for v in snapshot["files"].values()), capacity)
+        self.assertEqual(snapshot["files"]["source.txt"]["current"], "tracked evidence\n")
+        self.assertNotIn("untracked-secret", snapshot["files"])
+        self.assertNotIn("binary", snapshot["files"])
+        self.assertNotIn("oversized", snapshot["files"])
+        self.assertEqual(snapshot["files"]["empty"], {"current": "", "base": ""})
+        self.assertEqual(len(snapshot["files"]["exact-limit"]["base"]), 65536)
+        del snapshot
+
+        overflow = self.repo / "overflow.txt"
+        overflow.write_bytes(b"x")
+        self.git("add", "overflow.txt")
+        current_dir = self.root / "current-overflow"
+        current_dir.mkdir()
+        with self.assertRaisesRegex(ValueError, "current.*32 MiB"):
+            broker.sources(self.repo, current_dir, shutil.which("git"))
+
+        self.git("-c", "core.hooksPath=/dev/null", "commit", "-qm", "committed overflow fixture")
+        overflow.unlink()
+        combined_dir = self.root / "combined-overflow"
+        combined_dir.mkdir()
+        with self.assertRaisesRegex(OverflowError, "combined.*64 MiB"):
+            broker.sources(self.repo, combined_dir, shutil.which("git"))
 
     def test_binding_failures_explain_registration_without_mutating_records(self):
         binding = self.repo / ".git/agent-tooling-design-doc.json"

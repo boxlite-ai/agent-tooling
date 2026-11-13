@@ -168,7 +168,7 @@ Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's can
 | `.agents/hooks/design-worker-state.sh` | Private snapshot, assignment, human acceptance, and publication transitions under the clone transaction. |
 | `.agents/hooks/design-worker-group.sh` | POSIX leader adapter over the shared in-group controller. |
 | `scripts/design-worker.py` | Exact snapshot identities, installed profiles, canonical tasks, native result parsing, and setup/review supervisors. |
-| `scripts/design-worker-broker.py` | Typed read-only source/history/cache tools and isolated public prefetch. |
+| `scripts/design-worker-broker.py` | Typed read-only source/history/cache tools, isolated public prefetch, and 32 MiB current/64 MiB combined source ceilings. |
 | `scripts/design-worker-process.py` | Separate POSIX lifetimes and suspended Windows Job Object assignment. |
 | `.agents/design-worker-policy.json` | Installed CLI versions and models; optional qualified administrative paths and provider settings. |
 
