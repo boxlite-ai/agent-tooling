@@ -158,6 +158,19 @@ AUDITOR_SESSION_SCOPE=<scope> AUDITOR_PROMPT_EPOCH=<epoch> CODEX_COMMIT_PUSH_AUD
 
 It prints `codex audit commit: PASS` or `FAIL`; findings go to stderr.
 
+### POSIX controller descriptors
+
+Both headless runners use the [shared controller](../../lib/audit-process-group.sh) on macOS and Linux, including macOS Bash3.2.
+Startup requires readable, searchable `/dev/fd` and unused descriptors12–17; unavailable inspection or an occupied handle fails before FIFO creation.
+
+```text
+inspect free12–17 → bootstrap16/17 → directional request12/13 + lifetime14/15 → close bootstrap → unlink FIFOs
+```
+
+The parent-shell check sees Bash's close-on-exec redirection backups, which a child inspection would miss.
+It preserves caller handles and reports the occupied descriptor instead of waiting on a FIFO without its bootstrap writer.
+Request-writer closure still initiates shutdown; lifetime EOF still requires controller exit, followed by survivor verification.
+
 ### Exit codes
 
 | Exit | `run-verdict-audit.sh` | `run-commit-push-audit.sh` |

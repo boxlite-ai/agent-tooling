@@ -6,20 +6,32 @@ audit_group_uses_controller() {
 }
 
 audit_group_open_controller() {  # private run directory
-  local request="$1/group-request" lifetime="$1/group-lifetime"
+  local request="$1/group-request" lifetime="$1/group-lifetime" descriptor
+  # Bash saves redirected function streams on close-on-exec descriptors starting at10.
+  # Inspect in this shell: a child cannot see those saved handles.
+  if [[ ! -d /dev/fd || ! -r /dev/fd || ! -x /dev/fd ]]; then
+    printf 'audit controller: cannot inspect /dev/fd\n' >&2
+    return 1
+  fi
+  for descriptor in 12 13 14 15 16 17; do
+    if [[ -e /dev/fd/$descriptor || -L /dev/fd/$descriptor ]]; then
+      printf 'audit controller: private descriptor %s is occupied\n' "$descriptor" >&2
+      return 1
+    fi
+  done
   if ! mkfifo "$request" "$lifetime"; then
     rm -f "$request" "$lifetime"
     return 1
   fi
   # Temporary read/write ends let us open both halves before the group exists.
   # shellcheck disable=SC2094 # Both paths are FIFOs, opened on separate descriptors.
-  if ! { exec 10<>"$request" 11<>"$lifetime" &&
+  if ! { exec 16<>"$request" 17<>"$lifetime" &&
          exec 12<"$request" 13>"$request" 14<"$lifetime" 15>"$lifetime"; }; then
-    exec 10>&- 11>&- 12<&- 13>&- 14<&- 15>&-
+    exec 16>&- 17>&- 12<&- 13>&- 14<&- 15>&-
     rm -f "$request" "$lifetime"
     return 1
   fi
-  exec 10>&- 11>&-
+  exec 16>&- 17>&-
   if ! rm -f "$request" "$lifetime"; then
     exec 12<&- 13>&- 14<&- 15>&-
     return 1
