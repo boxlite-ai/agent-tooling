@@ -99,6 +99,7 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | Commit/push dossier | Branch, HEAD, staged/pushed diff, command, commit subject; five-hour validity; mismatch/age denies. |
 | Receipt | Parent, tree, subject; never diff hash alone. |
 | Design verdict | Root, branch, URL, live-content SHA-256; automatic results require worker provenance and advice bound to the verdict task. Human overrules retain their content binding. |
+| Timed PR request | Review and size bindings survive explicit renewal; archive the prior attempt before publishing a fresh pending ID and deadline. Renewal grants no approval. |
 
 ## Invariants
 

@@ -23,9 +23,24 @@ Git retry matches the session, epoch, branch, head, and latest failure. A record
 
 ### Renewal
 
-Only explicit human instruction renews an expired or declined size request. Remeasure and show the current diff before renewal.
+Only explicit human instruction renews an expired review request or an expired or declined size request.
+Show the current diff and description before renewing review; remeasure the diff before renewing size.
+
+For example, expired review R1 becomes pending R2; R1's late reply cannot approve R2.
+
+```sh
+bash <plugin-root>/scripts/timed-user-prompt.sh renew STATE REQUEST_ID 'VERBATIM_HUMAN_INSTRUCTION'
+```
 
 The state machine archives the old record and instruction under lock, then publishes a fresh ID and 300-second deadline. A reply to the archived ID cannot answer the new request.
+
+Renewal preserves the target binding and grants no approval; the replacement requires a fresh timely reply.
+Ordinary retries retain the pending ID and deadline; pending, accepted, and consumed requests cannot be renewed.
+The publishing gate checks the current target and description before consuming acceptance.
+
+After a write error, inspect the active request and `STATE.expired-REQUEST_ID.json` before retrying.
+An archive with the original active ID means publication failed; an active ID matching `successor_id` means the replacement was published.
+Keep both records intact; neither outcome grants approval, and an existing archive blocks another renewal of its original ID.
 
 ### Unsupported records
 

@@ -119,7 +119,8 @@ wait
 expect "$(cat "$scratch/1.json")" '.deadline == 2300'
 printf '2400\n' > "$CONFIRMATION_TEST_CLOCK"
 expect "$(run request "$scratch/state with spaces/concurrent" "$spec")" '.status == "expired" and .deadline == 2300'
-reject renew "$scratch/state with spaces/concurrent" "$(jq -r .id "$scratch/1.json")" 'Please request the exception again.'
+expect "$(run renew "$scratch/state with spaces/concurrent" "$(jq -r .id "$scratch/1.json")" \
+  'Please renew the review request.')" '.status == "pending" and .deadline == 2700 and .accepted_at == null'
 
 state="$scratch/state with spaces/renewal.json"
 request="$(run request "$state" "$size_spec")"
