@@ -11,15 +11,16 @@ audit_group_open_controller() {  # private run directory
     rm -f "$request" "$lifetime"
     return 1
   fi
-  # Temporary read/write ends let us open both halves before the group exists.
+  # Bash 3.2 can use 10/11 to save redirected function input. Keep bootstrap
+  # writers separate from those slots and from the final read-only endpoints.
   # shellcheck disable=SC2094 # Both paths are FIFOs, opened on separate descriptors.
-  if ! { exec 10<>"$request" 11<>"$lifetime" &&
+  if ! { exec 16<>"$request" 17<>"$lifetime" &&
          exec 12<"$request" 13>"$request" 14<"$lifetime" 15>"$lifetime"; }; then
-    exec 10>&- 11>&- 12<&- 13>&- 14<&- 15>&-
+    exec 16>&- 17>&- 12<&- 13>&- 14<&- 15>&-
     rm -f "$request" "$lifetime"
     return 1
   fi
-  exec 10>&- 11>&-
+  exec 16>&- 17>&-
   if ! rm -f "$request" "$lifetime"; then
     exec 12<&- 13>&- 14<&- 15>&-
     return 1

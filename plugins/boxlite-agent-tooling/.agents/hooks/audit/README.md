@@ -102,6 +102,20 @@ Revalidate this sequence with `.agents/skills/boxlite-visualize/scripts/validate
 
 ## Runners
 
+### POSIX FIFO descriptor ownership
+
+The shared process-group helper owns descriptors 12–17 during setup; callers must leave them available.
+
+| Descriptors | Purpose | Lifetime |
+| --- | --- | --- |
+| 12 / 13 | Controller reads requests / supervisor writes requests | Close the writer to notify the controller |
+| 14 / 15 | Supervisor reads lifetime / controller holds its writer | Controller exit produces EOF for the supervisor |
+| 16 / 17 | Temporary read/write FIFO bootstrap handles | Close before launching the process group, including on setup failure |
+
+Bash 3.2 can use 10/11 to restore a redirected function's stdin, so bootstrap handles avoid those slots.
+Keep the final readers read-only: reusing them as read/write bootstraps can retain writers and suppress cancellation EOF.
+The [controller regression suite](../../../tests/audit/audit-process-group.test.sh) checks redirected startup, restored stdin, real channel traffic, EOF and failure cleanup.
+
 ### Verdict runner
 
 `run-verdict-audit.sh` selects the invoking host's auditor, with the
