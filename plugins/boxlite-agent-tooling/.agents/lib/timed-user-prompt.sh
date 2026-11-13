@@ -113,9 +113,10 @@ _timed_user_prompt_transition() { # same arguments as the facade; lock already h
       else . end
     elif . == null or .id != $arg then error("unknown or superseded confirmation")
     elif $op == "renew" then
-      if (.status | IN("expired","declined") | not) or .spec.prefix != "pr-size-exception:"
+      if (.status | IN("expired","declined") | not)
+        or (.spec.prefix | IN("pr-size-exception:","reviewed:") | not)
         or ($reply | line and test("\\S") | not)
-      then error("renewal requires an expired or declined PR-size request and the explicit human instruction")
+      then error("renewal requires an expired PR review or expired/declined PR-size request and explicit human instruction")
       else .id = $id | .created_at = $now | .deadline = ($now+300)
         | .status = "pending" | .response = "" | .fallback_delivered = false end
     elif $op == "prompt-reply" then

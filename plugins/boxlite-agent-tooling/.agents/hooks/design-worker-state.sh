@@ -172,9 +172,13 @@ case "${1:-}" in
       verdict_audit_write_atomic "$path" ;;
   public)
     directory="$(git -C "$2" rev-parse --absolute-git-dir)" || exit 2
-    binding="$(verdict_audit_read_single_record "$directory/agent-tooling-design-doc.json")" || exit 2
+    binding="$(verdict_audit_read_single_record "$directory/agent-tooling-design-doc.json")" || {
+      _design_doc_error 'register a readable design document before running the assigned worker'; exit 2;
+    }
     jq -ce --arg root "$(cd "$2" && pwd -P)" --arg branch "$(_design_doc_context "$2")" \
-      'select(keys==["branch","root","url"] and .root==$root and .branch==$branch) | {url}' <<<"$binding" ;;
+      'select(keys==["branch","root","url"] and .root==$root and .branch==$branch) | {url}' <<<"$binding" || {
+      _design_doc_error 'design registration does not match this checkout; register the design for this worktree and branch'; exit 2;
+    } ;;
   binding) shift; _design_doc_binding "$@" ;;
   log) _design_doc_log_store "$2" ;;
   snapshot) worker_snapshot "$2" ;;

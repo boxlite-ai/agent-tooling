@@ -99,6 +99,7 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | Commit/push dossier | Branch, HEAD, staged/pushed diff, command, commit subject; five-hour validity; mismatch/age denies. |
 | Receipt | Parent, tree, subject; never diff hash alone. |
 | Design verdict | Root, branch, URL, live-content SHA-256; automatic results require worker provenance and advice bound to the verdict task. Human overrules retain their content binding. |
+| Timed PR request | Review and size bindings survive explicit renewal; archive the prior attempt before publishing a fresh pending ID and deadline. Renewal grants no approval. |
 
 ## Invariants
 
@@ -168,7 +169,7 @@ Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's can
 | `.agents/hooks/design-worker-state.sh` | Private snapshot, assignment, human acceptance, and publication transitions under the clone transaction. |
 | `.agents/hooks/design-worker-group.sh` | POSIX leader adapter over the shared in-group controller. |
 | `scripts/design-worker.py` | Exact snapshot identities, installed profiles, canonical tasks, native result parsing, and setup/review supervisors. |
-| `scripts/design-worker-broker.py` | Typed read-only source/history/cache tools and isolated public prefetch. |
+| `scripts/design-worker-broker.py` | Typed read-only source/history/cache tools, isolated public prefetch, and 32 MiB current/64 MiB combined source ceilings. |
 | `scripts/design-worker-process.py` | Separate POSIX lifetimes and suspended Windows Job Object assignment. |
 | `.agents/design-worker-policy.json` | Installed CLI versions and models; optional qualified administrative paths and provider settings. |
 
@@ -177,7 +178,7 @@ Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's can
 | Library | Used by | Owns |
 | --- | --- | --- |
 | `.agents/lib/tooling-profile.sh` | Installer, refresh, verification, profile validation, host bootstraps | Profile `tooling` fields and hold policy; callers report its error. |
-| `.agents/lib/shell-scan.sh` | `.agents/hooks/preflight-pr-review.sh` | Splits shell source into simple commands without running it. |
+| `.agents/lib/shell-scan.sh` | `.agents/hooks/preflight-pr-review.sh`, `.agents/hooks/preflight-design-worker.sh` | Splits shell source into simple commands without running it. |
 | `.agents/lib/pr-watch-attachment.jq` | `.agents/hooks/post-remote-write-watch.sh`, `.agents/watch/pr-watch-attach.sh` | Pre-push attachment manifest schema. |
 | `.githooks/hook-lib.sh` | Git hooks | Delegated commit/push gate call and the sync-then-chain step. |
 | `.agents/lib/commit-push-evidence.sh` | Pre-push and headless commit/push auditor | Complete-source checks and identical sanitized push rendering; see [published-main merges](.githooks/README.md#published-main-merges). |

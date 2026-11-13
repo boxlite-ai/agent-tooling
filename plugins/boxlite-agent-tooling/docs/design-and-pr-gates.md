@@ -114,6 +114,24 @@ bash "/absolute/installed/plugin/scripts/design-doc.sh" run
 ```
 
 The host Bash hook derives the role and launches a fresh CLI; the command itself only reports status.
+The hook distinguishes executable runner commands from literal arguments and quoted examples using the shared shell scanner.
+Only the exact canonical action launches a worker; prefixes, suffixes, compound execution, and evaluated runner payloads are denied.
+
+The scanner callback flushes the final word, classifies executable position, marks shell-consumed heredocs, and clears command arrays.
+Recursive scans retain a detected denial; quoted data passed to readers or printers remains inert.
+Command recognition preserves executable fragments attached to redirections and handles command-leading control words and quoted filename fragments.
+
+Lookup-only command flags and Bash syntax checks stay inert; evaluated env splitting and shell options with operands are inspected.
+
+Missing, invalid, or mismatched registration fails with a registration diagnostic and preserves the original record.
+
+Source capture permits 32 MiB of current text and 64 MiB combined with committed text; overflow names the exceeded ceiling.
+The 64 KiB per-blob limit, 10,000-file limit, tracked regular-file selection, and symlink protections remain enforced.
+Committed blobs use groups of at most 64 Git batch requests, with validated identities, sizes, framing, and bounded output; the setup lease remains 30 seconds.
+
+Malformed batch replies abort capture; missing, binary, and oversized blobs remain excluded, while repeated object IDs count once per tracked path.
+Only private object-ID request files supply Git stdin; network operations retain null stdin.
+
 The first run records an auditor result; the next edit requests an advisor before showing findings.
 A matching human overrule retains its authority; an explicit run with complete automatic approval starts a fresh audit.
 
