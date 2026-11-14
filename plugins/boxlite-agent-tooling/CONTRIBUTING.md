@@ -73,7 +73,7 @@ Apply [size/decomposition policy](guidance/workflow.md#pr-size-and-decomposition
 
    The design is for human reviewers; the log stays in the clone, bound to the audit, and is never published. An empty log deletes it; any log change needs a new audit.
 
-3. Follow the gate's auditor route, then advisor route; show advice to the human, who selects what to adopt.
+3. Follow the gate's auditor route, then advisor route; start coding once advice records, and report it with the result for the human to select from.
 4. Read/apply `boxlite-pr-preparation` for drafts/revisions; include the registered full URL and substantive project-documentation link.
 5. Pass safely quoted inline text or use the [guarded PR body-file launcher](docs/design-and-pr-gates.md#pr-body-files).
 

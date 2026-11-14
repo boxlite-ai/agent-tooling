@@ -63,6 +63,20 @@ Each live PASS/FAIL needs fresh advice after required stop/reflection handling: 
 
 Reject severity labels/unresolved local anchors; outside evidence remains unchecked; advice never mutates verdicts or enters `prior_findings`.
 
+Recorded advice opens the edit gate without a human wait. The agent reports each advisory and advice item in its final reply and the PR; an item changes the design only after the human accepts it.
+
+### Stage progression
+
+[Shared guidance](../guidance/workflow.md#progression) makes each passed stage start the next one without asking.
+
+| Handoff | Signal the agent receives |
+| --- | --- |
+| Design PASS → code | The advice prompt orders implementation once advice records. |
+| Code → commit and push | Guidance only; no hook can tell finished code from work in progress. |
+| Push → draft PR | The post-push context asks for a draft PR when a feature branch has none; a default-branch push gets no request. |
+
+The rule is guidance, not a gate: an agent that stops anyway is not blocked. Gates that ask for a human choice keep their pauses.
+
 ### Design audit loop
 
 `.agents/lib/design-audit.jq` counts FAILs per root/branch across rebinding; PASS, overrule, or redesign resets the count.

@@ -8,6 +8,24 @@ Apply the `boxlite-clean-code` skill for design, implementation, refactoring, an
 
 MANDATORY: File all agent-tooling issues from any consumer in [upstream GitHub Issues](https://github.com/boxlite-ai/agent-tooling/issues).
 
+### Progression
+
+A passed stage starts the next one; never ask whether to continue.
+
+| When | Next, without asking |
+| --- | --- |
+| The design audit records PASS and advice is recorded | Start implementing |
+| Implementation is finished and its checks pass | Commit and push |
+| The commit and push audits record PASS and the push succeeds | Open a draft PR |
+
+Pause only when:
+
+- A gate asks for a human choice: PR size above 400, a stopped audit loop, an API compatibility decision, or a disclosure approval.
+- The next action is destructive or cannot be undone.
+- The request cannot answer a requirement that changes the result.
+
+Report design advisories and advice in the final reply and the PR; adopt an item only after the human accepts it.
+
 ### Understand
 
 - Read this file, the nearest README/CONTRIBUTING, relevant docs, and the actual source before editing.
