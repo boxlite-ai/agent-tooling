@@ -11,8 +11,9 @@ def audit_deadline_qualified($outcome; $attempt):
   and ($outcome.deadline_review.recorded_at | ar_timestamp)
   and ($outcome.deadline_review.recorded_at >= $attempt.input.deadline);
 def ar_finding:
-  ar_keys(["id","invariant","behavior","criterion","evidence","origin","origin_evidence",
-    "review_gap","review_change","reopening","conflict","criterion_change"])
+  (del(.severity) | ar_keys(["id","invariant","behavior","criterion","evidence","origin","origin_evidence",
+    "review_gap","review_change","reopening","conflict","criterion_change"]))
+  and (.severity == null or (.severity | IN("critical","high")))
   and (.id == "NEW" or (.id | ar_id))
   and all(.invariant,.behavior,.criterion,.evidence,.origin_evidence; ar_text)
   and (.origin | IN("existing","introduced","missed_earlier","unknown"))
@@ -29,7 +30,8 @@ def ar_disposition:
   and (.status | IN("open","resolved","retracted","not_assessed")) and (.evidence | ar_text);
 def ar_registry:
   type == "array" and length <= 128
-  and all(.[]; ar_keys(["id","invariant","behavior","criterion","status","evidence"])
+  and all(.[]; (del(.severity) | ar_keys(["id","invariant","behavior","criterion","status","evidence"]))
+    and (.severity == null or (.severity | IN("critical","high")))
     and (.id | ar_id) and all(.invariant,.behavior,.criterion,.evidence; ar_text)
     and (.status | IN("open","resolved","retracted","not_assessed")))
   and ([.[].id] | length == (unique | length))
@@ -73,6 +75,7 @@ def audit_reconcile($review; $attempt; $verdict; $deadline):
       then error("new finding on rerun must explain its introduction or earlier miss")
       else .registry += [{id:("F" + ((.registry | length) + 1 | tostring)),
         invariant:$finding.invariant,behavior:$finding.behavior,criterion:$finding.criterion,
+        severity:($finding.severity // "critical"),
         status:"open",evidence:$finding.evidence}] end
     elif $index == null then error("unknown finding ID")
     elif .registry[$index].invariant != $finding.invariant or .registry[$index].behavior != $finding.behavior
@@ -86,7 +89,11 @@ def audit_reconcile($review; $attempt; $verdict; $deadline):
     elif .registry[$index].status != "open" and .registry[$index].status != "not_assessed"
     then error("finding contradicts its disposition")
     else .registry[$index].evidence = $finding.evidence end |
-    if $index != null then .registry[$index].criterion = $finding.criterion else . end |
+    if $index != null then .registry[$index].criterion = $finding.criterion
+      | .registry[$index].severity =
+        (if ($registry[$index].status | IN("resolved","retracted")) then ($finding.severity // "critical")
+         elif $registry[$index].severity == "high" and $finding.severity == "high" then "high" else "critical" end)
+    else . end |
     if $finding.conflict != null and ([$registry[].id] | index($finding.conflict.previous_id)) == null
     then error("conflicting advice must reference a previous finding") else . end) |
   if (.registry | ar_registry | not) then error("invalid finding registry") else . end;

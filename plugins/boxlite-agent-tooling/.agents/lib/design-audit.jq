@@ -2,6 +2,7 @@
 # branch. A cycle ends with PASS, OVERRIDDEN or Redesign; FAILs count until then.
 include "audit-reflection-contract";
 include "audit-reconciliation";
+include "audit-loop";
 def da_keys: ["advisories","branch","content_sha256","extra","failures","findings",
   "overruled","reflection","root","stop","url","verdict"];
 def da_line: type == "string" and length >= 1 and length <= 500 and (test("[[:cntrl:]]") | not);
@@ -23,7 +24,8 @@ def da_worker_provenance($role):
   and (if $role == "auditor" then .verdict_task_id == ""
     else (.verdict_task_id | type == "string" and test("^[0-9a-f]{32}$")) end);
 def da_valid:
-  (del(.deadline_review,.worker_provenance) | keys) == da_keys
+  (del(.deadline_review,.worker_provenance,.progress) | keys) == da_keys
+  and (.progress == null or (.progress | audit_loop_view_valid))
   and (.worker_provenance == null or da_worker_provenance("auditor"))
   and all(.url, .content_sha256; type == "string")
   and (.deadline_review == null or (.deadline_review |
@@ -66,6 +68,7 @@ def da_request($root; $url; $digest; $history):
      then .findings else [] end),
    open_findings:(if .verdict == "FAIL" then .findings else [] end),
    fails:(.failures | length), stop, blocked:da_blocked, reflection_due:da_reflection_due,
+   recovery:(audit_loop_design_view | audit_loop_classify),
    redesign:da_redesign($digest), history_hash:$history, failure_ids:.failures};
 # A second FAIL stops for the human when a blocking finding repeats or their number did
 # not drop; the third FAIL, or any FAIL after Reflect again, always stops.
@@ -74,7 +77,8 @@ def da_record($v; $url; $digest):
   elif da_reflection_due then error("submit the reflection before this audit: design-doc.sh reflect")
   elif da_redesign($digest) then error("Redesign needs a fresh draft; this content already failed")
   else
-    del(.worker_provenance)
+    (audit_loop_design_record($v.verdict; $v.findings)) as $progress
+    | del(.worker_provenance)
     | (if .verdict == "FAIL" then .findings else [] end) as $previous
     | (if .verdict == "FAIL" then .failures else [] end) as $failures
     | (if .url == $url then .overruled else [] end) as $overruled
@@ -87,7 +91,7 @@ def da_record($v; $url; $digest):
             else "none" end)
       end
     | .url = $url | .content_sha256 = $digest | .advisories = $v.advisories
-    | .overruled = $overruled | .extra = false | .reflection = null
+    | .overruled = $overruled | .extra = false | .reflection = null | .progress=$progress
     | del(.deadline_review) | if $v.deadline_review != null then . + {deadline_review:$v.deadline_review} else . end
   end;
 def da_reflect($body; $history):
