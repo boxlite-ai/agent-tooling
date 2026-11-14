@@ -67,11 +67,24 @@ Reject severity labels/unresolved local anchors; outside evidence remains unchec
 
 `.agents/lib/design-audit.jq` counts FAILs per root/branch across rebinding; PASS, overrule, or redesign resets the count.
 
+`.agents/lib/audit-loop.jq` classifies the design and commit/push audit loops from their last two FAIL rounds ([design #563](https://github.com/boxlite-ai/agent-tooling/issues/563)).
+The design gate and the commit/push checkpoint share it, so a loop that still shrinks waits for a human only at the limits in the table below.
+
+| Class | Signal |
+| --- | --- |
+| `converging` | The latest FAIL left fewer blocking findings than the FAIL before it. |
+| `stalled` | Not fewer, and a finding repeated. |
+| `churning` | Not fewer, and every finding is new. |
+| `infra` | The last two rounds ended in ERROR. |
+| `none` | Fewer than two comparable rounds. |
+
+A design finding repeats when its exact line returns; a history gate counts any registry ID that is still open.
+
 | Condition / choice | Result |
 | --- | --- |
 | Edited content, same URL | Carry last FAIL's findings into the next task. |
-| Converging second FAIL | Require reflection matching `.agents/lib/audit-reflection-contract.jq`. |
-| Repeated/non-reducing second FAIL, third FAIL, or FAIL after reflection choice | Stop as INCOMPLETE and ask for a human decision. |
+| Converging FAIL: fewer blocking findings than the previous FAIL | Require reflection matching `.agents/lib/audit-reflection-contract.jq`, then audit again without a question. |
+| Non-converging FAIL from the second on, eighth FAIL, or FAIL after reflection choice | Stop as INCOMPLETE and ask for a human decision. |
 | Redesign | Reset count; failed content cannot be audited again. |
 | Reflect again | Require reflection, then permit one more audit. |
 | Overrule | Record `OVERRIDDEN`; retained `overruled:` findings are not re-raised. |

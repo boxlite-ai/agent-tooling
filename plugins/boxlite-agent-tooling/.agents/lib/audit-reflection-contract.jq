@@ -1,8 +1,11 @@
 include "audit-reconciliation";
+include "audit-loop";
 def audit_failure_ids: [.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR")) | .id];
+# From the third failure, Git asks the human unless the loop still converges.
 def audit_git_decision_due:
   (.context.gate | IN("commit","push")) and (audit_failure_ids | length) >= 3
-  and .attempts[-1].outcome != null and .attempts[-1].outcome.verdict != "PASS";
+  and .attempts[-1].outcome != null and .attempts[-1].outcome.verdict != "PASS"
+  and (audit_loop_history_rounds | audit_loop_class) != "converging";
 # Reserve snapshot/binding, outcome, registry growth, and reflection/metadata.
 # Closed cycles are removable; pending results must remain recordable.
 def audit_history_exhausted($max_bytes):

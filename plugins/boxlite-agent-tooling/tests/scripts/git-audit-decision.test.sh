@@ -65,7 +65,7 @@ for kind in commit push verdict; do
     jq -e '.attempts | length == 3' "$state" >/dev/null
   fi
 done
-printf 'PASS: Git pauses after three failures; verdict audits retain their budget\n'
+printf 'PASS: Git pauses a non-converging loop at its third failure; verdict audits retain their budget\n'
 
 prompt_cli="$plugin/scripts/timed-user-prompt.sh"
 select_kind commit

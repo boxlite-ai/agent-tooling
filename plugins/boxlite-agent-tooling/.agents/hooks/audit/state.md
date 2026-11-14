@@ -15,9 +15,10 @@ All `.agents/state/` artifacts are ignored and session-scoped where checkouts ca
 | `scripts/audit-reflection.sh`, `.agents/lib/audit-reflection.sh`, `.agents/lib/audit-reflection.jq` | Bounded serialized transitions, immutable bindings, deduplication, atomic regular-file writes. |
 | `.agents/lib/audit-reconciliation.jq` | Finding IDs/dispositions/provenance/coverage/reopening; reject unresolved PASS. |
 | `.agents/lib/audit-reflection-contract.jq` | After two failures require complete current reflection; independent sufficient assessment for PASS; freeze active reflection. |
+| `.agents/lib/audit-loop.jq` | Reduce failed attempts to rounds and classify the loop: converging, stalled, churning, infra, or none. |
 | `scripts/audit-reflection-gate.sh`, `.agents/lib/audit-reflection-gate.sh` | Snapshot evidence, bind launch/acceptance, check epochs, reconcile dossiers. |
 | `.agents/prompts/audit/audit-reflection.md`, `.agents/prompts/audit/git-audit-history.md` | Shared reconciliation/native history procedure. |
-| `.agents/lib/git-audit-decision.sh` | Three-failure checkpoint through timed requests, preserving original failures. |
+| `.agents/lib/git-audit-decision.sh` | Human checkpoint for a non-converging loop from its third failure, through timed requests, preserving original failures. |
 
 ### Validation and deadlines
 
@@ -44,8 +45,8 @@ Design recording uses matching task/content predecessor metadata.
 
 Context: `repo_root`, `session`, `epoch`, `branch`, `gate`; limits: eight failures, sixteen attempts, 10 MiB, plus 512 KiB reserved preparation capacity.
 
-- `.agents/lib/git-audit-decision.sh` pauses commit/push after three FAIL/ERROR rounds; five-minute **Reflect again** / **Stop** binds context/latest failure, defaulting to reflection.
-- Preserve choices across canceled preparation/native-headless handoff; each further failure asks again; PASS closes the cycle.
+- `.agents/lib/git-audit-decision.sh` pauses a non-converging commit/push loop from its third FAIL/ERROR round; five-minute **Reflect again** / **Stop** binds context/latest failure, defaulting to reflection.
+- Preserve choices across canceled preparation/native-headless handoff; each further non-converging failure asks again; PASS closes the cycle.
 - Check preparation under history → timed-request lock order, never across human/model waits; native/headless use the same guard.
 - Terminal readiness uses `audit_reflection_ready` without demanding new reflection after PASS changes the history hash; Git still checks/consumes fresh bindings.
 - Record outcomes once; replay differing only in advisories succeeds without replacing the first result; runner failure is ERROR, cancellation separate.

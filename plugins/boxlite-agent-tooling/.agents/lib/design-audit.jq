@@ -2,6 +2,7 @@
 # branch. A cycle ends with PASS, OVERRIDDEN or Redesign; FAILs count until then.
 include "audit-reflection-contract";
 include "audit-reconciliation";
+include "audit-loop";
 def da_keys: ["advisories","branch","content_sha256","extra","failures","findings",
   "overruled","reflection","root","stop","url","verdict"];
 def da_line: type == "string" and length >= 1 and length <= 500 and (test("[[:cntrl:]]") | not);
@@ -44,7 +45,7 @@ def da_state($root; $branch):
 def da_blocked: .stop != "none" and (.extra | not);
 def da_reflection_due:
   .verdict == "FAIL" and .reflection == null
-  and ((.stop == "none" and (.failures | length) == 2) or .extra);
+  and ((.stop == "none" and (.failures | length) >= 2) or .extra);
 def da_redesign($digest): .verdict == "NONE" and .content_sha256 == $digest;
 def da_passed($url; $digest):
   .url == $url and .content_sha256 == $digest and (.verdict | IN("PASS","OVERRIDDEN"));
@@ -67,8 +68,13 @@ def da_request($root; $url; $digest; $history):
    open_findings:(if .verdict == "FAIL" then .findings else [] end),
    fails:(.failures | length), stop, blocked:da_blocked, reflection_due:da_reflection_due,
    redesign:da_redesign($digest), history_hash:$history, failure_ids:.failures};
-# A second FAIL stops for the human when a blocking finding repeats or their number did
-# not drop; the third FAIL, or any FAIL after Reflect again, always stops.
+# A converging loop continues after each reflection. A FAIL that leaves no fewer blocking
+# findings than the one before it stops for the human; so does the eighth FAIL, and any
+# FAIL after Reflect again. A finding repeats when its exact line returns.
+def da_loop_class($previous; $current):
+  [{verdict:"FAIL", count:($previous | length), repeated:false},
+   {verdict:"FAIL", count:($current | length), repeated:any($current[]; IN($previous[]))}]
+  | audit_loop_class;
 def da_record($v; $url; $digest):
   if da_blocked then error("the research loop stopped for the human; their decision comes first")
   elif da_reflection_due then error("submit the reflection before this audit: design-doc.sh reflect")
@@ -81,10 +87,9 @@ def da_record($v; $url; $digest):
     | if $v.verdict == "PASS" then .verdict = "PASS" | .findings = [] | .failures = [] | .stop = "none"
       else ($failures + ["\($failures | length + 1):\($digest)"]) as $next
         | .verdict = "FAIL" | .findings = $v.findings | .failures = $next
-        | .stop = (if .extra or ($next | length) >= 3 then "cap"
-            elif ($next | length) == 2 and (any($v.findings[]; IN($previous[]))
-              or ($v.findings | length) >= ($previous | length)) then "early"
-            else "none" end)
+        | .stop = (if .extra or ($next | length) >= 8 then "cap"
+            elif ($next | length) >= 2 and da_loop_class($previous; $v.findings) != "converging"
+            then "early" else "none" end)
       end
     | .url = $url | .content_sha256 = $digest | .advisories = $v.advisories
     | .overruled = $overruled | .extra = false | .reflection = null

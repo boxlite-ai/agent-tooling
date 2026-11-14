@@ -284,8 +284,8 @@ fi
 expect_denial 'a converging FAIL 2 asks for a reflection' codex "scripts/design-doc.sh\" reflect"
 rm -f "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
 record_on "$(revision 2)" "$two"
-publish "$(revision 3)"; record_on "$(revision 3)" '["high: research: A"]'
-expect_denial 'a repeated finding at FAIL 2 stops the loop' codex 'INCOMPLETE: the design-audit loop stopped after FAIL 2'
+publish "$(revision 3)"; record_on "$(revision 3)" "$two"
+expect_denial 'repeated findings with no drop at FAIL 2 stop the loop' codex 'INCOMPLETE: the design-audit loop stopped after FAIL 2'
 decision_state="$scratch/repo/.agents/state/design-decision-request.json"
 decision_id="$(jq -er .id "$decision_state")"
 expect_denial 'the stop names the typed decision line' codex "design-decision: $decision_id <Redesign|Reflect again|Overrule> <reason>"

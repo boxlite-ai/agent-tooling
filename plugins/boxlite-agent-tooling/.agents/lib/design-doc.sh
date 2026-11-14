@@ -421,7 +421,7 @@ design_doc_advice_record() { # working directory -> verified URL
   design_doc_binding advise "$1" "$advice"
 }
 
-# Stores the reflection that audit 3, or an audit after Reflect again, waits for.
+# Stores the reflection that each audit after a converging FAIL, or after Reflect again, waits for.
 design_doc_audit_reflect() { # working directory -> verified URL
   local input
   input="$(head -c 65537)"
