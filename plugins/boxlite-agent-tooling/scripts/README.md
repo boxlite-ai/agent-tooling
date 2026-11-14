@@ -130,6 +130,24 @@ Installers never rewrite tracked loaders; a breaking release follows [the upgrad
 
 Check Claude installation by exact `projectPath`; updating one linked worktree can leave another stale.
 
+### 0.1.55 adoption
+
+Version 0.1.55 packages the assigned design-worker protocol and native Git merge-evidence qualification fixes.
+Its distinct cache version separates these fixes from earlier 0.1.54 installations.
+
+1. Record the merged release SHA, then run the consumer installer in one eligible worktree per host before expanding.
+2. Compare the adoption record, physical cache revision, worktree hook path, generated guidance and host plugin version.
+3. Check each Claude record by exact `projectPath`; record fresh-session outcomes separately for every tested worktree.
+4. Verify symlink-free packaging with a real isolated installation/reinstallation, then inspect fresh skill and hook discovery.
+
+If host activation fails after repository adoption, pause expansion and repair that installation through its normal bootstrap before retrying.
+Preserve holds and unrelated edits; installation does not grant hook trust, and existing sessions require a reload or new task.
+If `main` advances during adoption, qualify the adopted revision separately instead of attributing its result to the recorded release SHA.
+
+The native Git workflow passed on macOS for both hosts before this release.
+That result does not establish clean Claude process termination; observe fresh lifecycle completion separately.
+Native Linux sessions and Windows qualification remain unverified.
+
 Transcript discovery and runner contracts: [audit configuration](../.agents/hooks/audit/README.md), [proof/routing](../.agents/hooks/audit/architecture.md#audit-producers), [review criteria](../.agents/hooks/audit/architecture.md#commitpush-review-criteria).
 
 `full-transcript` fixtures prove handoff/access, not live model behavior; verify native hosts/platforms separately after adoption.
