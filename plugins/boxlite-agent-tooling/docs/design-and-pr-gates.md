@@ -63,7 +63,7 @@ Each live PASS/FAIL needs fresh advice after required stop/reflection handling: 
 
 Reject severity labels/unresolved local anchors; outside evidence remains unchecked; advice never mutates verdicts or enters `prior_findings`.
 
-Recorded advice opens the edit gate without a human wait. The agent reports each advisory and advice item in its final reply and the PR; an item changes the design only after the human accepts it.
+Recorded advice opens the edit gate without a human wait. The agent reports each advisory and advice item in its final reply and the PR; an item changes the design only after the human accepts it. An item that would change the design's approach or scope is the exception: the agent asks before coding.
 
 ### Stage progression
 
@@ -73,7 +73,13 @@ Recorded advice opens the edit gate without a human wait. The agent reports each
 | --- | --- |
 | Design PASS → code | The advice prompt orders implementation once advice records. |
 | Code → commit and push | Guidance only; no hook can tell finished code from work in progress. |
-| Push → draft PR | The post-push context asks for a draft PR when a feature branch has none; a default-branch push gets no request. |
+| Push → draft PR | The post-push context asks for a draft PR when a feature branch has none. |
+
+The draft PR request has three limits:
+
+- Only a push carries it; other watched remote writes, such as a PR comment, get none.
+- A default-branch push gets none.
+- The default branch comes from the local `origin/HEAD` pointer; a clone without it treats every branch as a feature branch.
 
 The rule is guidance, not a gate: an agent that stops anyway is not blocked. Gates that ask for a human choice keep their pauses.
 

@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 Edit `guidance/workflow.md`. Run `bash scripts/sync-guidance.sh <repo-root>` in plugin.
 Run `make test:guidance` from root.
 
-<!-- agent-tooling:guidance:begin rev=f4343a7c28ed-dirty sha256=4b25bba937d5 -->
+<!-- agent-tooling:guidance:begin rev=4a79840a106c-dirty sha256=1b2f6a1834a6 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -73,6 +73,7 @@ A passed stage starts the next one; never ask whether to continue.
 Pause only when:
 
 - A gate asks for a human choice: PR size above 400, a stopped audit loop, an API compatibility decision, or a disclosure approval.
+- A recorded advice item would change the design's approach or scope.
 - The next action is destructive or cannot be undone.
 - The request cannot answer a requirement that changes the result.
 

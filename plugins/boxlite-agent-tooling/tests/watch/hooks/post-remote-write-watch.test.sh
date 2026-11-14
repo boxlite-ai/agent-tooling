@@ -2192,6 +2192,12 @@ got="$(STUB_PR_NUMBER="" ctx "git push" "")"
 check_contains 'no PR yet still arms, noting the watcher polls' "$got" "No open PR"
 # A pushed feature branch without a PR hands off to the draft PR (design #573).
 check_contains 'no PR yet on a feature branch asks for a draft PR' "$got" "open a draft PR now"
+got="$(STUB_PR_NUMBER="" ctx "gh pr comment 5 -b x" "")"
+if [[ "$got" == *"No open PR"* && "$got" != *"draft PR"* ]]; then
+  ok 'only a push asks for a draft PR'
+else
+  badf 'only a push asks for a draft PR' 'got: %.160s' "$got"
+fi
 [[ "$(git rev-parse --show-toplevel)" -ef "$REPO" ]] || { printf 'not in the hermetic repo\n' >&2; exit 1; }
 git -C "$REPO" update-ref refs/remotes/origin/harness-branch HEAD
 git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/harness-branch

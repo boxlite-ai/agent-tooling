@@ -10,5 +10,6 @@ Advisories (not blocking):
 Once it records, start implementing without waiting. Report each advisory and advice
 item with your view in the final reply and the PR;
 adopt an item only after the human accepts it.
+If an item would change the design's approach or scope, ask the human before coding.
 
 {{instruction}}

@@ -239,6 +239,8 @@ expect_denial 'recorded advice starts implementation without a human wait' claud
   'start implementing without waiting'
 expect_denial 'advice is reported later and stays human-accepted' codex \
   'adopt an item only after the human accepts it'
+expect_denial 'design-changing advice pauses for the human' claude \
+  'If an item would change the design'
 advise '[]' || { printf 'FAIL recording empty advice\n'; fail=$((fail+1)); }
 for tool in Write Edit MultiEdit NotebookEdit apply_patch; do
   check "$tool" 'edit source' allow

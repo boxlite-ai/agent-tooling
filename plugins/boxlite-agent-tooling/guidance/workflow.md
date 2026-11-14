@@ -21,6 +21,7 @@ A passed stage starts the next one; never ask whether to continue.
 Pause only when:
 
 - A gate asks for a human choice: PR size above 400, a stopped audit loop, an API compatibility decision, or a disclosure approval.
+- A recorded advice item would change the design's approach or scope.
 - The next action is destructive or cannot be undone.
 - The request cannot answer a requirement that changes the result.
 
