@@ -229,9 +229,10 @@ Headless classification and both runners read the optional user file
 
 ## Commit/push retry choices
 
-After three FAIL/ERROR rounds, choose **Reflect again (Recommended)** or **Stop**; five-minute silence selects reflection, never approval.
+From the third FAIL/ERROR round, a loop that is not [converging](../../../docs/design-and-pr-gates.md#design-audit-loop) asks for **Reflect again (Recommended)** or **Stop**; five-minute silence selects reflection, never approval.
+A converging loop needs only its reflection before the next audit.
 
-- Retain history, submit current reflection, fix/test, then obtain a fresh audit; further failures ask again within eight-failure/sixteen-attempt/storage limits.
+- Retain history, submit current reflection, fix/test, then obtain a fresh audit; further non-converging failures ask again within eight-failure/sixteen-attempt/storage limits.
 - Use the managed question or standalone `commit-audit-decision: <request-id> <Reflect again|Stop>`; push uses `push-audit-decision:`.
 - Stale/mixed answers follow ordinary cancellation; Stop keeps Git blocked; later explicit task instructions start a new prompt context.
 

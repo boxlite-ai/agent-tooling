@@ -111,7 +111,7 @@ design_decision() {
       deny "$decision" ;;
     *)
       reason='the FAIL limit was reached'
-      [[ "$(jq -r .stop <<<"$request")" == cap ]] || reason='a blocking finding repeated or their number did not drop'
+      [[ "$(jq -r .stop <<<"$request")" == cap ]] || reason='the number of blocking findings did not drop'
       id="$(jq -er .id <<<"$decision")" || deny 'request id unavailable'
       if ! decision="$(user_question instruction "$plugin_root" "$decision")" \
          || ! reply_format="$(user_question design-format "$plugin_root" "$id")" \

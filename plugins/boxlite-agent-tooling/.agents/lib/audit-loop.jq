@@ -1,3 +1,27 @@
+# Both count-based checkpoints and typed diagnostics use the same progress rule.
+def audit_loop_compare_counts($previous; $current; $repeated):
+  if $current < $previous then "converging" elif $repeated then "stalled" else "churning" end;
+
+def audit_loop_round:
+  type == "object" and (.verdict | IN("FAIL","ERROR"))
+  and (.count | type == "number" and . >= 0 and . == floor) and (.repeated | type == "boolean");
+def audit_loop_class:
+  if type != "array" or any(.[]; audit_loop_round | not) then error("invalid audit rounds")
+  else [.[] | select(.verdict == "FAIL")] as $fails
+    | if length >= 2 and all(.[-2:][]; .verdict == "ERROR") then "infra"
+      elif ($fails | length) < 2 then "none"
+      else audit_loop_compare_counts($fails[-2].count; $fails[-1].count; $fails[-1].repeated) end
+  end;
+def audit_loop_history_rounds:
+  [.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR")) | .outcome
+   | if .verdict == "ERROR" then {verdict,count:0,repeated:false}
+     else (.history_review // {dispositions:[],findings:[]}) as $review
+       | ([$review.dispositions[] | select(.status | IN("open","not_assessed")) | .id]
+          + [$review.findings[] | select(.id != "NEW") | .id] | unique) as $known
+       | {verdict,repeated:($known | length > 0),
+          count:(($known | length) + ([$review.findings[] | select(.id == "NEW")] | length))}
+     end];
+
 # Read-only progress diagnostics. A pattern never grants action or audit authority.
 def audit_loop_rounds_valid:
   type == "array" and length <= 16 and all(.[];
@@ -28,9 +52,8 @@ def audit_loop_classify:
       elif $last.kind == "ERROR" then
         if $rounds[-2].kind == "ERROR" then "infra" else "error" end
       elif ($failed | length) < 2 then "initial"
-      elif ($failed[-1].findings | length) < ($failed[-2].findings | length) then "converging"
-      elif any($failed[-1].findings[]; .id as $id | any($failed[-2].findings[]; .id == $id)) then "stalled"
-      else "churning" end),
+      else audit_loop_compare_counts(($failed[-2].findings | length); ($failed[-1].findings | length);
+        any($failed[-1].findings[]; .id as $id | any($failed[-2].findings[]; .id == $id))) end),
     blocking_count:($last.findings | length),
     critical_ids:([$last.findings[] | select(.severity == "critical") | .id] | unique),
     history_complete,

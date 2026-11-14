@@ -90,9 +90,9 @@ class Classification(unittest.TestCase):
         result = json.loads(model(expression, None).stdout)
         self.assertEqual(result["recovery"]["pattern"], "converging")
         self.assertEqual(result["fails"], 2)
-        # The existing design gate still pauses on a repeated finding.
-        self.assertFalse(result["reflection_due"])
-        self.assertTrue(result["blocked"])
+        # Convergence requires reflection without pausing for a human.
+        self.assertTrue(result["reflection_due"])
+        self.assertFalse(result["blocked"])
         progress = {"rounds": [frame("FAIL", "high: F1")] * 16, "history_complete": True}
         state = {"verdict": "FAIL", "progress": progress}
         result = json.loads(model('audit_loop_design_record("FAIL"; ["high: F2"])', state).stdout)
