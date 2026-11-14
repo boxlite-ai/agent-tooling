@@ -109,7 +109,7 @@ partial="$(verdict "$reviewed" PASS '[]')"
 record 'an auditor cannot supply its own deadline marker' 1 \
   "$(jq '.deadline_review={deadline:1,recorded_at:2}' <<<"$partial")"
 
-# The research loop (design #309): severity, carried findings, the FAIL cap, and the
+# The research loop (designs #309, #563): severity, carried findings, convergence, the FAIL cap, and the
 # human's choice. Each revision is new design content.
 research_state="$(git rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
 revise() { # label -> SHA-256 of the published revision
@@ -181,7 +181,7 @@ reflect 'a reflection bound to this history is stored' 0 "$(reflection "$request
 request_has 'the reflected loop asks for audit 3' '(.reflection_due | not) and (.blocked | not)'
 c="$(revise c)"
 record 'FAIL 3 records' 0 "$(review "$c" "$(high 'Transfer: unsupported')")"
-request_has 'FAIL 3 stops for the human' '.blocked and .stop == "cap" and .fails == 3'
+request_has 'a FAIL 3 that stops shrinking stops for the human' '.blocked and .stop == "early" and .fails == 3'
 record 'a stopped loop refuses another verdict' 1 "$(review "$c" '[]')"
 decide 'a choice the gate does not know is refused' 1 'Approve'
 status=0; grep -q 'unknown research decision' "$scratch/err" || status=1
@@ -205,8 +205,14 @@ request_has 'overruled findings ride along, marked' \
   '.prior_findings == ["overruled: high: research: Transfer: unsupported"] and .fails == 0'
 record 'FAIL 1 of a new cycle' 0 "$(review "$d" "$two")"
 e="$(revise e)"
-record 'a repeated finding at FAIL 2 records' 0 "$(review "$e" '["high: research: Fidelity: quote lacks subject"]')"
-request_has 'a repeated finding stops at FAIL 2' '.blocked and .stop == "early" and .fails == 2'
+repeated='["high: research: Fidelity: quote lacks subject"]'
+record 'a repeated finding at FAIL 2 records' 0 "$(review "$e" "$repeated")"
+request_has 'a repeat among fewer findings still converges' '.reflection_due and (.blocked | not) and .fails == 2'
+request="$(gate edit 2>/dev/null)" || true
+reflect 'the converging repeat is reflected on' 0 "$(reflection "$request")"
+e="$(revise e2)"
+record 'the same finding alone at FAIL 3 records' 0 "$(review "$e" "$repeated")"
+request_has 'a repeat with no drop stops at FAIL 3' '.blocked and .stop == "early" and .fails == 3'
 decide 'Redesign resets the count' 0 Redesign
 request_has 'Redesign asks for a fresh draft' '.redesign and .fails == 0 and (.blocked | not)'
 record 'the failed draft cannot be audited after Redesign' 1 "$(review "$e" '[]')"
@@ -217,6 +223,20 @@ g="$(revise g)"
 record 'FAIL 2 with as many new findings records' 0 "$(review "$g" "$(high 'Local fit: unchecked')")"
 request_has 'no drop in findings stops at FAIL 2' '.blocked and .stop == "early"'
 decide 'Overrule again' 0 Overrule
+# A loop that sheds one finding per round runs unattended until the eighth FAIL.
+shrinking() { jq -nc --argjson n "$1" '[range($n) | "high: research: gap \(.)"]'; }
+for n in 9 8 7 6 5 4 3; do
+  long="$(revise "long$n")"
+  record "FAIL with $n findings records" 0 "$(review "$long" "$(shrinking "$n")")"
+  (( n == 9 )) && continue
+  request_has "shrinking to $n findings asks no human" '.reflection_due and (.blocked | not)'
+  request="$(gate edit 2>/dev/null)" || true
+  reflect "the round with $n findings is reflected on" 0 "$(reflection "$request")"
+done
+long="$(revise long2)"
+record 'the eighth FAIL records' 0 "$(review "$long" "$(shrinking 2)")"
+request_has 'the eighth FAIL stops even while shrinking' '.blocked and .stop == "cap" and .fails == 8'
+decide 'Overrule the capped loop' 0 Overrule
 h="$(revise h)"
 record 'FAIL 1 before rebinding' 0 "$(review "$h" "$two")"
 other=https://github.com/example/project/issues/2

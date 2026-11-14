@@ -191,7 +191,7 @@ See [state contracts](../.agents/hooks/audit/state.md#state-files) and the
 | [continue-timed-prompts.sh](continue-timed-prompts.sh) | Called by the Stop gate with hook JSON on stdin; emit a continuation for pending confirmations or their timeout fallback. |
 | [resume-on-network-error.sh](resume-on-network-error.sh) `[--max-restarts N] [--max-wait SECONDS] [--probe-url URL] [--] <prompt> [claude args...]` | Supervise `claude -p`, retry eligible API failures within budgets, and print final result JSON. |
 
-Git preparation checks the three-failure decision under the history lock.
+Git preparation checks the non-converging-loop decision under the history lock.
 
 - `next-action` reports the same decision without creating an attempt.
 - Five-minute expiry permits one reflected retry, preserving failed outcomes.
