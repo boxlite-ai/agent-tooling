@@ -165,7 +165,7 @@ exec '{curl}' -q "$@" --noproxy '*' --connect-to 'github.com:443:127.0.0.1:{self
 ''')
 
     def run_hook(self, refs=None, url="https://github.com/fixture/consumer.git"):
-        environment = dict(self.environment, PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
+        environment = dict(self.environment, PATH=str(self.bin) + os.pathsep + self.environment["PATH"],
                            AGENT_GATED="1", BOXLITE_PR_WATCH="0", FIXTURE_EVIDENCE=str(self.evidence),
                            FIXTURE_CHAINED=str(self.chained))
         for path in (self.evidence, self.chained):
@@ -198,20 +198,26 @@ exec '{curl}' -q "$@" --noproxy '*' --connect-to 'github.com:443:127.0.0.1:{self
         self.assertEqual(p, r)
         self.assertEqual(identical["reason"], "overlap")
 
-    def amend_merge(self, path, content, *, published=True, subject="chore: extend published history"):
+    def amend_merge(self, path, content, *, published=True, subject="chore: extend published history", old_content=None):
         blob = self.git("hash-object", "-w", "--stdin", data=content).decode().strip()
         index = self.root / "private.index"
 
-        def tree_at(commit):
+        def tree_at(commit, content_blob=blob):
             index.unlink(missing_ok=True)
             self.environment["GIT_INDEX_FILE"] = str(index)
             try:
                 self.git("read-tree", commit)
-                self.git("update-index", "--add", "--cacheinfo", "100644", blob, path)
+                self.git("update-index", "--add", "--cacheinfo", "100644", content_blob, path)
                 return self.git("write-tree").decode().strip()
             finally:
                 self.environment.pop("GIT_INDEX_FILE", None)
 
+        if old_content is not None:
+            old_blob = self.git("hash-object", "-w", "--stdin", data=old_content).decode().strip()
+            self.old = self.git("commit-tree", tree_at(self.old, old_blob), "-p", self.base,
+                                data=b"feat: retain protocol source\n").decode().strip()
+            self.first = self.git("commit-tree", tree_at(self.first, old_blob), "-p", self.old,
+                                  data=b"feat: add unpublished change\n").decode().strip()
         if published:
             tree = tree_at(self.published)
             self.published = self.git("commit-tree", tree, "-p", self.published,
@@ -252,6 +258,7 @@ exec '{curl}' -q "$@" --noproxy '*' --connect-to 'github.com:443:127.0.0.1:{self
 
     def test_custom_transport_and_unsupported_urls_keep_endpoint(self):
         for key, value in (("http.extraHeader", "X-Route: alternative"),
+                           ("http.https://github.com/.version", "HTTP/1.1"),
                            ("url.https://elsewhere.invalid/.pushInsteadOf", "https://github.com/"),
                            ("remote.origin.receivepack", "custom-receive")):
             self.git("config", key, value)
@@ -261,6 +268,110 @@ exec '{curl}' -q "$@" --noproxy '*' --connect-to 'github.com:443:127.0.0.1:{self
                     "https://fixture@github.com/fixture/consumer.git"):
             self.assertEqual(self.run_hook(url=url), self.endpoint)
         self.assertEqual(self.requests, [])
+
+    def test_plain_http_versions_preserve_value_boundaries(self):
+        cases = [(('HTTP/1.1',), True), (('HTTP/2',), True),
+                 (('HTTP/1.1', 'HTTP/2', 'HTTP/1.1'), True)]
+        for invalid in ('', 'HTTP/3', 'HTTP/1.0', 'HTTP/1.1\nHTTP/2', ' HTTP/1.1'):
+            cases.extend(((('HTTP/1.1', invalid), False), ((invalid, 'HTTP/1.1'), False)))
+        for values, eligible in cases:
+            with self.subTest(values=values):
+                for value in values:
+                    self.git('config', '--add', 'http.version', value)
+                before = len(self.requests)
+                try:
+                    evidence = self.run_hook()
+                    if eligible:
+                        self.assertLessEqual(len(evidence), 262144)
+                        self.assertIn(b'selected-entry', evidence)
+                    else:
+                        self.assertEqual(evidence, self.endpoint)
+                    self.assertEqual(len(self.requests) - before, int(eligible))
+                finally:
+                    self.git('config', '--unset-all', 'http.version')
+
+    def test_stock_git_exec_path_remains_eligible(self):
+        helper = os.fsdecode(self.git('--exec-path').removesuffix(b'\n'))
+        self.environment['GIT_EXEC_PATH'] = helper
+        self.environment['PATH'] = os.pathsep.join((helper, helper + '/.', self.environment['PATH']))
+        evidence = self.run_hook()
+        self.assertLessEqual(len(evidence), 262144, 'stock Git exports must preserve scoped eligibility')
+        self.assertIn(b'selected-entry', evidence)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_unproved_helper_directory_cannot_launch_shadow_tools(self):
+        helper = self.root / 'unproved-helpers'
+        marker = self.root / 'shadow-tool-ran'
+        for name in ('git', 'curl', 'bash'):
+            self.script(helper / name, f'#!/bin/sh\nprintf "{name}\\n" >> "{marker}"\nexit 1\n')
+        updates = self.root / 'updates'
+        endpoint = self.root / 'endpoint'
+        updates.write_bytes(self.ref_line)
+        endpoint.write_bytes(self.endpoint)
+        environment = dict(self.environment, GIT_EXEC_PATH=str(helper),
+                           PATH=os.pathsep.join((str(helper), str(helper) + '/.', str(self.bin),
+                                                self.environment['PATH'])))
+        payload = '\0'.join((str(self.repo), 'origin', 'https://github.com/fixture/consumer.git',
+                             str(updates), str(endpoint), '')).encode()
+        result = subprocess.run([sys.executable, str(self.runtime / 'scripts/push-merge-evidence.py'), '--publish'],
+                                cwd=self.repo, env=environment, input=payload,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=18)
+        self.assertNotEqual(result.returncode, 0, 'custom helper directory must remain ineligible')
+        self.assertEqual(endpoint.read_bytes(), self.endpoint)
+        self.assertFalse(marker.exists(), 'the excluded directory must never supply executable tools')
+        self.assertEqual(self.requests, [])
+
+    def test_custom_or_ambiguous_git_exec_paths_keep_endpoint(self):
+        helper = os.fsdecode(self.git('--exec-path').removesuffix(b'\n'))
+        custom = self.root / 'custom-helpers'
+        custom.mkdir()
+        for value in ('', 'relative/helpers', str(custom), helper + '/.',
+                      helper + os.pathsep + str(custom), helper + '\n'):
+            with self.subTest(value=value):
+                self.environment['GIT_EXEC_PATH'] = value
+                self.assertEqual(self.run_hook(), self.endpoint)
+        self.assertEqual(self.requests, [])
+
+    def test_production_protocol_source_import_remains_eligible(self):
+        self.amend_merge('published-protocol.py', (PLUGIN / 'scripts/push-merge-evidence.py').read_bytes())
+        evidence = self.run_hook()
+        self.assertLessEqual(len(evidence), 262144)
+        self.assertIn(b'selected-entry', evidence)
+        self.assertEqual(len(self.requests), 1)
+        expected = 'Basic ' + base64.b64encode(b'fixture:fixture-password').decode()
+        self.assertEqual(self.requests[0][1], expected)
+
+    def test_protocol_source_upgrade_retains_complete_endpoint_checks(self):
+        source = (PLUGIN / 'scripts/push-merge-evidence.py').read_bytes()
+        prefix = b'header = "' + b'Authorization: '
+        source = source.replace(prefix + b'Basic ', prefix)
+        source = source.replace(b'authorization = base64.', b'authorization = b"Basic " + base64.')
+        old_source = source.replace(b'authorization = b"Basic " + base64', b'authorization = base64')
+        old_source = old_source.replace(prefix, prefix + b'Basic ')
+        self.amend_merge('published-protocol.py', source, old_content=old_source)
+        self.assertEqual(self.run_hook(), self.endpoint,
+                         'removed protocol literals remain covered by complete endpoint checks')
+        self.assertEqual(self.requests, [])
+
+    def test_render_timeout_keeps_endpoint_and_cleans_descendants(self):
+        child_path = self.root / 'renderer-descendant.pid'
+        library = self.runtime / '.agents/lib/commit-push-evidence.sh'
+        with library.open('a') as stream:
+            stream.write(f'''\ncommit_push_render_evidence() {{
+  sleep 20 &
+  printf '%s' "$!" > '{child_path}'
+  wait
+}}
+''')
+        started = time.monotonic()
+        evidence = self.run_hook()
+        self.assertEqual(len(self.requests), 1, 'the receiving proof must finish before rendering blocks')
+        self.assertTrue(child_path.exists(), 'the production path must reach the blocked renderer')
+        self.assertEqual(evidence, self.endpoint, 'late rendering must not publish scoped evidence')
+        self.assertLess(time.monotonic() - started, 18)
+        state = subprocess.run(['ps', '-p', child_path.read_text(), '-o', 'stat='],
+                               stdout=subprocess.PIPE, text=True).stdout.strip()
+        self.assertTrue(not state or state.startswith('Z'), 'renderer descendant must not remain live')
 
     def test_unqualified_certificate_environment_keeps_endpoint(self):
         for key in ("CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"):

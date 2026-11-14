@@ -371,11 +371,7 @@ capture_pr_watch_binding || true
 # its single new commit leaves right after claiming it, because that claim IS the
 # authorization and nothing below would re-derive it. Everything else audits.
 try_scoped_push_evidence() (  # remote-name remote-url; endpoint remains intact on failure
-  local scoped subject
-  scoped="$(mktemp)" || return 0
-  trap 'rm -f "$scoped"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM HUP
+  local subject
   # shellcheck source=../.agents/lib/commit-push-evidence.sh
   source "$tooling_root/.agents/lib/commit-push-evidence.sh" || return 0
   findings=()
@@ -386,12 +382,7 @@ try_scoped_push_evidence() (  # remote-name remote-url; endpoint remains intact 
     < <(sed -n 's/^commit-subject [0-9a-f][0-9a-f]* //p' "$pushed_diff_file")
   (( ${#findings[@]} == 0 )) || return 0
   printf '%s\0' "$repo_root" "$1" "$2" "$stdin_file" "$pushed_diff_file" \
-    | python3 -I "$tooling_root/scripts/push-merge-evidence.py" > "$scoped" 2>/dev/null || return 0
-  # Count exactly the shared headless rendering, including subjects and context overhead.
-  # shellcheck source=../.agents/lib/subagent.sh
-  source "$tooling_root/.agents/lib/subagent.sh" || return 0
-  commit_push_render_evidence "$scoped" | capture_bounded_stream /dev/null 262144 || return 0
-  mv -f "$scoped" "$pushed_diff_file" || return 0
+    | python3 -I "$tooling_root/scripts/push-merge-evidence.py" --publish 2>/dev/null || return 0
 )
 
 run_push_audit() {  # remote-name remote-url

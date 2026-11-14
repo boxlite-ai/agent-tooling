@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 Edit `guidance/workflow.md`. Run `bash scripts/sync-guidance.sh <repo-root>` in plugin.
 Run `make test:guidance` from root.
 
-<!-- agent-tooling:guidance:begin rev=1b731f1cfd0d-dirty sha256=8b2d7995a3f8 -->
+<!-- agent-tooling:guidance:begin rev=bdf65f931a58 sha256=8b2d7995a3f8 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 

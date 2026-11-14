@@ -183,8 +183,11 @@ Claude/Copilot use `skills` and `agents` aliases. Host parity checks Codex's can
 | `.githooks/hook-lib.sh` | Git hooks | Delegated commit/push gate call and the sync-then-chain step. |
 | `.agents/lib/commit-push-evidence.sh` | Pre-push and headless commit/push auditor | Complete-source checks and identical sanitized push rendering; see [published-main merges](.githooks/README.md#published-main-merges). |
 
-`scripts/push-merge-evidence.py` stages optional receiving-service proof and committed-tree evidence under the existing process-lifetime owner.
-The pre-push hook retains the complete endpoint source through local checks and accepts only complete scoped output within both raw and sanitized limits.
+`scripts/push-merge-evidence.py --publish` owns optional receiving-service proof, committed-tree evidence, shared sanitized rendering, and atomic endpoint replacement under one deadline and process lifetime.
+Private staging shares the endpoint filesystem; rendering failure or timeout preserves the endpoint and terminates owned descendants.
+The pre-push hook retains complete endpoint source through local checks; publication requires complete scoped output within both raw and sanitized limits.
+The helper excludes Git's inherited helper directory from executable lookup before launching its owner, then validates the exact default within the owned deadline.
+Git, curl, Bash, proof subprocesses, and sanitized rendering share the restored search path; custom or ambiguous helper selections preserve endpoint evidence.
 
 ### Skill ownership
 
