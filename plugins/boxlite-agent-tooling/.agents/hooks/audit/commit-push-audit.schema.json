@@ -94,9 +94,10 @@
     },
     "finding": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "invariant", "behavior", "criterion", "evidence", "origin", "origin_evidence", "review_gap", "review_change", "reopening", "conflict", "criterion_change"],
+      "required": ["id", "severity", "invariant", "behavior", "criterion", "evidence", "origin", "origin_evidence", "review_gap", "review_change", "reopening", "conflict", "criterion_change"],
       "properties": {
-        "id": {"type": "string", "pattern": "^(NEW|F[1-9][0-9]{0,3})$"}, "invariant": {"$ref": "#/$defs/text"},
+        "id": {"type": "string", "pattern": "^(NEW|F[1-9][0-9]{0,3})$"}, "severity": {"enum": ["critical", "high"]},
+        "invariant": {"$ref": "#/$defs/text"},
         "behavior": {"$ref": "#/$defs/text"}, "criterion": {"$ref": "#/$defs/text"},
         "evidence": {"$ref": "#/$defs/text"}, "origin_evidence": {"$ref": "#/$defs/text"},
         "review_gap": {"$ref": "#/$defs/text"}, "review_change": {"$ref": "#/$defs/text"},

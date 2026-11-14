@@ -50,13 +50,14 @@ audit_reflection_gate() { # context-json operation [attempt-id] [bounded JSON pa
   fi
   if [[ "$operation" == inspect ]]; then
     jq -c -L "$library" --arg path "$path" --argjson history_max_bytes "$(audit_reflection_history_limit)" \
-      'include "audit-reflection-contract";
+      'include "audit-reflection-contract"; include "audit-loop";
       . as $state | {state_path:$path,state:$state,pending:($state.attempts | any(.outcome == null)),
         exhausted:audit_history_exhausted($history_max_bytes),
         unresolved:(($state.attempts[-1].outcome.verdict | IN("PASS","IN_PROGRESS") | not) and
           (any($state.attempts[]; .outcome.verdict | IN("FAIL","ERROR")) or
             any($state.registry[]; .status | IN("open","not_assessed")))),
-        reflection_due:(audit_reflection_ready | not)}' <<<"$state"
+        reflection_due:(audit_reflection_ready | not),
+        recovery:($state | audit_loop_history_view | audit_loop_classify)}' <<<"$state"
     return $?
   fi
   if [[ "$operation" == prepare ]]; then

@@ -32,10 +32,14 @@ reject() {
   [[ -s "$scratch/err" && "$(cat "$state")" == "$before" ]]
 }
 expect() { jq -e "$1" "$state" >/dev/null || { printf 'FAIL: %s\n' "$1" >&2; exit 1; }; }
+progress() { jq -e -L "$plugin/.agents/lib" \
+  'include "audit-loop"; audit_loop_history_view | audit_loop_classify | '"$1" "$state" >/dev/null; }
 
 prepare a1
 record "$(result a1 FAIL '[]' "[$finding]")" >/dev/null
 expect '.registry[0].id == "F1" and .registry[0].status == "open"'
+expect '.registry[0].severity == "critical"'
+progress '.pattern == "initial" and .critical_ids == ["F1"]'
 # Compare the schema's ID leaves with the production predicates. Include the ID
 # allocated by record, not only IDs invented by this test.
 schema="$plugin/.agents/hooks/audit/commit-push-audit.schema.json"
@@ -81,23 +85,30 @@ changed="$(jq '.id="F1" | .criterion="prove cancellation and publication togethe
 reject "$(result a2 FAIL "$(disposition F1 open)" "[$changed]")"
 missed="$(jq '.invariant="worker terminates" | .behavior="cleanup" | .origin="missed_earlier"' <<<"$finding")"
 reject "$(result a2 FAIL "$(disposition F1 resolved)" "[$missed]")"
-missed="$(jq '.review_gap="cleanup path not examined" | .review_change="trace teardown and in-flight work"' <<<"$missed")"
+missed="$(jq '.severity="high" | .review_gap="cleanup path not examined" | .review_change="trace teardown and in-flight work"' <<<"$missed")"
 record "$(result a2 FAIL "$(disposition F1 resolved)" "[$missed]")" >/dev/null
 expect '.registry[0].status == "resolved" and .registry[1].id == "F2"'
+expect '.registry[1].severity == "high"'
+progress '.pattern == "churning" and .blocking_count == 1 and .critical_ids == []'
 prepare a3
 reopened="$(jq '.id="F1"' <<<"$finding")"
 reject "$(result a3 FAIL "$(disposition F2 resolved)" "[$reopened]")"
 reopened="$(jq '.reopening={reason:"lock removed by new change",evidence:"a3.diff and failing publication check"}' <<<"$reopened")"
 record "$(result a3 FAIL "$(disposition F2 resolved)" "[$reopened]")" >/dev/null
 expect '.registry[0].id == "F1" and .registry[0].status == "open" and (.registry | length) == 2'
+expect '.registry[0].severity == "critical"'
+progress '.pattern == "churning" and .critical_ids == ["F1"]'
 prepare a4
 conflicting="$(jq '.id="F1" | .conflict={previous_id:"F99",evidence:"old closure",check:"both event orderings",decision:"retain lock"}' <<<"$finding")"
 reject "$(result a4 FAIL "$(disposition F1 open)" "[$conflicting]")"
 reject "$(result a4 PASS "$(disposition F1 open)" '[]')"
-changed="$(jq '.criterion_change={previous:"both event orderings pass",reason:"include cancellation contract",evidence:"upstream cancellation specification"}' <<<"$changed")"
+changed="$(jq '.severity="high" | .criterion_change={previous:"both event orderings pass",reason:"include cancellation contract",evidence:"upstream cancellation specification"}' <<<"$changed")"
 record "$(result a4 FAIL "$(disposition F1 open)" "[$changed]")" >/dev/null
 expect '.registry[0].criterion == "prove cancellation and publication together"'
+expect '.registry[0].severity == "critical"'
+progress '.pattern == "stalled" and .critical_ids == ["F1"]'
 prepare a5
 record "$(result a5 PASS "$(disposition F1 resolved)" '[]')" >/dev/null
 expect 'all(.registry[]; .status == "resolved")'
+progress '.pattern == "complete" and .blocking_count == 0 and .critical_ids == []'
 printf 'PASS: stable findings, prior misses, closures, coverage, and justified reopening\n'

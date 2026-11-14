@@ -57,6 +57,12 @@ See [attempt ownership and next actions](.agents/hooks/audit/architecture.md#com
 
 See [auditor deadlines and recording windows](.agents/hooks/audit/architecture.md#timed-subagents).
 
+### Audit progress
+
+History inspection for commit, push, and verdict, plus design status, uses `.agents/lib/audit-loop.jq` for read-only classification.
+For example, two ERROR rounds report `infra` while the existing reflection and permission checks still apply.
+See [progress diagnostics](.agents/hooks/audit/state.md#progress-diagnostics) for severity, legacy records, bounds, and reconstruction limits.
+
 ## Follow-up capture
 
 The optional Claude launcher injects the queue rule and handle through SessionStart. The SDK binds queue calls to the native root, prompt, and Git common directory. A PreToolUse callback inserts a one-use permit after checking that binding.
