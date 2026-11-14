@@ -84,6 +84,18 @@ One existing branch fast-forward ending in a two-parent merge can use scoped evi
 The optional query uses Git's noninteractive credentials and the exact `git-receive-pack` discovery service, verified TLS, and no redirects.
 Unsupported transports, custom transport configuration, unavailable credentials, ambiguous ancestry, or mixed updates retain the original endpoint evidence.
 
+Plain `http.version` accepts only `HTTP/1.1` and `HTTP/2`; every repeated value must match exactly.
+Empty, unknown, newline-containing, and URL-scoped values retain endpoint evidence without requesting optional proof.
+All other HTTP transport overrides remain unsupported.
+
+Git's exported `GIT_EXEC_PATH` is eligible only when it exactly matches the selected frontend's default under a cleared Git environment.
+Executable lookup excludes that directory, its aliases, and descendants before selecting Git, curl, Bash, or launching the owned worker.
+Empty, relative, custom, or ambiguous helper paths retain endpoint evidence; proof and rendering use the restored search path.
+
+The helper constructs its authentication value separately from header serialization, preserving authenticated wire bytes without embedding a complete credential-field prefix.
+A fresh import of that source can use scoped evidence.
+An upgrade removing an older flagged literal retains endpoint evidence because complete-source checks include removed lines.
+
 For feature F merging published main P into N, the reviewer sees unpublished ordinary patches and selected F→N and P→N patches.
 Select every path both parents changed and every result differing from the expected inherited entry.
 Each selected path includes its reason and base/parent/result entries, including overlaps with two empty patches.
@@ -93,11 +105,13 @@ Each selected path includes its reason and base/parent/result entries, including
 | Complete operation | Original ref headers, destination binding, subjects, endpoint SHA-256, and full endpoint path manifest. |
 | Local checks | Per-ref API checks and complete endpoint token, review-marker, and subject checks finish before substitution. |
 | Metadata independence | Private Git metadata borrows objects read-only; grafts, replacements, commit graphs, consumer attributes, and external transformations cannot change proof reads. |
-| Bounds | One ten-second proof/render deadline; 256-KiB receive response, 16-MiB aggregate tree staging, at most 128 ordinary commits. |
+| Bounds | One ten-second deadline for proof, sanitized rendering, budget checks, and atomic publication; 256-KiB receive response, 16-MiB aggregate tree staging, at most 128 ordinary commits. |
 | Evidence publication | Both raw scoped output and its complete sanitized rendering must fit 256 KiB; private staging replaces endpoint evidence only after success. |
 | Cleanup | The existing process owner terminates descendants; POSIX controller cleanup allows up to four additional seconds. |
 
-`scripts/push-merge-evidence.py` owns optional proof and rendering.
+`scripts/push-merge-evidence.py --publish` owns proof, shared sanitized rendering, and endpoint replacement under one process lifetime and deadline.
+It stages output beside the endpoint and replaces it atomically only after both evidence budgets pass before the deadline.
+Without `--publish`, the helper emits raw scoped evidence on stdout and leaves the endpoint untouched.
 `.agents/lib/commit-push-evidence.sh` shares full-source checks and sanitized push formatting between the hook and headless auditor.
 The synthetic push command hashes the selected artifact; its endpoint hash binds the complete source that preceded selection.
 
