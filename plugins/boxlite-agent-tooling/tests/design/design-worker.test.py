@@ -343,6 +343,21 @@ sys.exit(result.returncode)
         (configuration / "remote-settings.json").write_text("{}")
         self.assertEqual(self.hook(host="claude").returncode, 0)
 
+    def test_shipped_claude_2_1_325_starts_and_unlisted_2_1_324_is_refused(self):
+        shipped = json.loads((PLUGIN / ".agents/design-worker-policy.json").read_text())["versions"]["claude"]
+        policy_path = self.plugin / ".agents/design-worker-policy.json"
+        policy = json.loads(policy_path.read_text())
+        policy["versions"]["claude"] = shipped
+        policy_path.write_text(json.dumps(policy))
+        (self.bin / "version").write_text("2.1.324 (Claude Code)")
+        refused = self.hook(host="claude")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("unqualified worker CLI version: 2.1.324", refused.stderr)
+        self.assertFalse((self.bin / "observed").exists())
+        (self.bin / "version").write_text("2.1.325 (Claude Code)")
+        self.assertEqual(self.hook(host="claude").returncode, 0)
+        self.assertTrue((self.bin / "observed").exists())
+
     def test_large_snapshot_publishes_both_roles(self):
         self.doc["body"] += "\n" + "Bounded source evidence. " * 400
         (self.bin / "document.json").write_text(json.dumps(self.doc))
