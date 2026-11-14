@@ -63,7 +63,11 @@ Each live PASS/FAIL needs fresh advice after required stop/reflection handling: 
 
 Reject severity labels/unresolved local anchors; outside evidence remains unchecked; advice never mutates verdicts or enters `prior_findings`.
 
-Recorded advice opens the edit gate without a human wait. The agent reports each advisory and advice item in its final reply and the PR; an item changes the design only after the human accepts it. An item that would change the design's approach or scope is the exception: the agent asks before coding.
+Recorded advice opens the edit gate without a human wait.
+
+- The agent reports each advisory and advice item in its final reply and the PR.
+- An item changes the design only after the human accepts it.
+- An item that would change the design's approach or scope is the exception: the agent asks before coding.
 
 ### Stage progression
 
