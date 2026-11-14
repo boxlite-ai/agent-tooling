@@ -10,7 +10,8 @@ import time
 
 directory = Path(__file__).resolve().parent
 if "--version" in sys.argv:
-    print("codex-cli 0.162.1; Claude Code 2.1.322")
+    reported = directory / "version"
+    print(reported.read_text() if reported.exists() else "codex-cli 0.162.1; Claude Code 2.1.322")
     sys.exit(0)
 task = sys.stdin.read()
 mode = (directory / "mode").read_text() if (directory / "mode").exists() else "normal"

@@ -170,6 +170,16 @@ This runtime dependency avoids separate platform-specific JSON and process super
 #### Worker profile
 
 The installed `.agents/design-worker-policy.json` pins supported CLI versions and models.
+
+| Host | Qualified versions | Live evidence |
+| --- | --- | --- |
+| Claude Code | 2.1.322, 2.1.325 | 2.1.325: auditor and advisor runs on macOS only, 2026-11-15, recorded in [design #571](https://github.com/boxlite-ai/agent-tooling/issues/571); Linux and Windows not run |
+| Codex | 0.162.1 | None recorded in this table |
+
+- The list is exact: a CLI whose reported version is absent cannot start a worker, and the runner prints `unqualified worker CLI version`.
+- To add a version, run one auditor and one advisor with it, then add it here and in the policy with that evidence.
+- A host on an unlisted version cannot audit the design for that change, so the machine owner first extends their installed policy.
+
 Executable discovery uses fixed installation locations, including native Codex npm bundles; `PATH`, `CODEX_BIN`, and tool-call endpoint overrides cannot choose workers.
 The runner hashes the CLI, interpreter, broker, policy, task rules, and generated startup inputs, rejecting replacements.
 
