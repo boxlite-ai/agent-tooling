@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 Edit `guidance/workflow.md`. Run `bash scripts/sync-guidance.sh <repo-root>` in plugin.
 Run `make test:guidance` from root.
 
-<!-- agent-tooling:guidance:begin rev=4a79840a106c-dirty sha256=1b2f6a1834a6 -->
+<!-- agent-tooling:guidance:begin rev=53cc05d364b1-dirty sha256=dc78f25b3ff9 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -66,6 +66,7 @@ A passed stage starts the next one; never ask whether to continue.
 
 | When | Next, without asking |
 | --- | --- |
+| The edit gate requires a design | Research, write, register and audit it |
 | The design audit records PASS and advice is recorded | Start implementing |
 | Implementation is finished and its checks pass | Commit and push |
 | The commit and push audits record PASS and the push succeeds | Open a draft PR |
