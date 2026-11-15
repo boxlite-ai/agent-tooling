@@ -692,6 +692,15 @@ policy_path_json="$(jq -Rn --arg path "$policy_path" '$path')"
 
 pr_line="No open PR for '${branch}' yet; the watcher polls until one appears."
 compact_pr_line="No open PR may exist yet; the watcher polls."
+# A pushed feature branch without a PR hands off to the draft PR; other remote writes
+# and a default-branch push have no PR to open. An unknown default branch counts as a
+# feature branch.
+default_branch="$(git -C "$repo_root" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" \
+  || default_branch=""
+if [[ "$remote_write_kind" == git_push && "$branch" != "${default_branch#origin/}" ]]; then
+  pr_line="No open PR for '${branch}' yet: open a draft PR now with boxlite-pr-preparation; the watcher polls until one appears."
+  compact_pr_line="No open PR may exist yet: open a draft PR now; the watcher polls."
+fi
 if [[ "$pr_number" =~ ^[0-9]+$ ]]; then
   pr_line="PR #${pr_number}: https://github.com/${slug}/pull/${pr_number}"
   compact_pr_line="PR #${pr_number}."
