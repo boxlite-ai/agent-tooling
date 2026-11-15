@@ -10,7 +10,7 @@ Edit runtime instructions and questions in Markdown; code owns routing, serializ
 | Design gate | `.agents/prompts/design/` |
 | PR descriptions, review, size, and decomposition | `.agents/prompts/pr/` |
 | Shared questions, timed requests, and Force pass cards | `.agents/prompts/questions/` |
-| Writing reminder | `.agents/prompts/reminders/` |
+| Writing and pending-work reminders | `.agents/prompts/reminders/` |
 | API and network recovery | `.agents/prompts/resume/` |
 | Subagent dispatch | `.agents/prompts/subagent/` |
 | Watcher attachment and schedules | `.agents/prompts/watch/` |

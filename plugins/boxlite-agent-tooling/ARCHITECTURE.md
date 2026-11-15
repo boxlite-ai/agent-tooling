@@ -34,7 +34,7 @@ Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), a
 | Issue, comment, review, and release text file | `scripts/gh-write.sh` | Apply GitHub writing checks to a bounded snapshot and pass it over stdin. |
 | Remote-write `PostToolUse` | `.agents/hooks/post-remote-write-watch.sh` | Attach successful writes to PR monitoring; after a push, ask for a draft PR on a feature branch without one. |
 | Test `PostToolUse`; Claude failure event | `.agents/hooks/record-test-run.sh` | Record supported completed `make test...` results in ignored test-run receipts. |
-| `Stop` | `.agents/hooks/stop-gate.sh` | Continue timed requests, check writing, then execute verdict checking. A payload without a non-empty `session_id` blocks. |
+| `Stop` | `.agents/hooks/stop-gate.sh` | Check writing, continue timed requests, remind once per work state about audited work left uncommitted or unpushed, then execute verdict checking. A payload without a non-empty `session_id` blocks. |
 | Claude `StopFailure` | `.agents/hooks/record-api-failure.sh` | Record failure kind for `scripts/resume-on-network-error.sh`. |
 | Claude async `StopFailure` | `.agents/hooks/resume-after-api-failure.sh` | Resume eligible interactive failures at most three times per session in ten minutes. |
 

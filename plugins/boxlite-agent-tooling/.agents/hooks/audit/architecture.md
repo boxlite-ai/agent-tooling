@@ -148,7 +148,7 @@ Monotonic fixed-preview growth supports logarithmic selection; byte/UTF-8 behavi
 
 ### Stop gate to verdict check
 
-After TL;DR, structure, and confirmation checks, `.agents/hooks/stop-gate.sh` executes `.agents/hooks/audit/preflight-verdict-check.sh` with unchanged payload, preserving output/status/signals; missing dependencies deny.
+After TL;DR, structure, confirmation, and pending-work checks, `.agents/hooks/stop-gate.sh` executes `.agents/hooks/audit/preflight-verdict-check.sh` with unchanged payload, preserving output/status/signals; missing dependencies deny.
 
 ## Incomplete evidence
 

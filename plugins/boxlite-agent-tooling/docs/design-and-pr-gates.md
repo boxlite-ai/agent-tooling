@@ -76,7 +76,7 @@ Recorded advice opens the edit gate without a human wait.
 | Handoff | Signal the agent receives |
 | --- | --- |
 | Design PASS → code | The advice prompt orders implementation once advice records. |
-| Code → commit and push | Guidance only; no hook can tell finished code from work in progress. |
+| Code → commit and push | Guidance, plus the Stop reminder below; no hook can tell finished code from work in progress. |
 | Push → draft PR | The post-push context asks for a draft PR when a feature branch has none. |
 
 The draft PR request has three limits:
@@ -85,7 +85,27 @@ The draft PR request has three limits:
 - A default-branch push gets none.
 - The default branch comes from the local `origin/HEAD` pointer; a clone without it treats every branch as a feature branch.
 
-The rule is guidance, not a gate: an agent that stops anyway is not blocked. Gates that ask for a human choice keep their pauses.
+The rule is guidance, not a gate. Gates that ask for a human choice keep their pauses.
+
+### Stop reminder for pending work
+
+`scripts/continue-workflow.sh` runs in the Stop gate after timed confirmations and before the verdict check.
+
+| Condition | Result |
+| --- | --- |
+| The branch has no local design PASS with advice for the same content | Nothing |
+| No uncommitted change, untracked file, or unpushed commit | Nothing |
+| The work state equals the one stored for this session | Nothing |
+| Otherwise | Store the state, then continue the turn with the reminder |
+
+The work state hashes the head commit, the file status, the tracked content difference, and the unpushed commit count.
+
+- Each work state gets one reminder; a second Stop on the same state reaches the verdict check.
+- The state lives in `.agents/state/workflow-reminder-<session-scope>.json`.
+- The step reads local records only and never contacts the design provider.
+- Its own read or write failures give no reminder and never block a Stop.
+- Edits inside an untracked file do not change the state, since only its name is hashed.
+- The reminder offers a second Stop for a permitted pause; it never commits or pushes.
 
 ### Design audit loop
 
