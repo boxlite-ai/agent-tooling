@@ -63,9 +63,9 @@ History inspection for commit, push, and verdict, plus design status, uses `.age
 For example, two ERROR rounds report `infra` while the existing reflection and permission checks still apply.
 See [progress diagnostics](.agents/hooks/audit/state.md#progress-diagnostics) for severity, legacy records, bounds, and reconstruction limits.
 
-The design gate reserves one fresh referee per loop under the existing clone-wide transaction.
-Cited decisions adjust an effective-count overlay while preserving ordinary FAIL evidence.
-Retractions require resolvable frozen-source or research citations; critical findings prevent automatic reservations.
+The design gate stores recovery reservations in its audit record under the existing clone-wide transaction.
+One fresh owned referee can recheck repeated high findings; its evidence changes an overlay without replacing the ordinary FAIL.
+One Shrink reservation captures the original design and findings before requesting a local draft, followed by approved publication and complete ordinary review.
 
 See [design recovery ownership](.agents/hooks/audit/state.md#design-recovery-ownership) for bindings, interruption, and authority boundaries.
 

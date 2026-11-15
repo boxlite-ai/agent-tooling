@@ -86,6 +86,22 @@ worker_transition() {
     _design_doc_error 'a human design decision takes precedence'; return 1
   fi
   (( decision_status == 1 )) || return 1
+  if [[ "$action" == shrink ]]; then
+    jq -e --argjson live "$live" '.snapshot==$live and $live.request.recovery_action=="shrink"
+      and ($live.request.advice_due | not)' <<<"$input" >/dev/null || return 1
+    if [[ -e "$path" || -L "$path" ]]; then
+      pending="$(_design_doc_worker_record "$path")" || return 1
+      jq -e '.expires < now or .status != "pending"' <<<"$pending" >/dev/null || return 1
+    fi
+    assignment="$(jq -nc --argjson input "$input" --argjson live "$live" '
+      {assignment:{task_id:$input.task_id,source_sha256:$live.snapshot.snapshot_sha256,
+        deadline:$input.deadline},original:$live.snapshot.body}')" || return 1
+    _design_doc_audit_update "$directory/agent-tooling-design-audit.json" "$root" \
+      "$(jq -r .branch <<<"$live")" "$(jq -r .url <<<"$live")" "$(jq -r .snapshot.content_sha256 <<<"$live")" \
+      '($argument | fromjson) as $input | da_shrink_reserve($input.assignment; $input.original)' "$assignment" || return 1
+    printf '%s\n' '{"reserved":true}'
+    return
+  fi
   if [[ "$action" == claim ]]; then
     jq -e --argjson live "$live" '.snapshot == $live' <<<"$input" >/dev/null || {
       _design_doc_error 'assignment snapshot changed'; return 1;
@@ -97,10 +113,12 @@ worker_transition() {
       }
     fi
     jq -e '.request | (.blocked // false | not)
-      and (.reflection_due // false | not) and (.redesign // false | not)' <<<"$live" >/dev/null || return 1
+      and (.reflection_due // false | not) and (.redesign // false | not)
+      and (.shrink_pending // false | not)' <<<"$live" >/dev/null || return 1
     jq -e --argjson live "$live" '.role ==
       (if $live.request.advice_due then "advisor"
-       elif $live.request.recovery_action=="referee" then "referee" else "auditor" end)' \
+       elif $live.request.recovery_action=="referee" then "referee"
+       elif $live.request.recovery_action=="shrink" then "unavailable" else "auditor" end)' \
       <<<"$input" >/dev/null || return 1
     # An unowned verdict, or a PASS an auditor is about to replace, cannot authorize a new worker.
     if jq -e --argjson input "$input" '.state | ((.verdict=="PASS" or .verdict=="FAIL") and .worker_provenance==null)
@@ -116,7 +134,7 @@ worker_transition() {
       _design_doc_audit_update "$directory/agent-tooling-design-audit.json" "$root" \
         "$(jq -r .branch <<<"$live")" "$(jq -r .url <<<"$live")" \
         "$(jq -r .snapshot.content_sha256 <<<"$live")" \
-        'da_referee_reserve($argument | fromjson)' "$assignment" || return 1
+        'da_recovery_reserve("referee"; $argument | fromjson)' "$assignment" || return 1
       live="$(worker_snapshot "$root")" || return 1
     fi
     jq -c --argjson live "$live" '. + {snapshot:$live,status:"pending"}' <<<"$input" |
@@ -208,6 +226,6 @@ case "${1:-}" in
   binding) shift; _design_doc_binding "$@" ;;
   log) _design_doc_log_store "$2" ;;
   snapshot) worker_snapshot "$2" ;;
-  claim|publish) worker_transition "$1" "$2" ;;
+  claim|publish|shrink) worker_transition "$1" "$2" ;;
   *) exit 2 ;;
 esac

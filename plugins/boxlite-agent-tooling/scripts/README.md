@@ -139,7 +139,7 @@ Transcript discovery and runner contracts: [audit configuration](../.agents/hook
 
 | Script / arguments | Responsibility and effects |
 | --- | --- |
-| [design-doc.sh](design-doc.sh) `register <URL>`, `check`, `run`, `log`, `reflect`, or `show [repo-root]` | Bind and inspect designs, request a host-owned worker through the exact Bash action, or store the log/reflection; standalone result submissions are rejected. |
+| [design-doc.sh](design-doc.sh) `register <URL>`, `check`, `run`, `shrink FILE`, `log`, `reflect`, or `show [repo-root]` | Bind and inspect designs, request an owned worker or local Shrink, or store completion metadata/log/reflection; standalone worker-result submissions are rejected. |
 | [api-compatibility.sh](api-compatibility.sh) `inspect\|inspect-push\|check\|push [repo-root] [base-ref]` | Check `*openapi*.yaml` changes, require user confirmation to skip breaking/default enforcement, and export per-file request-audit evidence; see [commands](api-compatibility.md). |
 | [writing-structure.sh](writing-structure.sh) `commit [repo-root]` | List the writing-structure violations a commit adds to staged Markdown. Exit 0: none or skipped; 1: listed on stdout; 2: a file could not be measured. See [staged Markdown](../docs/writing-checks.md#staged-markdown). |
 | [pr-author-review.sh](pr-author-review.sh) `<github-event.json>` | CI publisher: update the author-review check and prompt, and return an unacknowledged PR to draft. Exit 0: acknowledged/irrelevant; 1: awaiting acknowledgment; 2: API/validation error. |

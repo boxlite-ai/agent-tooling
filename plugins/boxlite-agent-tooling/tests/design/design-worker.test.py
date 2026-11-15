@@ -157,9 +157,97 @@ class OwnedWorker(unittest.TestCase):
         self.assertEqual(task["findings"], findings)
         self.assertNotEqual(self.gate().returncode, 0, "a referee cannot grant edit authority")
 
+    def test_design_shrink_retains_requirements_and_needs_an_ordinary_review(self):
+        self.check_shrink("codex")
 
+    def test_claude_design_shrink_uses_the_same_owned_contract(self):
+        self.check_shrink("claude")
 
+    def check_shrink(self, host):
+        findings = ["high: F2: source.txt:1 boundary remains unchecked"]
+        self.fail_designs([["high: F1: source.txt:1 cleanup remains unchecked"], findings], host)
+        original = self.doc["body"]
+        self.assertEqual(self.hook(host=host).returncode, 0)
+        reserved = self.record("audit")
+        marker = reserved["recovery_state"]["shrink"]
+        self.assertEqual(marker["original_design"], original)
+        self.assertEqual(reserved["verdict"], "NONE")
+        self.assertEqual(len(reserved["failures"]), 2)
+        denial = self.gate()
+        self.assertNotEqual(denial.returncode, 0)
+        self.assertIn("A design Shrink is reserved", denial.stderr)
+        self.assertNotIn("The human chose Redesign", denial.stderr)
+        status = self.cli("run")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIn(marker["task_id"], status.stdout)
+        metadata = {"task_id": marker["task_id"], "source_sha256": marker["source_sha256"],
+                    "removed_scope": ["optional candidate annotation"], "affected_sections": ["Details"],
+                    "preserved_requirements": ["Read the tracked source"], "findings": findings}
+        path = self.root / "shrink.json"
+        path.write_text(json.dumps(metadata))
+        self.assertNotEqual(self.cli("shrink", str(path)).returncode, 0, "unchanged source is not a reduction")
+        result = self.cli("log", body="Additional research without changing the design text.")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.cli("shrink", str(path))
+        self.assertNotEqual(result.returncode, 0, "a research-log change cannot complete a design reduction")
+        self.assertIn("changed design text", result.stderr)
+        self.doc["body"] = original.replace("\nA revised design candidate.", "")
+        (self.bin / "document.json").write_text(json.dumps(self.doc))
+        for changed in ({**metadata, "source_sha256": "0" * 64}, {**metadata, "findings": []},
+                        {**metadata, "preserved_requirements": []}):
+            path.write_text(json.dumps(changed))
+            self.assertNotEqual(self.cli("shrink", str(path)).returncode, 0)
+            self.assertIsNone(self.record("audit")["recovery_state"]["shrink"]["result"])
+        path.write_text(json.dumps(metadata))
+        link = self.root / "linked.json"
+        link.symlink_to(path)
+        self.assertNotEqual(self.cli("shrink", str(link)).returncode, 0)
+        if hasattr(os, "mkfifo"):
+            fifo = self.root / "metadata.pipe"
+            os.mkfifo(fifo)
+            self.assertNotEqual(self.cli("shrink", str(fifo), timeout=3).returncode, 0)
+        result = self.cli("shrink", str(path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(self.gate().returncode, 0, "completion metadata is not design approval")
+        self.assertNotEqual(self.cli("shrink", str(path)).returncode, 0, "completion cannot replay")
+        result = self.hook(host=host)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = json.loads((self.bin / "task-input.json").read_text())
+        self.assertEqual(task["shrink_review"]["original_design"], original)
+        self.assertEqual(task["shrink_review"]["result"]["findings"], findings)
+        self.assertEqual(self.record("audit")["worker_provenance"]["role"], "auditor")
+        self.assertNotEqual(self.gate().returncode, 0)
+        self.assertEqual(self.hook(host=host).returncode, 0)
+        self.assertEqual(self.gate().returncode, 0)
 
+    def test_no_reduction_blocks_without_a_replacement_shrink(self):
+        findings = ["high: F2: source.txt:1 remains unchecked"]
+        self.fail_designs([["high: F1: source.txt:1 remains unchecked"], findings])
+        self.assertEqual(self.hook().returncode, 0)
+        before = self.record("audit")
+        marker = before["recovery_state"]["shrink"]
+        path = self.root / "none.json"
+        path.write_text(json.dumps({"task_id": marker["task_id"], "source_sha256": marker["source_sha256"],
+            "removed_scope": [], "affected_sections": [], "preserved_requirements": ["every edit is mandatory"],
+            "findings": findings}))
+        result = self.cli("shrink", str(path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.record("audit")["verdict"], "FAIL")
+        self.assertNotEqual(self.hook().returncode, 0)
+        self.assertEqual(self.record("audit")["recovery_state"]["shrink"]["task_id"], marker["task_id"])
+        self.assertNotEqual(self.gate().returncode, 0)
+
+    def test_previous_referee_records_retain_their_marker_after_upgrade(self):
+        self.check_referee("codex")
+        record = self.record("audit")
+        del record["recovery_state"]["shrink"]
+        path = self.repo / ".git/agent-tooling-design-audit.json"
+        path.write_text(json.dumps(record))
+        before = path.read_bytes()
+        denial = self.gate()
+        self.assertNotEqual(denial.returncode, 0)
+        self.assertIn("reflection", denial.stderr.lower())
+        self.assertEqual(path.read_bytes(), before)
 
     def test_failed_referee_launch_keeps_its_reservation_consumed(self):
         findings = ["high: F1: source.txt:1 remains unchecked"]
