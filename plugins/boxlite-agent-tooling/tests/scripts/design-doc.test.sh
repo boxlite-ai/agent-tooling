@@ -180,8 +180,8 @@ reflect 'a reflection missing the FAIL ids is refused' 1 "$(reflection "$request
 reflect 'a reflection bound to this history is stored' 0 "$(reflection "$request")"
 request_has 'the reflected loop asks for audit 3' '(.reflection_due | not) and (.blocked | not)'
 c="$(revise c)"
-record 'FAIL 3 records' 0 "$(review "$c" "$(high 'Transfer: unsupported')")"
-request_has 'a FAIL 3 that stops shrinking stops for the human' '.blocked and .stop == "early" and .fails == 3'
+record 'a critical FAIL 3 records' 0 "$(review "$c" '["critical: research: Transfer: unsupported"]')"
+request_has 'a critical FAIL 3 stops for the human' '.blocked and .stop == "early" and .fails == 3'
 record 'a stopped loop refuses another verdict' 1 "$(review "$c" '[]')"
 decide 'a choice the gate does not know is refused' 1 'Approve'
 status=0; grep -q 'unknown research decision' "$scratch/err" || status=1
@@ -211,8 +211,8 @@ request_has 'a repeat among fewer findings still converges' '.reflection_due and
 request="$(gate edit 2>/dev/null)" || true
 reflect 'the converging repeat is reflected on' 0 "$(reflection "$request")"
 e="$(revise e2)"
-record 'the same finding alone at FAIL 3 records' 0 "$(review "$e" "$repeated")"
-request_has 'a repeat with no drop stops at FAIL 3' '.blocked and .stop == "early" and .fails == 3'
+record 'a critical finding at FAIL 3 records' 0 "$(review "$e" '["critical: research: Fidelity: quote lacks subject"]')"
+request_has 'a critical finding stops at FAIL 3' '.blocked and .stop == "early" and .fails == 3'
 decide 'Redesign resets the count' 0 Redesign
 request_has 'Redesign asks for a fresh draft' '.redesign and .fails == 0 and (.blocked | not)'
 record 'the failed draft cannot be audited after Redesign' 1 "$(review "$e" '[]')"
@@ -220,8 +220,8 @@ f="$(revise f)"
 request_has 'a fresh draft starts a new count' '(.redesign | not) and .fails == 0'
 record 'FAIL 1 again' 0 "$(review "$f" "$(high 'Search: thin log')")"
 g="$(revise g)"
-record 'FAIL 2 with as many new findings records' 0 "$(review "$g" "$(high 'Local fit: unchecked')")"
-request_has 'no drop in findings stops at FAIL 2' '.blocked and .stop == "early"'
+record 'FAIL 2 with a new critical finding records' 0 "$(review "$g" '["critical: research: Local fit: unchecked"]')"
+request_has 'a critical finding stops at FAIL 2' '.blocked and .stop == "early"'
 decide 'Overrule again' 0 Overrule
 # A loop that sheds one finding per round runs unattended until the eighth FAIL.
 shrinking() { jq -nc --argjson n "$1" '[range($n) | "high: research: gap \(.)"]'; }

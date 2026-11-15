@@ -47,7 +47,7 @@ json() { jq -e "$@" >/dev/null; }
 publish() { jq -nc --arg url "$url" --arg body "$1" '{html_url:$url,body:$body}' > "$DOC_RESPONSE"; }
 record_fail() {
   jq -nc --arg digest "$(printf '%s' "$design" | shasum -a 256 | awk '{print $1}')" \
-    '{content_sha256:$digest,verdict:"FAIL",findings:["high: scope: fixture finding"]}' \
+    '{content_sha256:$digest,verdict:"FAIL",findings:["critical: scope: fixture finding"]}' \
     | (cd "$repo" && bash "$cli" verdict) >/dev/null
 }
 gate() {

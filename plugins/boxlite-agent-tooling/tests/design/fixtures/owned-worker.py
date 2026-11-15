@@ -79,10 +79,11 @@ if mode == "pause":
         time.sleep(0.02)
 broker.stdin.close()
 broker.wait(timeout=5)
-role = "advisor" if "verdict" in data else "auditor"
+role = "advisor" if "verdict" in data else "referee" if "findings" in data else "auditor"
 queued = directory / "result.json"
 result = json.loads(queued.read_text()) if queued.exists() else ({"content_sha256": data["content_sha256"], "advice": []}
     if role == "advisor" else {"content_sha256": data["content_sha256"], "verdict": "PASS", "findings": [], "advisories": []})
+result.setdefault("content_sha256", data["content_sha256"])
 if mode == "invalid":
     print("invalid completion")
     sys.exit(0)
