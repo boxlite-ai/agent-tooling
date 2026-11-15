@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # PR description facade over literal argv already validated by the shell scanner.
-# Requires design-doc.sh, git, gh, jq and perl; prints a denial reason on failure.
+# Requires design-doc.sh, verdict-audit-state.sh, audit-ledger.sh, git, gh, jq and perl;
+# prints a denial reason on failure.
 
 _pr_description_check_explanation() { # bounded GitHub-rendered HTML
   if ! printf '%s' "$1" | perl -CSD -0777 -e '
@@ -63,6 +64,44 @@ _pr_description_check_explanation() { # bounded GitHub-rendered HTML
   fi
 }
 
+# Every ledger finding recorded on the PR branch must appear in a ## Unresolved findings
+# section as its label, gate@head7:ID (design #563). Requires sourced audit-ledger.sh.
+_pr_description_check_ledger() { # root, branch, bounded GitHub-rendered HTML
+  local path ledger labels missing
+  path="$(audit_ledger_path "$1")"
+  [[ -e "$path" || -L "$path" ]] || return 0
+  if ! ledger="$(audit_ledger_read "$path")" \
+    || ! labels="$(jq -rs --arg branch "$2" '[.[] | select(.branch == $branch) | . as $entry
+        | .findings[] | "\($entry.gate)@\($entry.head[0:7]):\(.id)"] | unique | .[]' <<<"$ledger" 2>/dev/null)"; then
+    printf 'Cannot read the unresolved-findings ledger %s; repair or remove it before publishing.' "$path"
+    return 1
+  fi
+  [[ -n "$labels" ]] || return 0
+  missing="$(printf '%s' "$3" | perl -CSD -0777 -e '
+    my ($html, $labels) = (scalar(<STDIN>) // "", $ARGV[0]);
+    $html =~ s/<!--.*?(?:-->|\z)//sg;
+    my ($quote, $level, $heading, $active, $section) = (0, 0, "", 0, "");
+    while ($html =~ m{<(/?)([a-z][a-z0-9-]*)\b(?:[^>"\x27]|"[^"]*"|\x27[^\x27]*\x27)*>|([^<]+)|<}g) {
+      my ($closing, $name, $text) = ($1, $2, $3);
+      if (defined $name) {
+        if ($name eq "blockquote") { $closing ? ($quote -= $quote > 0) : $quote++; next; }
+        next if $quote || $name !~ /^h([1-6])$/;
+        if (!$closing) { $active = 0 if $1 <= 2; ($level, $heading) = ($1, ""); next; }
+        $active = 1 if $level == 2 && $heading =~ /\A\s*Unresolved findings\s*\z/i;
+        $level = 0;
+        next;
+      }
+      next unless defined $text && !$quote;
+      if ($level) { $heading .= $text; } elsif ($active) { $section .= "$text "; }
+    }
+    print join(" ", grep { $section !~ /(?<![\w@:.-])\Q$_\E(?![\w])/ } split /\n/, $labels);
+  ' "$labels")" || missing="$labels"
+  [[ -z "$missing" ]] && return 0
+  printf 'PR body needs a ## Unresolved findings section listing every ledger finding for this branch; missing: %s' \
+    "$(tr '\n' ' ' <<<"$missing")"
+  return 1
+}
+
 pr_description_check() { # root, resolved target, create|edit|ready, validated gh PR arguments
   local root="$1" target="$2" operation="$3" token body="" count=0 selector="" url response
   shift 3
@@ -119,5 +158,8 @@ pr_description_check() { # root, resolved target, create|edit|ready, validated g
   ' "$url"; then
     printf 'PR must link the registered design doc: %s' "$url"; return 1
   fi
-  _pr_description_check_explanation "$response"
+  _pr_description_check_explanation "$response" || return 1
+  local head_ref
+  head_ref="$(jq -r .head_ref <<<"$target")" || return 1
+  _pr_description_check_ledger "$root" "${head_ref#*:}" "$response"
 }

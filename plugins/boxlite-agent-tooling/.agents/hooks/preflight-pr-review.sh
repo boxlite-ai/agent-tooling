@@ -1695,6 +1695,9 @@ fi
 # shellcheck source=../lib/design-doc.sh
 source "$lib_dir/design-doc.sh" 2>/dev/null \
   || deny 'The PR description verifier is unavailable.'
+# shellcheck source=../lib/audit-ledger.sh
+source "$lib_dir/audit-ledger.sh" 2>/dev/null \
+  || deny 'The PR description verifier is unavailable.'
 # shellcheck source=../lib/pr-description.sh
 source "$lib_dir/pr-description.sh" 2>/dev/null \
   || deny 'The PR description verifier is unavailable.'

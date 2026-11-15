@@ -122,7 +122,8 @@ stuck_loop() { # jq edit for the first round's finding severity
 
 for host in claude codex; do
   export BOXLITE_HOOK_HOST="$host"
-  rm -f "$ledger"
+  # Two earlier entries: the gate must append to a multi-line ledger, not fail reading it.
+  jq -nc '{attempt_id:"earlier-1",gate:"commit",findings:[]},{attempt_id:"earlier-2",gate:"push",findings:[]}' > "$ledger"
   session "forced-$host"
   stuck_loop "$high"
   check "$host: a stuck loop with only high findings is due to continue" \
@@ -133,7 +134,7 @@ for host in claude codex; do
     'none:true'
   check "$host: the ledger holds the open high finding for that attempt" \
     "$(jq -sc --arg id "$(history | jq -r '.state.attempts[-1].id')" \
-      '[length, .[0].attempt_id == $id, (.[0].findings | map(.severity))]' "$ledger")" '[1,true,["high"]]'
+      '[length, .[-1].attempt_id == $id, (.[-1].findings | map(.severity))]' "$ledger")" '[3,true,["high"]]'
   check "$host: the history records no PASS" \
     "$(history | jq -r '[.state.attempts[].outcome.verdict] | index("PASS") == null')" true
   check "$host: the FAIL dossier was consumed" "$([[ -e "$repo/.agents/state/last-audit.json" ]] && echo kept || echo consumed)" consumed
@@ -146,7 +147,7 @@ for host in claude codex; do
   check "$host: a stuck loop with a critical finding still asks the human" \
     "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out"):$(action "$out")" 'deny:Next action: wait'
   check "$host: nothing is written to the ledger for it" \
-    "$(jq -s --arg s "$scope" 'length' "$ledger")" 1
+    "$(jq -s --arg s "$scope" 'length' "$ledger")" 3
 done
 
 printf 'RESULT: %s passed, %s failed\n' "$pass" "$fail"

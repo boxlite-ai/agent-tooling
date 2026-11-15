@@ -76,6 +76,43 @@ while IFS= read -r fixture; do
     fi
   done
 done < "$plugin/tests/pr/fixtures/pr-explanation-render.jsonl"
+# Ledger findings for the PR branch must be listed under ## Unresolved findings (design #563).
+head7="$(git rev-parse --short=7 HEAD)" ledger=.agents/state/audit-ledger.jsonl
+jq -nc --arg head "$(git rev-parse HEAD)" \
+  '{gate:"commit",branch:"feature",head:$head,findings:[{id:"F1",severity:"high"}]},
+   {gate:"push",branch:"other",head:$head,findings:[{id:"F9",severity:"high"}]}' > "$ledger"
+url=https://github.com/example/repo/issues/1
+base_html="<h2>Links</h2><p><a href=\"$url\">$url</a></p><h2>How it works</h2><p>Retry once.</p>"
+for case in \
+  "deny|none|" \
+  "deny|quoted|<blockquote><h2>Unresolved findings</h2><p><code>commit@$head7:F1</code></p></blockquote>" \
+  "deny|prefix|<h2>Unresolved findings</h2><p><code>commit@$head7:F12</code></p>" \
+  "deny|elsewhere|<h2>Notes</h2><p>commit@$head7:F1</p><h2>Unresolved findings</h2><p>None.</p>" \
+  "allow|listed|<h2>Unresolved findings</h2><ul><li><code>commit@$head7:F1</code> (high): retry.</li></ul>"; do
+  IFS='|' read -r want name extra <<<"$case"
+  jq -nc --arg name "$name" --arg html "$base_html$extra" '{name:$name,body:("## TL;DR\n\nLedger " + $name + "."),html:$html}' \
+    > "$EXPLANATION_FIXTURE"
+  rm -f .agents/state/pr-review-request.json
+  output="$(jq -nc --arg command "gh pr create --draft --title 'feat: retry once' --body '## TL;DR
+
+Ledger $name.'" \
+    '{tool_input:{command:$command}}' | bash "$plugin/.agents/hooks/preflight-pr-review.sh")"
+  reason="$(jq -r '.hookSpecificOutput.permissionDecisionReason // ""' <<<"$output")"
+  if { [[ "$want" == allow && -z "$output" ]]; } ||
+     { [[ "$want" == deny && "$reason" == 'PR body needs a ## Unresolved findings section'*"missing: commit@$head7:F1 " ]]; }; then
+    pass=$((pass+1))
+  else
+    printf 'FAIL ledger/%s: want %s; %s\n' "$name" "$want" "$output"
+    fail=$((fail+1))
+  fi
+done
+printf 'not json\n' > "$ledger"
+jq -nc --arg html "$base_html" '{name:"corrupt",body:"## TL;DR\n\nLedger corrupt.",html:$html}' > "$EXPLANATION_FIXTURE"
+reason="$(jq -nc '{tool_input:{command:"gh pr create --draft --title '\''feat: retry once'\'' --body '\''## TL;DR\n\nLedger corrupt.'\''"}}' \
+  | bash "$plugin/.agents/hooks/preflight-pr-review.sh" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')"
+if [[ "$reason" == 'Cannot read the unresolved-findings ledger'* ]]; then pass=$((pass+1)); else
+  printf 'FAIL ledger/corrupt: %s\n' "$reason"; fail=$((fail+1)); fi
+rm -f "$ledger"
 # Rendered whitespace runs stay linear: each trim matches from the start of its text.
 # shellcheck source=../../.agents/lib/pr-description.sh
 source "$plugin/.agents/lib/pr-description.sh"
