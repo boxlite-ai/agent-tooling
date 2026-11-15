@@ -1574,6 +1574,20 @@ tamper_receipt() {  # repo jq-filter
   jq "$2" "$receipt" > "$receipt.tmp" && mv "$receipt.tmp" "$receipt"
 }
 
+# A forced UNRESOLVED commit keeps its FAIL dossier for commit-msg (design #563): it must
+# not earn the receipt that would let its push skip the audit.
+R="$(setup)"; stage_change "$R"; write_audit "$R" commit
+jq '.verdict="FAIL" | .findings=["high: test: open finding. Evidence: f:1. Pass if: fixed"]' \
+  "$R/.agents/state/last-audit.json" > "$R/.agents/state/x.json" \
+  && mv "$R/.agents/state/x.json" "$R/.agents/state/last-audit.json"
+printf 'change\n' > "$R/msg.txt"
+forced_rc=0
+(cd "$R" && CLAUDECODE=1 "$R/.githooks/commit-msg" "$R/msg.txt" >/dev/null 2>"$R/err.txt") || forced_rc=$?
+check_eq "forced FAIL dossier at commit-msg → commit proceeds, no receipt, dossier consumed" \
+  "rc=$forced_rc receipt=$(receipt_count "$R") dossier=$([[ -e "$R/.agents/state/last-audit.json" ]] && echo kept || echo gone)" \
+  "rc=0 receipt=0 dossier=gone"
+rm -rf "$R"
+
 read -r R B < <(setup_pushed)
 commit_audited "$R"
 receipts_after_commit="$(receipt_count "$R")"

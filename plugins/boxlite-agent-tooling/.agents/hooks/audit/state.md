@@ -13,6 +13,7 @@ All `.agents/state/` artifacts are ignored and session-scoped where checkouts ca
 | Owner | Responsibility |
 | --- | --- |
 | `scripts/audit-reflection.sh`, `.agents/lib/audit-reflection.sh`, `.agents/lib/audit-reflection.jq` | Bounded serialized transitions, immutable bindings, deduplication, atomic regular-file writes. |
+| `.agents/lib/audit-ledger.sh` | Append one bounded `.agents/state/audit-ledger.jsonl` line per forced commit/push attempt; repeated calls for the same attempt write nothing. |
 | `.agents/lib/audit-reconciliation.jq` | Finding IDs/dispositions/provenance/coverage/reopening; reject unresolved PASS. |
 | `.agents/lib/audit-loop.jq` | Pure bounded progress classification; normalized history/design adapters, without action authority. |
 | `.agents/lib/audit-reflection-contract.jq` | After two failures require complete current reflection; independent sufficient assessment for PASS; freeze active reflection. |

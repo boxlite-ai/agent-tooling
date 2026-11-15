@@ -96,6 +96,8 @@ source "$lib_dir/audit-task-file.sh" || library_failure "$lib_dir/audit-task-fil
 source "$lib_dir/audit-reflection.sh" || library_failure "$lib_dir/audit-reflection.sh"
 # shellcheck source=../lib/audit-reflection-gate.sh
 source "$lib_dir/audit-reflection-gate.sh" || library_failure "$lib_dir/audit-reflection-gate.sh"
+# shellcheck source=../lib/audit-ledger.sh
+source "$lib_dir/audit-ledger.sh" || library_failure "$lib_dir/audit-ledger.sh"
 # Assigned by auditor_override_load_valid_grant; initialize the sourced public output
 # explicitly so `set -u` and static analysis share the same boundary contract.
 auditor_override_nonce_hash=""
@@ -784,6 +786,7 @@ ${advisories}
 }Reflect on the findings it upheld; an ordinary audit must still pass."
   fi
 
+  forced_continuation=""
   if [[ "$audit_verdict" != "PASS" ]]; then
     findings="$(printf '%s' "$audit_document" \
       | jq -r '.findings[]? | "  - " + .' 2>/dev/null || echo '')"
@@ -806,8 +809,21 @@ ${advisories}
         'Retry through the current Claude Code or Codex hook route with its real session and prompt epoch; preserve the FAIL and test receipts.' \
         'The existing history owner can enforce reflection, Stop, and the retry budget.'
     fi
-    deny_with_audit "CLAUDE.md audit FAILED on branch '${branch}': ${findings_summary}.
+    # A stuck loop with only high findings proceeds as UNRESOLVED (design #563).
+    forced_state="$(audit_reflection_gate "$reflection_context" inspect | jq -c -L "$tooling_root/.agents/lib" '
+      include "audit-reflection-contract"; .state | select(audit_forced_continuation_due)')" || forced_state=""
+    if [[ -n "$forced_state" ]]; then
+      audit_ledger_record "$project_dir" "$forced_state" "$branch" "$head" \
+        || block_git recover "The unresolved-findings ledger could not be written; git ${kind} remains gated." \
+          "Repair access to $(audit_ledger_path "$project_dir"), then retry the original Git operation." \
+          'The ledger records the open findings for this attempt.'
+      forced_continuation="UNRESOLVED: ${kind} proceeds with ${findings_summary}; the loop is stuck and every open finding is high.
+They are recorded in $(audit_ledger_path "$project_dir"). List them in your final reply and in the pull request under Unresolved findings."
+      audit_verdict=UNRESOLVED
+    else
+      deny_with_audit "CLAUDE.md audit FAILED on branch '${branch}': ${findings_summary}.
 Read them, then reassess each finding with current evidence; a code change or newer test receipt is not required merely to request review."
+    fi
   fi
 
   gate_checkpoint
@@ -850,7 +866,13 @@ Read them, then reassess each finding with current evidence; a code change or ne
   # Surface without touching the permission decision. Deliberately NOT
   # permissionDecision:"allow", which would auto-approve a command the user might
   # otherwise be asked about.
-  if [[ -n "$advisories" ]]; then
+  if [[ -n "$forced_continuation" ]]; then
+    additional_context="$forced_continuation"
+    additional_context_bytes="$(LC_ALL=C printf '%s' "$additional_context" | wc -c | tr -d ' ')"
+    (( additional_context_bytes <= deny_max_bytes )) \
+      || additional_context="UNRESOLVED: ${kind} proceeds; its open high findings are in $(audit_ledger_path "$project_dir")."
+    jq -nc --arg c "$additional_context" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}'
+  elif [[ -n "$advisories" ]]; then
     additional_context="Audit PASSED with advisories (non-blocking, no re-audit needed):
 ${advisories}"
     additional_context_bytes="$(LC_ALL=C printf '%s' "$additional_context" | wc -c | tr -d ' ')"
