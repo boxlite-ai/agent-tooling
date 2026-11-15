@@ -10,6 +10,8 @@ def da_lines: type == "array" and length <= 50 and all(.[]; da_line);
 def da_empty($root; $branch):
   {root:$root, branch:$branch, url:"", content_sha256:"", verdict:"NONE", findings:[],
    advisories:[], failures:[], stop:"none", extra:false, reflection:null, overruled:[]};
+# Discard a verdict that cannot authorize work while keeping human overrules.
+def da_reset($root; $branch): . as $old | da_empty($root; $branch) | .overruled = $old.overruled;
 # Provenance is supplied by the runner that owns the worker's output channel.
 def da_worker_provenance($role):
   . as $record | .worker_provenance |
@@ -36,8 +38,6 @@ def da_valid:
   and (.failures | type == "array" and length <= 64 and all(.[]; type == "string"))
   and (.stop | IN("none","early","cap")) and (.extra | type == "boolean")
   and (.reflection == null or (.reflection | audit_reflection_body));
-# A record with only the binding and verdict fields lacks the loop state; it cannot be read.
-def da_pre_loop: type == "object" and keys == ["branch","content_sha256","findings","root","url","verdict"];
 # Another root or branch starts fresh; a malformed record for this one fails closed.
 def da_state($root; $branch):
   if type == "object" and .root == $root and .branch == $branch then

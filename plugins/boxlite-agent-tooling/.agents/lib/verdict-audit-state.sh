@@ -28,6 +28,31 @@ verdict_audit_sha256() {
     || return 1
 }
 
+# The hex value of ` key=<hex>` in a synthetic Git audit command, or nothing.
+verdict_audit_command_field() {  # command key
+  printf '%s' "$1" | sed -n "s/.* ${2}=\\([0-9a-f][0-9a-f]*\\).*/\\1/p" | head -1
+}
+
+# SHA-256 of the change a commit or push audit reviews. A push hook supplies its
+# exact pushed-diff hash; without one, a push falls back to the branch diff.
+verdict_audit_diff_hash() {  # repo-root kind [pushed-diff-hash]
+  case "$2" in
+    commit) git -C "$1" diff --cached --no-ext-diff | verdict_audit_sha256 ;;
+    push)
+      if [[ "${3:-}" =~ ^[0-9a-f]{64}$ ]]; then
+        printf '%s' "$3"
+        return
+      fi
+      {
+        git -C "$1" diff --no-ext-diff origin/main...HEAD 2>/dev/null ||
+          git -C "$1" diff --no-ext-diff HEAD~1...HEAD 2>/dev/null ||
+          true
+      } | verdict_audit_sha256
+      ;;
+    *) printf 'unknown' | verdict_audit_sha256 ;;
+  esac
+}
+
 # Snapshot workspace state without letting a FIFO, symlink, or replacement pathname
 # choose what gets parsed. `record` mode validates the bytes before command substitution
 # can erase trailing LFs. `json` mode prefixes the selected inode's mtime, keeping

@@ -86,19 +86,17 @@ if [[ "$stop_hook_active" != true && -n "$last_assistant_message" ]]; then
     exit 0
   fi
 fi
-timed_continuation="$tooling_root/scripts/continue-timed-prompts.sh"
-[[ -r "$timed_continuation" ]] || { printf "stop-gate: timed continuation missing\n" >&2; exit 2; }
-continuation="$(printf '%s' "$raw_payload" | bash "$timed_continuation")" || exit 2
-if [[ -n "$continuation" ]]; then
-  printf '%s\n' "$continuation"
-  exit 0
-fi
-workflow_continuation="$tooling_root/scripts/continue-workflow.sh"
-[[ -r "$workflow_continuation" ]] || { printf "stop-gate: workflow continuation missing\n" >&2; exit 2; }
-continuation="$(printf '%s' "$raw_payload" | bash "$workflow_continuation")" || exit 2
-if [[ -n "$continuation" ]]; then
-  printf '%s\n' "$continuation"
-  exit 0
-fi
+# Timed confirmations come first; the first continuation printed ends this Stop.
+for continuation_kind in timed:continue-timed-prompts workflow:continue-workflow; do
+  continuation_script="$tooling_root/scripts/${continuation_kind#*:}.sh"
+  [[ -r "$continuation_script" ]] || {
+    printf 'stop-gate: %s continuation missing\n' "${continuation_kind%%:*}" >&2; exit 2;
+  }
+  continuation="$(printf '%s' "$raw_payload" | bash "$continuation_script")" || exit 2
+  if [[ -n "$continuation" ]]; then
+    printf '%s\n' "$continuation"
+    exit 0
+  fi
+done
 
 run_verdict_check

@@ -19,7 +19,7 @@ Policy: `boxlite-design-doc`; commands: [Contributing](../CONTRIBUTING.md#pull-r
 | `agent-tooling-design-advice.json` | Fresh advice bound to the verdict and its worker task ID, with advisor provenance; overrules need none. |
 | `agent-tooling-design-worker.json` | Owned task ID, exact snapshot, review and collection deadlines, consumed or aborted status. |
 
-A leftover `agent-tooling-design-research.json`, or an audit record without loop fields, fails closed and names the file to remove.
+An audit record without loop fields fails closed.
 
 - `.agents/lib/verdict-audit-state.sh` supplies safe reads/replacement; failed reads retain no success cache.
 - Notion child blocks fail closed; native block structure prevents literal text forging headings; design length has no total-word cap.
