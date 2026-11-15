@@ -12,10 +12,18 @@ def audit_loop_class:
       elif ($fails | length) < 2 then "none"
       else audit_loop_compare_counts($fails[-2].count; $fails[-1].count; $fails[-1].repeated) end
   end;
+
+# A history gate's rounds: each failed attempt's unresolved registry IDs plus its new
+# findings. An ID the registry already held counts as a repeat. A FAIL that a referee
+# rechecked counts only the findings that referee upheld.
 def audit_loop_history_rounds:
-  [.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR")) | .outcome
-   | if .verdict == "ERROR" then {verdict,count:0,repeated:false}
-     else (.history_review // {dispositions:[],findings:[]}) as $review
+  [.attempts[] | select(.outcome.verdict | IN("FAIL","ERROR","REFEREE")) | .outcome] as $outcomes
+  | [range(0; $outcomes | length) as $index | $outcomes[$index] | select(.verdict != "REFEREE")
+   | if .verdict == "ERROR" then {verdict, count:0, repeated:false}
+     elif ($outcomes[$index + 1].verdict // "") == "REFEREE" then
+       ([$outcomes[$index + 1].history_review.dispositions[] | select(.status == "open")] | length) as $upheld
+       | {verdict, repeated:($upheld > 0), count:$upheld}
+     else (.history_review // {dispositions:[], findings:[]}) as $review
        | ([$review.dispositions[] | select(.status | IN("open","not_assessed")) | .id]
           + [$review.findings[] | select(.id != "NEW") | .id] | unique) as $known
        | {verdict,repeated:($known | length > 0),

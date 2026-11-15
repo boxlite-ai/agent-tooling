@@ -16,7 +16,7 @@ All `.agents/state/` artifacts are ignored and session-scoped where checkouts ca
 | `.agents/lib/audit-reconciliation.jq` | Finding IDs/dispositions/provenance/coverage/reopening; reject unresolved PASS. |
 | `.agents/lib/audit-loop.jq` | Pure bounded progress classification; normalized history/design adapters, without action authority. |
 | `.agents/lib/audit-reflection-contract.jq` | After two failures require complete current reflection; independent sufficient assessment for PASS; freeze active reflection. |
-| `.agents/lib/audit-loop.jq` | Reduce failed attempts to rounds and classify the loop: converging, stalled, churning, infra, or none. |
+| `.agents/lib/audit-loop.jq` | Reduce failed attempts to rounds and classify the loop: converging, stalled, churning, infra, or none. A FAIL followed by a `REFEREE` outcome counts only upheld findings. |
 | `scripts/audit-reflection-gate.sh`, `.agents/lib/audit-reflection-gate.sh` | Snapshot evidence, bind launch/acceptance, check epochs, reconcile dossiers. |
 | `.agents/prompts/audit/audit-reflection.md`, `.agents/prompts/audit/git-audit-history.md` | Shared reconciliation/native history procedure. |
 | `.agents/lib/git-audit-decision.sh` | Human checkpoint for a non-converging loop from its third failure, through timed requests, preserving original failures. |

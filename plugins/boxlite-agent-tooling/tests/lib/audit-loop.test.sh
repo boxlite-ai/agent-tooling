@@ -79,5 +79,10 @@ check_eq "a resolved disposition is not counted" \
 check_eq "ERROR, PASS and pending attempts" \
   "$(history_rounds '[{"outcome":{"verdict":"ERROR","evidence":{}}},{"outcome":{"verdict":"PASS"}},{"outcome":null}]')" \
   '[{"verdict":"ERROR","count":0,"repeated":false}]'
+referee_outcome='{"outcome":{"verdict":"REFEREE","history_review":{"dispositions":[
+  {"id":"F1","status":"retracted","evidence":"e"},{"id":"F2","status":"open","evidence":"e"}],"findings":[]}}}'
+check_eq "a FAIL followed by a referee counts only the upheld findings" \
+  "$(history_rounds "[$(review '["F1","F2"]' '[]'),$referee_outcome]")" \
+  '[{"verdict":"FAIL","repeated":true,"count":1}]'
 
 assert_result
