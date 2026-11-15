@@ -118,10 +118,12 @@ subject_hash_for() {
 # a hooksPath-configured clone all 23 returned `passthrough`, so every one of the 17
 # expecting a decision failed — the layer they name never ran at all. Pin both so
 # they mean one thing everywhere; deferral has its own cases below.
+# The structure check reads the checkout's index too, so a developer's staged Markdown
+# would decide these cases (#587); its own cases run in a scratch repository below.
 hook_ungated() {
   ( cd "$REPO_ROOT" \
     && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='' \
-       "$HOOK" )
+       COMMIT_WRITING_CHECK=0 "$HOOK" )
 }
 
 run() {
@@ -206,6 +208,31 @@ run "push after &&"                     "cat x && $GP origin main"    "deny"
 # newline-as-separator fix these SILENTLY PASSED THROUGH (the bypass); must deny now.
 run "newline before commit"             $'cd x\n'"$GC -m wip"          "deny"
 run "newline before push"               $'cd x\n'"$GP origin main"     "deny"
+
+echo
+echo "## A developer's staged Markdown cannot decide gate cases (#587)"
+# Stage the slip in a copy of the checkout's index, with its blob in a scratch object
+# store, so the developer's index and objects are never written.
+slip_ok=0
+real_index="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-path index)" \
+  && real_objects="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-path objects)" \
+  && mkdir -p "$TMP/slip-objects" && cp "$real_index" "$TMP/slip-index" && slip_ok=1
+if (( slip_ok )); then
+  export GIT_INDEX_FILE="$TMP/slip-index" GIT_OBJECT_DIRECTORY="$TMP/slip-objects" \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES="$real_objects"
+  slip_blob="$(printf '# Slip\n\nOne here. Two here. Three here. Four here.\n' \
+    | git -C "$REPO_ROOT" hash-object -w --stdin)" \
+    && git -C "$REPO_ROOT" update-index --add --cacheinfo "100644,$slip_blob,structure-isolation-$$.md" \
+    || slip_ok=0
+fi
+if (( slip_ok )); then
+  write_audit "PASS" "[]" "commit"
+  run "a staged slip in the checkout leaves a matching PASS allowed" "$GC -m foo" "passthrough"
+else
+  bad "a staged slip in the checkout leaves a matching PASS allowed" "fixture index could not be built"
+fi
+unset GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+rm -rf "$TMP/slip-index" "$TMP/slip-objects" "$TMP/.agents/state/last-audit.json"
 
 echo
 echo "## Gate logic: audit file states"
