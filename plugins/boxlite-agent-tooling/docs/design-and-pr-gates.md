@@ -130,19 +130,6 @@ The design gate and the commit/push checkpoint share it, so a loop that still sh
 
 A design finding repeats when its exact line returns; a history gate counts any registry ID that is still open.
 
-#### Referee result
-
-A stalled commit or push loop can record one `REFEREE` outcome per cycle: a fresh recheck of the open findings, never a verdict on the change.
-The history accepts it; the gate does not request one yet.
-
-| Rule | Behavior |
-| --- | --- |
-| When | The last recorded round is a FAIL, the class is `stalled`, and the cycle holds no earlier `REFEREE`. |
-| Content | One disposition per open finding, `open` (upheld) or `retracted`; no new findings. |
-| Retraction | Its evidence cites a file line such as `path:12`, or tool output in backticks; otherwise the record is refused. |
-| Effect | Retracted findings leave the registry's open set; the FAIL before the referee then counts only upheld findings. |
-| Not a failure, not a PASS | It adds no failed round, needs no reflection assessment, and an ordinary audit must still pass. |
-
 | Condition / choice | Result |
 | --- | --- |
 | Edited content, same URL | Carry last FAIL's findings into the next task. |
@@ -156,6 +143,22 @@ The history accepts it; the gate does not request one yet.
 The prompt hook records the human's first-line `design-decision: <request-id> <choice> <reason>` after checking the current request.
 
 Neither design agent has a force-pass card; they gate edits, not turn completion or commits.
+
+### Commit and push referee
+
+A stalled commit or push loop gets one referee per cycle ([design #563](https://github.com/boxlite-ai/agent-tooling/issues/563)).
+It is a fresh recheck of the open findings, never a verdict on the change.
+
+| Rule | Behavior |
+| --- | --- |
+| When | The last recorded round is a FAIL, the class is `stalled`, and the cycle holds no earlier `REFEREE`. |
+| Request | The commit gate renders `.agents/prompts/audit/commit-push-referee.md` for the usual auditor agent, after the reflection the history already requires. History accepts a `REFEREE` outcome whenever one is due; it does not check that the attempt carried this task. |
+| Isolation | The task lists the open findings only; it carries no criteria and tells the referee to read no reflection. This is a prompt rule, not an enforced one. |
+| Content | One disposition per open finding, `open` (upheld) or `retracted`; no new findings. |
+| Retraction | Its evidence cites a file line such as `path:12`, or tool output in backticks; otherwise the record is refused. |
+| Effect | Retracted findings leave the registry's open set; the FAIL before the referee then counts only upheld findings. |
+| Standing | Not a PASS and not a failed round: the gate denies again, and an ordinary audit must still pass. |
+| Human question | The native gate runs the referee before asking; the headless runner cannot launch one, so it asks as before. |
 
 ### Design conformance
 

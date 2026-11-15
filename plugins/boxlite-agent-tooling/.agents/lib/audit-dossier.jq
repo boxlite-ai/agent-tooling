@@ -21,7 +21,7 @@ def audit_dossier_normalize_git:
      and (.[0].command_hash | test("^[0-9a-f]{64}$"))
      and (.[0].commit_subject_hash | type) == "string"
      and (.[0].commit_subject_hash | test("^[0-9a-f]{64}$|^$"))
-     and (.[0].verdict == "PASS" or .[0].verdict == "FAIL")
+     and (.[0].verdict | IN("PASS","FAIL","REFEREE"))
      and (.[0].findings | type) == "array" and (.[0].findings | length) <= 32
      and all(.[0].findings[]; bounded_line(1024))
      and (.[0].advisories | type) == "array" and (.[0].advisories | length) <= 32
