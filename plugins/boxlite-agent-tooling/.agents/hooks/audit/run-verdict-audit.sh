@@ -727,17 +727,6 @@ retire_canceled_request_authority() {
     "$audit_request_file" "$audit_request_body" >/dev/null 2>&1
 }
 
-# Report whether the anchored audit group still has any member other than its leader.
-# `ps -axo` is available on both BSD/macOS and procps; the sentinel keeps the PGID from
-# being reused while this observational poll runs.
-audit_group_has_residual_members() {  # leader-pid / pgid
-  ps -axo pid=,pgid= 2>/dev/null \
-    | awk -v leader="$1" -v group="$1" '
-        $1 != leader && $2 == group { found = 1 }
-        END { exit(found ? 0 : 1) }
-      '
-}
-
 quiesce_audit_group() {
   local i=0 owned_pgid="$audit_pgid" cleanup_status=0
   if [[ "$owned_pgid" =~ ^[1-9][0-9]*$ \

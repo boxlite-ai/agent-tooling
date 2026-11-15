@@ -112,33 +112,13 @@ deny_max_bytes=8192
 # Same ceiling as the deny reason that will carry it back to the agent.
 handoff_command_max_bytes=8192
 
-command_field() {
-  local key="$1"
-  printf '%s' "$command" | sed -n "s/.* ${key}=\\([0-9a-f][0-9a-f]*\\).*/\\1/p" | head -1
-}
-
 push_diff_hash_from_command=""
 if [[ "$kind" == "push" ]]; then
-  push_diff_hash_from_command="$(command_field pushed_diff_sha256)"
+  push_diff_hash_from_command="$(verdict_audit_command_field "$command" pushed_diff_sha256)"
 fi
 
 current_diff_hash() {
-  case "$kind" in
-    commit)
-      git -C "$repo_root" diff --cached --no-ext-diff | verdict_audit_sha256
-      ;;
-    push)
-      if [[ "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
-        printf '%s' "$push_diff_hash_from_command"
-        return
-      fi
-      {
-        git -C "$repo_root" diff --no-ext-diff origin/main...HEAD 2>/dev/null ||
-          git -C "$repo_root" diff --no-ext-diff HEAD~1...HEAD 2>/dev/null ||
-          true
-      } | verdict_audit_sha256
-      ;;
-  esac
+  verdict_audit_diff_hash "$repo_root" "$kind" "$push_diff_hash_from_command"
 }
 
 diff_hash="$(current_diff_hash)"
@@ -224,20 +204,17 @@ load_handoff_document() {
     def bounded_line($bytes):
       type == "string" and utf8bytelength <= $bytes
       and (explode | all(. != 0 and . != 10 and . != 13));
+    def scoped_epoch:
+      (.session_scope | type == "string"
+       and test("^git-[0-9a-f]{40}([0-9a-f]{24})?$"))
+      and (.prompt_epoch | type == "string"
+           and test("^[1-9][0-9]*-[1-9][0-9]*-[0-9]+$"));
     def lifecycle:
       . == null or (type == "object"
-        and exact_keys(["session_scope", "prompt_epoch"])
-        and (.session_scope | type == "string"
-             and test("^git-[0-9a-f]{40}([0-9a-f]{24})?$"))
-        and (.prompt_epoch | type == "string"
-             and test("^[1-9][0-9]*-[1-9][0-9]*-[0-9]+$")));
+        and exact_keys(["session_scope", "prompt_epoch"]) and scoped_epoch);
     def override:
       . == null or (type == "object"
-        and exact_keys(["session_scope", "prompt_epoch", "nonce_hash"])
-        and (.session_scope | type == "string"
-             and test("^git-[0-9a-f]{40}([0-9a-f]{24})?$"))
-        and (.prompt_epoch | type == "string"
-             and test("^[1-9][0-9]*-[1-9][0-9]*-[0-9]+$"))
+        and exact_keys(["session_scope", "prompt_epoch", "nonce_hash"]) and scoped_epoch
         and (.nonce_hash | type == "string" and test("^[0-9a-f]{64}$")));
     if length == 1 and (.[0] | type) == "object"
        and (.[0] | exact_keys(["branch", "head", "command_kind", "diff_hash",
@@ -870,16 +847,6 @@ ${advisories}"
 
 # A `.claude/.last-audit*.json` file blocks agent commits and pushes until removed,
 # so a stale copy can never pass for current audit state.
-# A 0.1.53 session still mirrors each state file it writes (#489). Remove a regular
-# copy identical to its original; remove this loop once 0.1.55 ships, since a 0.1.53
-# session then stops at the version check before writing (#491).
-for state_name in last-audit.json last-audit-handoff.json; do
-  mirror="$project_dir/.claude/.$state_name"
-  if [[ -f "$mirror" && ! -L "$mirror" ]] \
-      && cmp -s "$mirror" "$project_dir/.agents/state/$state_name"; then
-    rm -f -- "$mirror"
-  fi
-done
 stale_approvals=()
 for stale_approval in "$project_dir/.claude/.last-audit.json" \
     "$project_dir/.claude/.last-audit-handoff.json"; do

@@ -249,11 +249,9 @@ github_doc $'## TL;DR\n\nVerify designs before edits.\n\nProblem: undocumented e
 expect 'the original design is registered again' 0 register "$url"
 jq -nc --arg root "$(pwd -P)" --arg url "$url" --arg sha "$h" '{root:$root, branch:"feature",
   url:$url, content_sha256:$sha, verdict:"FAIL", findings:["research: old finding"]}' > "$research_state"
-request="$(gate edit 2>"$scratch/err")" && status=0 || status=$?
+request="$(gate edit 2>/dev/null)" && status=0 || status=$?
 [[ -z "$request" ]] || status="request printed"
-grep -Fq "unsupported design-audit record; remove $research_state" "$scratch/err" \
-  || status="no fix named: $status"
-outcome 'a record without loop fields fails closed and names its removal' 3 "$status"
+outcome 'a record without loop fields fails closed' 3 "$status"
 jq '. + {advisories:[], failures:[], stop:"sideways", extra:false, reflection:null, overruled:[]}' \
   "$research_state" > "$scratch/malformed" && mv "$scratch/malformed" "$research_state"
 request="$(gate edit 2>/dev/null)" && status=0 || status=$?
@@ -261,18 +259,8 @@ request="$(gate edit 2>/dev/null)" && status=0 || status=$?
 outcome 'a malformed loop state fails closed' 3 "$status"
 record 'a malformed loop state takes no verdict' 1 "$(verdict "$reviewed" PASS '[]')"
 rm -f "$research_state"
-research_file="$(git rev-parse --absolute-git-dir)/agent-tooling-design-research.json"
-jq -nc --arg root "$(pwd -P)" --arg url "$url" --arg sha "$reviewed" '{root:$root, branch:"feature",
-  url:$url, content_sha256:$sha, verdict:"PASS", findings:[]}' > "$research_file"
-request="$(gate edit 2>"$scratch/err")" && status=0 || status=$?
-[[ -z "$request" ]] || status="request printed"
-grep -Fq "unsupported design verdict file; remove $research_file" "$scratch/err" \
-  || status="no fix named: $status"
-outcome 'a research-named verdict file fails closed and names its removal' 3 "$status"
-record 'a research-named verdict file blocks recording' 1 "$(verdict "$reviewed" PASS '[]')"
-rm -f "$research_file"
 expect 'research is not a command' 2 research
-record 'a PASS records once the old file is gone' 0 "$(verdict "$reviewed" PASS '[]')"
+record 'a PASS records once the malformed record is gone' 0 "$(verdict "$reviewed" PASS '[]')"
 advise 'advice on that PASS records' 0 "$(no_advice "$reviewed")"
 status=0; gate edit >/dev/null 2>"$scratch/err" || status=$?
 outcome 'that PASS, with advice, allows edits' 0 "$status"

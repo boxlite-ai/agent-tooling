@@ -178,22 +178,13 @@ _design_doc_jq() { # jq arguments -> jq with this library's modules on its path
 }
 
 # The loop state for this root and branch (design-audit.jq). A missing file starts
-# fresh; an unreadable or malformed one fails closed, so it cannot reset the count.
-# A research-named verdict file or a record without the loop fields fails, naming the file
-# to remove; removing it starts a fresh design audit.
+# fresh; an unreadable or malformed one, including a record without the loop fields,
+# fails closed, so it cannot reset the count.
 _design_doc_audit_state() { # verdict path, root, branch
-  local path="$1" snapshot record=null old="${1%/*}/agent-tooling-design-research.json"
-  if [[ -e "$old" || -L "$old" ]]; then
-    _design_doc_error "unsupported design verdict file; remove $old, then rerun the design audit"
-    return 1
-  fi
+  local path="$1" snapshot record=null
   if [[ -e "$path" || -L "$path" ]]; then
     snapshot="$(verdict_audit_read_json_snapshot "$path" 2>/dev/null)" || return 1
     record="${snapshot#*$'\n'}"
-  fi
-  if _design_doc_jq -e 'include "design-audit"; da_pre_loop' <<<"$record" >/dev/null 2>&1; then
-    _design_doc_error "unsupported design-audit record; remove $path, then rerun the design audit"
-    return 1
   fi
   _design_doc_jq -c --arg root "$2" --arg branch "$3" \
     'include "design-audit"; da_state($root; $branch)' <<<"$record" 2>/dev/null
@@ -235,17 +226,11 @@ _design_doc_audit_passed() { # verdict path, root, branch, URL, content SHA-256,
       return 1
     fi
   fi
-  if _design_doc_jq -e 'include "design-audit";
-      (.verdict | IN("PASS","FAIL")) and (da_worker_provenance("auditor") | not)' \
-      <<<"$state" >/dev/null; then
-    state="$(_design_doc_jq -c --arg root "$2" --arg branch "$3" 'include "design-audit";
-      . as $old | da_empty($root; $branch) | .overruled=$old.overruled' <<<"$state")" || return 1
-  fi
-  if ! _design_doc_jq -e --arg exact "${6:-}" 'include "design-audit";
-      .verdict != "PASS" or (.worker_provenance.snapshot_sha256 == $exact)' <<<"$state" >/dev/null; then
-    state="$(_design_doc_jq -c --arg root "$2" --arg branch "$3" 'include "design-audit";
-      . as $old | da_empty($root; $branch) | .overruled=$old.overruled' <<<"$state")" || return 1
-  fi
+  # A verdict without auditor provenance, or a PASS for another snapshot, authorizes nothing.
+  state="$(_design_doc_jq -c --arg root "$2" --arg branch "$3" --arg exact "${6:-}" 'include "design-audit";
+    if ((.verdict | IN("PASS","FAIL")) and (da_worker_provenance("auditor") | not))
+       or (.verdict == "PASS" and .worker_provenance.snapshot_sha256 != $exact)
+    then da_reset($root; $branch) else . end' <<<"$state")" || return 1
   request="$(_design_doc_jq -c --arg root "$2" --arg url "$4" --arg digest "$5" \
     --arg history "$(_design_doc_history_hash "$state")" \
     'include "design-audit"; da_request($root; $url; $digest; $history)' <<<"$state")" || return 1

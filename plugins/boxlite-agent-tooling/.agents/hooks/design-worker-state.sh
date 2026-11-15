@@ -72,7 +72,7 @@ worker_human_decision() { # live capture -> an accepted decision for this exact 
 worker_transition() {
   # The design library consumes these two dynamically scoped publication inputs.
   # shellcheck disable=SC2034
-  local action="$1" root="$2" input live pending directory old path result decision_status=0 design_worker_proof design_worker_deadline
+  local action="$1" root="$2" input live pending directory path result decision_status=0 design_worker_proof design_worker_deadline
   input="$(head -c 1048577)" || return 1
   (( ${#input} <= 1048576 )) || return 1
   live="$(worker_snapshot "$root")" || return 1
@@ -95,13 +95,11 @@ worker_transition() {
     fi
     jq -e '.request | (.blocked // false | not)
       and (.reflection_due // false | not) and (.redesign // false | not)' <<<"$live" >/dev/null || return 1
-    # Retain pre-upgrade outcomes separately; they cannot authorize a new worker.
+    # An unowned verdict, or a PASS an auditor is about to replace, cannot authorize a new worker.
     if jq -e --argjson input "$input" '.state | ((.verdict=="PASS" or .verdict=="FAIL") and .worker_provenance==null)
         or (.verdict=="PASS" and $input.role=="auditor")' <<<"$live" >/dev/null; then
-      old="$(jq -c .state <<<"$live")"
-      printf '%s\n' "$old" | verdict_audit_write_atomic "$directory/agent-tooling-design-history-$(jq -r .state_hash <<<"$live").json" || return 1
       _design_doc_jq -c --arg root "$root" --arg branch "$(jq -r .branch <<<"$live")" \
-        'include "design-audit"; .state as $old | da_empty($root;$branch) | .overruled=$old.overruled' <<<"$live" |
+        'include "design-audit"; .state | da_reset($root; $branch)' <<<"$live" |
         verdict_audit_write_atomic "$directory/agent-tooling-design-audit.json" || return 1
       live="$(worker_snapshot "$root")" || return 1
     fi

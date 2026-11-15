@@ -182,36 +182,13 @@ hash_file() {
   verdict_audit_sha256 <"$1"
 }
 
-command_field() {
-  local key="$1"
-  printf '%s' "$command" | sed -n "s/.* ${key}=\\([0-9a-f][0-9a-f]*\\).*/\\1/p" | head -1
-}
-
 push_diff_hash_from_command=""
 if [[ "$kind" == "push" ]]; then
-  push_diff_hash_from_command="$(command_field pushed_diff_sha256)"
+  push_diff_hash_from_command="$(verdict_audit_command_field "$command" pushed_diff_sha256)"
 fi
 
 current_diff_hash() {
-  case "$kind" in
-    commit)
-      git -C "$repo_root" diff --cached --no-ext-diff | hash_stdin
-      ;;
-    push)
-      if [[ "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
-        printf '%s' "$push_diff_hash_from_command"
-        return
-      fi
-      {
-        git -C "$repo_root" diff --no-ext-diff origin/main...HEAD 2>/dev/null ||
-          git -C "$repo_root" diff --no-ext-diff HEAD~1...HEAD 2>/dev/null ||
-          true
-      } | hash_stdin
-      ;;
-    *)
-      printf 'unknown' | hash_stdin
-      ;;
-  esac
+  verdict_audit_diff_hash "$repo_root" "$kind" "$push_diff_hash_from_command"
 }
 
 diff_hash="$(current_diff_hash)"
@@ -838,14 +815,6 @@ normalize_agentic_output() {
     printf '%s' "$normalized_output" | jq -r '.findings[]' >&2
     exit 1
   fi
-}
-
-audit_group_has_residual_members() {  # sentinel pid / pgid
-  ps -axo pid=,pgid= 2>/dev/null \
-    | awk -v leader="$1" -v group="$1" '
-        $1 != leader && $2 == group { found = 1 }
-        END { exit(found ? 0 : 1) }
-      '
 }
 
 stop_codex_monitors() {

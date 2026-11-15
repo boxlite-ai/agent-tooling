@@ -1639,16 +1639,12 @@ printf -v stale_rm 'rm -f -- %q %q' "$TMP/.claude/.last-audit.json" "$TMP/.claud
 check_raw "both stale copies, one a dangling symlink, block a push with one rm" \
   "$([[ "$stale_reason" == *"$stale_rm"* ]] && echo blocked || echo "$stale_reason")" blocked
 rm -f "$TMP/.claude/.last-audit.json" "$TMP/.claude/.last-audit-handoff.json"
-# 0.1.53 mirrors each state file it writes (#489): an identical regular copy is
-# removed; a differing copy, a symlink, or a copy without its original still blocks.
-write_audit "PASS" "[]" "commit" "$GC -m foo"
-cp "$TMP/.agents/state/last-audit.json" "$TMP/.claude/.last-audit.json"
-run "an identical 0.1.53 mirror does not block a matching PASS" "$GC -m foo" passthrough
-check_raw "the gate removes the identical 0.1.53 mirror" \
-  "$([[ -e "$TMP/.claude/.last-audit.json" ]] && echo present || echo gone)" gone
-for stale_kind in differing symlink orphan; do
+# Any regular copy, symlink, or copy without its original blocks, even one identical
+# to its .agents/state/ original.
+for stale_kind in identical differing symlink orphan; do
   write_audit "PASS" "[]" "commit" "$GC -m foo"
   case "$stale_kind" in
+    identical) cp "$TMP/.agents/state/last-audit.json" "$TMP/.claude/.last-audit.json" ;;
     differing) printf '{}\n' > "$TMP/.claude/.last-audit.json" ;;
     symlink) ln -s "$TMP/.agents/state/last-audit.json" "$TMP/.claude/.last-audit.json" ;;
     orphan) cp "$TMP/.agents/state/last-audit.json" "$TMP/.claude/.last-audit-handoff.json" ;;
