@@ -961,6 +961,26 @@ if ! compatibility_error="$(bash "$tooling_root/scripts/api-compatibility.sh" "$
     'The same compatibility check passes; an audit cannot bypass it.'
 fi
 
+# Measured limits fail here in seconds; without this an auditor spends a round on them.
+writing_status=0
+writing_error="$(bash "$tooling_root/scripts/writing-structure.sh" "$kind" "$repo_root" 2>&1)" || writing_status=$?
+if (( writing_status != 0 )); then
+  # Five bounded lines keep the reason under the deny cap however many blocks a commit adds.
+  writing_total="$(grep -c '' <<<"$writing_error")"
+  writing_listing="$(head -n 5 <<<"$writing_error" | cut -c1-300)"
+  (( writing_total <= 5 )) || writing_listing+=$'\n'"... and $(( writing_total - 5 )) more line(s)"
+  if (( writing_status == 1 )); then
+    block_git recover "Staged Markdown adds prose-structure violations:
+$writing_listing" \
+      'Apply boxlite-writing to each listed block, restage it, then rerun scripts/writing-structure.sh commit for this repository before retrying Git.' \
+      'The same structure check passes; an audit cannot bypass it.'
+  fi
+  block_git recover "The staged-Markdown structure check could not run:
+$writing_listing" \
+    'Repair the named file or dependency, then rerun scripts/writing-structure.sh commit for this repository before retrying Git.' \
+    'The structure check exits 0; an audit cannot bypass it.'
+fi
+
 # Installation/guidance/framework checks remain owned by the git hooks above this
 # delegated call. This branch skips only the auditor verdict and deliberately returns
 # context (not permissionDecision:"allow"), so host approval policy is unchanged.

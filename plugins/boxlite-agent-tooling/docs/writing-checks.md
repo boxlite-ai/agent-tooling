@@ -91,8 +91,25 @@ Internal instructions/tool payloads need no summary; Stop does not shorten prose
 | Limits | ≤3 sentences per prose block or list item; ≤25 words per sentence; lists of 2–7 items, sub-lists of 2–3, at most 3 levels; tables of 2–5 columns. |
 | Splitting | Perl 5.22+ `\b{sb}` (UAX #29) after masking code spans, URLs, link targets, and abbreviations; a forced break before `#`, a digit, or inline code after terminal punctuation. |
 | Skipped | Fences, HTML comments, headings, table cells, blockquotes; the TL;DR and Chinese/Japanese sentences skip the word limit. |
-| Scope | Stop replies of any length and every inspected GitHub body; design registration checks only the summary. |
+| Scope | Stop replies of any length, every inspected GitHub body, and staged Markdown at commit time (below); design registration checks only the summary. |
 | Correction | One message lists up to five violations and counts the rest; Stop names the skill once; a checker failure fails closed, and Stop exits 2. |
 | Bounds | Whitespace and long punctuation runs collapse before splitting, so parsing stays linear. |
 
 GitHub CLI and fetched design content keep independent mandatory checks; shared guidance applies across unsupported surfaces too.
+
+### Staged Markdown
+
+`scripts/writing-structure.sh commit [repository]` reports the violations a commit adds, and the commit gate runs it before requesting any audit ([design #575](https://github.com/boxlite-ai/agent-tooling/issues/575)).
+A prose slip then costs seconds, not an audit round.
+
+| Case | Result |
+| --- | --- |
+| Staged `*.md` file added, modified or renamed | Measured as staged and as in `HEAD` (a renamed file against its old path); only lines absent from the `HEAD` report are listed. |
+| Unchanged violating block | Not reported, so existing text never blocks a commit. |
+| Extended violating block | Reported, because its count changed. |
+| Any listed line | Exit 1; the gate refuses the commit with `recover`, shows the first five lines with a count of the rest, and writes no audit task. |
+| Merge, cherry-pick or revert in progress, push, or `COMMIT_WRITING_CHECK=0` | Skipped. |
+| File over 1 MiB or unreadable | Exit 2 naming the file; the gate refuses the commit. |
+
+Each line reads `path: rule count (limit N): excerpt`.
+The auditor still reviews prose; commits made outside the agent hooks are not checked.
