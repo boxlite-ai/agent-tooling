@@ -6,7 +6,9 @@
 #      Every nonempty reply must also keep boxlite-writing's structure limits. One
 #      block lists every correction; the retry is never checked again.
 #   2. A pending timed confirmation resumes the agent; expiry selects its fallback.
-#   3. preflight-verdict-check.sh replaces this process and judges the turn. Its
+#   3. Audited work left uncommitted or unpushed resumes the agent once per work
+#      state.
+#   4. preflight-verdict-check.sh replaces this process and judges the turn. Its
 #      block, error or allow is the answer.
 #
 # stdin is the host's Stop payload, handed unchanged to the verdict check. stdout,
@@ -87,6 +89,13 @@ fi
 timed_continuation="$tooling_root/scripts/continue-timed-prompts.sh"
 [[ -r "$timed_continuation" ]] || { printf "stop-gate: timed continuation missing\n" >&2; exit 2; }
 continuation="$(printf '%s' "$raw_payload" | bash "$timed_continuation")" || exit 2
+if [[ -n "$continuation" ]]; then
+  printf '%s\n' "$continuation"
+  exit 0
+fi
+workflow_continuation="$tooling_root/scripts/continue-workflow.sh"
+[[ -r "$workflow_continuation" ]] || { printf "stop-gate: workflow continuation missing\n" >&2; exit 2; }
+continuation="$(printf '%s' "$raw_payload" | bash "$workflow_continuation")" || exit 2
 if [[ -n "$continuation" ]]; then
   printf '%s\n' "$continuation"
   exit 0

@@ -189,6 +189,7 @@ See [state contracts](../.agents/hooks/audit/state.md#state-files) and the
 | [timed-user-prompt.sh](timed-user-prompt.sh) `request\|status\|renew\|consume\|fallback STATE SPEC_OR_ID [RENEWAL_INSTRUCTION]` | Persist confirmation deadlines, exact human responses, consumption, and expiry; renewal requires the user's explicit instruction. |
 | [claude-with-timed-prompts.sh](claude-with-timed-prompts.sh) `[claude args...]` | Launch Claude with this plugin; configure native question timeout for supported local sessions and disable Remote Control there. |
 | [continue-timed-prompts.sh](continue-timed-prompts.sh) | Called by the Stop gate with hook JSON on stdin; emit a continuation for pending confirmations or their timeout fallback. |
+| [continue-workflow.sh](continue-workflow.sh) | Called by the Stop gate with hook JSON on stdin; emit one continuation per work state when a branch with a passed design has uncommitted or unpushed work. |
 | [resume-on-network-error.sh](resume-on-network-error.sh) `[--max-restarts N] [--max-wait SECONDS] [--probe-url URL] [--] <prompt> [claude args...]` | Supervise `claude -p`, retry eligible API failures within budgets, and print final result JSON. |
 
 Git preparation checks the non-converging-loop decision under the history lock.
