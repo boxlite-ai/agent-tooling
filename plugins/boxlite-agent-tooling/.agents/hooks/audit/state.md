@@ -67,6 +67,22 @@ Pending attempts appear separately as `pending:true`; progress compares complete
 - Opaque legacy FAILs remain critical reconstruction gaps; truncated or unavailable design rounds set `history_complete:false`.
 - Design identities are exact finding lines; only `high:` prefixes denote high severity, and design worker startup ERRORs are outside this progress record.
 
+### Design recovery ownership
+
+The design gate reserves one referee per loop under the existing clone-wide design transaction.
+Critical findings and the eight-failure cap prevent automatic reservations; a reservation survives interruption and Redesign.
+
+- Referees use fresh gate-launched workers and the shared read-only broker on both supported hosts.
+- Their inputs contain the current design and assigned findings, excluding controller history, reflection, and author dispositions.
+- Result publication checks task, worker, snapshot, source, and live assignment; stale or duplicate completions grant nothing.
+- Retractions change an effective-count overlay; the original FAIL, findings, and ordinary worker provenance remain intact.
+- Uncited or unresolvable retractions stand as upheld; citations resolve against the frozen source or research snapshot, and critical findings remain blocking.
+
+For example, retracting F2 from a two-finding round leaves one effective finding while the stored ordinary outcome remains FAIL.
+An ordinary matching PASS with its required advice supplies edit authority; a referee cannot supply PASS.
+
+Design Shrink, history-gate recovery actions, forced continuation, and the durable findings ledger remain subsequent delivery work.
+
 ### History acceptance
 
 Context: `repo_root`, `session`, `epoch`, `branch`, `gate`; limits: eight failures, sixteen attempts, 10 MiB, plus 512 KiB reserved preparation capacity.

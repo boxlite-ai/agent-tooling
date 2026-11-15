@@ -229,7 +229,7 @@ It ships by maintainer decision, recorded in #474, because `xhigh` checked nothi
 | `VERDICT_AUDITOR_MODEL` | `run-verdict-audit.sh` | Table row | Overrides the `claude -p` route's model; diagnostics record it as an override. |
 | `VERDICT_AUDITOR_TIMEOUT` | Native deadline hook, `run-verdict-audit.sh` | `180` seconds | Investigation, 1–3480. All headless routes add `min(60, budget)` seconds to record. Claude defaults: record 180 s, interrupt 210 s if undelivered, hard stop 240 s. Startup/cleanup add elapsed time. No valid report remains an execution error. |
 | `COMMIT_PUSH_AUDITOR_TIMEOUT` | `preflight-commit-push.sh`, `run-commit-push-audit.sh` | `900` seconds | Native investigation: 1–9999; headless: 1–3480 plus `min(60, budget)` record seconds. At deadline, no confirmed blockers means PASS with unchecked advisories; known blockers stay FAIL. Native hooks allow recording and owned-task cleanup. |
-| `DESIGN_AUDITOR_TIMEOUT` | `preflight-design-doc.sh` | `900` seconds | Design audit and advice deadline; past it, the auditor or advisor is told to record now. |
+| `DESIGN_AUDITOR_TIMEOUT` | `preflight-design-doc.sh` | `900` seconds | Design review-worker deadline; past it, record the result with unverified work disclosed. |
 | `CODEX_BIN` | Both runners and Stop classifier | `codex` on `PATH`, then the macOS app bundle | Codex binary; does not override host selection. |
 | `CODEX_COMMIT_PUSH_AUDIT_MODE` | `run-commit-push-audit.sh` | `agentic` | `local` runs offline checks, for tests and diagnostics only. |
 | `AUDITOR_SESSION_SCOPE`, `AUDITOR_PROMPT_EPOCH` | `run-commit-push-audit.sh` | unset | Bind the audit to one session's history and prompt; the gate's command sets both. |

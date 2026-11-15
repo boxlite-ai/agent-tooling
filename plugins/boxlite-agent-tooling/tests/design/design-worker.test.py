@@ -55,9 +55,9 @@ class OwnedWorker(unittest.TestCase):
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.repo, check=True, capture_output=True).stdout
 
-    def cli(self, *args, body=None, check=False):
+    def cli(self, *args, body=None, check=False, timeout=None):
         return subprocess.run(["bash", str(self.plugin / "scripts/design-doc.sh"), *args], cwd=self.repo,
-                              env=self.env, input=body, capture_output=True, check=check, text=True)
+                              env=self.env, input=body, capture_output=True, check=check, text=True, timeout=timeout)
 
     def hook(self, command=None, host="codex"):
         payload = {"tool_name": "Bash", "cwd": str(self.repo), "tool_input": {
@@ -108,6 +108,72 @@ class OwnedWorker(unittest.TestCase):
         self.assertNotEqual(self.cli("verdict", body='{"verdict":"PASS"}').returncode, 0)
         self.assertNotEqual(self.cli("advice", body='{"advice":[]}').returncode, 0)
         self.assertNotEqual(self.cli("run").returncode, 0)
+
+    def test_referee_is_owned_blind_and_preserves_ordinary_outcomes(self):
+        self.check_referee("codex")
+
+    def test_claude_referee_uses_the_same_owned_contract(self):
+        self.check_referee("claude")
+
+    def fail_designs(self, rounds, host="codex"):
+        queued = self.bin / "result.json"
+        for number, findings in enumerate(rounds):
+            if number:
+                self.doc["body"] += "\nA revised design candidate."
+                (self.bin / "document.json").write_text(json.dumps(self.doc))
+            queued.write_text(json.dumps({"verdict": "FAIL", "findings": findings, "advisories": []}))
+            result = self.hook(host=host)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            queued.unlink()
+            result = self.hook(host=host)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def check_referee(self, host):
+        findings = [f"high: F{number}: source.txt:1 needs check {number}" for number in range(1, 6)]
+        queued = self.bin / "result.json"
+        self.fail_designs([findings, findings], host)
+        before = self.record("audit")
+        decisions = [{"id": findings[0], "status": "upheld", "evidence": "source.txt:1 cleanup is absent"},
+                     {"id": findings[1], "status": "retracted", "evidence": "source.txt:1 boundary is established"},
+                     {"id": findings[2], "status": "retracted", "evidence": "missing.txt:1 invented anchor"},
+                     {"id": findings[3], "status": "retracted", "evidence": "source.txt:99999 absent line"},
+                     {"id": findings[4], "status": "retracted", "evidence": "tool output: invented proof"}]
+        queued.write_text(json.dumps({"decisions": decisions}))
+        result = self.hook(host=host)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = self.record("audit")
+        self.assertEqual(after["verdict"], "FAIL")
+        self.assertEqual(after["findings"], before["findings"])
+        self.assertEqual(after["progress"], before["progress"])
+        self.assertEqual(after["worker_provenance"], before["worker_provenance"])
+        referee = after["recovery_state"]["referee"]
+        self.assertEqual([item["status"] for item in referee["result"]],
+                         ["upheld", "retracted", "upheld", "upheld", "upheld"])
+        self.assertEqual(referee["worker_provenance"]["role"], "referee")
+        self.assertNotEqual(referee["task_id"], before["worker_provenance"]["task_id"])
+        self.assertEqual(referee["worker_provenance"]["verdict_task_id"], before["worker_provenance"]["task_id"])
+        task = json.loads((self.bin / "task-input.json").read_text())
+        self.assertEqual(set(task), {"content_sha256", "findings"})
+        self.assertEqual(task["findings"], findings)
+        self.assertNotEqual(self.gate().returncode, 0, "a referee cannot grant edit authority")
+
+
+
+
+
+    def test_failed_referee_launch_keeps_its_reservation_consumed(self):
+        findings = ["high: F1: source.txt:1 remains unchecked"]
+        self.fail_designs([findings, findings])
+        (self.bin / "mode").write_text("nonzero")
+        self.assertNotEqual(self.hook().returncode, 0)
+        before = self.record("audit")
+        marker = before["recovery_state"]["referee"]
+        self.assertIsNone(marker["result"])
+        self.assertEqual(self.record("worker")["status"], "aborted")
+        (self.bin / "mode").write_text("normal")
+        self.assertNotEqual(self.hook().returncode, 0)
+        self.assertEqual(self.record("audit")["recovery_state"]["referee"], marker)
+        self.assertNotEqual(self.gate().returncode, 0)
 
     def test_runner_mentions_are_data_but_evaluated_commands_are_denied(self):
         runner = f'bash "{self.plugin}/scripts/design-doc.sh" run'

@@ -201,7 +201,7 @@ _design_doc_file_hash() { # path -> SHA-256 of its bytes, or nothing when it is 
 _design_doc_worker_record() { # pending path -> bounded, typed assignment record
   verdict_audit_read_regular_state "$1" 1048576 record | jq -ce '
     select(type=="object" and keys==["expires","review_deadline","role","snapshot","status","task_id","task_sha256","worker_sha256"]
-      and (.role | IN("auditor","advisor")) and (.status | IN("pending","consumed","aborted"))
+      and (.role | IN("auditor","advisor","referee")) and (.status | IN("pending","consumed","aborted"))
       and (.task_id | type=="string" and test("^[0-9a-f]{32}$"))
       and all(.task_sha256,.worker_sha256; type=="string" and test("^[0-9a-f]{64}$"))
       and all(.expires,.review_deadline; type=="number" and .>0 and .==floor)
