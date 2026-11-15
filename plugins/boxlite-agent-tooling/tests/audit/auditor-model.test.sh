@@ -30,7 +30,7 @@ load() {  # root auditor host -> "model effort" or "error"
 }
 
 echo "## Loader"
-check_eq "shipped verdict auditor row" "$(load "$PLUGIN" verdict-auditor claude)" "claude-sonnet-5 xhigh"
+check_eq "shipped verdict auditor row" "$(load "$PLUGIN" verdict-auditor claude)" "claude-sonnet-5 low"
 check_eq "shipped classifier row" "$(load "$PLUGIN" verdict-classifier claude)" "claude-haiku-4-5-20251001 low"
 root="$(printf 'a\tclaude\tm-1\tlow\r\n' | fake_root crlf)"
 check_eq "CRLF table parses like LF" "$(load "$root" a claude)" "m-1 low"
@@ -113,15 +113,15 @@ run_claude CLAUDE_CODE_EFFORT_LEVEL=max
 check_eq "pinned run exits 0" "$?" 0
 argv="$(cat "$scratch/argv")"
 check_eq "row model and effort reach the CLI" \
-  "$([[ "$argv" == *"--model claude-sonnet-5 --effort xhigh"* ]] && echo yes || echo no)" yes
+  "$([[ "$argv" == *"--model claude-sonnet-5 --effort low"* ]] && echo yes || echo no)" yes
 check_eq "user effort override is dropped from the child" "$(cat "$scratch/env")" absent
 check_eq "diagnostics record the pair and the dropped value" \
   "$(jq -c '.auditor' "$diagnostics")" \
-  '{"model":"claude-sonnet-5","effort":"xhigh","model_source":"table","observed":"unobserved","dropped_effort_env":"max"}'
+  '{"model":"claude-sonnet-5","effort":"low","model_source":"table","observed":"unobserved","dropped_effort_env":"max"}'
 run_claude VERDICT_AUDITOR_MODEL=claude-test-model
 argv="$(cat "$scratch/argv")"
 check_eq "model override reaches the CLI" \
-  "$([[ "$argv" == *"--model claude-test-model --effort xhigh"* ]] && echo yes || echo no)" yes
+  "$([[ "$argv" == *"--model claude-test-model --effort low"* ]] && echo yes || echo no)" yes
 check_eq "diagnostics mark the override" "$(jq -r '.auditor.model_source' "$diagnostics")" override
 
 echo "## Custom command echo"
@@ -132,9 +132,9 @@ run_override() {  # echoed model, echoed effort ("" omits the fields)
       VERDICT_AUDITOR_CMD="printf '%s %s\n' \"\$AUDITOR_MODEL\" \"\$AUDITOR_EFFORT\" > '$scratch/exported'; bash '$scratch/write-dossier' '$1' '$2'" \
       bash "$RUNNER" "$repo/transcript.jsonl" "$SESSION" "$GENERATION" >/dev/null 2>&1 )
 }
-run_override claude-sonnet-5 xhigh
+run_override claude-sonnet-5 low
 check_eq "matching echo is accepted" "$?" 0
-check_eq "row is exported to the command" "$(cat "$scratch/exported")" "claude-sonnet-5 xhigh"
+check_eq "row is exported to the command" "$(cat "$scratch/exported")" "claude-sonnet-5 low"
 check_eq "matching echo is recorded as observed" "$(jq -r '.auditor.observed' "$diagnostics")" matched
 run_override claude-other low
 check_eq "mismatched echo has no authority" "$?" 1
