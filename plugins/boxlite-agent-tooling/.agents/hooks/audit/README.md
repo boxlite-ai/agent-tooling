@@ -210,6 +210,16 @@ Headless classification and both runners read the optional user file
 | Codex | `-c model=` and `-c model_reasoning_effort=` after `--ignore-user-config`. |
 | `VERDICT_AUDITOR_CMD` | Receives `AUDITOR_MODEL`/`AUDITOR_EFFORT`; a dossier may echo them as `auditor_model`/`auditor_effort`, and a differing echo has no authority. |
 | Diagnostics | Each record carries `auditor`: model, effort, source, and whether the pair was observed. |
+
+Rows changed after replays:
+
+| Row | Setting | Evidence |
+| --- | --- | --- |
+| `verdict-auditor`, Claude Code | `claude-sonnet-5` at `low` | [14 replays on 2026-11-15](https://github.com/boxlite-ai/agent-tooling/issues/474#issuecomment-6882184780): `low` published a dossier on 3 of 4 turns, `medium` on 1 of 4, `xhigh` on 0 of 4 |
+
+Known gap for that row: a planted false claim was not caught at `low` within the 180-second budget.
+It ships by maintainer decision, recorded in #474, because `xhigh` checked nothing in those replays.
+
 - **Diagnostic limits:** each tail is at most 4 KiB; the shared log rotates at its existing 1 MiB bound. Stop errors name this local file. Diagnostics never grant dossier authority.
 
 | Variable | Read by | Default | Effect |

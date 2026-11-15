@@ -2819,7 +2819,7 @@ headless_budget="$headless_budget safe=$(jq -r '.safe_mode' "$REQUEST_CAP") mode
 headless_budget="$headless_budget persist=$(jq -r '.no_session_persistence' "$REQUEST_CAP") effort=$(jq -r '.effort' "$REQUEST_CAP")"
 check_eq "headless Claude request replaces ambient context within a hard budget" \
   "$headless_budget" \
-  "bytes=bounded system=bounded tools=4:Read,Bash,Write,TaskStop calls=1 safe=true mode=replace persist=true effort=xhigh"
+  "bytes=bounded system=bounded tools=4:Read,Bash,Write,TaskStop calls=1 safe=true mode=replace persist=true effort=low"
 # --safe-mode ignores user/project permission settings and print mode has no approver,
 # so a tool listed only in --tools is denied. The auditor could not write its dossier.
 check_eq "headless Claude pre-approves the auditor tools it lists" \
