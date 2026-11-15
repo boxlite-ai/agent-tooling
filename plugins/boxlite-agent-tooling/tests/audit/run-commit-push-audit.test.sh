@@ -1617,7 +1617,8 @@ echo "## SHA-256 Git repositories keep the audit contract end to end"
 R_SHA256="$(setup sha256)"
 cp "$REPO_ROOT/.agents/hooks/preflight-commit-push.sh" "$R_SHA256/.agents/hooks/"
 mkdir -p "$R_SHA256/scripts"
-cp "$REPO_ROOT/scripts/api-compatibility.sh" "$R_SHA256/scripts/"
+cp "$REPO_ROOT/scripts/api-compatibility.sh" "$REPO_ROOT/scripts/writing-structure.sh" "$R_SHA256/scripts/"
+cp "$REPO_ROOT/.agents/lib/reply-summary.sh" "$REPO_ROOT/.agents/lib/reply-summary.pl" "$R_SHA256/.agents/lib/"
 sha256_head="$(git -C "$R_SHA256" rev-parse HEAD)"
 ( cd "$R_SHA256" && CLAUDE_PROJECT_DIR="$R_SHA256" \
     CODEX_COMMIT_PUSH_AUDIT_MODE=local \

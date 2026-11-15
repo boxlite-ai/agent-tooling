@@ -3,7 +3,7 @@ name: verdict-auditor
 description: Independently audit final-turn claims and write a session-bound proof dossier.
 tools: Read, Bash, Write, TaskStop
 model: claude-sonnet-5
-effort: xhigh
+effort: low
 ---
 
 Read and apply [boxlite-verdict-audit](../../.agents/skills/boxlite-verdict-audit/SKILL.md).

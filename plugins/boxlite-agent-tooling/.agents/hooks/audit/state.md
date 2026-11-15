@@ -14,6 +14,7 @@ All `.agents/state/` artifacts are ignored and session-scoped where checkouts ca
 | --- | --- |
 | `scripts/audit-reflection.sh`, `.agents/lib/audit-reflection.sh`, `.agents/lib/audit-reflection.jq` | Bounded serialized transitions, immutable bindings, deduplication, atomic regular-file writes. |
 | `.agents/lib/audit-reconciliation.jq` | Finding IDs/dispositions/provenance/coverage/reopening; reject unresolved PASS. |
+| `.agents/lib/audit-loop.jq` | Pure bounded progress classification; normalized history/design adapters, without action authority. |
 | `.agents/lib/audit-reflection-contract.jq` | After two failures require complete current reflection; independent sufficient assessment for PASS; freeze active reflection. |
 | `.agents/lib/audit-loop.jq` | Reduce failed attempts to rounds and classify the loop: converging, stalled, churning, infra, or none. |
 | `scripts/audit-reflection-gate.sh`, `.agents/lib/audit-reflection-gate.sh` | Snapshot evidence, bind launch/acceptance, check epochs, reconcile dossiers. |
@@ -40,6 +41,31 @@ Runtime derives `outcome.deadline_review = {deadline, recorded_at}` only after c
 | Replay | Persist qualification before cleanup, reuse first marker; never rewrite old FAILs. |
 
 Design recording uses matching task/content predecessor metadata.
+
+### Progress diagnostics
+
+History `inspect` and design status return `recovery` diagnostics from the same classifier.
+The existing reflection, stop, and permission rules remain authoritative.
+
+| Latest rounds | Pattern | Meaning |
+| --- | --- | --- |
+| Fewer findings between the last two FAILs | `converging` | Blocking count decreased. |
+| Same or greater count, overlapping IDs | `stalled` | A blocking finding repeats. |
+| Same or greater count, disjoint IDs | `churning` | New findings replaced previous ones. |
+| Two consecutive ERRORs | `infra` | The runner failed twice. |
+| First FAIL, one ERROR, IN_PROGRESS, canceled, PASS, override | `initial`, `error`, `partial`, `canceled`, `complete`, `overridden` | No two-FAIL comparison applies. |
+
+Example: FAIL(F1), ERROR, FAIL(F1) is `stalled`; FAIL(F1), ERROR, ERROR is `infra`, retaining F1's severity.
+Two ERRORs still require the existing reflection; `infra` grants no continuation.
+Pending attempts appear separately as `pending:true`; progress compares completed outcomes.
+
+- `blocking_count` and `critical_ids` describe the latest reconstructed findings, including findings retained through ERROR or cancellation.
+- `compared_failures` counts up to two FAILs; `history_complete` describes reconstruction, never review coverage or permission.
+- Canonical views contain at most sixteen rounds and 144 unique IDs per round, allowing 128 registry entries plus sixteen opaque gaps; malformed views reject.
+- New history dossiers require explicit `critical` or `high`; absent legacy severity defaults to critical and cannot downgrade an open critical finding.
+- Accepted dispositions close findings; a justified reopening starts a new severity assessment.
+- Opaque legacy FAILs remain critical reconstruction gaps; truncated or unavailable design rounds set `history_complete:false`.
+- Design identities are exact finding lines; only `high:` prefixes denote high severity, and design worker startup ERRORs are outside this progress record.
 
 ### History acceptance
 
