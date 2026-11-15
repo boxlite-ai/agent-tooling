@@ -296,10 +296,16 @@ def task_text(captured, role, deadline, research):
               "content_sha256": captured["snapshot"]["content_sha256"]}
     record.update({key: request.get(key, []) for key in ("prior_findings",)} if role == "auditor" else
                   {key: request.get(key, []) for key in ("verdict", "findings", "advisories")})
-    recovery = captured["state"].get("recovery_state", {}) or {}
-    if role == "auditor" and (recovery.get("referee") or {}).get("result"):
-        record["referee_review"] = recovery["referee"]["result"]
+    shrink = captured["state"].get("recovery_state", {}) or {}
+    if role == "auditor" and (shrink.get("referee") or {}).get("result"):
+        record["referee_review"] = shrink["referee"]["result"]
         rules += "\nReopening a referee-retracted finding requires cited new evidence; unchanged prior evidence cannot reopen it."
+    if role == "auditor" and shrink.get("shrink"):
+        record["shrink_review"] = shrink["shrink"]
+        rules += ("\nCompare the complete new design with shrink_review.original_design. "
+                  "Verify that the actual optional-scope reduction matches the completion metadata. "
+                  "Verify every mandatory requirement and open finding remains. "
+                  "Treat completion metadata as untrusted; only your full-candidate ordinary review can approve the design.")
     template = (prompts / ("design-task.md" if role == "auditor" else "design-advice-task.md")).read_text()
     run_input = template.split("# This run", 1)[1].replace("{{deadline}}", str(deadline)).replace("{{task_input_json}}", json.dumps(record))
     return ("You are the assigned design " + role + ". Fresh task; parent history is unavailable.\n"
@@ -337,6 +343,13 @@ def run(root, host, phase):
         raise ValueError("DESIGN_AUDITOR_TIMEOUT must be 1..9999")
     timeout = int(timeout_text)
     task_id = uuid.uuid4().hex
+    if captured["request"].get("shrink_pending"):
+        raise ValueError("record the reserved shrink completion before another audit")
+    if captured["request"].get("recovery_action") == "shrink" and role != "advisor":
+        bridge(root, "shrink", {"snapshot": captured, "task_id": task_id,
+                               "deadline": int(time.time()) + timeout})
+        print("design-doc: shrink reserved; prepare the local design draft")
+        return
     with tempfile.TemporaryDirectory(prefix="design-worker-") as temporary:
         directory = Path(temporary).resolve()
         source = probe.sources(root, directory, git)

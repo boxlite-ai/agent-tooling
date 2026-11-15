@@ -1,5 +1,5 @@
 # Design-loop state bound to root and branch. PASS and OVERRIDDEN close a cycle;
-# Redesign preserves consumed recovery actions and the failure budget.
+# automatic Redesign preserves consumed recovery actions and the failure budget.
 include "audit-reflection-contract";
 include "audit-reconciliation";
 include "audit-loop";
@@ -30,6 +30,7 @@ def da_valid:
   (del(.deadline_review,.worker_provenance,.progress,.recovery_state) | keys) == da_keys
   and (.progress == null or (.progress | audit_loop_view_valid))
   and (.recovery_state | audit_recovery_valid)
+  and (.recovery_state.shrink == null or (.recovery_state.shrink.original_design | type == "string" and length > 0))
   and (.recovery_state.referee as $referee | $referee.result == null or
     ({content_sha256:$referee.worker_provenance.content_sha256,
       worker_provenance:$referee.worker_provenance} | da_worker_provenance("referee"))
@@ -62,7 +63,7 @@ def da_open_findings:
   elif .verdict == "FAIL" then .findings else [] end;
 def da_blocked:
   .stop != "none" and (.extra | not)
-  and (da_recovery_action | IN("referee") | not)
+  and (da_recovery_action | IN("referee","shrink") | not)
   and (.stop != "early" or (da_effective_progress | audit_loop_classify | .pattern != "converging"));
 def da_reflection_due:
   .verdict == "FAIL" and .reflection == null
@@ -90,6 +91,7 @@ def da_request($root; $url; $digest; $history):
    fails:(.failures | length), stop, blocked:da_blocked, reflection_due:da_reflection_due,
    recovery:(da_effective_progress | audit_loop_classify),
    recovery_action:(if $live then da_recovery_action else "none" end),
+   shrink_pending:(.recovery_state.shrink != null and .recovery_state.shrink.result == null),
    redesign:da_redesign($digest), history_hash:$history, failure_ids:.failures};
 # Ordinary reviews retain original progress; recovery decisions affect a copied view.
 def da_record($v; $url; $digest):
@@ -115,14 +117,22 @@ def da_record($v; $url; $digest):
     | .overruled = $overruled | .extra = false | .reflection = null | .progress=$progress
     | del(.deadline_review) | if $v.deadline_review != null then . + {deadline_review:$v.deadline_review} else . end
   end;
-def da_referee_reserve($assignment):
-  (da_recovery_input | audit_recovery_reserve($assignment; now | floor)) as $reserved
+def da_recovery_reserve($kind; $assignment):
+  (da_recovery_input | audit_recovery_reserve($kind; $assignment; now | floor)) as $reserved
   | .recovery_state=$reserved.recovery;
 def da_referee_record($task; $source; $result; $proof):
-  (da_recovery_input | audit_recovery_finish($task; $source; $result)) as $completed
+  (da_recovery_input | audit_recovery_finish("referee"; $task; $source; $result)) as $completed
   | .recovery_state=$completed.recovery | .reflection=null
   | .recovery_state.referee.worker_provenance=$proof
   | if da_valid then . else error("invalid referee provenance") end;
+def da_shrink_reserve($assignment; $original):
+  da_recovery_reserve("shrink"; $assignment)
+  | .recovery_state.shrink.original_design=$original
+  | .verdict="NONE" | .stop="none" | .extra=false | .reflection=null;
+def da_shrink_finish($task; $source; $result):
+  (da_recovery_input | audit_recovery_shrink_finish($task; $source; $result)) as $completed
+  | .recovery_state=$completed.recovery
+  | if ($result.removed_scope | length) == 0 then .verdict="FAIL" | .stop="early" else . end;
 def da_reflect($body; $history):
   if (da_reflection_due | not) then error("no reflection is due")
   elif ($body | audit_reflection_body | not) or $body.history_hash != $history

@@ -70,7 +70,7 @@ Pending attempts appear separately as `pending:true`; progress compares complete
 
 ### Design recovery ownership
 
-The design gate reserves one referee per loop under the existing clone-wide design transaction.
+The design gate reserves one referee and one Shrink action per loop under the existing clone-wide design transaction.
 Critical findings and the eight-failure cap prevent automatic reservations; a reservation survives interruption and Redesign.
 
 - Referees use fresh gate-launched workers and the shared read-only broker on both supported hosts.
@@ -82,7 +82,17 @@ Critical findings and the eight-failure cap prevent automatic reservations; a re
 For example, retracting F2 from a two-finding round leaves one effective finding while the stored ordinary outcome remains FAIL.
 An ordinary matching PASS with its required advice supplies edit authority; a referee cannot supply PASS.
 
-Design Shrink, history-gate recovery actions, forced continuation, and the durable findings ledger remain subsequent delivery work.
+Version 1 records may omit `shrink`; absence denotes an unused action.
+Upgrades preserve completed referee results and consumed reservations.
+Unknown fields and malformed reservations still reject.
+
+Shrinking prepares a local design draft, preserves the captured original requirements and findings, and retains public-text approval requirements.
+Record removed scope, affected sections, preserved requirements, and exact finding IDs through `design-doc.sh shrink FILE` after publication.
+
+The gate binds this metadata to the current provider snapshot and requires a complete ordinary audit of the resulting candidate.
+An empty removed-scope list records no permitted reduction and consumes the action without granting edit authority.
+
+History-gate recovery actions, forced continuation, and the durable findings ledger remain separate delivery work.
 
 ### History acceptance
 
