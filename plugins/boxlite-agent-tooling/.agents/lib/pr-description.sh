@@ -64,16 +64,13 @@ _pr_description_check_explanation() { # bounded GitHub-rendered HTML
   fi
 }
 
-# Every ledger finding recorded on the PR branch must appear in a ## Unresolved findings
+# Every open ledger finding on the PR branch must appear in a ## Unresolved findings
 # section as its label, gate@head7:ID (design #563). Requires sourced audit-ledger.sh.
 _pr_description_check_ledger() { # root, branch, bounded GitHub-rendered HTML
-  local path ledger labels missing
-  path="$(audit_ledger_path "$1")"
-  [[ -e "$path" || -L "$path" ]] || return 0
-  if ! ledger="$(audit_ledger_read "$path")" \
-    || ! labels="$(jq -rs --arg branch "$2" '[.[] | select(.branch == $branch) | . as $entry
-        | .findings[] | "\($entry.gate)@\($entry.head[0:7]):\(.id)"] | unique | .[]' <<<"$ledger" 2>/dev/null)"; then
-    printf 'Cannot read the unresolved-findings ledger %s; repair or remove it before publishing.' "$path"
+  local labels missing
+  if ! labels="$(audit_ledger_open_labels "$1" "$2")"; then
+    printf 'Cannot read the unresolved-findings ledger %s; repair or remove it before publishing.' \
+      "$(audit_ledger_path "$1")"
     return 1
   fi
   [[ -n "$labels" ]] || return 0

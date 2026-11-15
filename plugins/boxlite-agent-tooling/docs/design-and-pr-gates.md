@@ -176,9 +176,11 @@ It is never a PASS; the findings go to a ledger instead of a question.
 | Effect | The gate consumes the FAIL dossier and returns `UNRESOLVED: ...` as context, not as a permission decision. |
 | Ledger | `.agents/state/audit-ledger.jsonl` gains one line per forced attempt, with each open finding's ID, severity and criterion. |
 | Push | A forced commit earns no commit audit receipt, so its push is audited. |
-| PR body | Each ledger finding on the PR's head branch must appear under `## Unresolved findings` as `gate@head7:ID`, such as `commit@3fe00d4:F1`; quotations do not count. |
-| Unreadable ledger | PR creation and edits are denied until the ledger is repaired or removed. |
-| Final reply | The agent lists the ledger entries; no hook enforces that yet. |
+| Open finding | A ledger finding on the branch, labeled `gate@head7:ID` such as `commit@3fe00d4:F1`, that no human has dismissed. |
+| PR body | Each open finding on the PR's head branch must appear under `## Unresolved findings` by label; quotations do not count. |
+| Final reply | When a reply omits an open label, the Stop gate asks once for a revision that lists it. |
+| Dismissal | The human types the whole prompt `ledger-dismiss: <label> <reason>`; the reason is required, up to 280 characters. The prompt hook records it in the ledger, or says why it recorded nothing. |
+| Unreadable ledger | PR creation and edits are denied, and the Stop gate asks the reply to report it, until the ledger is repaired or removed. |
 | Headless runner | Unchanged: it cannot reach this branch and still asks. |
 
 ### Design conformance
@@ -329,7 +331,7 @@ Public commands clear reserved publication inputs; a reflection preserves the re
 | Accepted content | Prose, lists, tables, diagrams; any independently qualifying matching section suffices. |
 | Rejected content | Nested headings alone, quotes, comments, example headings, or placeholder-only/mixed placeholders. |
 | Render bounds | 20 seconds, 64 KiB; failure blocks publication without consuming acknowledgment. |
-| Unresolved findings | When the ledger holds findings for the head branch, a level-two **Unresolved findings** section lists each `gate@head7:ID`; an unreadable ledger blocks. |
+| Unresolved findings | When the ledger holds open findings for the head branch, a level-two **Unresolved findings** section lists each `gate@head7:ID`; an unreadable ledger blocks. |
 
 Hidden source URLs do not count; direct API/browser writes bypass this CLI boundary; example accuracy and relevance remain human review responsibilities.
 

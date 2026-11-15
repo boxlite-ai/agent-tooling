@@ -178,6 +178,10 @@ if [[ "$prompt_text" =~ ^[[:space:]]*design-decision: ]]; then
   printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$project_dir" \
     bash "$tooling_root/.agents/hooks/design-decision-prompt.sh"
 fi
+if [[ "$prompt_text" =~ ^[[:space:]]*ledger-dismiss: ]]; then
+  printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$project_dir" \
+    bash "$tooling_root/.agents/hooks/ledger-dismiss-prompt.sh"
+fi
 
 state_dir="$project_dir/.agents/state"
 if ! mkdir -p "$state_dir" 2>/dev/null; then
