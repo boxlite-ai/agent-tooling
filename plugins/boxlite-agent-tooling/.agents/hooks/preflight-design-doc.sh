@@ -138,6 +138,10 @@ design_decision() {
   esac
 }
 [[ "$(jq -r .blocked <<<"$request")" != true ]] || design_decision
+if [[ "$(jq -r '.shrink_pending // false' <<<"$request")" == true ]]; then
+  message="$(user_question render "$plugin_root" design/audit-shrink)" || deny 'shrink instruction unavailable'
+  deny "$message"
+fi
 if [[ "$(jq -r .redesign <<<"$request")" == true ]]; then
   approval="$(user_question redesign-approval "$plugin_root")" || deny 'redesign question unavailable'
   message="$(user_question render "$plugin_root" design/audit-redesign "approval=$approval")" \

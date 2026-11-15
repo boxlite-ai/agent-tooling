@@ -201,7 +201,7 @@ _design_doc_file_hash() { # path -> SHA-256 of its bytes, or nothing when it is 
 _design_doc_worker_record() { # pending path -> bounded, typed assignment record
   verdict_audit_read_regular_state "$1" 1048576 record | jq -ce '
     select(type=="object" and keys==["expires","review_deadline","role","snapshot","status","task_id","task_sha256","worker_sha256"]
-      and (.role | IN("auditor","advisor")) and (.status | IN("pending","consumed","aborted"))
+      and (.role | IN("auditor","advisor","referee")) and (.status | IN("pending","consumed","aborted"))
       and (.task_id | type=="string" and test("^[0-9a-f]{32}$"))
       and all(.task_sha256,.worker_sha256; type=="string" and test("^[0-9a-f]{64}$"))
       and all(.expires,.review_deadline; type=="number" and .>0 and .==floor)
@@ -426,7 +426,7 @@ _design_doc_context() { # repo root -> branch identity
 # the gate's request instead of the URL. decide applies a human choice that a hook already
 # accepted, carrying its binding through the fresh provider read; advise stores advice.
 _design_doc_binding() { # caller holds the design transaction for mutations
-  local operation="$1" root branch git_dir state_path audit_path snapshot url record digest design_worker_snapshot
+  local operation="$1" root branch git_dir state_path audit_path snapshot url record digest original design_worker_snapshot
   root="$(git -C "$2" rev-parse --show-toplevel)" || return 1
   root="$(cd "$root" && pwd -P)" || return 1
   branch="$(_design_doc_context "$root")" || return 1
@@ -442,7 +442,7 @@ _design_doc_binding() { # caller holds the design transaction for mutations
         '{root:$root,branch:$branch,url:$url}' |
         verdict_audit_write_atomic "$state_path" || return 1
       ;;
-    check|edit|verdict|reflect|decide|advise|show)
+    check|edit|verdict|reflect|decide|advise|show|shrink-complete)
       snapshot="$(verdict_audit_read_json_snapshot "$state_path")" || {
         _design_doc_error 'no readable binding; register the design doc before writing code'; return 1;
       }
@@ -463,6 +463,21 @@ _design_doc_binding() { # caller holds the design transaction for mutations
         verdict) _design_doc_audit_write "$audit_path" "$root" "$branch" "$url" "$digest" "$3" || return 1 ;;
         reflect) _design_doc_audit_update "$audit_path" "$root" "$branch" "$url" "$digest" \
           'da_reflect($argument | fromjson; $history)' "$3" || return 1 ;;
+        shrink-complete)
+          record="$(jq -ce --arg candidate "$(jq -r .snapshot_sha256 <<<"$snapshot")" '
+            select(type=="object" and keys==["affected_sections","findings","preserved_requirements",
+              "removed_scope","source_sha256","task_id"])
+            | {task_id,source_sha256,result:(del(.task_id,.source_sha256)+{candidate_sha256:$candidate})}' \
+            <<<"$3")" || return 1
+          original="$(_design_doc_audit_state "$audit_path" "$root" "$branch")" || return 1
+          original="$(jq -c .recovery_state.shrink.original_design <<<"$original")" || return 1
+          if [[ "$original" == "$(jq -c .body <<<"$snapshot")" ]] \
+              && jq -e '.result.removed_scope | length > 0' <<<"$record" >/dev/null; then
+            _design_doc_error 'shrink requires changed design text; a research-log change is not a reduction'; return 1
+          fi
+          _design_doc_audit_update "$audit_path" "$root" "$branch" "$url" "$digest" \
+            '($argument | fromjson) as $input | da_shrink_finish($input.task_id; $input.source_sha256; $input.result)' \
+            "$record" || return 1 ;;
         decide)
           jq -e --arg root "$root" --arg branch "$(git -C "$root" branch --show-current)" \
             --arg head "$(git -C "$root" rev-parse HEAD)" --arg url "$url" --arg digest "$digest" \

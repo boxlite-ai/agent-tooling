@@ -128,7 +128,7 @@ Limits and guarantees:
 
 ### Design audit loop
 
-`.agents/lib/design-audit.jq` counts FAILs per root/branch across rebinding; PASS, overrule, or redesign resets the count.
+`.agents/lib/design-audit.jq` counts FAILs per root/branch across rebinding; PASS or overrule resets the count.
 
 `.agents/lib/audit-loop.jq` classifies the design and commit/push audit loops from their last two FAIL rounds ([design #563](https://github.com/boxlite-ai/agent-tooling/issues/563)).
 The design gate and the commit/push checkpoint share it, so a loop that still shrinks waits for a human only at the limits in the table below.
@@ -147,8 +147,10 @@ A design finding repeats when its exact line returns; a history gate counts any 
 | --- | --- |
 | Edited content, same URL | Carry last FAIL's findings into the next task. |
 | Converging FAIL: fewer blocking findings than the previous FAIL | Require reflection matching `.agents/lib/audit-reflection-contract.jq`, then audit again without a question. |
-| Non-converging FAIL from the second on, eighth FAIL, or FAIL after reflection choice | Stop as INCOMPLETE and ask for a human decision. |
-| Redesign | Reset count; failed content cannot be audited again. |
+| Eligible stalled high-only FAIL with an unused referee | Reserve one fresh referee; ordinary audit authority remains required. |
+| Eligible churning high-only FAIL with an unused Shrink | Reserve a smaller local draft; approved publication and complete ordinary review remain required. |
+| Non-converging FAIL without automatic recovery, eighth FAIL, or FAIL after reflection choice | Stop as INCOMPLETE and ask for a human decision. |
+| Redesign | Without recovery, reset the count; otherwise preserve actions and their failure budget; require a fresh draft. |
 | Reflect again | Require reflection, then permit one more audit. |
 | Overrule | Record `OVERRIDDEN`; retained `overruled:` findings are not re-raised. |
 | No answer after five minutes | Keep edits blocked. |
@@ -247,8 +249,11 @@ A matching human overrule retains its authority; an explicit run with complete a
 flowchart LR
     A[Exact Bash action] --> B[Host-owned supervisor]
     B --> C[Freeze public research]
-    C --> D[Capture design, log, and tracked source]
-    D --> E[Fresh auditor or advisor]
+    C --> D[Capture design and log]
+    D -->|Audit, advice, referee| E[Freeze tracked source and launch fresh worker]
+    D -->|Shrink| H[Reserve local design draft]
+    H --> I[Approved publication and complete ordinary review]
+    I --> D
     E --> F[Validate result under clone transaction]
     F --> G[Atomic result plus consumed task ID]
 ```

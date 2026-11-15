@@ -114,7 +114,8 @@ def audit_loop_design_view:
   else {rounds:[{kind:"FAIL",findings:(.findings | audit_loop_design_findings)}],
     history_complete:((.failures | length) <= 1)} end;
 def audit_loop_design_record($verdict; $findings):
-  (if .verdict == "FAIL" then audit_loop_design_view else {rounds:[],history_complete:true} end)
+  (if .recovery_state != null and .progress != null then .progress
+    elif .verdict == "FAIL" then audit_loop_design_view else {rounds:[],history_complete:true} end)
   | if $verdict == "PASS" then {rounds:[{kind:"PASS",findings:[]}],history_complete:true}
     else .rounds += [{kind:$verdict,findings:($findings | audit_loop_design_findings)}]
       | if (.rounds | length) > 16 then .history_complete=false | .rounds=.rounds[-16:] else . end

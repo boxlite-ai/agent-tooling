@@ -322,9 +322,10 @@ fi
 expect_denial 'a converging FAIL 2 asks for a reflection' codex "scripts/design-doc.sh\" reflect"
 probe_block 'a due reflection records a reflection-due block' reflection-due
 rm -f "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
+two='["critical: research: A","high: research: B"]'
 record_on "$(revision 2)" "$two"
 publish "$(revision 3)"; record_on "$(revision 3)" "$two"
-expect_denial 'repeated findings with no drop at FAIL 2 stop the loop' codex 'INCOMPLETE: the design-audit loop stopped after FAIL 2'
+expect_denial 'critical findings at FAIL 2 stop the loop' codex 'INCOMPLETE: the design-audit loop stopped after FAIL 2'
 probe_block 'a stopped loop awaiting a human records no block' none
 decision_state="$scratch/repo/.agents/state/design-decision-request.json"
 decision_id="$(jq -er .id "$decision_state")"
@@ -344,7 +345,7 @@ publish "$(revision 5)"; record_on "$(revision 5)" "$two"
 export DESIGN_TEST_CLOCK="$scratch/clock"
 started=$(( $(/bin/date -u +%s) + 10 ))
 printf '%s\n' "$started" > "$DESIGN_TEST_CLOCK"
-expect_denial 'no drop in findings stops the loop' codex 'INCOMPLETE'
+expect_denial 'critical findings stop the loop' codex 'INCOMPLETE'
 printf '%s\n' "$(( started + 301 ))" > "$DESIGN_TEST_CLOCK"
 expect_denial 'an unanswered stop keeps edits blocked' codex 'edits stay blocked'
 check Write 'edit source' deny

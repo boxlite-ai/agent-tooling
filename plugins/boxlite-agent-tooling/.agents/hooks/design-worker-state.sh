@@ -19,6 +19,9 @@ worker_reconcile() { # directory, pending record -> complete interrupted cleanup
   snapshot="$(verdict_audit_read_json_snapshot "$path")" || return 1
   record="${snapshot#*$'\n'}"
   _design_doc_jq -e --argjson pending "$pending" 'include "design-audit";
+    (if $pending.role=="referee" then . as $state | .recovery_state.referee.worker_provenance as $proof
+      | {root:$state.root,branch:$state.branch,url:$state.url,
+        content_sha256:$proof.content_sha256,worker_provenance:$proof} else . end) |
     da_worker_provenance($pending.role) and .root==$pending.snapshot.root
     and .branch==$pending.snapshot.branch and .url==$pending.snapshot.url
     and .worker_provenance.task_id==$pending.task_id
@@ -72,7 +75,7 @@ worker_human_decision() { # live capture -> an accepted decision for this exact 
 worker_transition() {
   # The design library consumes these two dynamically scoped publication inputs.
   # shellcheck disable=SC2034
-  local action="$1" root="$2" input live pending directory path result decision_status=0 design_worker_proof design_worker_deadline
+  local action="$1" root="$2" input live pending directory path result assignment decision_status=0 design_worker_proof design_worker_deadline
   input="$(head -c 1048577)" || return 1
   (( ${#input} <= 1048576 )) || return 1
   live="$(worker_snapshot "$root")" || return 1
@@ -83,6 +86,22 @@ worker_transition() {
     _design_doc_error 'a human design decision takes precedence'; return 1
   fi
   (( decision_status == 1 )) || return 1
+  if [[ "$action" == shrink ]]; then
+    jq -e --argjson live "$live" '.snapshot==$live and $live.request.recovery_action=="shrink"
+      and ($live.request.advice_due | not)' <<<"$input" >/dev/null || return 1
+    if [[ -e "$path" || -L "$path" ]]; then
+      pending="$(_design_doc_worker_record "$path")" || return 1
+      jq -e '.expires < now or .status != "pending"' <<<"$pending" >/dev/null || return 1
+    fi
+    assignment="$(jq -nc --argjson input "$input" --argjson live "$live" '
+      {assignment:{task_id:$input.task_id,source_sha256:$live.snapshot.snapshot_sha256,
+        deadline:$input.deadline},original:$live.snapshot.body}')" || return 1
+    _design_doc_audit_update "$directory/agent-tooling-design-audit.json" "$root" \
+      "$(jq -r .branch <<<"$live")" "$(jq -r .url <<<"$live")" "$(jq -r .snapshot.content_sha256 <<<"$live")" \
+      '($argument | fromjson) as $input | da_shrink_reserve($input.assignment; $input.original)' "$assignment" || return 1
+    printf '%s\n' '{"reserved":true}'
+    return
+  fi
   if [[ "$action" == claim ]]; then
     jq -e --argjson live "$live" '.snapshot == $live' <<<"$input" >/dev/null || {
       _design_doc_error 'assignment snapshot changed'; return 1;
@@ -94,13 +113,28 @@ worker_transition() {
       }
     fi
     jq -e '.request | (.blocked // false | not)
-      and (.reflection_due // false | not) and (.redesign // false | not)' <<<"$live" >/dev/null || return 1
+      and (.reflection_due // false | not) and (.redesign // false | not)
+      and (.shrink_pending // false | not)' <<<"$live" >/dev/null || return 1
+    jq -e --argjson live "$live" '.role ==
+      (if $live.request.advice_due then "advisor"
+       elif $live.request.recovery_action=="referee" then "referee"
+       elif $live.request.recovery_action=="shrink" then "unavailable" else "auditor" end)' \
+      <<<"$input" >/dev/null || return 1
     # An unowned verdict, or a PASS an auditor is about to replace, cannot authorize a new worker.
     if jq -e --argjson input "$input" '.state | ((.verdict=="PASS" or .verdict=="FAIL") and .worker_provenance==null)
         or (.verdict=="PASS" and $input.role=="auditor")' <<<"$live" >/dev/null; then
       _design_doc_jq -c --arg root "$root" --arg branch "$(jq -r .branch <<<"$live")" \
         'include "design-audit"; .state | da_reset($root; $branch)' <<<"$live" |
         verdict_audit_write_atomic "$directory/agent-tooling-design-audit.json" || return 1
+      live="$(worker_snapshot "$root")" || return 1
+    fi
+    if [[ "$(jq -r .role <<<"$input")" == referee ]]; then
+      assignment="$(jq -nc --argjson input "$input" --argjson live "$live" '
+        {task_id:$input.task_id,source_sha256:$live.snapshot.snapshot_sha256,deadline:$input.review_deadline}')" || return 1
+      _design_doc_audit_update "$directory/agent-tooling-design-audit.json" "$root" \
+        "$(jq -r .branch <<<"$live")" "$(jq -r .url <<<"$live")" \
+        "$(jq -r .snapshot.content_sha256 <<<"$live")" \
+        'da_recovery_reserve("referee"; $argument | fromjson)' "$assignment" || return 1
       live="$(worker_snapshot "$root")" || return 1
     fi
     jq -c --argjson live "$live" '. + {snapshot:$live,status:"pending"}' <<<"$input" |
@@ -127,6 +161,18 @@ worker_transition() {
   # All nested operations share the transaction already held by this dispatcher.
   if [[ "$(jq -r .role <<<"$pending")" == auditor ]]; then
     printf '%s' "$result" | design_doc_audit_record "$root" >/dev/null || return 1
+  elif [[ "$(jq -r .role <<<"$pending")" == referee ]]; then
+    result="$(_design_doc_jq -ce --argjson live "$live" --argjson input "$input" '
+      include "design-audit";
+      $input.result as $result | if ($result | keys) != ["content_sha256","decisions"]
+        or $result.content_sha256 != $live.snapshot.content_sha256
+        then error("invalid referee result") else . end |
+      ($result.decisions | map(. as $decision |
+        if .status=="retracted" and (($input.citation_ids // []) | index($decision.id))==null
+        then .status="upheld" else . end)) as $decisions |
+      $live.state | da_referee_record($input.task_id; $input.proof.snapshot_sha256;
+        $decisions; $input.proof)' <<<"null")" || return 1
+    printf '%s\n' "$result" | verdict_audit_write_atomic "$directory/agent-tooling-design-audit.json" || return 1
   else
     printf '%s' "$result" | design_doc_advice_record "$root" >/dev/null || return 1
   fi
@@ -180,6 +226,6 @@ case "${1:-}" in
   binding) shift; _design_doc_binding "$@" ;;
   log) _design_doc_log_store "$2" ;;
   snapshot) worker_snapshot "$2" ;;
-  claim|publish) worker_transition "$1" "$2" ;;
+  claim|publish|shrink) worker_transition "$1" "$2" ;;
   *) exit 2 ;;
 esac

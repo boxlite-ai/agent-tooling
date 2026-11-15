@@ -55,9 +55,9 @@ class OwnedWorker(unittest.TestCase):
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.repo, check=True, capture_output=True).stdout
 
-    def cli(self, *args, body=None, check=False):
+    def cli(self, *args, body=None, check=False, timeout=None):
         return subprocess.run(["bash", str(self.plugin / "scripts/design-doc.sh"), *args], cwd=self.repo,
-                              env=self.env, input=body, capture_output=True, check=check, text=True)
+                              env=self.env, input=body, capture_output=True, check=check, text=True, timeout=timeout)
 
     def hook(self, command=None, host="codex"):
         payload = {"tool_name": "Bash", "cwd": str(self.repo), "tool_input": {
@@ -108,6 +108,160 @@ class OwnedWorker(unittest.TestCase):
         self.assertNotEqual(self.cli("verdict", body='{"verdict":"PASS"}').returncode, 0)
         self.assertNotEqual(self.cli("advice", body='{"advice":[]}').returncode, 0)
         self.assertNotEqual(self.cli("run").returncode, 0)
+
+    def test_referee_is_owned_blind_and_preserves_ordinary_outcomes(self):
+        self.check_referee("codex")
+
+    def test_claude_referee_uses_the_same_owned_contract(self):
+        self.check_referee("claude")
+
+    def fail_designs(self, rounds, host="codex"):
+        queued = self.bin / "result.json"
+        for number, findings in enumerate(rounds):
+            if number:
+                self.doc["body"] += "\nA revised design candidate."
+                (self.bin / "document.json").write_text(json.dumps(self.doc))
+            queued.write_text(json.dumps({"verdict": "FAIL", "findings": findings, "advisories": []}))
+            result = self.hook(host=host)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            queued.unlink()
+            result = self.hook(host=host)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def check_referee(self, host):
+        findings = [f"high: F{number}: source.txt:1 needs check {number}" for number in range(1, 6)]
+        queued = self.bin / "result.json"
+        self.fail_designs([findings, findings], host)
+        before = self.record("audit")
+        decisions = [{"id": findings[0], "status": "upheld", "evidence": "source.txt:1 cleanup is absent"},
+                     {"id": findings[1], "status": "retracted", "evidence": "source.txt:1 boundary is established"},
+                     {"id": findings[2], "status": "retracted", "evidence": "missing.txt:1 invented anchor"},
+                     {"id": findings[3], "status": "retracted", "evidence": "source.txt:99999 absent line"},
+                     {"id": findings[4], "status": "retracted", "evidence": "tool output: invented proof"}]
+        queued.write_text(json.dumps({"decisions": decisions}))
+        result = self.hook(host=host)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = self.record("audit")
+        self.assertEqual(after["verdict"], "FAIL")
+        self.assertEqual(after["findings"], before["findings"])
+        self.assertEqual(after["progress"], before["progress"])
+        self.assertEqual(after["worker_provenance"], before["worker_provenance"])
+        referee = after["recovery_state"]["referee"]
+        self.assertEqual([item["status"] for item in referee["result"]],
+                         ["upheld", "retracted", "upheld", "upheld", "upheld"])
+        self.assertEqual(referee["worker_provenance"]["role"], "referee")
+        self.assertNotEqual(referee["task_id"], before["worker_provenance"]["task_id"])
+        self.assertEqual(referee["worker_provenance"]["verdict_task_id"], before["worker_provenance"]["task_id"])
+        task = json.loads((self.bin / "task-input.json").read_text())
+        self.assertEqual(set(task), {"content_sha256", "findings"})
+        self.assertEqual(task["findings"], findings)
+        self.assertNotEqual(self.gate().returncode, 0, "a referee cannot grant edit authority")
+
+    def test_design_shrink_retains_requirements_and_needs_an_ordinary_review(self):
+        self.check_shrink("codex")
+
+    def test_claude_design_shrink_uses_the_same_owned_contract(self):
+        self.check_shrink("claude")
+
+    def check_shrink(self, host):
+        findings = ["high: F2: source.txt:1 boundary remains unchecked"]
+        self.fail_designs([["high: F1: source.txt:1 cleanup remains unchecked"], findings], host)
+        original = self.doc["body"]
+        self.assertEqual(self.hook(host=host).returncode, 0)
+        reserved = self.record("audit")
+        marker = reserved["recovery_state"]["shrink"]
+        self.assertEqual(marker["original_design"], original)
+        self.assertEqual(reserved["verdict"], "NONE")
+        self.assertEqual(len(reserved["failures"]), 2)
+        denial = self.gate()
+        self.assertNotEqual(denial.returncode, 0)
+        self.assertIn("A design Shrink is reserved", denial.stderr)
+        self.assertNotIn("The human chose Redesign", denial.stderr)
+        status = self.cli("run")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIn(marker["task_id"], status.stdout)
+        metadata = {"task_id": marker["task_id"], "source_sha256": marker["source_sha256"],
+                    "removed_scope": ["optional candidate annotation"], "affected_sections": ["Details"],
+                    "preserved_requirements": ["Read the tracked source"], "findings": findings}
+        path = self.root / "shrink.json"
+        path.write_text(json.dumps(metadata))
+        self.assertNotEqual(self.cli("shrink", str(path)).returncode, 0, "unchanged source is not a reduction")
+        result = self.cli("log", body="Additional research without changing the design text.")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.cli("shrink", str(path))
+        self.assertNotEqual(result.returncode, 0, "a research-log change cannot complete a design reduction")
+        self.assertIn("changed design text", result.stderr)
+        self.doc["body"] = original.replace("\nA revised design candidate.", "")
+        (self.bin / "document.json").write_text(json.dumps(self.doc))
+        for changed in ({**metadata, "source_sha256": "0" * 64}, {**metadata, "findings": []},
+                        {**metadata, "preserved_requirements": []}):
+            path.write_text(json.dumps(changed))
+            self.assertNotEqual(self.cli("shrink", str(path)).returncode, 0)
+            self.assertIsNone(self.record("audit")["recovery_state"]["shrink"]["result"])
+        path.write_text(json.dumps(metadata))
+        link = self.root / "linked.json"
+        link.symlink_to(path)
+        self.assertNotEqual(self.cli("shrink", str(link)).returncode, 0)
+        if hasattr(os, "mkfifo"):
+            fifo = self.root / "metadata.pipe"
+            os.mkfifo(fifo)
+            self.assertNotEqual(self.cli("shrink", str(fifo), timeout=3).returncode, 0)
+        result = self.cli("shrink", str(path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(self.gate().returncode, 0, "completion metadata is not design approval")
+        self.assertNotEqual(self.cli("shrink", str(path)).returncode, 0, "completion cannot replay")
+        result = self.hook(host=host)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = json.loads((self.bin / "task-input.json").read_text())
+        self.assertEqual(task["shrink_review"]["original_design"], original)
+        self.assertEqual(task["shrink_review"]["result"]["findings"], findings)
+        self.assertEqual(self.record("audit")["worker_provenance"]["role"], "auditor")
+        self.assertNotEqual(self.gate().returncode, 0)
+        self.assertEqual(self.hook(host=host).returncode, 0)
+        self.assertEqual(self.gate().returncode, 0)
+
+    def test_no_reduction_blocks_without_a_replacement_shrink(self):
+        findings = ["high: F2: source.txt:1 remains unchecked"]
+        self.fail_designs([["high: F1: source.txt:1 remains unchecked"], findings])
+        self.assertEqual(self.hook().returncode, 0)
+        before = self.record("audit")
+        marker = before["recovery_state"]["shrink"]
+        path = self.root / "none.json"
+        path.write_text(json.dumps({"task_id": marker["task_id"], "source_sha256": marker["source_sha256"],
+            "removed_scope": [], "affected_sections": [], "preserved_requirements": ["every edit is mandatory"],
+            "findings": findings}))
+        result = self.cli("shrink", str(path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.record("audit")["verdict"], "FAIL")
+        self.assertNotEqual(self.hook().returncode, 0)
+        self.assertEqual(self.record("audit")["recovery_state"]["shrink"]["task_id"], marker["task_id"])
+        self.assertNotEqual(self.gate().returncode, 0)
+
+    def test_previous_referee_records_retain_their_marker_after_upgrade(self):
+        self.check_referee("codex")
+        record = self.record("audit")
+        del record["recovery_state"]["shrink"]
+        path = self.repo / ".git/agent-tooling-design-audit.json"
+        path.write_text(json.dumps(record))
+        before = path.read_bytes()
+        denial = self.gate()
+        self.assertNotEqual(denial.returncode, 0)
+        self.assertIn("reflection", denial.stderr.lower())
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_failed_referee_launch_keeps_its_reservation_consumed(self):
+        findings = ["high: F1: source.txt:1 remains unchecked"]
+        self.fail_designs([findings, findings])
+        (self.bin / "mode").write_text("nonzero")
+        self.assertNotEqual(self.hook().returncode, 0)
+        before = self.record("audit")
+        marker = before["recovery_state"]["referee"]
+        self.assertIsNone(marker["result"])
+        self.assertEqual(self.record("worker")["status"], "aborted")
+        (self.bin / "mode").write_text("normal")
+        self.assertNotEqual(self.hook().returncode, 0)
+        self.assertEqual(self.record("audit")["recovery_state"]["referee"], marker)
+        self.assertNotEqual(self.gate().returncode, 0)
 
     def test_runner_mentions_are_data_but_evaluated_commands_are_denied(self):
         runner = f'bash "{self.plugin}/scripts/design-doc.sh" run'
