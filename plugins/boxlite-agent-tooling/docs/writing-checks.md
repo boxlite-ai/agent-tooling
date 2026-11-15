@@ -113,3 +113,4 @@ A prose slip then costs seconds, not an audit round.
 
 Each line reads `path: rule count (limit N): excerpt`.
 The auditor still reviews prose; commits made outside the agent hooks are not checked.
+Gate test cases that run inside the developer's checkout set `COMMIT_WRITING_CHECK=0`, so a staged slip there cannot decide them (#587).

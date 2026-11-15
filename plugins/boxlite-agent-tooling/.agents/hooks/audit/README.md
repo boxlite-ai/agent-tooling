@@ -236,7 +236,7 @@ It ships by maintainer decision, recorded in #474, because `xhigh` checked nothi
 | `VERDICT_CLASSIFIER_CMD` | `preflight-verdict-check.sh` | Current host's CLI | Replaces triage: turn text on stdin, `YES` or `NO` on stdout. `false` forces the pattern fallback. |
 | `VERDICT_EXTRACTOR_CMD` | `preflight-verdict-check.sh` | unset | Reads an unsupported transcript format: `$1` is the path; stdout is the turn text. |
 | `VERDICT_GATE_HARD_BLOCK` | `preflight-verdict-check.sh` | `1` | `0` turns blocks into human-only notes, for rollback only. |
-| `COMMIT_WRITING_CHECK` | `scripts/writing-structure.sh` | `1` | `0` skips the staged-Markdown structure check before commit audits, for rollback only. |
+| `COMMIT_WRITING_CHECK` | `scripts/writing-structure.sh` | `1` | `0` skips the staged-Markdown structure check before commit audits; for rollback, and for gate tests that run in the developer's checkout. |
 
 ## Commit/push retry choices
 
