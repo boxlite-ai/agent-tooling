@@ -159,6 +159,9 @@ expect_denial() { # description, host, expected text
 for host in claude codex; do
   expect_denial "$host prints the register command" "$host" \
     "bash \"$plugin/scripts/design-doc.sh\" register <GitHub-issue/Notion/Linear-URL>"
+  # The first stage hands off like the rest (design #592).
+  expect_denial "$host is told to continue to the audit without asking" "$host" \
+    'Continue without asking'
 done
 (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" register "$url") >/dev/null || exit 1
 # A bound design still needs a research verdict for its exact content before any edit.

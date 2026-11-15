@@ -75,6 +75,7 @@ Recorded advice opens the edit gate without a human wait.
 
 | Handoff | Signal the agent receives |
 | --- | --- |
+| Design required → design audited | The design-required denial says to research, write, register and audit it without asking. |
 | Design PASS → code | The advice prompt orders implementation once advice records. |
 | Code → commit and push | Guidance, plus the Stop reminder below; no hook can tell finished code from work in progress. |
 | Push → draft PR | The post-push context asks for a draft PR when a feature branch has none. |

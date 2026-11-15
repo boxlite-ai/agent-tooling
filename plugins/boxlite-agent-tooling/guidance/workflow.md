@@ -14,6 +14,7 @@ A passed stage starts the next one; never ask whether to continue.
 
 | When | Next, without asking |
 | --- | --- |
+| The edit gate requires a design | Research, write, register and audit it |
 | The design audit records PASS and advice is recorded | Start implementing |
 | Implementation is finished and its checks pass | Commit and push |
 | The commit and push audits record PASS and the push succeeds | Open a draft PR |
