@@ -8,16 +8,24 @@ source "$plugin/tests/audit/fixtures/audit-reflection-fixture.sh"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 cli="$plugin/scripts/audit-reflection.sh"
+# The human checkpoint writes its request under the repository, so the loops need a real one.
+git init -q -b feature "$scratch/repo"
+cd -P "$scratch/repo"
+git -c core.hooksPath=/dev/null -c user.name=test -c user.email=test@example.test commit -qm fixture --allow-empty
+mkdir -p .agents/state
+export CLAUDE_PROJECT_DIR="$PWD"
+head="$(git rev-parse HEAD)"
 
 select_loop() {  # gate, name
   state="$scratch/$2.json"
-  context="$(jq -nc --arg gate "$1" --arg session "$2" \
-    '{repo_root:"/fixture",session:$session,epoch:"1",branch:"main",gate:$gate}')"
+  context="$(jq -nc --arg root "$PWD" --arg gate "$1" \
+    --arg session "git-$(printf '%s' "$2" | git hash-object --stdin)" \
+    '{repo_root:$root,session:$session,epoch:"0",branch:"feature",gate:$gate}')"
 }
 prepare() {
   audit_test_submit_due "$cli" "$state"
-  jq -nc --argjson context "$context" --arg id "$1" \
-    '{context:$context,attempt:{id:$id,binding:{head:$id},snapshot:{diff:"candidate"},deadline:4102444800}}' \
+  jq -nc --argjson context "$context" --arg id "$1" --arg head "$head" \
+    '{context:$context,attempt:{id:$id,binding:{head:$head},snapshot:{diff:"candidate"},deadline:4102444800}}' \
     | bash "$cli" prepare "$state" >/dev/null
 }
 new_findings() {  # count
@@ -75,7 +83,21 @@ for gate in commit push; do
   prepare a3; accept a3 FAIL "$(dispositions 'F2:open:unchanged')" '[]'
   [[ "$(class):$(due)" == stalled:false ]]
   jq -e -L "$plugin/.agents/lib" 'include "audit-reflection-contract"; audit_git_decision_due' "$state" >/dev/null
-  prepare r2 2>/dev/null && { printf 'FAIL: %s prepared past the human checkpoint\n' "$gate" >&2; exit 1; }
+  if prepare r2 2>"$scratch/err"; then printf 'FAIL: %s prepared past the human checkpoint\n' "$gate" >&2; exit 1; fi
+  grep -Fq 'audit-decision:' "$scratch/err"
+
+  # A route that can launch the referee reaches it before the human question; other routes ask.
+  select_loop "$gate" "$gate-late-stall"
+  prepare c1; accept c1 FAIL '[]' "$(new_findings 3)"
+  prepare c2; accept c2 FAIL "$(dispositions 'F1:resolved:fixed' 'F2:open:again' 'F3:open:again')" '[]'
+  prepare c3; accept c3 FAIL "$(dispositions 'F2:open:again' 'F3:open:again')" '[]'
+  [[ "$(class):$(due)" == stalled:true ]]
+  if prepare c4 2>"$scratch/err"; then printf 'FAIL: %s skipped the checkpoint without a referee route\n' "$gate" >&2; exit 1; fi
+  grep -Fq 'audit-decision:' "$scratch/err"
+  rm -f ".agents/state/$gate-audit-decision-request-"*
+  AUDIT_REFEREE_ROUTE=1 prepare c4
+  accept c4 REFEREE "$(dispositions 'F2:retracted:src/gate.sh:12 already holds the lock' 'F3:open:still fails')" '[]'
+  [[ "$(class)" == converging ]]
 
   select_loop "$gate" "$gate-all-retracted"
   prepare b1; accept b1 FAIL '[]' "$(new_findings 1)"

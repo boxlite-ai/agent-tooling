@@ -511,6 +511,8 @@ task_input_json="$(jq -nc \
     parent_session_id:$parent_session_id, parent_host:$parent_host,
     audit_started_at:$audit_started_at}')"
 reflection_context=""
+# This route can launch the referee, so a stalled loop reaches it before the human question.
+export AUDIT_REFEREE_ROUTE=1
 if [[ -n "$hook_session_scope" && -n "$hook_prompt_epoch" ]]; then
   reflection_context="$(jq -nc --arg root "$(cd "$repo_root" && pwd -P)" \
     --arg session "$hook_session_scope" --arg epoch "$hook_prompt_epoch" \
@@ -574,8 +576,20 @@ audit_instruction() {
   if [[ -n "$reflection_context" ]]; then
     input="$(prepare_audit_attempt "$input")" || return 2
   fi
-  task="$(subagent_prompt audit/commit-push-task "$tooling_root" \
-    "audit_criteria=${audit_criteria}" "task_input_json=${input}")" || return 2
+  local referee_findings=""
+  if [[ -n "$reflection_context" ]]; then
+    referee_findings="$(audit_reflection_gate "$reflection_context" inspect | jq -c -L "$tooling_root/.agents/lib" '
+      include "audit-reflection-contract"; .state | if audit_referee_due then
+        [.registry[] | select(.status | IN("open","not_assessed")) | {id,invariant,behavior,criterion,evidence}]
+      else empty end')" || return 2
+  fi
+  if [[ -n "$referee_findings" ]]; then
+    task="$(subagent_prompt audit/commit-push-referee "$tooling_root" \
+      "referee_findings_json=${referee_findings}" "task_input_json=${input}")" || return 2
+  else
+    task="$(subagent_prompt audit/commit-push-task "$tooling_root" \
+      "audit_criteria=${audit_criteria}" "task_input_json=${input}")" || return 2
+  fi
   task+=$'\n\n'"$(subagent_prompt audit/dossier-validation "$tooling_root" \
     "validator_json=$(jq -nc --arg path "$tooling_root/scripts/validate-audit-dossier.sh" '{path:$path}')")" || return 2
   # Claim check: the deny reason carries a pointer, never the task text,
@@ -708,7 +722,7 @@ validate_audit() {
   audit_document="$(printf '%s' "$audit_json" | jq -ecs -L "$tooling_root/.agents/lib" '
     include "audit-dossier";
     audit_dossier_normalize_git |
-    select(if .verdict == "PASS" then (.findings | length) == 0 else (.findings | length) > 0 end)
+    select(if .verdict == "FAIL" then (.findings | length) > 0 else (.findings | length) == 0 end)
   ' 2>/dev/null || true)"
   if [[ -z "$audit_document" || ! "$audit_mtime" =~ ^[0-9]+$ ]]; then
     rm -f "$audit_selection"
@@ -784,6 +798,14 @@ Re-audit is required."
   # real findings.
   advisories="$(printf '%s' "$audit_document" \
     | jq -r '.advisories[] | "  ~ " + .' 2>/dev/null || echo '')"
+
+  if [[ "$audit_verdict" == "REFEREE" ]]; then
+    rm -f "$audit_selection"
+    deny_with_audit "A referee rechecked the repeated findings; its result is recorded and is not a verdict.
+${advisories:+Retracted findings:
+${advisories}
+}Reflect on the findings it upheld; an ordinary audit must still pass."
+  fi
 
   if [[ "$audit_verdict" != "PASS" ]]; then
     findings="$(printf '%s' "$audit_document" \
@@ -1002,7 +1024,7 @@ if [[ -n "${CODEX_SANDBOX:-}" && -n "${GITHOOK_DELEGATED:-}" && "$kind" == "push
     AUDITOR_SESSION_SCOPE="$hook_session_scope" \
       AUDITOR_PROMPT_EPOCH="$hook_prompt_epoch" \
       AUDITOR_PARENT_SESSION_ID="$parent_session_id" \
-      AUDITOR_PARENT_HOST="$(hook_host_kind)" \
+      AUDITOR_PARENT_HOST="$(hook_host_kind)" AUDIT_REFEREE_ROUTE= \
       bash "$headless_auditor" "$kind" "$command" >/dev/null 2>&1 || true
   fi
 fi

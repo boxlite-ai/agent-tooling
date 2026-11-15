@@ -101,7 +101,7 @@ The audit task and a FAIL's findings travel by claim check ([design #407](https:
 
 | Action | Parent responsibility |
 | --- | --- |
-| `audit` | Launch bound review, then retry; unchanged FAIL needs no cosmetic change/new receipt. |
+| `audit` | Launch bound review, then retry; unchanged FAIL needs no cosmetic change/new receipt. A stalled loop receives one [referee task](../../../docs/design-and-pr-gates.md#commit-and-push-referee) in place of a review. |
 | `recover` | Repair prerequisite and verify; unscoped FAIL returns through a real session-bound route. |
 | `reflect` | Run discriminating check, submit validated reflection, retry. |
 | `wait` | Finish worker/choice or repair unverifiable state; preserve history/links/timers. |

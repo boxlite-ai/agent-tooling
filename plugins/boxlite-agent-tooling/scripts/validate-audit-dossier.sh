@@ -42,8 +42,8 @@ else
   candidate="$(printf '%s' "$candidate" | jq -ecs -L "$library" --arg kind "$kind" '
     include "audit-dossier"; audit_dossier_normalize_git |
     if .command_kind != $kind then error("command_kind does not match requested kind")
-    elif (.verdict == "PASS") != ((.findings | length) == 0)
-    then error("verdict/findings inconsistent: PASS requires none; FAIL requires findings") else . end
+    elif (.verdict == "FAIL") != ((.findings | length) > 0)
+    then error("verdict/findings inconsistent: only FAIL carries findings, and it requires them") else . end
   ')" || { printf 'audit-dossier: invalid Git dossier shape, kind, or verdict/findings\n' >&2; exit 1; }
 fi
 if [[ "$history_path" == - ]]; then

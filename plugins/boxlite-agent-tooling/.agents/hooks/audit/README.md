@@ -242,6 +242,7 @@ It ships by maintainer decision, recorded in #474, because `xhigh` checked nothi
 
 From the third FAIL/ERROR round, a loop that is not [converging](../../../docs/design-and-pr-gates.md#design-audit-loop) asks for **Reflect again (Recommended)** or **Stop**; five-minute silence selects reflection, never approval.
 A converging loop needs only its reflection before the next audit.
+A stalled loop gets its [referee](../../../docs/design-and-pr-gates.md#commit-and-push-referee) before this question on the native gate.
 
 - Retain history, submit current reflection, fix/test, then obtain a fresh audit; further non-converging failures ask again within eight-failure/sixteen-attempt/storage limits.
 - Use the managed question or standalone `commit-audit-decision: <request-id> <Reflect again|Stop>`; push uses `push-audit-decision:`.

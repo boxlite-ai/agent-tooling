@@ -92,8 +92,13 @@ def audit_loop_history_view:
                 as $open
               | .open=($open | audit_loop_merge_findings)
             end
+          elif $outcome.verdict == "REFEREE" then
+            # A referee adds no round; the FAIL it rechecked keeps only the upheld findings.
+            [$outcome.history_review.dispositions[] | select(.status == "open") | .id] as $upheld
+            | .open |= map(select(.id as $id | $upheld | index($id) != null))
+            | if (.rounds | length) > 0 then .rounds[-1].findings = .open else . end
           else . end
-          | .rounds += [{kind:$outcome.verdict,findings:.open}]
+          | if $outcome.verdict == "REFEREE" then . else .rounds += [{kind:$outcome.verdict,findings:.open}] end
         end)
   | {rounds,history_complete};
 

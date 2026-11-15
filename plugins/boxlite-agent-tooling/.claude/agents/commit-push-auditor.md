@@ -15,8 +15,7 @@ effort: high
 
 ## Procedure
 
-Verify required checks; apply the supplied deadline policy to unfinished checks.
-Never cite time.
+Verify required checks; apply the deadline policy to unfinished ones. Never cite time.
 
 1. Work in `repo_root`. Read AGENTS.md/CLAUDE.md and CONTRIBUTING.md. Capture `git branch --show-current` and
    `git rev-parse HEAD`; fail if they differ from the task.
@@ -57,11 +56,11 @@ Compute SHA-256 for the exact diff bytes and command string.
    over 72 characters, process/AI narrative, pasted logs, or secrets; tool-generated
    CodeRabbit summaries pass.
 
-6. Apply the task's shared judgment rules (from `.agents/prompts/audit/commit-push-criteria.md`);
-   if absent, reject the task.
+6. Apply the task's shared judgment rules (`commit-push-criteria.md`); if absent, reject the
+   task, except a `Referee` task, whose rules replace steps 3–6 and the verdict.
 
-7. Write the dossier, adding history_review and reflection_review only when the
-   history contract requires them:
+7. Write the dossier, with history_review and reflection_review only when history
+   requires them:
 
    ```json
    {
@@ -77,5 +76,5 @@ Compute SHA-256 for the exact diff bytes and command string.
    }
    ```
 
-Run the task's dossier validator before delivery; correct rejected fields.
+Run the task's dossier validator; correct rejected fields.
 Do not edit work, propose fixes, or run commit/push. Reply only with verdict and dossier path.
