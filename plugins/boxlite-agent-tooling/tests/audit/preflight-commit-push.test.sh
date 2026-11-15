@@ -53,8 +53,9 @@ HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 # nothing; only the copies do.
 stage_lib() {  # $1 = fake repo root
   mkdir -p "$1/scripts"
-  cp "$REPO_ROOT/scripts/api-compatibility.sh" "$1/scripts/"
+  cp "$REPO_ROOT/scripts/api-compatibility.sh" "$REPO_ROOT/scripts/writing-structure.sh" "$1/scripts/"
   mkdir -p "$1/.agents/lib" "$1/.agents/prompts"
+  cp "$REPO_ROOT/.agents/lib/reply-summary.sh" "$REPO_ROOT/.agents/lib/reply-summary.pl" "$1/.agents/lib/"
   cp "$REPO_ROOT/.agents/lib/subagent.sh" \
      "$REPO_ROOT/.agents/lib/verdict-audit-state.sh" \
      "$REPO_ROOT/.agents/lib/auditor-override-state.sh" \
@@ -1532,6 +1533,35 @@ reason="$(both_reason "")"
 check_contains 'headless route still offered as a third option' "$reason" 'run-commit-push-audit.sh'
 
 echo
+echo "## Staged Markdown that adds a structure violation is refused before any audit (#575)"
+printf '# Guide\n\nOne sentence here. Two sentences here. Three sentences here. Four sentences here.\n' \
+  > "$BOTH_REPO/structure-guide.md"
+git -C "$BOTH_REPO" add structure-guide.md
+rm -rf "$BOTH_REPO/.agents/state/audit-tasks"
+structure_reason="$(reason_for_repo "$BOTH_REPO" "git commit -m 'test: x'")"
+check_raw "the denial is a recover action naming the file and the rule" \
+  "$(grep -cE '^Next action: recover$|^structure-guide\.md: prose 4 \(limit 3\)' <<<"$structure_reason")" 2
+check_raw "no audit task is written for the refused commit" \
+  "$(find "$BOTH_REPO/.agents/state/audit-tasks" -type f 2>/dev/null | wc -l | tr -d ' ')" 0
+check_raw "the rollback switch restores the audit path" \
+  "$(COMMIT_WRITING_CHECK=0 reason_for_repo "$BOTH_REPO" "git commit -m 'test: x'" | head -1)" "Next action: audit"
+{ printf '# Guide\n'; for n in $(seq 1 400); do
+    printf '\nBlock %s one. Block %s two. Block %s three. Block %s four.\n' "$n" "$n" "$n" "$n"; done
+} > "$BOTH_REPO/structure-guide.md"
+git -C "$BOTH_REPO" add structure-guide.md
+structure_reason="$(reason_for_repo "$BOTH_REPO" "git commit -m 'test: x'")"
+check_raw "400 added blocks still name the check, bounded and counted" \
+  "$(grep -cE '^Reason: Staged Markdown adds prose-structure violations:$|^\.\.\. and 395 more line\(s\)$' <<<"$structure_reason"):$(( $(printf '%s' "$structure_reason" | wc -c) < 8192 ))" "2:1"
+head -c 1048577 /dev/zero | tr '\0' 'a' > "$BOTH_REPO/structure-guide.md"
+git -C "$BOTH_REPO" add structure-guide.md
+check_raw "an unmeasurable staged file is refused with its own reason" \
+  "$(reason_for_repo "$BOTH_REPO" "git commit -m 'test: x'" | grep -cE '^Reason: The staged-Markdown structure check could not run:$|cannot measure structure-guide\.md')" 2
+git -C "$BOTH_REPO" rm -q --cached structure-guide.md
+rm -f "$BOTH_REPO/structure-guide.md"
+check_raw "without the staged violation the commit reaches the audit step" \
+  "$(reason_for_repo "$BOTH_REPO" "git commit -m 'test: x'" | head -1)" "Next action: audit"
+
+echo
 echo "## A missing shared library blocks rather than waving the commit through"
 # Fail direction matters more than the failure here. A PreToolUse hook that merely
 # crashes is reported and stepped over, so on a DENY gate a broken install would let
@@ -1557,6 +1587,7 @@ if [[ "$rc" == 0 && -z "$out" ]]; then
 else
   badf 'non-git commands unaffected by a missing library' 'rc=%s out=%s' "$rc" "${out:-EMPTY}"
 fi
+echo
 rm -rf "$BOTH_REPO"
 
 # The native launch instruction carries no timer: the SubagentStop hook owns the deadline.
