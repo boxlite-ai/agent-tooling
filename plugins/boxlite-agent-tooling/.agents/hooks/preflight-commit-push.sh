@@ -818,7 +818,7 @@ ${advisories}
           "Repair access to $(audit_ledger_path "$project_dir"), then retry the original Git operation." \
           'The ledger records the open findings for this attempt.'
       forced_continuation="UNRESOLVED: ${kind} proceeds with ${findings_summary}; the loop is stuck and every open finding is high.
-They are recorded in $(audit_ledger_path "$project_dir"). List them in your final reply and in the pull request under Unresolved findings."
+They are recorded in $(audit_ledger_path "$project_dir"). List them in your final reply; the pull request needs each as gate@head7:ID under ## Unresolved findings."
       audit_verdict=UNRESOLVED
     else
       deny_with_audit "CLAUDE.md audit FAILED on branch '${branch}': ${findings_summary}.

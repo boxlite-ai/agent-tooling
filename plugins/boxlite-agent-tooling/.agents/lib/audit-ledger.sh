@@ -10,13 +10,22 @@ audit_ledger_path() {  # repository root -> ledger path
   printf '%s/.agents/state/audit-ledger.jsonl' "$1"
 }
 
+# Prints the ledger's JSON lines. The json read mode keeps every line; record mode
+# accepts a single line only.
+audit_ledger_read() {  # ledger path
+  local snapshot
+  snapshot="$(verdict_audit_read_regular_state "$1" 4194304 json)" || return 1
+  # The first line is the mtime; an empty ledger has nothing after it.
+  [[ "$snapshot" != *$'\n'* ]] || printf '%s' "${snapshot#*$'\n'}"
+}
+
 # Appends one entry for the latest attempt of a validated history; an entry for the
 # same attempt is written once.
 audit_ledger_record() {  # repository root, history JSON, branch, head
   local path existing="" entry
   path="$(audit_ledger_path "$1")"
   if [[ -e "$path" || -L "$path" ]]; then
-    existing="$(verdict_audit_read_regular_state "$path" 4194304 record)" || return 2
+    existing="$(audit_ledger_read "$path")" || return 2
   fi
   entry="$(jq -c -L "$(dirname "${BASH_SOURCE[0]}")" --arg branch "$3" --arg head "$4" \
     --argjson now "$(date +%s)" '
