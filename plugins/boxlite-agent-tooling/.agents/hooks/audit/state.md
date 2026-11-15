@@ -116,6 +116,7 @@ The [index reader](../../../scripts/read-verdict-index.sh) returns an offset onl
 - `auditor-control`: escalation/completion/grants/events.
 - `last-api-failure.json`: error kind.
 - `api-resume`: bounded resume/wake records.
+- `workflow-reminder`: per-session last work state `scripts/continue-workflow.sh` reminded about.
 
 ### Verdict retry handoff
 

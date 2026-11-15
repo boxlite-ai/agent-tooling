@@ -45,6 +45,7 @@ stop() { # repo [session] -> the script's stdout
 }
 continues() { jq -e '.decision == "block"' <<<"$1" >/dev/null 2>&1; }
 passes_through() { [[ "$1" == 0 && -z "$2" ]]; } # status, stdout
+fails_closed() { [[ "$1" == 2 && "$2" == *"$3"* ]]; } # status, stderr, expected text
 
 printf '## Pending work on a passed design continues once per state\n'
 repo="$(new_repo once)"; pass_design "$repo"
@@ -53,6 +54,10 @@ out="$(stop "$repo")"
 continues "$out" && [[ "$out" == *"uncommitted changes"* && "$out" == *"feature"* ]]
 check_rc 'a modified file continues the turn and names the pending work' "$?" "out=$out"
 check_eq 'the same state does not continue again' "$(stop "$repo")" ""
+git -C "$repo" add file.txt
+check_eq 'staging the unchanged edit does not continue again' "$(stop "$repo")" ""
+git -C "$repo" restore --staged file.txt
+check_eq 'unstaging it does not continue again' "$(stop "$repo")" ""
 printf 'more\n' >> "$repo/file.txt"
 continues "$(stop "$repo")"; check_rc 'a further edit to the same file continues once more' "$?"
 check_eq 'and then ends' "$(stop "$repo")" ""
@@ -68,6 +73,32 @@ printf '## New files count\n'
 repo="$(new_repo untracked)"; pass_design "$repo"
 printf 'new\n' > "$repo/new.txt"
 continues "$(stop "$repo")"; check_rc 'an untracked file alone continues the turn' "$?"
+git -C "$repo" add new.txt
+check_eq 'staging the new file does not continue again' "$(stop "$repo")" ""
+
+printf '## A branch without an upstream falls back to the default branch\n'
+repo="$(new_repo noupstream)"; pass_design "$repo"
+git -C "$repo" config --unset branch.feature.merge
+git -C "$repo" commit -q --allow-empty -m work
+check_eq 'no upstream and no default branch pointer gives no reminder' "$(stop "$repo")" ""
+git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/feature
+out="$(stop "$repo")"
+continues "$out" && [[ "$out" == *"1 unpushed commit"* ]]
+check_rc 'a commit ahead of the default branch continues the turn' "$?" "out=$out"
+
+printf '## Missing dependencies fail closed\n'
+tools="$scratch/tools"; mkdir -p "$tools"
+for tool in bash git perl dirname cat cut; do ln -s "$(command -v "$tool")" "$tools/$tool"; done
+said="$(printf '{}' | PATH="$tools" bash "$plugin/scripts/continue-workflow.sh" 2>&1 >/dev/null)"; rc=$?
+fails_closed "$rc" "$said" 'required command missing: jq'
+check_rc 'a missing jq exits 2 and names it' "$?" "rc=$rc said=$said"
+partial="$scratch/partial-plugin"; mkdir -p "$partial"
+cp -R "$plugin/.agents" "$plugin/scripts" "$partial/"
+rm "$partial/scripts/continue-workflow.sh"
+said="$(jq -nc '{hook_event_name:"Stop",session_id:"gate",stop_hook_active:false,last_assistant_message:"Noted."}' \
+  | (cd "$repo" && CLAUDE_PROJECT_DIR="$repo" bash "$partial/.agents/hooks/stop-gate.sh" 2>&1 >/dev/null))"; rc=$?
+fails_closed "$rc" "$said" 'workflow continuation missing'
+check_rc 'the Stop gate exits 2 when the step is missing' "$?" "rc=$rc said=$said"
 printf 'ignored\n' > "$repo/.agents-ignored"; printf '.agents-ignored\n' >> "$repo/.git/info/exclude"
 check_eq 'an ignored file changes nothing' "$(stop "$repo")" ""
 
@@ -99,19 +130,19 @@ passes_through "$rc" "$out"; check_rc 'an unwritable state directory gives no re
 printf '## The Stop gate runs the step before the verdict check\n'
 repo="$(new_repo gate)"; pass_design "$repo"; printf 'edit\n' >> "$repo/file.txt"
 : > "$repo/transcript.jsonl"
-gate() { # repo -> the Stop gate's stdout for a short claim-free reply
-  jq -nc --arg p "$1/transcript.jsonl" \
-    '{hook_event_name:"Stop",session_id:"gate",transcript_path:$p,stop_hook_active:false,last_assistant_message:"Noted."}' \
+gate() { # repo, continued-turn flag -> the Stop gate's stdout for a short claim-free reply
+  jq -nc --arg p "$1/transcript.jsonl" --argjson active "${2:-false}" \
+    '{hook_event_name:"Stop",session_id:"gate",transcript_path:$p,stop_hook_active:$active,last_assistant_message:"Noted."}' \
     | (cd "$1" && CLAUDE_PROJECT_DIR="$1" VERDICT_CLASSIFIER_CMD=false \
         bash "$plugin/.agents/hooks/stop-gate.sh" 2>/dev/null)
 }
 out="$(gate "$repo")"
 continues "$out" && [[ "$out" == *"uncommitted changes"* && "$out" != *"verdict-gate"* ]]
 check_rc 'the first Stop continues with the reminder before the verdict check' "$?" "out=$out"
-out="$(gate "$repo")"
+out="$(gate "$repo" true)"
 reaches_verdict_check() { [[ "$1" != *"uncommitted changes"* && "$1" == *"verdict-gate"* ]]; }
 reaches_verdict_check "$out"
-check_rc 'the second Stop on the same state reaches the verdict check' "$?" "out=$out"
+check_rc 'the continued turn on the same state reaches the verdict check' "$?" "out=$out"
 
 printf '## A pending timed confirmation wins\n'
 repo="$(new_repo timed)"; pass_design "$repo"; printf 'edit\n' >> "$repo/file.txt"
