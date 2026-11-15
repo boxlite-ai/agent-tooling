@@ -163,7 +163,35 @@ for host in claude codex; do
   expect_denial "$host is told to continue to the audit without asking" "$host" \
     'Continue without asking'
 done
+# Design #597: a denial the agent can resolve records a block for its session; a
+# denial that needs a human records none. Each probe snapshots the shared state and
+# restores it, so its session cannot disturb later cases.
+probe_block() { # description, wanted reason or "none"
+  local git_dir saved record reason
+  git_dir="$(git -C "$scratch/repo" rev-parse --absolute-git-dir)"
+  saved="$scratch/probe-saved"; rm -rf "$saved"; mkdir -p "$saved/git" "$saved/state"
+  cp -p "$git_dir"/agent-tooling-design-* "$saved/git/" 2>/dev/null || :
+  cp -Rp "$scratch/repo/.agents/state/." "$saved/state/" 2>/dev/null || :
+  jq -nc --arg cwd "$scratch/repo" '{tool_name:"Write",cwd:$cwd,session_id:"block-probe",tool_input:{file_path:"source.py"}}' |
+    (cd "$scratch/repo" && env -u PLUGIN_ROOT CLAUDE_PLUGIN_ROOT="$plugin" \
+      bash "$plugin/.agents/hooks/preflight-design-doc.sh" >/dev/null 2>&1)
+  record="$scratch/repo/.agents/state/design-gate-block-$(printf '%s' '{"session_id":"block-probe"}' \
+    | (source "$plugin/.agents/lib/verdict-audit-state.sh" && verdict_audit_scope_from_hook_payload "$(cat)" "$scratch/repo")).json"
+  reason=none
+  [[ ! -f "$record" ]] || reason="$(jq -r .reason "$record")"
+  rm -f "$git_dir"/agent-tooling-design-*
+  cp -p "$saved"/git/* "$git_dir/" 2>/dev/null || :
+  rm -rf "$scratch/repo/.agents/state"; mkdir -p "$scratch/repo/.agents/state"
+  cp -Rp "$saved/state/." "$scratch/repo/.agents/state/" 2>/dev/null || :
+  if [[ "$reason" == "$2" ]]; then
+    printf 'PASS %s\n' "$1"; pass=$((pass+1))
+  else
+    printf 'FAIL %s: reason=%s\n' "$1" "$reason"; fail=$((fail+1))
+  fi
+}
+probe_block 'no registered design records a design-required block' design-required
 (cd "$scratch/repo" && bash "$plugin/scripts/design-doc.sh" register "$url") >/dev/null || exit 1
+probe_block 'a bound design without a verdict records an audit-required block' audit-required
 # A bound design still needs a research verdict for its exact content before any edit.
 record_research() { # PASS|FAIL, findings JSON
   jq -nc --arg sha "$(printf '%s' "$design" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')" \
@@ -292,10 +320,12 @@ else
   printf 'FAIL owned auditor receives prior findings without advice\n'; fail=$((fail+1))
 fi
 expect_denial 'a converging FAIL 2 asks for a reflection' codex "scripts/design-doc.sh\" reflect"
+probe_block 'a due reflection records a reflection-due block' reflection-due
 rm -f "$(git -C "$scratch/repo" rev-parse --absolute-git-dir)/agent-tooling-design-audit.json"
 record_on "$(revision 2)" "$two"
 publish "$(revision 3)"; record_on "$(revision 3)" "$two"
 expect_denial 'repeated findings with no drop at FAIL 2 stop the loop' codex 'INCOMPLETE: the design-audit loop stopped after FAIL 2'
+probe_block 'a stopped loop awaiting a human records no block' none
 decision_state="$scratch/repo/.agents/state/design-decision-request.json"
 decision_id="$(jq -er .id "$decision_state")"
 expect_denial 'the stop names the typed decision line' codex "design-decision: $decision_id <Redesign|Reflect again|Overrule> <reason>"
@@ -321,6 +351,7 @@ check Write 'edit source' deny
 decision_id="$(jq -er .id "$decision_state")"
 said 'a late typed line still counts' "$(typed "design-decision: $decision_id Redesign start from the findings")" 'recorded "'
 expect_denial 'Redesign asks for a fresh draft' codex 'The human chose Redesign'
+probe_block 'a redesign awaiting approval records no block' none
 unset DESIGN_TEST_CLOCK
 said 'the prompt hook routes typed decisions' "$(cat "$plugin/.agents/hooks/cancel-verdict-audit.sh")" 'design-decision-prompt.sh'
 publish "$design"; record_on "$design" '[]'

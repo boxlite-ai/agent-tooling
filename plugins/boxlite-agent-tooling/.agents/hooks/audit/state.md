@@ -118,6 +118,7 @@ The [index reader](../../../scripts/read-verdict-index.sh) returns an offset onl
 - `last-api-failure.json`: error kind.
 - `api-resume`: bounded resume/wake records.
 - `workflow-reminder`: per-session last work state `scripts/continue-workflow.sh` reminded about.
+- `design-gate-block`: per-session design-gate block, written by `.agents/hooks/preflight-design-doc.sh` and consumed at Stop.
 
 ### Verdict retry handoff
 

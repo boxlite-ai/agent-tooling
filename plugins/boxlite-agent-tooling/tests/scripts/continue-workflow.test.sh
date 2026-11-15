@@ -154,4 +154,35 @@ out="$(gate "$repo")"
 continues "$out" && [[ "$out" == *"Deadline:"* && "$out" != *"uncommitted changes"* ]]
 check_rc 'the confirmation text is delivered, not the reminder' "$?" "out=$out"
 
+printf '## A design-gate block continues the turn once (design #597)\n'
+blocked_edit() { # repo session -> the design gate's exit status for an edit
+  jq -nc --arg cwd "$1" --arg s "$2" \
+    '{tool_name:"Write",cwd:$cwd,session_id:$s,tool_input:{file_path:"source.py"}}' \
+    | (cd "$1" && CLAUDE_PROJECT_DIR="$1" CLAUDE_PLUGIN_ROOT="$plugin" \
+        bash "$plugin/.agents/hooks/preflight-design-doc.sh" >/dev/null 2>&1)
+}
+repo="$(new_repo gateblock)"
+blocked_edit "$repo" session; rc=$?
+check_eq 'an edit without a registered design is blocked' "$rc" 2
+out="$(stop "$repo")"
+continues "$out" && [[ "$out" == *"design"* && "$out" == *"feature"* ]]
+check_rc 'the next Stop continues the turn with the design step' "$?" "out=$out"
+check_eq 'a second Stop without a new block ends the turn' "$(stop "$repo")" ""
+blocked_edit "$repo" session
+check_eq 'another session does not consume the block' "$(stop "$repo" other)" ""
+continues "$(stop "$repo")"; check_rc 'the blocked session still gets its continuation' "$?"
+blocked_edit "$repo" session
+git -C "$repo" switch -qc elsewhere
+check_eq 'a block recorded on another branch is ignored' "$(stop "$repo")" ""
+git -C "$repo" switch -q feature
+blocked_edit "$repo" session; pass_design "$repo"
+out="$(stop "$repo")"
+[[ "$out" != *"no passed"* ]]; check_rc 'a passed design takes no design continuation' "$?" "out=$out"
+mkdir -p "$repo/.agents/state"
+scope="$(source "$plugin/.agents/lib/verdict-audit-state.sh" \
+  && verdict_audit_scope_from_hook_payload '{"session_id":"session"}' "$repo")"
+printf '{not json' > "$repo/.agents/state/design-gate-block-$scope.json"
+out="$(stop "$repo")"; rc=$?
+passes_through "$rc" "$out"; check_rc 'a malformed block record fails open' "$?" "rc=$rc out=$out"
+
 assert_result

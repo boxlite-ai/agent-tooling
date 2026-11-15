@@ -75,7 +75,7 @@ Recorded advice opens the edit gate without a human wait.
 
 | Handoff | Signal the agent receives |
 | --- | --- |
-| Design required → design audited | The design-required denial says to research, write, register and audit it without asking. |
+| Design required → design audited | The denial says to research, write, register and audit it without asking; the Stop reminder below continues the turn once. |
 | Design PASS → code | The advice prompt orders implementation once advice records. |
 | Code → commit and push | Guidance, plus the Stop reminder below; no hook can tell finished code from work in progress. |
 | Push → draft PR | The post-push context asks for a draft PR when a feature branch has none. |
@@ -88,9 +88,21 @@ The draft PR request has three limits:
 
 The rule is guidance, not a gate. Gates that ask for a human choice keep their pauses.
 
-### Stop reminder for pending work
+### Stop reminders for a design-gate block and pending work
 
 `scripts/continue-workflow.sh` runs in the Stop gate after timed confirmations and before the verdict check.
+
+It first checks for a design-gate block from this session:
+
+- The design gate records a block when it denies an edit for a reason the agent can resolve.
+- Those reasons are: no design, an audit or advice due, a failed audit, or a due reflection.
+- A stopped audit loop or a redesign awaiting approval records nothing, because a human must choose.
+- A binding error a human must fix, such as a missing provider token, still records a design-required block.
+- The reminder's pause line bounds that case to one extra turn.
+- At Stop, the record is deleted; on the same branch without a passed design, the turn continues once toward an audited design.
+- The record lives in `.agents/state/design-gate-block-<session-scope>.json`; a malformed record is dropped silently.
+
+Otherwise it checks pending work on a branch whose design passed:
 
 | Condition | Result |
 | --- | --- |
