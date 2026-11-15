@@ -38,7 +38,8 @@ git_audit_decision_result() { # library, validated history, path; typed result u
   fi
   # A route that can launch the referee runs it before asking the human.
   if ! jq -e -L "$library" 'include "audit-reflection-contract";
-      audit_git_decision_due and ((env.AUDIT_REFEREE_ROUTE == "1" and audit_referee_due) | not)' <<<"$state" >/dev/null; then
+      audit_git_decision_due and ((env.AUDIT_REFEREE_ROUTE == "1" and audit_referee_due) | not)
+      and ((env.AUDIT_REFEREE_ROUTE == "1" and audit_forced_continuation_due) | not)' <<<"$state" >/dev/null; then
     printf '%s\n' '{"action":"continue","reason":""}'; return 0
   fi
   mkdir -p "$root/.agents/state" || return 2

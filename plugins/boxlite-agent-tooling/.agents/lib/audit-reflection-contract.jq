@@ -20,6 +20,16 @@ def audit_referee_outcome:
   (.history_review.findings == []) and (.history_review.dispositions | length) > 0
   and all(.history_review.dispositions[]; .status == "open"
     or (.status == "retracted" and (.evidence | test("[^\\s:]+:[0-9]+|`[^`]+`"))));
+# A stuck commit/push loop proceeds as UNRESOLVED when every open finding is high
+# (design #563): at least three failures, not converging, no referee still due, and the
+# latest round a FAIL. A missing severity counts as critical, which keeps the human question.
+def audit_forced_continuation_due:
+  (.context.gate | IN("commit","push")) and (audit_failure_ids | length) >= 3
+  and .attempts[-1].outcome.verdict == "FAIL"
+  and ((audit_loop_history_rounds | audit_loop_class) | IN("stalled","churning"))
+  and (audit_referee_due | not)
+  and ([.registry[] | select(.status | IN("open","not_assessed"))] as $open
+    | ($open | length) > 0 and all($open[]; .severity == "high"));
 # Reserve snapshot/binding, outcome, registry growth, and reflection/metadata.
 # Closed cycles are removable; pending results must remain recordable.
 def audit_history_exhausted($max_bytes):

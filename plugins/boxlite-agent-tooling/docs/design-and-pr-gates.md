@@ -161,6 +161,22 @@ It is a fresh recheck of the open findings, never a verdict on the change.
 | Standing | Not a PASS and not a failed round: the gate denies again, and an ordinary audit must still pass. |
 | Human question | The native gate runs the referee before asking; the headless runner cannot launch one, so it asks as before. |
 
+### Commit and push forced continuation
+
+A stuck loop whose open findings are all `high` lets the commit or push through as `UNRESOLVED` ([design #563](https://github.com/boxlite-ai/agent-tooling/issues/563)).
+It is never a PASS; the findings go to a ledger instead of a question.
+
+| Rule | Behavior |
+| --- | --- |
+| When | At least three failures, the class `stalled` or `churning`, no referee still due, and the latest round a FAIL. |
+| Severity | Every open registry finding is `high`; a missing severity counts as `critical`. |
+| Critical | Any open `critical` finding keeps today's path: the human question, and silence keeps Git blocked. |
+| Effect | The gate consumes the FAIL dossier and returns `UNRESOLVED: ...` as context, not as a permission decision. |
+| Ledger | `.agents/state/audit-ledger.jsonl` gains one line per forced attempt, with each open finding's ID, severity and criterion. |
+| Push | A forced commit earns no commit audit receipt, so its push is audited. |
+| Reporting | The agent lists the ledger entries in its final reply and in the pull request; no hook enforces that yet. |
+| Headless runner | Unchanged: it cannot reach this branch and still asks. |
+
 ### Design conformance
 
 Commit/push criteria compare the diff with authenticated `design-doc.sh show` output; they do not repeat design auditing.

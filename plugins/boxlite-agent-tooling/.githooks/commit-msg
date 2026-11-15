@@ -90,6 +90,7 @@ if [[ "$is_agent" == 1 ]]; then
   fi
 
   audit_kind="$(jq -r '.command_kind // ""' "$audit_file" 2>/dev/null || echo '')"
+  audit_verdict="$(jq -r '.verdict // ""' "$audit_file" 2>/dev/null || echo '')"
   expected_diff_hash="$(jq -r '.diff_hash // ""' "$audit_file" 2>/dev/null || echo '')"
   expected_subject_hash="$(jq -r '.commit_subject_hash // ""' "$audit_file" 2>/dev/null || echo '')"
   if [[ "$audit_kind" == "commit" ]]; then
@@ -112,10 +113,11 @@ if [[ "$is_agent" == 1 ]]; then
     exit 1
   fi
 
-  # Only a validated commit dossier earns a receipt. The override path above returned
-  # before reaching here precisely because no PASS verdict was ever created, and a
-  # human commit never enters this block at all.
-  if [[ "$audit_kind" == "commit" ]]; then
+  # Only a validated PASS earns a receipt. The override path above returned before
+  # reaching here because no PASS verdict was ever created; a forced UNRESOLVED commit
+  # keeps its FAIL dossier and gets none, so its push is audited; a human commit never
+  # enters this block at all.
+  if [[ "$audit_kind" == "commit" && "$audit_verdict" == "PASS" ]]; then
     publish_commit_audit_receipt "$actual_subject_hash"
   fi
 
