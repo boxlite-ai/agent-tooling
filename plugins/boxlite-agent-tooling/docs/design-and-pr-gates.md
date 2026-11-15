@@ -98,7 +98,13 @@ The rule is guidance, not a gate. Gates that ask for a human choice keep their p
 | The work state equals the one stored for this session | Nothing |
 | Otherwise | Store the state, then continue the turn with the reminder |
 
-The work state hashes the head commit, the file status, the tracked content difference, and the unpushed commit count.
+The work state hashes the head commit, the changed and untracked file paths, the tracked content difference, and the unpushed commit count.
+
+- Staging or unstaging a change leaves the state unchanged, so it does not repeat the reminder.
+- An overruled design has no PASS record and gets no reminder.
+- Both Git reads use `--no-optional-locks`, so a Stop never takes the index lock.
+
+Limits and guarantees:
 
 - Each work state gets one reminder; a second Stop on the same state reaches the verdict check.
 - The state lives in `.agents/state/workflow-reminder-<session-scope>.json`.

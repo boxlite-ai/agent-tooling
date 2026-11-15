@@ -48,8 +48,14 @@ jq -en --arg root "$repo" --arg branch "$branch" --argjson audit "$audit" --argj
 
 # ── Pending work ──────────────────────────────────────────────────────────────────
 head="$(git -C "$repo" rev-parse HEAD 2>/dev/null)" || exit 0
-status="$(git -C "$repo" status --porcelain 2>/dev/null)" || exit 0
-content="$(git -C "$repo" diff HEAD 2>/dev/null | git -C "$repo" hash-object --stdin 2>/dev/null)" || exit 0
+# Lock-free reads: a Stop runs beside other sessions' Git commands in this worktree.
+status="$(git -C "$repo" --no-optional-locks status --porcelain 2>/dev/null)" || exit 0
+# Staging moves a path between status columns and turns an untracked file into an
+# added one without changing the work, so the state hashes paths only and leaves
+# added files out of the content difference.
+paths="$(cut -c4- <<<"$status")"
+content="$(git -C "$repo" --no-optional-locks diff HEAD --diff-filter=a 2>/dev/null \
+  | git -C "$repo" hash-object --stdin 2>/dev/null)" || exit 0
 # Without an upstream branch, commits ahead of the default branch count as not pushed.
 base="$(git -C "$repo" rev-parse --verify --quiet '@{upstream}' 2>/dev/null)" \
   || base="$(git -C "$repo" rev-parse --verify --quiet refs/remotes/origin/HEAD 2>/dev/null)" \
@@ -66,7 +72,7 @@ fi
 [[ -n "$pending" ]] || exit 0
 
 # ── Once per work state ───────────────────────────────────────────────────────────
-state="$(printf '%s\n%s\n%s\n%s\n' "$head" "$unpushed" "$content" "$status" \
+state="$(printf '%s\n%s\n%s\n%s\n' "$head" "$unpushed" "$content" "$paths" \
   | git -C "$repo" hash-object --stdin 2>/dev/null)" || exit 0
 record="$repo/.agents/state/workflow-reminder-$scope.json"
 if previous="$(verdict_audit_read_json_snapshot "$record" 2>/dev/null)"; then
