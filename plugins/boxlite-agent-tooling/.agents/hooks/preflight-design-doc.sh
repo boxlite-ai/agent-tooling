@@ -66,9 +66,23 @@ request="$(design_doc_binding edit "$cwd")" || status=$?
 source "$plugin_root/.agents/lib/subagent.sh" || deny 'prompt loader unavailable'
 # shellcheck source=../lib/user-question.sh
 source "$plugin_root/.agents/lib/user-question.sh" || deny 'question library unavailable'
+# A block the agent can resolve alone is recorded for its session, so the Stop gate
+# can continue the turn once (scripts/continue-workflow.sh). Human-choice denials
+# record nothing. A failed write never changes the denial.
+record_agent_block() {  # reason
+  local root branch scope
+  root="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)" || return 0
+  root="$(cd "$root" && pwd -P)" || return 0
+  branch="$(git -C "$root" symbolic-ref --quiet --short HEAD 2>/dev/null)" || return 0
+  scope="$(verdict_audit_scope_from_hook_payload "$payload" "$root" 2>/dev/null)" || return 0
+  mkdir -p "$root/.agents/state" 2>/dev/null || return 0
+  jq -nc --arg branch "$branch" --arg reason "$1" '{branch:$branch,reason:$reason}' \
+    | verdict_audit_write_atomic "$root/.agents/state/design-gate-block-$scope.json" 2>/dev/null || :
+}
 if (( status != 3 )); then
   instruction="$(subagent_prompt design/design-required "$plugin_root" "plugin_root=$plugin_root")" \
     || deny 'design instruction unavailable'
+  record_agent_block design-required
   deny "$instruction"
 fi
 # The design is bound and readable, but no audit PASS matches its content yet.
@@ -138,6 +152,7 @@ if [[ "$(jq -r .reflection_due <<<"$request")" == true ]]; then
   message="$(subagent_prompt design/audit-reflect "$plugin_root" "plugin_root=$plugin_root" \
     "history_hash=$(jq -r .history_hash <<<"$request")" "failure_ids=$(jq -c .failure_ids <<<"$request")" \
     "findings=$(listed open_findings)")" || deny 'audit instruction unavailable'
+  record_agent_block reflection-due
   deny "$message"
 fi
 # Result publication belongs to the fixed host-owned action, not native subagents.
@@ -147,11 +162,15 @@ if [[ "$(jq -r .advice_due <<<"$request")" == true ]]; then
   message="$(user_question render "$plugin_root" design/advice-required \
     "verdict=$(jq -r .verdict <<<"$request")" "advisories=$(listed advisories)" "instruction=$instruction")" \
     || deny 'advice instruction unavailable'
+  block_reason=advice-due
 elif [[ -n "$(listed findings)" ]]; then
   message="$(subagent_prompt design/audit-failed "$plugin_root" "findings=$(listed findings)" \
     "advice=$(listed advice)" "instruction=$instruction")" || deny 'audit instruction unavailable'
+  block_reason=audit-failed
 else
   message="$(subagent_prompt design/audit-required "$plugin_root" "instruction=$instruction")" \
     || deny 'audit instruction unavailable'
+  block_reason=audit-required
 fi
+record_agent_block "$block_reason"
 deny "$message"

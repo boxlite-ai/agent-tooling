@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # shellcheck source-path=SCRIPTDIR
-# Stop-hook continuation for audited work left uncommitted or unpushed.
+# Stop-hook continuation toward the next workflow stage.
 #
 # stdin: the host's Stop payload. stdout: one {decision:"block",reason} object when
-# the branch has a passed, advised design and pending work in a state not yet
-# reminded about; otherwise nothing. Each work state is reminded about once, so the
-# same state at the next Stop ends the turn.
+# either holds, otherwise nothing:
+#   - the design gate blocked an edit this session for a reason the agent can resolve,
+#     and the branch still has no passed, advised design (once per recorded block);
+#   - the branch has a passed, advised design and pending work in a state not yet
+#     reminded about (once per work state).
 #
 # Exit 0 in both cases. Exit 2 only when a dependency or library is missing. The
 # step reads local state only, and its own read or write failures never continue or
@@ -37,14 +39,35 @@ design_record() { # file name -> JSON body
   snapshot="$(verdict_audit_read_json_snapshot "$git_dir/$1" 2>/dev/null)" || return 1
   printf '%s' "${snapshot#*$'\n'}"
 }
-audit="$(design_record agent-tooling-design-audit.json)" || exit 0
-advice="$(design_record agent-tooling-design-advice.json)" || exit 0
-jq -en --arg root "$repo" --arg branch "$branch" --argjson audit "$audit" --argjson advice "$advice" '
-  ($audit | type) == "object" and ($advice | type) == "object"
-  and $audit.root == $root and $audit.branch == $branch and $audit.verdict == "PASS"
-  and $advice.root == $root and $advice.branch == $branch
-  and ($audit.content_sha256 | type) == "string"
-  and $advice.content_sha256 == $audit.content_sha256' >/dev/null 2>&1 || exit 0
+design_passed() {
+  local audit advice
+  audit="$(design_record agent-tooling-design-audit.json)" || return 1
+  advice="$(design_record agent-tooling-design-advice.json)" || return 1
+  jq -en --arg root "$repo" --arg branch "$branch" --argjson audit "$audit" --argjson advice "$advice" '
+    ($audit | type) == "object" and ($advice | type) == "object"
+    and $audit.root == $root and $audit.branch == $branch and $audit.verdict == "PASS"
+    and $advice.root == $root and $advice.branch == $branch
+    and ($audit.content_sha256 | type) == "string"
+    and $advice.content_sha256 == $audit.content_sha256' >/dev/null 2>&1
+}
+continue_turn() {  # reason
+  jq -nc --arg reason "$1" '{decision:"block",reason:$reason}'
+  exit 0
+}
+
+# ── A design-gate block this session: continue once toward an audited design ──────
+# preflight-design-doc.sh records blocks the agent can resolve alone; each record is
+# consumed here, so a later Stop without a new block ends the turn.
+block_record="$repo/.agents/state/design-gate-block-$scope.json"
+if [[ -e "$block_record" || -L "$block_record" ]]; then
+  block="$(verdict_audit_read_json_snapshot "$block_record" 2>/dev/null)" || block=""
+  rm -f -- "$block_record" 2>/dev/null || exit 0
+  if [[ "$(jq -r '.branch // ""' <<<"${block#*$'\n'}" 2>/dev/null)" == "$branch" ]] && ! design_passed; then
+    reason="$(subagent_prompt reminders/design-continue "$plugin" "branch=$branch" 2>/dev/null)" || exit 0
+    continue_turn "$reason"
+  fi
+fi
+design_passed || exit 0
 
 # ── Pending work ──────────────────────────────────────────────────────────────────
 head="$(git -C "$repo" rev-parse HEAD 2>/dev/null)" || exit 0
@@ -83,4 +106,4 @@ reason="$(subagent_prompt reminders/workflow-continue "$plugin" \
 # The record is written before the reminder: a failed write must not repeat a reminder.
 mkdir -p "$repo/.agents/state" 2>/dev/null || exit 0
 jq -nc --arg state "$state" '{state:$state}' | verdict_audit_write_atomic "$record" 2>/dev/null || exit 0
-jq -nc --arg reason "$reason" '{decision:"block",reason:$reason}'
+continue_turn "$reason"
