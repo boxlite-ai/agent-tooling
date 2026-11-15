@@ -152,7 +152,8 @@ setup() {
   git -C "$d" config user.name tester
   mkdir -p "$d/.agents/hooks/audit" "$d/.agents/state" "$d/.agents/lib" "$d/.agents/prompts"
   mkdir -p "$d/scripts"
-  cp "$REPO_ROOT/scripts/api-compatibility.sh" "$d/scripts/"
+  cp "$REPO_ROOT/scripts/api-compatibility.sh" "$REPO_ROOT/scripts/writing-structure.sh" "$d/scripts/"
+  cp "$REPO_ROOT/.agents/lib/reply-summary.sh" "$REPO_ROOT/.agents/lib/reply-summary.pl" "$d/.agents/lib/"
   cp "$REPO_ROOT/.agents/hooks/preflight-commit-push.sh" \
      "$REPO_ROOT/.agents/hooks/auditor-control.sh" "$d/.agents/hooks/"
   cp "$REPO_ROOT/.agents/hooks/audit/run-commit-push-audit.sh" \
