@@ -17,7 +17,7 @@ def input_ok:
 def outcome_decision: if (.evidence | type) == "object" then del(.evidence.advisories) else . end;
 def outcome_ok:
   (del(.history_review,.reflection_review,.deadline_review) | keys_are(["verdict","evidence"]))
-  and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS","CANCELED"))
+  and (.verdict | IN("PASS","FAIL","ERROR","IN_PROGRESS","CANCELED","REFEREE"))
   and (.evidence | type == "string" or type == "object") and (tojson | utf8bytelength <= 65536);
 def attempt_ok:
   keys_are(["id","input","outcome","reflection_hash","history_hash"]) and (.input | input_ok) and .id == .input.id
@@ -79,6 +79,11 @@ elif $operation == "record" then
       and (($request.outcome.evidence.advisories // []) | length) == 0
     then error("deadline-unchecked evidence requires advisories") else . end |
     audit_reflection_assess($request.outcome; .attempts[$index]) |
+    if $request.outcome.verdict != "REFEREE" then .
+    elif (audit_referee_due | not) then error("no referee is due for this history")
+    elif ($request.outcome | audit_referee_outcome | not)
+    then error("a referee upholds or retracts each open finding, and a retraction cites evidence")
+    else . end |
     if $request.outcome.history_review != null then
       audit_reconcile($request.outcome.history_review; .attempts[$index]; $request.outcome.verdict; $deadline)
     elif (.registry | length) > 0 and ($request.outcome.verdict | IN("ERROR","CANCELED") | not)

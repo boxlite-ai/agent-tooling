@@ -6,6 +6,20 @@ def audit_git_decision_due:
   (.context.gate | IN("commit","push")) and (audit_failure_ids | length) >= 3
   and .attempts[-1].outcome != null and .attempts[-1].outcome.verdict != "PASS"
   and (audit_loop_history_rounds | audit_loop_class) != "converging";
+# A referee rechecks a stalled commit/push loop once per cycle (design #563); a pending
+# attempt is not yet part of the history that decides this.
+def audit_referee_due:
+  (.attempts |= map(select(.outcome != null)))
+  | (.context.gate | IN("commit","push")) and (.attempts | length) > 0
+    and .attempts[-1].outcome.verdict == "FAIL"
+    and (any(.attempts[]; .outcome.verdict == "REFEREE") | not)
+    and (audit_loop_history_rounds | audit_loop_class) == "stalled";
+# It upholds or retracts each open finding and raises none; a retraction cites a file
+# line (`path:12`) or quotes tool output in backticks.
+def audit_referee_outcome:
+  (.history_review.findings == []) and (.history_review.dispositions | length) > 0
+  and all(.history_review.dispositions[]; .status == "open"
+    or (.status == "retracted" and (.evidence | test("[^\\s:]+:[0-9]+|`[^`]+`"))));
 # Reserve snapshot/binding, outcome, registry growth, and reflection/metadata.
 # Closed cycles are removable; pending results must remain recordable.
 def audit_history_exhausted($max_bytes):
@@ -39,7 +53,7 @@ def audit_reflection_submit($body):
   elif any(.attempts[]; .outcome == null) then error("cannot replace reflection during an audit")
   else .reflection={body:$body,hash:""} end;
 def audit_reflection_assess($outcome; $attempt):
-  if $attempt.reflection_hash == "" or ($outcome.verdict | IN("ERROR","CANCELED")) then .
+  if $attempt.reflection_hash == "" or ($outcome.verdict | IN("ERROR","CANCELED","REFEREE")) then .
   elif ($outcome.reflection_review | ar_keys(["reflection_hash","assessment","evidence","auditor_assessment"]) | not)
     or $outcome.reflection_review.reflection_hash != $attempt.reflection_hash
     or ($outcome.reflection_review.assessment | IN("sufficient","insufficient","unchecked") | not)
