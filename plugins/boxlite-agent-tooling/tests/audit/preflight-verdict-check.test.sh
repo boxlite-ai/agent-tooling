@@ -596,6 +596,118 @@ else
 fi
 rm -rf "$R"
 
+# The runner's own deadline releases the turn with a human-only notice; the same reply
+# is not audited again. A worker's own exit 142 and an earlier FAIL in the round still block.
+STALLED_AUDITOR_STUB='cat >/dev/null
+printf "run\n" >> "$CLAUDE_PROJECT_DIR/.agents/state/STALLED_AUDIT_RUNS"
+sleep 30'
+run_timed_hook() {  # repo payload auditor-command
+  printf '%s' "$2" \
+    | ( cd "$1" && CLAUDE_PROJECT_DIR="$1" VERDICT_GATE_HARD_BLOCK=1 \
+        VERDICT_CLASSIFIER_CMD=false VERDICT_AUDITOR_TIMEOUT=1 \
+        VERDICT_AUDITOR_CMD="$3" bash "$HOOK" ) 2>/dev/null
+}
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+timeout_out="$(run_timed_hook "$R" "$payload" "$STALLED_AUDITOR_STUB")"
+timeout_repeat_out="$(run_timed_hook "$R" "$payload" "$STALLED_AUDITOR_STUB")"
+timeout_runs="$(wc -l < "$R/.agents/state/STALLED_AUDIT_RUNS" 2>/dev/null | tr -d ' ')"
+if [[ "$(decision_from_output "$timeout_out")" != block \
+   && "$(jq -r '.systemMessage // ""' <<<"$timeout_out" 2>/dev/null)" == *"timed out"* \
+   && "$(decision_from_output "$timeout_repeat_out")" != block \
+   && "$timeout_runs" == 1 ]]; then
+  ok "runner deadline ends the turn with a notice and is not re-audited"
+else
+  badf "runner deadline ends the turn with a notice and is not re-audited" \
+    'out=%s repeat=%s runs=%s' "${timeout_out:-EMPTY}" "${timeout_repeat_out:-EMPTY}" "${timeout_runs:-0}"
+fi
+rm -rf "$R"
+
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+worker_142_out="$(run_timed_hook "$R" "$payload" 'cat >/dev/null; exit 142')"
+if [[ "$(decision_from_output "$worker_142_out")" == block ]]; then
+  ok "a worker's own exit 142 still blocks the turn"
+else
+  badf "a worker's own exit 142 still blocks the turn" 'out=%s' "${worker_142_out:-EMPTY}"
+fi
+rm -rf "$R"
+
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+run_payload_hook "$R" "$payload" >/dev/null
+write_transcript "$R" "The root cause is the stale lock file."
+timeout_after_fail_out="$(run_timed_hook "$R" "$payload" "$STALLED_AUDITOR_STUB")"
+timeout_after_fail_runs="$(wc -l < "$R/.agents/state/STALLED_AUDIT_RUNS" 2>/dev/null | tr -d ' ')"
+# The revised reply is audited and times out; the earlier FAIL still holds the turn.
+if [[ "$(decision_from_output "$timeout_after_fail_out")" == block \
+   && "$timeout_after_fail_runs" == 1 ]]; then
+  ok "runner deadline keeps blocking after a FAIL in the same round"
+else
+  badf "runner deadline keeps blocking after a FAIL in the same round" 'out=%s' \
+    "${timeout_after_fail_out:-EMPTY}"
+fi
+rm -rf "$R"
+
+timed_block_case() {  # name repo payload: the stalled audit runs once and the turn blocks
+  local out runs
+  out="$(run_timed_hook "$2" "$3" "$STALLED_AUDITOR_STUB")"
+  runs="$(wc -l < "$2/.agents/state/STALLED_AUDIT_RUNS" 2>/dev/null | tr -d ' ')"
+  if [[ "$(decision_from_output "$out")" == block && "$runs" == 1 ]]; then
+    ok "$1"
+  else
+    badf "$1" 'out=%s runs=%s' "${out:-EMPTY}" "${runs:-0}"
+  fi
+}
+
+# A parked FAIL from an earlier fix holds the turn.
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+parked_path="$(session_state_path "$R" last-verdict.prev.json session-a)"
+mkdir -p "$(dirname "$parked_path")"
+jq -nc '{verdict:"FAIL",findings:["parked finding"]}' \
+  > "$parked_path"
+timed_block_case "runner deadline keeps blocking with a parked FAIL" "$R" "$payload"
+rm -rf "$R"
+
+# An open finding holds the turn even when no attempt in history is a FAIL.
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+(export TEST_AUDIT_VERDICT=IN_PROGRESS TEST_HISTORY_FINDING=1; run_payload_hook "$R" "$payload" >/dev/null)
+open_findings="$(jq -r '[.registry[] | select(.status | IN("open","not_assessed"))] | length' \
+  "$R"/.agents/state/audit-history-*.json 2>/dev/null || echo 0)"
+check_eq "an IN_PROGRESS audit leaves open findings without a FAIL" "$open_findings" 1
+write_transcript "$R" "The root cause is the stale lock file."
+timed_block_case "runner deadline keeps blocking with an open finding" "$R" "$payload"
+rm -rf "$R"
+
+# A final turn over the snapshot limit is incomplete evidence and holds the turn.
+R="$(setup)"; : > "$R/transcript.jsonl"
+append_user "$R" "Why does the socket fail?"
+append_assistant "$R" "The root cause is the stale socket path. $(printf 'x%.0s' {1..300000})"
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+timed_block_case "runner deadline keeps blocking a truncated final turn" "$R" "$payload"
+rm -rf "$R"
+
+# The release covers one reply in one prompt: the next prompt's reply is audited.
+R="$(setup)"; write_transcript "$R" "The root cause is the stale socket path."
+payload="$(jq -nc --arg p "$R/transcript.jsonl" \
+  '{transcript_path:$p, hook_event_name:"Stop", session_id:"session-a", turn_id:"turn-a"}')"
+run_timed_hook "$R" "$payload" "$STALLED_AUDITOR_STUB" >/dev/null
+prompt_hook "$R" session-a turn-b >/dev/null 2>&1
+append_user "$R" "Check the lock too."
+append_assistant "$R" "The root cause is the stale lock file."
+run_timed_hook "$R" "$payload" "$STALLED_AUDITOR_STUB" >/dev/null
+new_prompt_runs="$(wc -l < "$R/.agents/state/STALLED_AUDIT_RUNS" 2>/dev/null | tr -d ' ')"
+check_eq "a release covers one prompt: the next reply is audited" "$new_prompt_runs" 2
+rm -rf "$R"
+
 # Runner absence fails closed with one concise recovery message, not the routing prompt
 # the old model-driven flow exposed. CODEX_BIN pins an invalid explicit candidate so an
 # installed desktop app cannot make this hermetic no-runner case launch a real model.

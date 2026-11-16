@@ -127,6 +127,9 @@ bounded_capture_pending_signal=""
 # the binding, so the next audit re-checks known findings instead of starting cold.
 prev_verdict_file="$(verdict_audit_state_path "$state_dir/last-verdict.prev.json" "$session_scope")"
 last_uuid_file="$(verdict_audit_state_path "$state_dir/verdict-last-uuid" "$session_scope")"
+# "<prompt epoch> <reply id>" of the reply released after the runner's own deadline.
+timeout_release_file="$(verdict_audit_state_path "$state_dir/verdict-timeout-release" "$session_scope")"
+timeout_release_note="[verdict-gate] Verdict audit timed out; this reply's claims were not independently verified."
 decision_log="$(verdict_audit_state_path "$state_dir/verdict-decisions.log" "$session_scope")"
 # When Codex has no transcript, preserve its stable Stop message in the transcript
 # shape the independent auditor already consumes. This is gitignored runtime state,
@@ -1676,6 +1679,25 @@ block_audit_infrastructure_failure() {  # reason
   block "$1"
 }
 
+# The runner's own deadline (exit 124) releases a reply only when nothing known blocks
+# it: complete evidence, no parked FAIL, and no FAIL or open finding in this round.
+timeout_release_allowed() {
+  local history
+  [[ "$transcript_snapshot_truncated" != true && -n "$reflection_context" ]] || return 1
+  [[ ! -e "$prev_verdict_file" && ! -L "$prev_verdict_file" ]] || return 1
+  history="$(inspect_audit_history)" || return 1
+  jq -e '(.pending or any(.state.attempts[]?; .outcome.verdict? == "FAIL")
+          or any(.state.registry[]?; .status | IN("open","not_assessed"))) | not' \
+    <<<"$history" >/dev/null 2>&1
+}
+
+release_after_timeout() {
+  publish_record_for_current_epoch "$timeout_release_file" \
+    "$entry_prompt_epoch $FINAL_ID" || allow
+  log_decision runner TIMEOUT-allow
+  allow_with_note "$timeout_release_note"
+}
+
 audit_before_stop() {  # trigger-reason
   local trigger_reason="$1"
   local runner="$tooling_root/.agents/hooks/audit/run-verdict-audit.sh"
@@ -1697,11 +1719,15 @@ Verdict audit runner is unavailable at ${runner}."
     "$session_id" "$audit_generation" "$session_scope" 2>&1 >/dev/null)" \
     || runner_status=$?
   prompt_epoch_is_current || allow
+  if (( runner_status == 124 )) && timeout_release_allowed; then
+    release_after_timeout
+  fi
   if (( runner_status != 0 )); then
     log_decision runner ERROR-block
     case "$runner_status" in
       1) runner_failure="the independent auditor did not produce a valid dossier" ;;
       2) runner_failure="the auditor could not launch or its history needs recovery" ;;
+      124) runner_failure="the independent audit reached its deadline with earlier findings open" ;;
       130|143) runner_failure="the independent audit was canceled before completion" ;;
       *) runner_failure="the independent auditor exited with status ${runner_status}" ;;
     esac
@@ -2086,6 +2112,14 @@ audit_in_flight() {
 if audit_in_flight; then
   log_decision audit inflight-allow
   allow
+fi
+# A repeated Stop for a reply already released after the deadline reuses that result.
+# New input starts a new epoch, so identical text in a new prompt is audited again.
+if [[ -n "$FINAL_ID" ]] \
+   && [[ "$(verdict_audit_read_single_record "$timeout_release_file" 2>/dev/null)" \
+         == "$entry_prompt_epoch $FINAL_ID" ]]; then
+  log_decision runner TIMEOUT-reuse
+  allow_with_note "$timeout_release_note"
 fi
 if [[ -n "$reflection_context" ]]; then
   history_state="$(inspect_audit_history)" || block "Audit history is unreadable; verification remains incomplete."

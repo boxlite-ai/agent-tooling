@@ -54,6 +54,8 @@ audit_pgid=0
 audit_group_identity_owned=false
 audit_group_event_monitor_pid=0
 audit_group_event_write_open=false
+# True only when the runner's own deadline ended the audit and teardown was verified.
+audit_supervisor_expired=false
 request_monitor_pid=0
 audit_started=false
 audit_launching=false
@@ -139,6 +141,9 @@ audit_host="$(hook_host_kind)" || {
 # Codex and overrides receive the investigation deadline in their launch prompt.
 audit_runner=none
 audit_stop_seconds="$(subagent_timed_stop_seconds "$audit_timeout_seconds" "$max_audit_timeout_seconds")" || exit 2
+# The completion monitor enforces audit_stop_seconds. Worker alarms fire 15 s later and
+# matter only if the monitor has failed; the 60 s deadline slack covers them.
+audit_backstop_seconds="$(( audit_stop_seconds + 15 ))"
 if [[ -n "${VERDICT_AUDITOR_CMD:-}" ]]; then
   audit_runner=override
 elif [[ "$audit_host" != codex ]] && command -v claude >/dev/null 2>&1 && [[ -r "$spec_file" ]]; then
@@ -448,14 +453,20 @@ stop_request_monitor() {
 # shellcheck disable=SC2329
 cleanup_audit_lock() {
   local original_status=$? body owner_pid owner_token extra _ lease_status=0
-  local control_cleanup_failed=false
+  local control_cleanup_failed=false timeout_recorded=false
   if [[ "$reflection_pending" == true ]]; then
     local reflection_terminal=error
     (( original_status == 130 || original_status == 143 )) && reflection_terminal=cancel
     audit_reflection_gate "$reflection_context" "$reflection_terminal" "$audit_token" \
       "$(jq -nc --arg route "$audit_route" --argjson status "$original_status" \
         --argjson process "$audit_process_status" --argjson elapsed "$(( $(date +%s) - audit_started_at ))" \
-        '{route:$route,runner_exit:$status,process_exit:$process,elapsed_seconds:$elapsed}')" >/dev/null || true
+        '{route:$route,runner_exit:$status,process_exit:$process,elapsed_seconds:$elapsed}')" >/dev/null \
+      && timeout_recorded=true
+  fi
+  # Stop releases a turn on 124 only for an attempt the history holds as ERROR.
+  if (( original_status == 124 )) && [[ "$timeout_recorded" != true ]]; then
+    printf 'run-verdict-audit.sh: could not record the expired audit in its history.\n' >&2
+    original_status=1
   fi
   if [[ -n "$history_snapshot_path" ]]; then
     rm -f "$history_snapshot_path" 2>/dev/null || true
@@ -497,6 +508,8 @@ cleanup_audit_lock() {
       exit 2
     fi
     finish_audit_diagnostic "$original_status"
+    # An unrecorded expiry above set 1; the trap must exit with it, not keep 124.
+    (( original_status != 1 )) || { trap - EXIT; exit 1; }
     return 0
   fi
   if body="$(verdict_audit_read_single_record "$audit_lock_file" 2>/dev/null)"; then
@@ -507,6 +520,10 @@ cleanup_audit_lock() {
   fi
   stop_audit_lease_holder || lease_status=$?
   owns_audit_lock=false
+  if (( original_status == 124 && lease_status != 0 )); then
+    printf 'run-verdict-audit.sh: the audit lease was lost before its deadline was reported.\n' >&2
+    original_status=1
+  fi
   if (( original_status == 0 && lease_status != 0 )); then
     stop_request_monitor
     if ! revoke_canceled_generation_authority; then
@@ -559,6 +576,7 @@ cleanup_audit_lock() {
     stop_request_monitor
   fi
   finish_audit_diagnostic "$original_status"
+  (( original_status != 1 )) || { trap - EXIT; exit 1; }
 }
 
 # shellcheck disable=SC2329 # Called by EXIT cleanup and its failure branches.
@@ -1096,12 +1114,14 @@ start_audit_group_event_channel() {
   exec 5>&-
   rm -f "$event_fifo" 2>/dev/null || true
   rmdir "$channel_dir" 2>/dev/null || true
-  monitor_timeout="$(( audit_stop_seconds + 5 ))"
+  monitor_timeout="$audit_stop_seconds"
   # A direct child owns the event read. A valid `done N` record means the model command
-  # returned; EOF, malformed bytes, or timeout is a fail-closed completion failure.
+  # returned; EOF or malformed bytes is a fail-closed completion failure. Its alarm is the
+  # audit's hard deadline and exits 124; run_in_audit_group checks the clock too, so a
+  # worker that writes `done 124` early is not taken for an expiry.
   perl -e '
     my $timeout = shift;
-    $SIG{ALRM} = sub { exit 2 };
+    $SIG{ALRM} = sub { exit 124 };
     alarm $timeout;
     my $line = <STDIN>;
     exit 125 unless defined($line) && $line =~ /\Adone ([0-9]{1,3})\n\z/ && $1 <= 255;
@@ -1134,6 +1154,7 @@ publish_audit_group_completion() {  # command-status
 
 run_in_audit_group() {
   local command_prompt="$1" runner_pid="$$" command_status="" monitor_status=0
+  local group_started_at
   local diagnostic_abort=""
   shift
   audit_stderr_dir="$(mktemp -d "${TMPDIR:-/tmp}/boxlite-audit-stderr.XXXXXX")" || return 1
@@ -1149,6 +1170,7 @@ run_in_audit_group() {
   # available on both macOS and Linux. The sentinel runs and reaps the model pipeline,
   # publishes completion over a parent-owned unlinked FIFO, then remains alive so
   # audit_pgid is still an owned group identity during teardown.
+  group_started_at="$(date +%s)"
   start_audit_group_event_channel || return 1
   if audit_group_uses_controller && ! audit_group_open_controller "$audit_stderr_dir"; then
     stop_audit_group_event_monitor >/dev/null 2>&1 || true
@@ -1220,10 +1242,34 @@ run_in_audit_group() {
   audit_process_status="$monitor_status"
   audit_group_event_monitor_pid=0
   if (( monitor_status != 0 )); then
-    quiesce_audit_group
+    # With the monitor gone, the anchor's completion write fails and it sends USR2 as it
+    # tears down. That is expected here; EXIT cleanup still checks the lease for 124.
+    (( monitor_status != 124 )) || trap ':' USR2
+    if quiesce_audit_group && (( monitor_status == 124 \
+         && $(date +%s) >= group_started_at + audit_stop_seconds )); then
+      audit_supervisor_expired=true
+    fi
+    trap 'request_cancel 143 "the audit ownership lease was lost" true' USR2
     return 1
   fi
   quiesce_audit_group
+}
+
+# The model command ended without a usable completion. Exit 124 tells Stop that the
+# runner's own deadline ended it; EXIT cleanup turns 124 into 1 unless history records it.
+fail_audit_group() {
+  rm -f "$audit_output_file"
+  remove_owned_verdict while-current
+  echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
+  if [[ "$audit_supervisor_expired" == true ]]; then
+    if ! audit_request_is_current; then
+      cancel_audit 130 "the audit generation was revoked at its deadline"
+    fi
+    printf 'run-verdict-audit.sh: the audit reached its %s-second deadline\n' \
+      "$audit_stop_seconds" >&2
+    exit 124
+  fi
+  exit 1
 }
 
 fail_audit_publication() {  # diagnostic
@@ -1258,13 +1304,10 @@ if [[ "$audit_runner" == override ]]; then
   rm -f "$audit_output_file"
   if ! run_in_audit_group \
       "$audit_prompt" \
-      perl -e 'alarm shift; exec @ARGV' "$audit_stop_seconds" \
+      perl -e 'alarm shift; exec @ARGV' "$audit_backstop_seconds" \
         env AUDITOR_MODEL="$auditor_model" AUDITOR_EFFORT="$auditor_effort" \
         bash -c "$VERDICT_AUDITOR_CMD"; then
-    rm -f "$audit_output_file"
-    remove_owned_verdict while-current
-    echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
-    exit 1
+    fail_audit_group
   fi
 elif [[ "$audit_runner" == claude ]]; then
   audit_route=claude
@@ -1284,17 +1327,14 @@ elif [[ "$audit_runner" == claude ]]; then
   # dossier. Keep both lists identical.
   if ! run_in_audit_group \
       "$audit_prompt" \
-      subagent_timed_drive "$audit_timeout_seconds" 30 "$audit_stop_seconds" "$record_message" \
+      subagent_timed_drive "$audit_timeout_seconds" 30 "$audit_backstop_seconds" "$record_message" \
         "${claude_env[@]}" claude -p --safe-mode --input-format stream-json \
           --output-format stream-json --verbose --replay-user-messages \
           --system-prompt "$spec_body" --tools Read Bash Write TaskStop \
           --allowedTools "Read Bash Write TaskStop" \
           --name verdict-auditor --no-session-persistence \
           ${auditor_model_args[@]+"${auditor_model_args[@]}"}; then
-    rm -f "$audit_output_file"
-    remove_owned_verdict while-current
-    echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
-    exit 1
+    fail_audit_group
   fi
 elif [[ "$audit_runner" == codex ]]; then
   audit_route=codex
@@ -1311,7 +1351,7 @@ elif [[ "$audit_runner" == codex ]]; then
   auditor_model_codex_args
   if ! run_in_audit_group \
       "$codex_prompt" \
-      perl -e 'alarm shift; exec @ARGV' "$audit_stop_seconds" \
+      perl -e 'alarm shift; exec @ARGV' "$audit_backstop_seconds" \
         "$codex_bin" --ask-for-approval never \
           exec \
           --disable hooks \
@@ -1322,10 +1362,7 @@ elif [[ "$audit_runner" == codex ]]; then
           --ephemeral \
           --output-last-message "$audit_output_file" \
           -; then
-    rm -f "$audit_output_file"
-    remove_owned_verdict while-current
-    echo "run-verdict-audit.sh: auditor process group ended without a usable completion" >&2
-    exit 1
+    fail_audit_group
   fi
 else
   printf 'run-verdict-audit.sh: no auditor runner available for host %s.\n' "$audit_host" >&2
