@@ -27,6 +27,27 @@ An audit record without loop fields fails closed.
 - Standalone `verdict` and `advice` submissions exit 2 with a diagnostic on stderr and cannot authorize edits.
 - Critical/high gaps FAIL; low/nit gaps remain advisory; every round checks the complete design skill and outline.
 
+### Design result limits
+
+Generation and recording share `.agents/lib/design-result-limits.json`; `.agents/lib/design-result.jq` validates incoming arrays before publication.
+
+| Field | Maximum items | Each item |
+| --- | --- | --- |
+| Auditor `findings`, `advisories` | 50 per array | 1–500 Unicode code points, without C0, DEL, or C1 controls |
+| Advisor `advice` | 5 | Same string limits |
+
+Codex receives `minLength`, `maxLength`, `maxItems`, and a control-character pattern.
+Claude receives the pattern and explicit limit descriptions; its schema omits unsupported numeric bounds.
+Descriptions guide generation; the recorder enforces every bound and preserves accepted strings exactly.
+
+For example, a 501-character first finding fails with `findings[0]: length 501 exceeds maximum 500 characters` on stderr.
+Invalid results publish no verdict or advice; the runner keeps its bounded diagnostic output without rewriting the judgment.
+
+Both shared files join the worker's pinned inputs; edits during a review invalidate publication.
+Stored audit-state predicates enforce the fixed 1–500-character/50-item audit contract; these internal limits are not configuration options.
+
+### Research log
+
 The research log stays out of the design, which is for human reviewers:
 
 | Part | Behavior |

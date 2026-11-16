@@ -128,6 +128,7 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 | Host/config | Closed Codex event set; declared host/root precedence; invalid hold denies; `.agents/state/` stays ignored. |
 
 The [result ownership contract](docs/design-and-pr-gates.md#result-ownership) binds fresh design workers to exact snapshots and serializes their results with human decisions.
+Generation and recording share [design result limits](docs/design-and-pr-gates.md#design-result-limits); host schemas expose supported constraints, and recorders reject invalid fields before publication.
 
 ## Glossary
 

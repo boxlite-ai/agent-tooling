@@ -371,16 +371,18 @@ design_doc_audit_record() { # working directory -> verified URL
   local input verdict
   input="$(head -c 65537)"
   (( ${#input} <= 65536 )) || { _design_doc_error 'audit verdict is too large'; return 1; }
-  verdict="$(jq -cse 'def lines: type == "array" and length <= 50 and all(.[]; type == "string"
-      and length >= 1 and length <= 500 and (test("[[:cntrl:]]") | not));
+  verdict="$(_design_doc_jq -cse 'include "design-result";
     if length == 1 then .[0] else empty end |
     select(type == "object" and (keys - ["advisories"]) == ["content_sha256","findings","verdict"]
       and (.content_sha256 | type == "string" and test("\\A[0-9a-f]{64}\\z"))
-      and (.findings | lines) and ((.advisories // []) | lines)
+      and (.findings | dr_lines("findings")) and ((.advisories // []) | dr_lines("advisories"))
       and all((.advisories // [])[]; test("\\A\\s*(critical|high)\\s*:"; "i") | not)
       and ((.verdict == "PASS" and (.findings | length) == 0)
         or (.verdict == "FAIL" and (.findings | length) > 0)))
-    | .advisories //= []' <<<"$input" 2>/dev/null)" || {
+    | .advisories //= []' <<<"$input" 2>&1)" || {
+    if [[ "$verdict" == *'): design-result: '* ]]; then
+      _design_doc_error "${verdict#*): design-result: }"; return 1
+    fi
     _design_doc_error 'audit verdict must be one {content_sha256, verdict, findings, advisories} object: PASS without findings, FAIL with one-line findings, and no critical or high advisories'
     return 1
   }
@@ -394,12 +396,15 @@ design_doc_advice_record() { # working directory -> verified URL
   local input advice
   input="$(head -c 65537)"
   (( ${#input} <= 65536 )) || { _design_doc_error 'advice is too large'; return 1; }
-  advice="$(jq -cse 'if length == 1 then .[0] else empty end |
+  advice="$(_design_doc_jq -cse 'include "design-result";
+    if length == 1 then .[0] else empty end |
     select(type == "object" and keys == ["advice","content_sha256"]
       and (.content_sha256 | type == "string" and test("\\A[0-9a-f]{64}\\z"))
-      and (.advice | type == "array" and length <= 5 and all(.[]; type == "string"
-        and length >= 1 and length <= 500 and (test("[[:cntrl:]]") | not)
-        and (test("\\A\\s*(critical|high|low|nit)\\s*:"; "i") | not))))' <<<"$input" 2>/dev/null)" || {
+      and (.advice | dr_lines("advice"))
+      and all(.advice[]; test("\\A\\s*(critical|high|low|nit)\\s*:"; "i") | not))' <<<"$input" 2>&1)" || {
+    if [[ "$advice" == *'): design-result: '* ]]; then
+      _design_doc_error "${advice#*): design-result: }"; return 1
+    fi
     _design_doc_error 'advice must be one {content_sha256, advice} object: at most 5 one-line items of at most 500 characters, none starting with a severity'
     return 1
   }
