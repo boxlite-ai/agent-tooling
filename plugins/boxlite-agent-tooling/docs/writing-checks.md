@@ -6,6 +6,14 @@ Stop and GitHub hooks share writing checks. The writing skill owns the prose rul
 
 See the [entry points](../ARCHITECTURE.md#entry-points) for the hooks that run these checks.
 
+## Form selection
+
+The [form matrix](../.agents/skills/boxlite-writing/SKILL.md#form) guides agents from reader needs to organization and illustrations.
+
+A retry walkthrough can use ordered instructions and a concrete request trace; a sequence view explains overlapping attempts.
+
+Review semantic fit separately: the hooks below measure syntax and limits without deciding whether an illustration answers the reader's question.
+
 ## GitHub writing
 
 `.agents/lib/github-writing.sh` checks recognized `gh` PR/issue/discussion bodies, comments, reviews, close/reopen text, release notes, and REST body/description fields.
