@@ -189,6 +189,12 @@ def startup_policy(host, policy):
 
 def command(host, cli, directory, broker_command, schema, policy):
     if host == "claude":
+        # Claude accepts patterns and descriptions, but not these numeric bounds.
+        schema = json.loads(json.dumps(schema))
+        for value in schema.get("properties", {}).values():
+            value.pop("maxItems", None)
+            for keyword in ("minLength", "maxLength"):
+                value.get("items", {}).pop(keyword, None)
         settings = directory / "settings.json"
         settings.write_text(json.dumps({"disableAllHooks": True, "enableAllProjectMcpServers": False}))
         mcp = directory / "mcp.json"
@@ -228,17 +234,25 @@ def command(host, cli, directory, broker_command, schema, policy):
 
 
 def result_schema(role):
+    limits = json.loads((PLUGIN / ".agents/lib/design-result-limits.json").read_bytes())
+
+    def lines(field):
+        maximum = limits["maxItems"][field]
+        return {"type": "array", "maxItems": maximum, "description": f"At most {maximum} items.",
+                "items": {"type": "string", "minLength": limits["minLength"], "maxLength": limits["maxLength"],
+                          "pattern": limits["pattern"],
+                          "description": f'{limits["minLength"]}–{limits["maxLength"]} Unicode characters; no control characters.'}}
+
     properties = {"content_sha256": {"type": "string"}}
     if role == "auditor":
         properties.update({"verdict": {"type": "string", "enum": ["PASS", "FAIL"]},
-                           "findings": {"type": "array", "items": {"type": "string"}},
-                           "advisories": {"type": "array", "items": {"type": "string"}}})
+                           "findings": lines("findings"), "advisories": lines("advisories")})
     elif role == "referee":
         properties["decisions"] = {"type": "array", "items": {"type": "object", "properties": {
             "id": {"type": "string"}, "status": {"type": "string", "enum": ["upheld", "retracted"]},
             "evidence": {"type": "string"}}, "required": ["id", "status", "evidence"], "additionalProperties": False}}
     else:
-        properties["advice"] = {"type": "array", "items": {"type": "string"}}
+        properties["advice"] = lines("advice")
     return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
 
 
@@ -365,6 +379,7 @@ def run(root, host, phase):
         pins = [policy_path, Path(__file__).resolve(), Path(probe.__file__), Path(processes.__file__),
                 PLUGIN / ".agents/hooks/design-worker-group.sh", PLUGIN / ".agents/hooks/design-worker-state.sh",
                 PLUGIN / ".agents/lib/design-doc.sh", PLUGIN / ".agents/lib/design-audit.jq",
+                PLUGIN / ".agents/lib/design-result.jq", PLUGIN / ".agents/lib/design-result-limits.json",
                 PLUGIN / ".agents/lib/audit-recovery.jq", PLUGIN / ".agents/lib/audit-loop.jq"]
         pins += list((PLUGIN / ".agents/prompts/audit").glob("design-*.md"))
         pins += list((PLUGIN / ".claude/agents").glob("design-*.md"))

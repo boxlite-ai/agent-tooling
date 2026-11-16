@@ -21,6 +21,9 @@ data = json.JSONDecoder().raw_decode(task.split("UNTRUSTED_TASK_INPUT_JSON:\n", 
 (directory / "task.txt").write_text(task)
 (directory / "task-input.json").write_text(json.dumps(data))
 codex = "exec" in sys.argv
+schema = (Path(sys.argv[sys.argv.index("--output-schema") + 1]).read_text() if codex
+          else sys.argv[sys.argv.index("--json-schema") + 1])
+(directory / "schema.json").write_text(schema)
 if codex:
     cli = next(json.loads(value.split("=", 1)[1]) for value in sys.argv if value.startswith("mcp_servers.probe.command="))
     args = next(json.loads(value.split("=", 1)[1]) for value in sys.argv if value.startswith("mcp_servers.probe.args="))

@@ -1,0 +1,6 @@
+{
+  "minLength": 1,
+  "maxLength": 500,
+  "maxItems": {"findings": 50, "advisories": 50, "advice": 5},
+  "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+}

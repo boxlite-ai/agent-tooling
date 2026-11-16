@@ -109,6 +109,40 @@ class OwnedWorker(unittest.TestCase):
         self.assertNotEqual(self.cli("advice", body='{"advice":[]}').returncode, 0)
         self.assertNotEqual(self.cli("run").returncode, 0)
 
+    def test_codex_result_limits_cross_the_owned_channel(self):
+        self.check_result_limits("codex")
+
+    def test_claude_result_limits_cross_the_owned_channel(self):
+        self.check_result_limits("claude")
+
+    def check_result_limits(self, host):
+        queued = self.bin / "result.json"
+        finding = "x" * 501
+        queued.write_text(json.dumps({"verdict": "FAIL", "findings": [finding], "advisories": []}))
+        result = self.hook(host=host)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("findings[0]: length 501 exceeds maximum 500", result.stderr)
+        self.assertIn(finding, self.record("worker-diagnostics")["stdout"])
+        self.assertFalse((self.repo / ".git/agent-tooling-design-audit.json").exists())
+        self.assertNotEqual(self.gate().returncode, 0)
+        schema = json.loads((self.bin / "schema.json").read_text())["properties"]["findings"]
+        self.assertIn("50", schema["description"])
+        self.assertEqual(schema.get("maxItems"), 50 if host == "codex" else None)
+        queued.unlink()
+        result = self.hook(host=host)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        previous = self.record("audit")
+        queued.write_text(json.dumps({"advice": ["x"] * 6}))
+        result = self.hook(host=host)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("advice: item count 6 exceeds maximum 5", result.stderr)
+        self.assertEqual(self.record("audit"), previous)
+        self.assertFalse((self.repo / ".git/agent-tooling-design-advice.json").exists())
+        self.assertNotEqual(self.gate().returncode, 0)
+        schema = json.loads((self.bin / "schema.json").read_text())["properties"]["advice"]
+        self.assertIn("5", schema["description"])
+        self.assertEqual(schema.get("maxItems"), 5 if host == "codex" else None)
+
     def test_referee_is_owned_blind_and_preserves_ordinary_outcomes(self):
         self.check_referee("codex")
 
