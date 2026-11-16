@@ -63,6 +63,33 @@ audit_ledger_open_labels() {  # repository root, branch
     <<<"$ledger" 2>/dev/null
 }
 
+# Prints, one JSON line each, the branch's finding entries with no `filed` record, keeping
+# only their open findings; entries left with none are omitted.
+audit_ledger_unfiled_entries() {  # repository root, branch
+  local path ledger
+  path="$(audit_ledger_path "$1")"
+  [[ -e "$path" || -L "$path" ]] || return 0
+  ledger="$(audit_ledger_read "$path")" || return 1
+  jq -cs --arg branch "$2" '
+    map(select(.branch == $branch)) as $entries
+    | [$entries[] | select(.kind == "dismissal") | .label] as $dismissed
+    | [$entries[] | select(.kind == "filed") | [.gate, .attempt_id]] as $filed
+    | $entries[] | select(has("findings") and ([.gate, .attempt_id] | IN($filed[]) | not))
+    | . as $entry
+    | .findings |= map(select("\($entry.gate)@\($entry.head[0:7]):\(.id)" | IN($dismissed[]) | not))
+    | select(.findings | length > 0)' <<<"$ledger" 2>/dev/null
+}
+
+audit_ledger_mark_filed() {  # repository root, branch, gate, attempt id, issue URL
+  local path existing="" entry
+  path="$(audit_ledger_path "$1")"
+  existing="$(audit_ledger_read "$path")" || return 2
+  entry="$(jq -nc --argjson now "$(date +%s)" --arg branch "$2" --arg gate "$3" --arg attempt "$4" \
+    --arg url "$5" '{recorded_at:$now, kind:"filed", branch:$branch, gate:$gate, attempt_id:$attempt, url:$url}')" \
+    || return 2
+  _audit_ledger_append "$path" "$existing" "$entry"
+}
+
 # Records a human dismissal of one open label. Prints why on failure: status 1 for an
 # invalid request, 2 when the ledger cannot be read or written.
 audit_ledger_dismiss() {  # repository root, branch, label, reason

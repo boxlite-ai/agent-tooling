@@ -193,6 +193,10 @@ It is never a PASS; the findings go to a ledger instead of a question.
 | Final reply | When a reply omits an open label, the Stop gate asks once for a revision that lists it. |
 | Dismissal | The human types the whole prompt `ledger-dismiss: <label> <reason>`; the reason is required, up to 280 characters. The prompt hook records it in the ledger, or says why it recorded nothing. |
 | Unreadable ledger | PR creation and edits are denied, and the Stop gate asks the reply to report it, until the ledger is repaired or removed. |
+| Issue filing | After a successful push, a hook files each unfiled entry with open findings as one issue in the `origin` github.com repository, at most three GitHub attempts per push, through `scripts/gh-write.sh`; entries kept local do not count. |
+| Filing title | `Unresolved audit findings: <gate>@<head7> on <branch> (<attempt8>)`; a found issue with that title is recorded instead of creating another. |
+| Kept local | No finding cites a `path:line` in the pushed commit, an email or temporary path appears, the origin is not github.com, or the create fails; the hook says why and never blocks. |
+| Filing opt-out | `AUDIT_LEDGER_FILING=0`. |
 | Headless runner | Unchanged: it cannot reach this branch and still asks. |
 
 ### Design conformance
