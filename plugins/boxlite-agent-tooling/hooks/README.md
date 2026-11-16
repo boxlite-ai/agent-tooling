@@ -1,6 +1,6 @@
 ## TL;DR
 
-These manifests connect Claude Code and Codex lifecycle events to the shared hook scripts.
+These manifests connect Claude Code and Codex lifecycle events to the shared hook scripts; [omp-bridge.mjs](omp-bridge.mjs) does the same for OMP sessions.
 
 ## Manifests
 
@@ -9,12 +9,44 @@ These manifests connect Claude Code and Codex lifecycle events to the shared hoo
 | [hooks.json](hooks.json) | Claude Code convention | `claude` | Uses `asyncRewake`; adds `StopFailure` and `PostToolUseFailure`; loads the prompt-origin module. |
 | [codex-hooks.json](codex-hooks.json) | Codex plugin manifest | `codex` | Uses `async`; omits Claude-only events. |
 | [generic-hooks.json](generic-hooks.json) | Generic `plugin.json` | `unknown` | Same events as Codex. |
+| [omp-bridge.mjs](omp-bridge.mjs) | OMP `package.json` `omp.extensions` | `omp` (routes as unknown) | Maps OMP events onto the generic routes; spawns hooks itself because OMP passes hooks no stdin. |
 | [claude-prompt-origin.mjs](claude-prompt-origin.mjs) | `modules` in `hooks.json` | — | Marks a host background-command notification as verified for `UserPromptSubmit` hooks. |
 
 Every command exports `BOXLITE_HOOK_HOST`, the only host signal hooks read; without it the host is `unknown`.
 Claude commands resolve the plugin directory through `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT}}`, the others through `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`.
 Implementations live in [`.agents/hooks/`](../.agents/hooks/README.md);
 [Git hooks](../.githooks/README.md) are installed separately.
+
+## OMP host
+
+[omp-bridge.mjs](omp-bridge.mjs) is an OMP extension module, loaded through the
+plugin `package.json` (`omp.extensions`) and rebound in every session. It maps
+OMP events onto the generic routes (`before_agent_start` →
+`cancel-verdict-audit.sh`; `tool_call` → the generic PreToolUse fan-out;
+`tool_result` bash → the post routes with a synthesized `tool_response`;
+`session_stop` → `stop-gate.sh`) and runs the same scripts with
+`BOXLITE_HOOK_HOST=omp`, which routes as unknown.
+
+Prerequisites and limits:
+
+- OMP 18.21 or newer; link the plugin with `omp plugin link
+  <adopted-plugin-dir>` and relink after each adoption refresh.
+- Verdict evidence is the final reply only. The gate's transcript parser cannot
+  read OMP session JSONL, and `VERDICT_EXTRACTOR_CMD` requires OS process
+  containment that many Linux hosts restrict, so the bridge sends no transcript
+  path; the gate judges the payload reply. An assistant reply without text
+  blind-allows, the gate's own rule for transcripts lacking assistant text.
+- Verdict and commit/push audits still need the `claude` or `codex` CLI; the
+  claim classifier falls back to regex without one. Without an auditor CLI, a
+  reply carrying verifiable claims (completion, fixes, passing tests) blocks at
+  Stop and loops — fail-closed by design; short claim-free replies settle.
+- OMP caps a `session_stop` handler at 30 seconds, so the bridge enforces its
+  own budget (`BOXLITE_OMP_STOP_TIMEOUT_MS`, default 25000) and maps an overrun
+  to an explicit block: an over-long verdict check fails closed.
+- Unwired: `SubagentStart`/`SubagentStop` native-auditor ownership,
+  `StopFailure` recovery, `asyncRewake`, and refusing a prompt from
+  `before_agent_start` (OMP cannot; the gate reply arrives as a displayed
+  message).
 
 ## How it works
 
