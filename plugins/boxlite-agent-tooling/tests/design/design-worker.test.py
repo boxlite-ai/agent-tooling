@@ -512,6 +512,26 @@ sys.exit(result.returncode)
         self.assertEqual(self.hook(host="claude").returncode, 0)
         self.assertTrue((self.bin / "observed").exists())
 
+    def test_shipped_codex_0_169_0_publishes_both_roles_and_refuses_unlisted_release(self):
+        shipped = json.loads((PLUGIN / ".agents/design-worker-policy.json").read_text())["versions"]["codex"]
+        policy_path = self.plugin / ".agents/design-worker-policy.json"
+        policy = json.loads(policy_path.read_text())
+        policy["versions"]["codex"] = shipped
+        policy_path.write_text(json.dumps(policy))
+        (self.bin / "version").write_text("codex-cli 0.169.1")
+        refused = self.hook()
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("unqualified worker CLI version: codex-cli 0.169.1", refused.stderr)
+        self.assertFalse((self.bin / "observed").exists())
+        (self.bin / "version").write_text("codex-cli 0.169.0")
+        for role, kind in (("auditor", "audit"), ("advisor", "advice")):
+            result = self.hook()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.record(kind)["worker_provenance"]["role"], role)
+            self.assertEqual(self.gate().returncode == 0, role == "advisor")
+        self.assertEqual(self.record("advice")["worker_provenance"]["verdict_task_id"],
+                         self.record("audit")["worker_provenance"]["task_id"])
+
     def test_large_snapshot_publishes_both_roles(self):
         self.doc["body"] += "\n" + "Bounded source evidence. " * 400
         (self.bin / "document.json").write_text(json.dumps(self.doc))
