@@ -34,7 +34,7 @@ run_verdict_check() {
 for required_command in jq perl; do
   command -v "$required_command" >/dev/null 2>&1 || { printf 'stop-gate: missing %s\n' "$required_command" >&2; exit 2; }
 done
-for library in verdict-audit-state.sh reply-summary.sh reply-summary.pl concise-writing.sh; do
+for library in verdict-audit-state.sh reply-summary.sh reply-summary.pl concise-writing.sh audit-ledger.sh; do
   [[ -r "$tooling_root/.agents/lib/$library" ]] || { printf 'stop-gate: missing %s\n' "$library" >&2; exit 2; }
 done
 # shellcheck source=../lib/verdict-audit-state.sh
@@ -43,6 +43,8 @@ source "$tooling_root/.agents/lib/verdict-audit-state.sh"
 source "$tooling_root/.agents/lib/reply-summary.sh"
 # shellcheck source=../lib/concise-writing.sh
 source "$tooling_root/.agents/lib/concise-writing.sh"
+# shellcheck source=../lib/audit-ledger.sh
+source "$tooling_root/.agents/lib/audit-ledger.sh"
 
 # ── Input: the payload fields this gate reads; anything malformed is the verdict
 #    check's to report ─────────────────────────────────────────────────────────
@@ -80,6 +82,19 @@ if [[ "$stop_hook_active" != true && -n "$last_assistant_message" ]]; then
     exit 2
   fi
   (( structure_status == 0 )) || corrections+=("$structure_error")
+  # Open ledger findings on this branch must be listed by label (design #563).
+  if repo_root="$(git -C "${CLAUDE_PROJECT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" \
+      && branch="$(git -C "$repo_root" branch --show-current 2>/dev/null)" && [[ -n "$branch" ]]; then
+    if ! open_labels="$(audit_ledger_open_labels "$repo_root" "$branch")"; then
+      corrections+=("The unresolved-findings ledger $(audit_ledger_path "$repo_root") cannot be read; report that in the reply and ask the human to repair it.")
+    elif [[ -n "$open_labels" ]]; then
+      unlisted="$(perl -0777 -e '
+        my $reply = <STDIN> // "";
+        print join(" ", grep { $reply !~ /(?<![\w@:.-])\Q$_\E(?![\w])/ } split /\n/, $ARGV[0]);
+      ' "$open_labels" <<<"$last_assistant_message")" || exit 2
+      [[ -z "$unlisted" ]] || corrections+=("The reply omits open ledger findings: $unlisted. List each label, or tell the human to close one with \`ledger-dismiss: <label> <reason>\`.")
+    fi
+  fi
   if (( ${#corrections[@]} )); then
     reason="$(printf '%s\n' "${corrections[@]}")"
     jq -nc --arg reason "$reason" '{decision:"block",reason:$reason}'
