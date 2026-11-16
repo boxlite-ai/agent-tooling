@@ -21,7 +21,7 @@ See the [entry points](../ARCHITECTURE.md#entry-points) for the hooks that run t
 
 Only peer/higher headings end summaries; nested headings cannot reset them; denials reference `boxlite-writing` without consuming acknowledgment.
 
-- Privacy also checks rendered author-review bot comments; no automatic disclosure exception exists.
+- Privacy also checks rendered author-review bot comments; the only automatic disclosure exception is the [ledger issue filer](design-and-pr-gates.md#commit-and-push-forced-continuation).
 - Credentials and permissions are unchanged; [workflow disclosure policy](../guidance/workflow.md#disclosure) covers facts, paraphrases, attachments, and unsupported publishing routes.
 - Table-delimiter parsing stays linear, preserving Unicode whitespace, colons, escaped pipes, and matching cell counts; `tests/lib/reply-summary.test.sh` covers correctness/performance.
 

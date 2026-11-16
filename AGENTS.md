@@ -48,7 +48,7 @@ Local rules above block; `CLAUDE.md` import-only.
 Edit `guidance/workflow.md`. Run `bash scripts/sync-guidance.sh <repo-root>` in plugin.
 Run `make test:guidance` from root.
 
-<!-- agent-tooling:guidance:begin rev=53cc05d364b1-dirty sha256=dc78f25b3ff9 -->
+<!-- agent-tooling:guidance:begin rev=451866f1580d-dirty sha256=73aba8416848 -->
 
 > Managed by **boxlite-ai/agent-tooling** — do not edit between the markers. Change `plugins/boxlite-agent-tooling/guidance/workflow.md` there, then rerun `./.agent-tooling/install.sh` here.
 
@@ -180,6 +180,7 @@ Scope:
 - This covers private messages, memory citations, local paths, internal context, and paraphrases.
 - Omit uncertain material.
 - Edits invalidate approval; task authorization and hook passes grant none.
+- Exception: ledger issues the post-push hook files in the audited repository need no per-post approval; the hook posts only privacy-scanned text linking pushed code.
 
 ### Communication
 

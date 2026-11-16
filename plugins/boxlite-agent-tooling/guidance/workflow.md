@@ -128,6 +128,7 @@ Scope:
 - This covers private messages, memory citations, local paths, internal context, and paraphrases.
 - Omit uncertain material.
 - Edits invalidate approval; task authorization and hook passes grant none.
+- Exception: ledger issues the post-push hook files in the audited repository need no per-post approval; the hook posts only privacy-scanned text linking pushed code.
 
 ### Communication
 
