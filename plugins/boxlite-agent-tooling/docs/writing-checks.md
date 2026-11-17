@@ -8,11 +8,7 @@ See the [entry points](../ARCHITECTURE.md#entry-points) for the hooks that run t
 
 ## Form selection
 
-The [form matrix](../.agents/skills/boxlite-writing/SKILL.md#form) guides agents from reader needs to organization and illustrations.
-
-A retry walkthrough can use ordered instructions and a concrete request trace; a sequence view explains overlapping attempts.
-
-Review semantic fit separately: the hooks below measure syntax and limits without deciding whether an illustration answers the reader's question.
+The hooks below check syntax and limits, not whether a form answers the reader's question; review that against `boxlite-writing`.
 
 ## GitHub writing
 
