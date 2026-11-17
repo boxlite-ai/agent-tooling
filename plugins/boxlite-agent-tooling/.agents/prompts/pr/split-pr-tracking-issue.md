@@ -48,6 +48,6 @@ needs independent tracking, and link those issues here.
 - Date — PR link — result or decision.
 
 Update the checklist as each slice lands. Close the issue only when its agreed
-acceptance criteria are met.
+acceptance criteria are met: the slice meeting them says `Closes #<n>` so its merge closes the issue.
 
 Structure adapted from Rust's [tracking-issue template](https://github.com/rust-lang/rust/blob/main/.github/ISSUE_TEMPLATE/tracking_issue.md#L25-L65).
