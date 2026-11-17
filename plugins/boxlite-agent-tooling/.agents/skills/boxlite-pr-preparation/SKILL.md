@@ -71,7 +71,8 @@ test counts.
   the final diff, including drafts and description edits. Remove placeholders and
   superseded claims.
 - Use `Fixes #<n>` only when the PR meets that issue's agreed acceptance criteria.
-  Intermediate slices reference the tracking issue without closing it.
+  Intermediate slices reference the tracking issue without closing it; the slice meeting its criteria uses `Closes #<n>`.
+  GitHub ignores the keyword on non-default-branch PRs; close those issues by hand after merge.
 - Read and apply the [review question](../../prompts/pr/pr-review-question.md).
   Self-review cannot supply the human's acknowledgment.
 
