@@ -17,12 +17,14 @@
 // before_agent_start refusal (OMP cannot reject a prompt; the gate reply is
 // delivered as a displayed message instead).
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const HOOKS_DIR = join(PLUGIN_ROOT, ".agents", "hooks");
+const SCRIPTS_DIR = join(PLUGIN_ROOT, "scripts");
 
 const STOP_TIMEOUT_MS = Number(process.env.BOXLITE_OMP_STOP_TIMEOUT_MS) || 25_000;
 
@@ -122,20 +124,65 @@ export function toolResponseFrom(event) {
 	};
 }
 
-export function stopPayload(base, event) {
+export function stopPayload(base, event, evidenceMode) {
 	const payload = {
 		...base,
 		hook_event_name: "Stop",
 		stop_hook_active: event?.stop_hook_active === true,
 	};
-	// Evidence is the final reply only: the gate's built-in parser cannot read OMP
-	// session JSONL, and its transcript_path would come back as a false-truncated
-	// snapshot that forces an audit on every settle. An empty reply text means the
-	// gate sees no assistant text and applies its own blind-allow rule.
 	const reply = textOfContent(event?.last_assistant_message?.content);
+	// Omit when empty: an explicit empty string reads as intentional silence and
+	// would skip the reply checks.
 	if (reply !== "") payload.last_assistant_message = reply;
-	payload.transcript_path = "";
+	// Transcript mode: the gate stages the session file through the extractor for
+	// full-turn audit evidence. Payload mode: the gate's transcript parser cannot
+	// read OMP session JSONL and the extractor override needs OS containment, so
+	// an unusable transcript path would come back as a false-truncated snapshot
+	// that forces an audit on every settle — send the final reply only.
+	if (evidenceMode !== "transcript") payload.transcript_path = "";
 	return payload;
+}
+
+// ── Evidence-mode probe ───────────────────────────────────────────────────────
+// Mirrors the verdict check's bounded_capture_prepare_override_isolation: an
+// explicit extractor override runs only inside OS process containment, so the
+// bridge offers transcript evidence only where that containment works.
+
+let containmentProbed = false;
+let containmentBackend = "";
+
+/** Pure decision over a probe result, for contract tests. */
+export function evidenceModeFromProbe(backend) {
+	return backend ? "transcript" : "payload";
+}
+
+export function probeContainment() {
+	if (containmentProbed) return containmentBackend;
+	containmentProbed = true;
+	containmentBackend = "";
+	const kernel = process.platform === "darwin" ? "Darwin" : process.platform === "linux" ? "Linux" : "";
+	if (kernel === "Darwin" && existsSync("/usr/bin/sandbox-exec") && existsSync("/usr/bin/perl")) {
+		const test = spawnSync("/usr/bin/sandbox-exec", [
+			"-p", "(version 1) (allow default) (deny process-fork)",
+			"/usr/bin/perl", "-e", "my $child = fork(); exit(defined($child) ? 1 : 0);",
+		], { stdio: "ignore", timeout: 10_000 });
+		if (test.status === 0) containmentBackend = "darwin-sandbox";
+	} else if (kernel === "Linux") {
+		const unshare = ["/usr/bin/unshare", "/bin/unshare"].find(path => existsSync(path));
+		if (unshare) {
+			const test = spawnSync(unshare, [
+				"--user", "--map-root-user", "--pid", "--fork", "--kill-child=KILL",
+				"/bin/sh", "-c", "exit 0",
+			], { stdio: "ignore", timeout: 10_000 });
+			if (test.status === 0) containmentBackend = "linux-pid-namespace";
+		}
+	}
+	return containmentBackend;
+}
+
+/** Evidence mode for the stop gate, decided once per process. */
+export function evidenceMode() {
+	return evidenceModeFromProbe(probeContainment());
 }
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
@@ -202,7 +249,11 @@ async function runPreToolUseRoute(route, payload, signal) {
 
 /** Run the Stop gate and map its answer onto the OMP stop contract. */
 export async function runStopGate(payload, signal) {
-	const result = await runScript(hookScript("stop-gate.sh"), payload, STOP_TIMEOUT_MS, {}, signal);
+	const mode = evidenceMode();
+	const extraEnv = mode === "transcript"
+		? { VERDICT_EXTRACTOR_CMD: join(SCRIPTS_DIR, "omp-verdict-extractor.sh") }
+		: {};
+	const result = await runScript(hookScript("stop-gate.sh"), payload, STOP_TIMEOUT_MS, extraEnv, signal);
 	return mapStopOutcome(result);
 }
 
@@ -286,6 +337,7 @@ export default function ompBridge(pi) {
 
 	pi.on("session_stop", async (event, ctx) => {
 		if ((ctx?.agent?.kind ?? "main") !== "main") return undefined;
-		return runStopGate(stopPayload(basePayload(ctx, "Stop"), event), ctx?.signal ?? event?.signal);
+		const payload = stopPayload(basePayload(ctx, "Stop"), event, evidenceMode());
+		return runStopGate(payload, ctx?.signal ?? event?.signal);
 	});
 }
