@@ -6,6 +6,10 @@ Stop and GitHub hooks share writing checks. The writing skill owns the prose rul
 
 See the [entry points](../ARCHITECTURE.md#entry-points) for the hooks that run these checks.
 
+## Form selection
+
+The hooks below check syntax and limits, not whether a form answers the reader's question; review that against `boxlite-writing`.
+
 ## GitHub writing
 
 `.agents/lib/github-writing.sh` checks recognized `gh` PR/issue/discussion bodies, comments, reviews, close/reopen text, release notes, and REST body/description fields.
