@@ -16,8 +16,9 @@ description: Write or shorten human-facing replies, docs, PRs, issues, and comme
 
 ## Form
 
-Choose the structure, then the smallest useful illustration; one concrete visual can also serve as the example.
-Explanations in any topic require a concrete example, visual, or call graph; flow, architecture, and interconnected causes require a diagram.
+- Choose the structure, then the smallest useful illustration; one concrete visual can also serve as the example.
+- Explanations in any topic require a concrete example, visual, or call graph; flow, architecture, and interconnected causes require a diagram.
+- Use the Structure cell; in Example and Visual, only cells marked Required are mandatory, and others describe what fits when needed.
 
 | Reader need | Structure | Example | Visual |
 | --- | --- | --- | --- |
