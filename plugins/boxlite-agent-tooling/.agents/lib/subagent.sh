@@ -245,6 +245,14 @@ subagent_timed_drive() {  # deadline (s), grace (s), stop (s), record message, C
         my $event = eval { $json->decode($1) };
         next unless ref $event eq "HASH";
         my $type = $event->{type} // "";
+        # Record the model behind an alias such as `sonnet` (design #643).
+        if ($type eq "system" && ($event->{subtype} // "") eq "init" && defined $event->{model}
+            && !ref $event->{model} && length($ENV{SUBAGENT_MODEL_FILE} // "")) {
+          if (open my $model_file, ">", $ENV{SUBAGENT_MODEL_FILE}) {
+            print {$model_file} $event->{model};
+            close $model_file;
+          }
+        }
         if ($type eq "user" && $event->{isReplay} && ref $event->{message} eq "HASH") {
           my $content = $event->{message}{content};
           @steps = () if defined $content && !ref $content && $content eq $record;

@@ -203,6 +203,7 @@ audit_cancellation_file="$(verdict_audit_cancellation_path \
 # Audits write to a runner-owned generation file first. Promotion happens only after the
 # entire process group is quiescent.
 audit_output_file="${verdict_file}.audit-${audit_token}"
+auditor_model_file="${audit_output_file}.model"
 # shellcheck disable=SC2154 # Assigned by verdict-audit-state.sh above.
 audit_deadline="$(( $(date +%s) + audit_stop_seconds + verdict_audit_deadline_slack_seconds ))"
 runner_start_token="$(verdict_audit_process_start_token "$$" 2>/dev/null)" || {
@@ -591,10 +592,15 @@ finish_audit_diagnostic() {
   fi
   if (( status == 130 || status == 143 )); then outcome=CANCELED
   elif (( status == 0 )); then outcome="${audit_verdict:-ERROR}"; fi
-  local auditor_settings=null
+  local auditor_settings=null resolved_model=""
+  # The Claude route's driver writes the model its init event reports (design #643).
+  if [[ -f "$auditor_model_file" ]]; then
+    resolved_model="$(head -c 100 "$auditor_model_file" | tr -cd 'A-Za-z0-9._:/+-')"
+    rm -f "$auditor_model_file"
+  fi
   if [[ -n "${auditor_model:-}" ]]; then
     auditor_settings="$(audit_diagnostic_auditor "$auditor_model" "$auditor_effort" \
-      "$auditor_model_source" "$auditor_observed" "$auditor_dropped_effort")" \
+      "$auditor_model_source" "$auditor_observed" "$auditor_dropped_effort" "$resolved_model")" \
       || auditor_settings=null
   fi
   audit_diagnostic_record "$project_dir" "$session_scope" verdict "$audit_generation" \
@@ -1325,6 +1331,8 @@ elif [[ "$audit_runner" == claude ]]; then
   # --safe-mode ignores user/project permission settings, so without the explicit
   # --allowedTools grant every listed tool is denied and the auditor cannot write its
   # dossier. Keep both lists identical.
+  rm -f "$auditor_model_file"
+  export SUBAGENT_MODEL_FILE="$auditor_model_file"
   if ! run_in_audit_group \
       "$audit_prompt" \
       subagent_timed_drive "$audit_timeout_seconds" 30 "$audit_backstop_seconds" "$record_message" \

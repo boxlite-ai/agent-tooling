@@ -30,8 +30,8 @@ load() {  # root auditor host -> "model effort" or "error"
 }
 
 echo "## Loader"
-check_eq "shipped verdict auditor row" "$(load "$PLUGIN" verdict-auditor claude)" "claude-sonnet-5 low"
-check_eq "shipped classifier row" "$(load "$PLUGIN" verdict-classifier claude)" "claude-haiku-4-5-20251001 low"
+check_eq "shipped verdict auditor row" "$(load "$PLUGIN" verdict-auditor claude)" "sonnet low"
+check_eq "shipped classifier row" "$(load "$PLUGIN" verdict-classifier claude)" "haiku low"
 root="$(printf 'a\tclaude\tm-1\tlow\r\n' | fake_root crlf)"
 check_eq "CRLF table parses like LF" "$(load "$root" a claude)" "m-1 low"
 root="$(printf 'a\tclaude\tm-1\tlow\n' | fake_root missing)"
@@ -96,6 +96,8 @@ cat > "$scratch/bin/claude" <<'STUB'
 printf '%s\n' "$*" > "$STUB_ARGV"
 printf '%s\n' "${CLAUDE_CODE_EFFORT_LEVEL-absent}" > "$STUB_ENV"
 IFS= read -r frame
+# Like the real CLI, report the model behind the requested name in init.
+printf '%s\n' '{"type":"system","subtype":"init","model":"claude-resolved-test"}'
 jq -r '.. | strings' <<<"$frame" | bash "$STUB_WRITE_DOSSIER"
 printf '%s\n' '{"type":"result","subtype":"success","result":"PASS"}'
 cat >/dev/null
@@ -113,11 +115,11 @@ run_claude CLAUDE_CODE_EFFORT_LEVEL=max
 check_eq "pinned run exits 0" "$?" 0
 argv="$(cat "$scratch/argv")"
 check_eq "row model and effort reach the CLI" \
-  "$([[ "$argv" == *"--model claude-sonnet-5 --effort low"* ]] && echo yes || echo no)" yes
+  "$([[ "$argv" == *"--model sonnet --effort low"* ]] && echo yes || echo no)" yes
 check_eq "user effort override is dropped from the child" "$(cat "$scratch/env")" absent
 check_eq "diagnostics record the pair and the dropped value" \
   "$(jq -c '.auditor' "$diagnostics")" \
-  '{"model":"claude-sonnet-5","effort":"low","model_source":"table","observed":"unobserved","dropped_effort_env":"max"}'
+  '{"model":"sonnet","effort":"low","model_source":"table","observed":"unobserved","dropped_effort_env":"max","resolved_model":"claude-resolved-test"}'
 run_claude VERDICT_AUDITOR_MODEL=claude-test-model
 argv="$(cat "$scratch/argv")"
 check_eq "model override reaches the CLI" \
@@ -132,9 +134,9 @@ run_override() {  # echoed model, echoed effort ("" omits the fields)
       VERDICT_AUDITOR_CMD="printf '%s %s\n' \"\$AUDITOR_MODEL\" \"\$AUDITOR_EFFORT\" > '$scratch/exported'; bash '$scratch/write-dossier' '$1' '$2'" \
       bash "$RUNNER" "$repo/transcript.jsonl" "$SESSION" "$GENERATION" >/dev/null 2>&1 )
 }
-run_override claude-sonnet-5 low
+run_override sonnet low
 check_eq "matching echo is accepted" "$?" 0
-check_eq "row is exported to the command" "$(cat "$scratch/exported")" "claude-sonnet-5 low"
+check_eq "row is exported to the command" "$(cat "$scratch/exported")" "sonnet low"
 check_eq "matching echo is recorded as observed" "$(jq -r '.auditor.observed' "$diagnostics")" matched
 run_override claude-other low
 check_eq "mismatched echo has no authority" "$?" 1

@@ -35,7 +35,7 @@ audit_diagnostic_tail() {  # [abort indicator]
 }
 
 # The optional 12th argument is the auditor settings object (design #474):
-# {model, effort, model_source, observed, dropped_effort_env}.
+# {model, effort, model_source, observed, dropped_effort_env, resolved_model}.
 audit_diagnostic_record() { # root scope gate generation attempt route start process-exit runner-exit outcome stderr-file [auditor-json]
   local root="$1" scope="$2" gate="$3" generation="$4" attempt="$5" route="$6"
   local started="$7" process_exit="$8" runner_exit="$9" outcome="${10}" stderr_file="${11}"
@@ -57,9 +57,10 @@ audit_diagnostic_record() { # root scope gate generation attempt route start pro
 }
 
 # Builds the settings object above from the loaded row and the caller's observations.
-audit_diagnostic_auditor() { # model effort model-source observed dropped-effort-env
+audit_diagnostic_auditor() { # model effort model-source observed dropped-effort-env [resolved-model]
   jq -nc --arg model "$1" --arg effort "$2" --arg source "$3" --arg observed "$4" \
-    --arg dropped "$5" \
+    --arg dropped "$5" --arg resolved "${6:-}" \
     '{model:$model,effort:$effort,model_source:$source,observed:$observed}
-     + if $dropped == "" then {} else {dropped_effort_env:$dropped} end'
+     + if $dropped == "" then {} else {dropped_effort_env:$dropped} end
+     + if $resolved == "" then {} else {resolved_model:$resolved} end'
 }

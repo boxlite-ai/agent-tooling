@@ -531,33 +531,74 @@ sys.exit(result.returncode)
         (configuration / "remote-settings.json").write_text("{}")
         self.assertEqual(self.hook(host="claude").returncode, 0)
 
-    def test_shipped_claude_2_1_325_starts_and_unlisted_2_1_324_is_refused(self):
-        shipped = json.loads((PLUGIN / ".agents/design-worker-policy.json").read_text())["versions"]["claude"]
+    def unpin(self):
         policy_path = self.plugin / ".agents/design-worker-policy.json"
         policy = json.loads(policy_path.read_text())
-        policy["versions"]["claude"] = shipped
+        policy.pop("versions")
         policy_path.write_text(json.dumps(policy))
-        (self.bin / "version").write_text("2.1.324 (Claude Code)")
-        refused = self.hook(host="claude")
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("unqualified worker CLI version: 2.1.324", refused.stderr)
-        self.assertFalse((self.bin / "observed").exists())
-        (self.bin / "version").write_text("2.1.325 (Claude Code)")
-        self.assertEqual(self.hook(host="claude").returncode, 0)
-        self.assertTrue((self.bin / "observed").exists())
 
-    def test_shipped_codex_0_169_0_publishes_both_roles_and_refuses_unlisted_release(self):
-        shipped = json.loads((PLUGIN / ".agents/design-worker-policy.json").read_text())["versions"]["codex"]
+    def test_shipped_policy_pins_no_cli_version_or_codex_model(self):
+        # Design #643: isolation is checked per run, so the shipped policy accepts any release and Codex default.
+        shipped = json.loads((PLUGIN / ".agents/design-worker-policy.json").read_text())
+        self.assertNotIn("versions", shipped)
+        self.assertNotIn("codex", shipped.get("models", {}))
+
+    def test_unpinned_models_use_each_cli_default_and_pins_win(self):
         policy_path = self.plugin / ".agents/design-worker-policy.json"
         policy = json.loads(policy_path.read_text())
-        policy["versions"]["codex"] = shipped
+        policy["models"] = {}
         policy_path.write_text(json.dumps(policy))
+        execution = self.repo / ".git/agent-tooling-design-worker-execution.json"
+        self.assertEqual(self.hook(host="codex").returncode, 0)
+        self.assertEqual((self.bin / "model").read_text(), "fixture-top")
+        self.assertEqual(json.loads(execution.read_text())["model"], "fixture-top")
+        self.assertEqual(self.hook(host="claude").returncode, 0)
+        self.assertEqual((self.bin / "model").read_text(), "")
+        # Claude reports the model behind its default or alias in init; the record keeps it.
+        self.assertEqual(json.loads(execution.read_text())["model"], "fixture-resolved")
+        policy["models"] = {"codex": "fixture-pinned"}
+        policy_path.write_text(json.dumps(policy))
+        self.cli("register", self.doc["html_url"], check=True)
+        self.assertEqual(self.hook(host="codex").returncode, 0)
+        self.assertEqual((self.bin / "model").read_text(), "fixture-pinned")
+
+    def test_optional_pin_still_refuses_an_unlisted_release(self):
+        for host, reported in (("claude", "2.1.324 (Claude Code)"), ("codex", "codex-cli 0.169.1")):
+            with self.subTest(host=host):
+                (self.bin / "version").write_text(reported)
+                refused = self.hook(host=host)
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn("unqualified worker CLI version: " + reported, refused.stderr)
+                self.assertFalse((self.bin / "observed").exists())
+
+    def test_unpinned_policy_runs_an_unlisted_release_whose_isolation_holds(self):
+        self.unpin()
+        # The Claude release audits, then the Codex release advises on that verdict.
+        for host, reported, kind in (("claude", "2.1.999 (Claude Code)", "audit"), ("codex", "codex-cli 0.999.0", "advice")):
+            with self.subTest(host=host):
+                (self.bin / "version").write_text(reported)
+                result = self.hook(host=host)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(reported, json.loads((self.repo / ".git/agent-tooling-design-worker-execution.json").read_text())["cli_version"])
+                self.assertTrue(self.record(kind)["worker_provenance"]["task_id"])
+
+    def test_isolation_violations_stop_the_run_and_publish_nothing(self):
+        self.unpin()
+        cases = (("claude", "extra-tool"), ("claude", "extra-mcp"), ("claude", "user-plugin"),
+                 ("claude", "bash-call"), ("claude", "no-init"), ("claude", "garbage-line"),
+                 ("codex", "command-item"), ("codex", "unknown-item"), ("codex", "other-mcp"), ("codex", "garbage-line"))
+        for host, mode in cases:
+            with self.subTest(host=host, mode=mode):
+                (self.bin / "mode").write_text(mode)
+                result = self.hook(host=host)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertEqual((self.bin / "observed").read_text(), mode, result.stderr)
+                self.assertIn("worker isolation check failed", result.stderr)
+                self.assertNotEqual(self.gate().returncode, 0)
+
+    def test_codex_publishes_both_roles_on_an_unlisted_release(self):
+        self.unpin()
         (self.bin / "version").write_text("codex-cli 0.169.1")
-        refused = self.hook()
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("unqualified worker CLI version: codex-cli 0.169.1", refused.stderr)
-        self.assertFalse((self.bin / "observed").exists())
-        (self.bin / "version").write_text("codex-cli 0.169.0")
         for role, kind in (("auditor", "audit"), ("advisor", "advice")):
             result = self.hook()
             self.assertEqual(result.returncode, 0, result.stderr)

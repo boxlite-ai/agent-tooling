@@ -54,6 +54,24 @@ def file_hash(path):
     return value.hexdigest()
 
 
+def valid_model(name):
+    return isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9._:/+-]{1,100}", name) is not None
+
+
+def codex_default_model(cli):
+    """Codex ranks its catalog by priority; the top listed API model is its current default."""
+    try:
+        # The catalog carries per-model instructions, so it runs to hundreds of kilobytes.
+        catalog = json.loads(probe.bounded([str(cli), "debug", "models"], timeout=10, maximum=4194304)[0])
+        listed = [model for model in catalog["models"] if model.get("visibility") == "list" and model.get("supported_in_api")]
+        slug = min(listed, key=lambda model: model["priority"])["slug"]
+    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
+        slug = None
+    if not valid_model(slug):
+        raise ValueError("cannot read the Codex model catalog; pin models.codex in the worker policy")
+    return slug
+
+
 def installed_policy():
     path = PLUGIN / ".agents/design-worker-policy.json"
     status = path.lstat()
@@ -62,11 +80,17 @@ def installed_policy():
     policy = json.loads(path.read_bytes())
     if not isinstance(policy, dict) or set(policy) - {"versions", "models", "executables", "authentication", "offline_research", "private_identifiers"}:
         raise ValueError("invalid installed worker policy")
+    # `versions` and `models` are optional pins; without them, run-time isolation checks admit
+    # any release and each CLI picks its own default model (design #643).
+    versions, models = policy.get("versions", {}), policy.get("models", {})
+    if (not isinstance(versions, dict) or set(versions) - {"codex", "claude"}
+            or not isinstance(models, dict) or set(models) - {"codex", "claude"}):
+        raise ValueError("invalid qualified host profile")
     for host in ("codex", "claude"):
-        if (not isinstance(policy.get("versions", {}).get(host), list)
-                or not policy["versions"][host] or not all(isinstance(item, str) and re.fullmatch(r"\d+\.\d+\.\d+", item) for item in policy["versions"][host])
-                or not isinstance(policy.get("models", {}).get(host), str)
-                or not re.fullmatch(r"[A-Za-z0-9._:/+-]{1,100}", policy["models"][host])):
+        pinned = versions.get(host, [])
+        if (not isinstance(pinned, list) or (host in versions and not pinned)
+                or not all(isinstance(item, str) and re.fullmatch(r"\d+\.\d+\.\d+", item) for item in pinned)
+                or (host in models and not valid_model(models[host]))):
             raise ValueError("invalid qualified host profile")
     return policy, file_hash(path)
 
@@ -180,7 +204,8 @@ def startup_policy(host, policy):
     cli = trusted_binary(host, policy)
     fingerprint = file_hash(cli)
     version = probe.bounded([cli, "--version"], timeout=5)[0].decode().strip()
-    if not set(re.findall(r"\b\d+\.\d+\.\d+\b", version)).intersection(policy["versions"][host]):
+    pinned = policy.get("versions", {}).get(host)
+    if pinned and not set(re.findall(r"\b\d+\.\d+\.\d+\b", version)).intersection(pinned):
         raise ValueError("unqualified worker CLI version: " + version)
     if file_hash(cli) != fingerprint:
         raise ValueError("worker executable changed during startup")
@@ -188,6 +213,7 @@ def startup_policy(host, policy):
 
 
 def command(host, cli, directory, broker_command, schema, policy):
+    pinned_model = policy.get("models", {}).get(host)
     if host == "claude":
         # Claude accepts patterns and descriptions, but not these numeric bounds.
         schema = json.loads(json.dumps(schema))
@@ -203,10 +229,12 @@ def command(host, cli, directory, broker_command, schema, policy):
                 "--strict-mcp-config", "--mcp-config", str(mcp), "--tools", "", "--allowedTools",
                 ",".join("mcp__probe__" + name for name in probe.TOOLS), "--permission-mode", "dontAsk",
                 "--system-prompt", "You are an independent design reviewer. Use only the assigned broker. Return the requested JSON.",
-                "--model", policy["models"][host], "--output-format", "json", "--json-schema", json.dumps(schema), "-p"]
+                *(["--model", pinned_model] if pinned_model else []), "--output-format", "stream-json", "--verbose",
+                "--json-schema", json.dumps(schema), "-p"]
+    model = pinned_model or codex_default_model(cli)
     catalogue = directory / "models.json"
     catalogue.write_text(json.dumps({"models": [{
-        "slug": policy["models"][host], "display_name": "Design reviewer", "description": "Independent design review",
+        "slug": model, "display_name": "Design reviewer", "description": "Independent design review",
         "default_reasoning_level": "high", "supported_reasoning_levels": [{"effort": "high", "description": "Review"}],
         "shell_type": "disabled", "visibility": "list", "supported_in_api": True, "priority": 1,
         "model_messages": {"instructions_template": "You are an independent design reviewer. Use the assigned read-only broker and return the requested JSON."},
@@ -223,7 +251,7 @@ def command(host, cli, directory, broker_command, schema, policy):
                     "plugins", "apps", "remote_plugin", "skill_mcp_dependency_install", "skill_search"):
         result += ["--disable", feature]
     result += ["--enable", "skip_host_skill_discovery", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
-               "--cd", str(directory), "--model", policy["models"][host]]
+               "--cd", str(directory), "--model", model]
     for setting in ("model_catalog_json=" + json.dumps(str(catalogue)), 'web_search="disabled"',
                     "tools.experimental_request_user_input.enabled=false", "tools.update_plan.enabled=false", "project_doc_max_bytes=0",
                     "skills.include_instructions=false", "skills.bundled.enabled=false",
@@ -414,7 +442,8 @@ def run(root, host, phase):
             phase_pending.write_bytes(encoded({"hard_stop": cutoff + 30, "task_id": task_id}))
             os.replace(phase_pending, phase)
             # The exact immutable task is sent only after startup inputs and assignment are pinned.
-            output, errors = collect(child, task.encode(), cutoff + 30, owner)
+            guard = IsolationGuard(host)
+            output, errors = collect(child, task.encode(), cutoff + 30, owner, guard=guard)
             if child.returncode or len(output) > 1048576 or len(errors) > 1048576:
                 raise ValueError("worker failed or returned excessive output")
             if not owner.broker_registered.is_set():
@@ -425,7 +454,11 @@ def run(root, host, phase):
             if not any(event["allowed"] for event in events):
                 raise ValueError("worker did not complete a permitted broker call")
             if host == "claude":
-                native = json.loads(output)
+                finals = [event for event in (json.loads(line) for line in output.splitlines() if line.strip())
+                          if event.get("type") == "result"]
+                if len(finals) != 1:
+                    raise ValueError("expected exactly one native final result")
+                native = finals[0]
                 if native.get("is_error"):
                     raise ValueError("native worker reported an error")
                 result = native.get("structured_output") or json.loads(native["result"])
@@ -448,7 +481,9 @@ def run(root, host, phase):
             bridge(root, "publish", {"task_id": task_id, "proof": proof, "result": result,
                 "citation_ids": referee_citations(result, source, research) if role == "referee" else []})
             published = True
-            bridge(root, "execution", {"task_id": task_id, "host": host, "cli_version": version,
+            # The model that actually ran: Claude reports it in init; Codex runs the argv model.
+            ran_model = guard.model if host == "claude" else launch[launch.index("--model") + 1]
+            bridge(root, "execution", {"task_id": task_id, "host": host, "cli_version": version, "model": ran_model,
                 "task_sha256": task_hash, "worker_pid": child.pid, "broker_calls": events})
             print("design-doc: assigned " + role + " result recorded; retry the edit gate")
         finally:
@@ -462,11 +497,92 @@ def run(root, host, phase):
                     pass  # Expiring pending state stays unauthorized after interrupted cleanup.
 
 
-def collect(child, task, deadline, owner, phase=None, maximum_deadline=None):
+class IsolationGuard:
+    """Checks a worker's event stream as it arrives (design #643).
+
+    Claude reports its isolation in `system/init`; both hosts report each action.
+    Any non-broker action, wrong report, or malformed line stops the run, so the
+    check holds on releases nobody qualified. Unknown Claude event types pass:
+    they cannot act without a `tool_use` block.
+    """
+
+    BROKER = "mcp__probe__"
+    CODEX_PASSIVE_ITEMS = {"agent_message", "reasoning", "todo_list", "error"}
+
+    def __init__(self, host):
+        self.host, self.pending, self.violation, self.init_seen = host, b"", None, False
+        self.model = None
+
+    def feed(self, block):
+        self.pending += block
+        *lines, self.pending = self.pending.split(b"\n")
+        for line in lines:
+            if self.violation is None and line.strip():
+                self.violation = self.check(line)
+        return self.violation
+
+    def finish(self):
+        if self.violation is None and self.pending.strip():
+            self.violation = self.check(self.pending)
+        if self.violation is None and self.host == "claude" and not self.init_seen:
+            self.violation = "no system/init event"
+        return self.violation
+
+    def check(self, line):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return "non-JSON output line"
+        if not isinstance(event, dict):
+            return "non-object output line"
+        return self.check_claude(event) if self.host == "claude" else self.check_codex(event)
+
+    def check_claude(self, event):
+        kind = event.get("type")
+        if kind == "system" and event.get("subtype") == "init":
+            self.init_seen = True
+            self.model = event.get("model") if isinstance(event.get("model"), str) else None
+            return self.check_init(event)
+        if kind in ("assistant", "result") and not self.init_seen:
+            return "no system/init event before the first assistant message"
+        content = event.get("message", {}).get("content") if kind == "assistant" and isinstance(event.get("message"), dict) else None
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "tool_use" and not self.allowed_tool(block.get("name")):
+                return "non-broker tool call: " + str(block.get("name"))[:80]
+        return None
+
+    def allowed_tool(self, name):
+        # `--json-schema` adds `StructuredOutput`, which only returns the result.
+        return isinstance(name, str) and (name.startswith(self.BROKER) or name == "StructuredOutput")
+
+    def check_init(self, event):
+        tools, servers, plugins = event.get("tools"), event.get("mcp_servers"), event.get("plugins", [])
+        if not isinstance(tools, list) or not all(self.allowed_tool(tool) for tool in tools):
+            return "init reports a non-broker tool"
+        if (not isinstance(servers, list) or len(servers) != 1 or not isinstance(servers[0], dict)
+                or (servers[0].get("name"), servers[0].get("status")) != ("probe", "connected")):
+            return "init reports MCP servers other than the connected broker"
+        if event.get("mcp_server_errors"):
+            return "init reports skipped MCP servers"
+        if not isinstance(plugins, list) or not all(isinstance(plugin, dict) and plugin.get("path") == "builtin" for plugin in plugins):
+            return "init reports a non-built-in plugin"
+        return None
+
+    def check_codex(self, event):
+        item = event.get("item")
+        if not isinstance(item, dict):
+            return None
+        kind = item.get("type")
+        if kind == "mcp_tool_call":
+            return None if item.get("server") == "probe" else "MCP call outside the broker"
+        return None if kind in self.CODEX_PASSIVE_ITEMS else "non-broker item: " + str(kind)[:80]
+
+
+def collect(child, task, deadline, owner, phase=None, maximum_deadline=None, guard=None):
     output, errors = bytearray(), bytearray()
     failed = threading.Event()
 
-    def drain(stream, target):
+    def drain(stream, target, checked=None):
         while True:
             block = stream.read(4096)
             if not block:
@@ -476,6 +592,9 @@ def collect(child, task, deadline, owner, phase=None, maximum_deadline=None):
                 child.kill()
                 return
             target.extend(block)
+            if checked is not None and checked.feed(block):
+                child.kill()
+                return
 
     def send():
         try:
@@ -484,8 +603,8 @@ def collect(child, task, deadline, owner, phase=None, maximum_deadline=None):
         except (BrokenPipeError, OSError):
             failed.set()
 
-    threads = [threading.Thread(target=drain, args=pair, daemon=True)
-               for pair in ((child.stdout, output), (child.stderr, errors))]
+    threads = [threading.Thread(target=drain, args=args, daemon=True)
+               for args in ((child.stdout, output, guard), (child.stderr, errors))]
     threads.append(threading.Thread(target=send, daemon=True))
     for thread in threads:
         thread.start()
@@ -510,8 +629,12 @@ def collect(child, task, deadline, owner, phase=None, maximum_deadline=None):
     owner.close()
     for thread in threads:
         thread.join(timeout=0.5)
+    if guard is not None and guard.violation:
+        raise ValueError("worker isolation check failed: " + guard.violation)
     if failed.is_set() or any(thread.is_alive() for thread in threads):
         raise ValueError("worker output or input channel failed")
+    if guard is not None and guard.finish():
+        raise ValueError("worker isolation check failed: " + guard.violation)
     child.stdout.close()
     child.stderr.close()
     return bytes(output), bytes(errors)

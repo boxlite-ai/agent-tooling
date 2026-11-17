@@ -300,20 +300,39 @@ This runtime dependency avoids separate platform-specific JSON and process super
 
 #### Worker profile
 
-The installed `.agents/design-worker-policy.json` pins supported CLI versions and models.
+Any CLI release may run a worker; the runner checks the isolation each run reports instead of its version ([design #643](https://github.com/boxlite-ai/agent-tooling/issues/643)).
 
-| Host | Qualified versions | Live evidence |
+```mermaid
+sequenceDiagram
+  participant R as Worker runner
+  participant C as CLI, any release
+  participant B as Broker MCP
+  R->>C: launch with restricted flags and the task
+  C-->>R: system/init (Claude only) with tools, mcp_servers, plugins
+  R->>R: wrong report or no report, so stop and publish nothing
+  C->>B: mcp__probe__ calls
+  C-->>R: each tool_use (Claude) or item.started (Codex)
+  R->>R: non-broker action, so stop and publish nothing
+  C-->>R: final result, then schema check and publication
+```
+
+| Check | Claude | Codex |
 | --- | --- | --- |
-| Claude Code | 2.1.322, 2.1.325 | 2.1.325: auditor and advisor runs on macOS only, 2026-11-15, recorded in [design #571](https://github.com/boxlite-ai/agent-tooling/issues/571); Linux and Windows not run |
-| Codex | 0.162.1, 0.169.0 | 0.169.0: auditor and advisor runs through the owned hook on macOS arm64, 2026-11-17; Linux and Windows not run |
+| Isolation report | `system/init`: only `mcp__probe__*` tools, only the connected `probe` server, built-in plugins only, no skipped servers | Not reported by the CLI |
+| Action guard | Each `tool_use` is `mcp__probe__*` or `StructuredOutput` | Each item is a `probe` MCP call or a passive item (`agent_message`, `reasoning`, `todo_list`, `error`) |
+| Fail closed | A line that is not a JSON object, or no init before the first assistant message | A line that is not a JSON object, or any other item type |
 
-- The list is exact: a CLI whose reported version is absent cannot start a worker, and the runner prints `unqualified worker CLI version`.
-- To add a version, run one auditor and one advisor with it, then add it here and in the policy with that evidence.
-- A host on an unlisted version cannot audit the design for that change, so the machine owner first extends their installed policy.
+- Launch flags stay the preventive control; the checks detect a release that ignores them and block publication.
+- Unknown Claude event types pass, because only `tool_use` blocks act.
+- Each published result records `cli_version`, so its release stays traceable.
 
-Codex 0.169.0 qualification used an isolated npm installation and offline fixture repository, preserving the global CLI.
-Both roles published linked provenance with the existing isolation flags; this verifies launch, broker access, and result publication, not review quality.
-See [design #622](https://github.com/boxlite-ai/agent-tooling/issues/622) for the qualification scope.
+The installed `.agents/design-worker-policy.json` holds optional pins:
+
+| Key | Absent | Present |
+| --- | --- | --- |
+| `versions.<host>` | Any release runs | Only the listed releases run; others print `unqualified worker CLI version` |
+| `models.claude` | The CLI default model | That model; the shipped policy pins the `sonnet` alias |
+| `models.codex` | The top-priority listed API model from `codex debug models`; an unreadable catalog stops the run | That model |
 
 Executable discovery uses fixed installation locations, including native Codex npm bundles; `PATH`, `CODEX_BIN`, and tool-call endpoint overrides cannot choose workers.
 The runner hashes the CLI, interpreter, broker, policy, task rules, and generated startup inputs, rejecting replacements.
