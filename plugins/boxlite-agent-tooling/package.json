@@ -1,6 +1,6 @@
 {
   "name": "boxlite-agent-tooling",
-  "version": "0.1.59",
+  "version": "0.1.60",
   "description": "Shared BoxLite coding-agent skills, auditors, hooks, and repository tooling.",
   "private": true,
   "license": "Apache-2.0",
