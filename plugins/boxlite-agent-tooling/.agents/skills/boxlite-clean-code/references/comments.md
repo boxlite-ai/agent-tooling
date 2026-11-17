@@ -15,7 +15,7 @@ Write for readers who know the language but are new to the subsystem.
 - Keep explanations beside their owner; link longer background or proofs.
 - Prefer clarity over comment-length limits. Skip obvious narration, decorative
   diagrams, and examples that reveal nothing. No diagram quota per function;
-  the plugin's `guidance/visuals.md` lists comments that require one.
+  the `boxlite-writing` Form table marks texts that require one.
 
 ## Choose the representation
 

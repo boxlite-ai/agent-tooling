@@ -30,7 +30,7 @@ description: Write or shorten human-facing replies, docs, PRs, issues, and comme
 | Comparison or trade-offs | Table: shared attributes, decision, reason | Same scenario for each option | If topology, scale, or measured differences matter |
 | Conditions → outcomes | Decision table | Typical and boundary cases | Decision tree for dependent branches |
 | Flow or architecture | Whole system → relevant parts | One request crossing boundaries | Required: components, ownership, and connections |
-| Timing or concurrency | Ordered events with named actors | One retry, race, callback, or failure | Sequence diagram or timeline for order and overlap |
+| Timing or concurrency | Ordered events with named actors | One retry, race, callback, or failure | Required: sequence diagram or timeline for order and overlap |
 | States and transitions | State → trigger → resulting state | One object's lifecycle | State diagram for branching or looping transitions |
 | Hierarchy | Nested outline or parent/child table | One path through the hierarchy | Tree when nesting is hard to follow |
 | Change | Before → after → consequence | Identical input exposing changed behavior | Adjacent views if connections or layout change |

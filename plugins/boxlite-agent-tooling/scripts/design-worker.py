@@ -304,7 +304,10 @@ def task_text(captured, role, deadline, research):
     rules = spec + "\n\n" + "\n\n".join(sections) + "\n\n" + (prompts / "probe-privacy.md").read_text()
     for skill in ("boxlite-design-doc", "boxlite-writing", "boxlite-clean-code"):
         rules += "\n\nAssigned standard " + skill + ":\n" + (PLUGIN / ".agents/skills" / skill / "SKILL.md").read_text()
+    # The worker cannot read plugin files, so policies the criteria name are inlined.
+    rules += "\n\nAssigned guidance visuals.md:\n" + (PLUGIN / "guidance/visuals.md").read_text()
     rules = rules.replace("{{plugin_root}}/skills/boxlite-design-doc/SKILL.md", "the assigned design standard above")
+    rules = rules.replace("{{plugin_root}}/guidance/visuals.md", "the assigned guidance visuals.md below")
     request = captured["request"]
     record = {"repo_root": captured["root"], "design_url": captured["url"],
               "content_sha256": captured["snapshot"]["content_sha256"]}
@@ -385,7 +388,8 @@ def run(root, host, phase):
         pins += list((PLUGIN / ".claude/agents").glob("design-*.md"))
         pins += [PLUGIN / ".agents/skills" / skill / "SKILL.md" for skill in
                  ("boxlite-design-doc", "boxlite-writing", "boxlite-clean-code")]
-        installed = {str(path): file_hash(path) for path in pins}
+        pins.append(PLUGIN / "guidance/visuals.md")
+        installed ={str(path): file_hash(path) for path in pins}
         if installed[str(policy_path)] != policy_hash:
             raise ValueError("installed worker policy changed during setup")
         owner = processes.Owner(directory, task_id, str(Path(sys.executable).resolve()), bash,

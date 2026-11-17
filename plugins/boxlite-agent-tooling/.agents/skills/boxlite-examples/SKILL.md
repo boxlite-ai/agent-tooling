@@ -26,7 +26,7 @@ Choose the simplest useful form; UML is optional:
 | Where does each part fit? | ASCII layout with ranges, contents, mappings |
 | What value changes? | Before/after table or calculation |
 
-Do not require diagrams per step. The plugin's `guidance/visuals.md` lists texts that require one.
+Do not require diagrams per step. The `boxlite-writing` Form table marks texts that require one.
 
 - Keep prose brief; omit repeated structures and facts already visible.
 - Inspect and cite sources; label illustrative values and assumptions.
