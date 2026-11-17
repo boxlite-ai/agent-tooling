@@ -46,4 +46,12 @@ class Profiles(unittest.TestCase):
                     model=json.loads((root/"models.json").read_text())["models"][0]
                     self.assertEqual(model["shell_type"],"disabled")
                     self.assertIsNone(model["apply_patch_tool_type"])
+    def test_auditor_rules_inline_the_visuals_policy(self):
+        # Design #633: the auditor reads only inlined rules, so a path reference cannot reach it.
+        captured={"snapshot":{"body":"design","content_sha256":"0"*64},"request":{},"state":{},
+                  "root":"/fixture","url":"https://example.invalid/design"}
+        task=worker.task_text(captured,"auditor",0,[])
+        self.assertNotIn("{{plugin_root}}",task)
+        policy=(PLUGIN/"guidance/visuals.md").read_text()
+        self.assertIn(policy.strip().splitlines()[-1],task)
 if __name__ == "__main__": unittest.main()
