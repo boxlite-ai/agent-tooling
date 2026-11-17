@@ -16,7 +16,7 @@ flowchart LR
     G -->|Missing, failed, or stale| R[Resolve and retry]
 ```
 
-Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), and `hooks/generic-hooks.json` (Codex events, unknown host).
+Host manifests: `hooks/hooks.json` (Claude), `hooks/codex-hooks.json` (Codex), and `hooks/generic-hooks.json` (Codex events, unknown host); `hooks/omp-bridge.mjs` maps OMP events onto the generic routes with unknown identity.
 
 | Event | Script | Contract |
 | --- | --- | --- |
@@ -101,7 +101,7 @@ Local gates are workflow checks; unsupported routes and writable state prevent s
 
 | Boundary | Contract |
 | --- | --- |
-| Host to hook | `BOXLITE_HOOK_HOST` declares routing only. Claude prefers `CLAUDE_PLUGIN_ROOT`, Codex and generic prefer `PLUGIN_ROOT`, and both fall back to the alternate root. Session markers do not route. Codex may export both aliases. Generic identity stays unknown. |
+| Host to hook | `BOXLITE_HOOK_HOST` declares routing only. Claude prefers `CLAUDE_PLUGIN_ROOT`, Codex and generic prefer `PLUGIN_ROOT`, and both fall back to the alternate root. Session markers do not route. Codex may export both aliases. Generic identity stays unknown; the OMP bridge exports `omp`, which routes as unknown. |
 | Hook to agent | Dossier audits use parent dispatch through `.agents/lib/subagent.sh`; the fixed design action launches fresh CLI workers inside the host hook. |
 | Agent to auditor | Dossier auditors write their reports; design workers return JSON on an owned channel. Gates validate publication without authoring judgments. |
 

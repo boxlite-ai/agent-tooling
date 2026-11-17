@@ -1,0 +1,10 @@
+{
+  "name": "boxlite-agent-tooling",
+  "version": "0.1.59",
+  "description": "Shared BoxLite coding-agent skills, auditors, hooks, and repository tooling.",
+  "private": true,
+  "license": "Apache-2.0",
+  "omp": {
+    "extensions": ["./hooks/omp-bridge.mjs"]
+  }
+}
