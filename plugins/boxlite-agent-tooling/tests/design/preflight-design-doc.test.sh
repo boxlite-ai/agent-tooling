@@ -261,6 +261,21 @@ equals 'advice never writes the verdict state' \
   "$(perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)' "$git_dir/agent-tooling-design-audit.json")" "$state_before"
 expect_denial 'a failed review lists its findings' codex 'no source supports the retry limit'
 expect_denial 'a failed review lists its advice' codex 'cite the retry source'
+# Tracked paths past the Linux 128 KiB exec string limit still anchor (#629); the worker caps them at 1 MiB.
+printf 'a\nb\nc\n' > "$scratch/repo/anchor.txt"
+git -C "$scratch/repo" add anchor.txt
+empty_blob="$(git -C "$scratch/repo" hash-object -w --stdin </dev/null)"
+long_dir="$(printf 'd%.0s' {1..200})"
+for i in $(seq 1000); do printf '100644 %s\t%s/f%d\n' "$empty_blob" "$long_dir" "$i"; done |
+  git -C "$scratch/repo" update-index --index-info
+kept_line='Validation: x. Why: anchor.txt:3. Try: y.'
+said="$(jq -nc --arg sha "$(digest_of "$design")" --arg a "$kept_line" \
+  '{content_sha256:$sha, advice:[$a, "Validation: x. Why: anchor.txt:4. Try: y."]}' |
+  (cd "$scratch/repo" && bash "$fixture_cli" advice) 2>&1 >/dev/null)" \
+  || { printf 'FAIL recording advice with over 128 KiB of tracked paths: %s\n' "${said:0:300}"; fail=$((fail+1)); }
+equals 'file:line anchors resolve past the exec string limit' \
+  "$(jq -c '.advice' "$git_dir/agent-tooling-design-advice.json")" "$(jq -nc --arg a "$kept_line" '[$a]')"
+git -C "$scratch/repo" rm -rq --cached "$long_dir" anchor.txt && rm "$scratch/repo/anchor.txt"
 publish "$design"
 record_research PASS '[]'
 check Write 'edit source' deny

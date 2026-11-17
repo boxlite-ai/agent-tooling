@@ -84,6 +84,8 @@ Each live PASS/FAIL needs fresh advice after required stop/reflection handling: 
 
 Reject severity labels/unresolved local anchors; outside evidence remains unchecked; advice never mutates verdicts or enters `prior_findings`.
 
+Anchor checks read the design and tracked-file list from stdin, not the environment, so lists past Linux's 128 KiB exec string limit still resolve.
+
 Recorded advice opens the edit gate without a human wait.
 
 - The agent reports each advisory and advice item in its final reply and the PR.

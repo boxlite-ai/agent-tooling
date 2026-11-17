@@ -268,16 +268,18 @@ _design_doc_advice_status() { # advice path, root, branch, request JSON -> reque
 
 # Keeps an advice item only when its Why resolves: each quote without a URL appears in the
 # design (whitespace-normalized), each "finding N" exists, and each file:line names a tracked
-# file with that line. Skill rules and outside quotes stay unchecked.
+# file with that line. Skill rules and outside quotes stay unchecked. The design and file list
+# reach Perl on stdin, split by NUL: exec caps each environment string (Linux 128 KiB) (#629).
 _design_doc_advice_anchor() { # repo root, design body, findings count, advice JSON -> kept JSON
   local files kept='[]' item reason
   files="$(git -C "$1" ls-files 2>/dev/null)" || files=''
   while IFS= read -r item; do
     [[ -n "$item" ]] || continue
-    reason="$(DESIGN_BODY="$2" TRACKED_FILES="$files" perl -e '
+    reason="$(printf '%s\0%s' "$2" "$files" | perl -e '
       my ($item, $count, $root) = @ARGV;
+      my ($body, $tracked) = split /\0/, do { local $/; <STDIN> }, 2;
       my $why = $item =~ /\bWhy:\s*(.*?)(?:\bTry:|\z)/s ? $1 : "";
-      (my $body = $ENV{DESIGN_BODY}) =~ s/\s+/ /g;
+      $body =~ s/\s+/ /g;
       if ($why !~ m{https?://}i) {
         while ($why =~ /"([^"]+)"/g) {
           (my $quote = $1) =~ s/\s+/ /g;
@@ -287,7 +289,7 @@ _design_doc_advice_anchor() { # repo root, design body, findings count, advice J
       while ($why =~ /\bfinding\s+(\d+)/gi) {
         print("finding $1 does not exist"), exit 0 if $1 < 1 || $1 > $count;
       }
-      my @files = split /\n/, $ENV{TRACKED_FILES};
+      my @files = split /\n/, $tracked;
       while ($why =~ m{([\w./-]+\.[A-Za-z]+):(\d+)}g) {
         my ($name, $line) = ($1, $2);
         my $found = 0;
