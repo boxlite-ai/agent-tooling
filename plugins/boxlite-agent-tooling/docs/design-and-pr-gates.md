@@ -65,7 +65,7 @@ Specs own input/output; `design-criteria.md` owns steps/entry format (2048-byte 
 | Section | Rule | Severity |
 | --- | --- | --- |
 | How it works | Opens with a one-line overview and a concrete example before the mechanism. | Missing overview or example first: high; other readability gaps: low |
-| Related work | Opens with sourced best practice and stance, or evidence that none is established; one method table marks the chosen row Pick; cited Lessons close it. | Missing best-practice line or column: high |
+| Related work | Opens with sourced best practice and stance, or evidence that none is established; one method table gives each stance a Reason and marks the chosen row Pick; cited Lessons close it. | Missing best-practice line or column: high |
 | Projects column | Lists every eligible researched project under its cited methods; the auditor checks it against the log and sources. | Missing project or wrong grouping: high |
 
 Mechanism and trade-off gaps keep their usual severity.

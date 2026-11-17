@@ -85,7 +85,7 @@ Outline:
 | TL;DR | Problem → outcome |
 | Problem | Current behavior or unmet need, concrete evidence, and impact |
 | Scope | Constraints, non-goals, acceptance |
-| Related work and lessons | Sourced best practice and stance first, or evidence none is established. One table, one row per method with Projects, trade-offs, and stance. Compare options per principles, including reuse, simplify, and no change. Mark Pick. Cite Lessons on failures, constraints, counterevidence, and effects. |
+| Related work and lessons | Sourced best practice and stance first, or evidence none is established. One table row per method with Projects, trade-offs, stance, and Reason. Compare options per principles, including reuse, simplify, and no change. Mark Pick. Cite Lessons on failures, constraints, counterevidence, and effects. |
 | How it works | Overview line, concrete example, and definitions first. Explain mechanism, outcome, and trade-offs. Give secondary changes subsections. Define, link, or explain project terms before use. |
 | Validation | Claim or risk → check → expected result; observed versus planned; design-specific checks only |
 
