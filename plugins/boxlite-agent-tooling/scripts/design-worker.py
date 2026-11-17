@@ -389,7 +389,7 @@ def run(root, host, phase):
         pins += [PLUGIN / ".agents/skills" / skill / "SKILL.md" for skill in
                  ("boxlite-design-doc", "boxlite-writing", "boxlite-clean-code")]
         pins.append(PLUGIN / "guidance/visuals.md")
-        installed ={str(path): file_hash(path) for path in pins}
+        installed = {str(path): file_hash(path) for path in pins}
         if installed[str(policy_path)] != policy_hash:
             raise ValueError("installed worker policy changed during setup")
         owner = processes.Owner(directory, task_id, str(Path(sys.executable).resolve()), bash,
