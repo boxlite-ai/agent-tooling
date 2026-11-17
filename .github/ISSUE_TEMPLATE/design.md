@@ -19,9 +19,9 @@ about: Describe a problem, researched approach, and validation plan.
 
 <!-- State the sourced best practice and the design's stance, or give evidence none is established. Say if there is no prior art. -->
 
-| Method | Projects | Trade-offs | Stance |
-| --- | --- | --- | --- |
-| | | | |
+| Method | Projects | Trade-offs | Stance | Reason |
+| --- | --- | --- | --- | --- |
+| | | | | |
 
 <!-- Use one row per method. List every researched project under each cited method, including rejected methods. Include only names and evidence that are public or approved for every reader and delegate. -->
 <!-- Use “No applicable method” for unmatched projects and “None” for empty Projects cells. -->
