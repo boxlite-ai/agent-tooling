@@ -16,7 +16,7 @@ description: Design audit rules before any code edit.
 3. Search: check the stored log (tool, date, queries, stop status), known items, dispositions, query terms; re-run 1–2 logged queries.
 4. Search gaps: a missing protocol element; a missed probe item changing the approach, scope or alternatives.
 5. Claims: split load-bearing claims into atomic sub-claims; check fidelity (originals; quotes and `file:line` at HEAD).
-6. Also check source of truth, failure modes, transfer, local fit, unknowns, alternatives (best SOTA option, reuse, simplify, nothing).
+6. Also check source of truth, failure modes, transfer, local fit, unknowns, alternatives (best SOTA option, reuse, simplify, nothing), required visuals (`{{plugin_root}}/guidance/visuals.md`).
 7. Record: re-check evidence; drop what fails; record one entry per class of gap.
 
 ## Entries

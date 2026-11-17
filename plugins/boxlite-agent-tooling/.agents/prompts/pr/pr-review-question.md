@@ -6,4 +6,4 @@ description: Shared explanation check for local and GitHub PR review.
 ---
 
 Apply boxlite-writing. Does How it works use a minimal, concrete example to explain
-the current diff's mechanism or rationale?
+the current diff's mechanism or rationale, with the visual guidance/visuals.md requires?

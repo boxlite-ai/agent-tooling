@@ -505,6 +505,16 @@ if [[ -s "$compatibility_policy" ]]; then
 else
   bad "delivered compatibility policy exists in the plugin"
 fi
+# Design #633: both auditors apply the required-visuals policy from the plugin.
+visuals_policy="$PLUGIN_ROOT/guidance/visuals.md"
+check "native Git audit receives the visuals policy path" "$visuals_policy" "$commit_task_rendered"
+check "headless Git audit receives the visuals policy path" "$visuals_policy" "$commit_runner_rendered"
+check "design audit receives the visuals policy path" "$visuals_policy" "$design_task_rendered"
+if [[ -s "$visuals_policy" ]]; then
+  ok "delivered visuals policy exists in the plugin"
+else
+  bad "delivered visuals policy exists in the plugin"
+fi
 
 echo
 echo "## Plain-text asks never wait and keep a safe default (#334)"
