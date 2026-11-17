@@ -2620,9 +2620,61 @@ wait "$timeout_runner_job" 2>/dev/null; override_timeout_rc=$?
 kill "$watchdog" 2>/dev/null || true; wait "$watchdog" 2>/dev/null || true
 override_timeout_state="bounded=$override_timeout_bounded rc=$override_timeout_rc"
 override_timeout_state="$override_timeout_state lock=$([[ -e "$(state_of "$R" verdict-audit.lock)" ]] && echo present || echo gone)"
-check_eq "VERDICT_AUDITOR_CMD is bounded by the configured audit timeout" \
-  "$override_timeout_state" "bounded=yes rc=1 lock=gone"
+override_timeout_history="$(jq -r '.attempts[-1].outcome.verdict // "MISSING"' \
+  "$R"/.agents/state/audit-history-*.json 2>/dev/null || echo MISSING)"
+override_timeout_state="$override_timeout_state history=$override_timeout_history"
+# Only the runner's own deadline earns 124, and only after the attempt is recorded.
+check_eq "VERDICT_AUDITOR_CMD is bounded by the runner's deadline and reports it" \
+  "$override_timeout_state" "bounded=yes rc=124 lock=gone history=ERROR"
 rm -rf "$R"
+
+# A worker that exits 142 by itself has not met the runner's deadline: ordinary error.
+R="$(setup)"
+( cd "$R" && CLAUDE_PROJECT_DIR="$R" VERDICT_AUDITOR_TIMEOUT=5 \
+    VERDICT_AUDITOR_CMD='cat >/dev/null; exit 142' \
+    bash "$RUNNER" "$R/transcript.jsonl" "$SESSION" "$GENERATION" >/dev/null 2>&1 )
+check_eq "a worker's own exit 142 is an ordinary runner error" "$?" 1
+rm -rf "$R"
+
+# 124 needs both an ERROR attempt in history and a clean lease release. A BASH_ENV
+# DEBUG trap breaks one of them at the deadline; the runner must fall back to 1.
+write_expiry_fault_env() {  # repo
+  cat > "$1/expiry-fault-env.sh" <<'EXPIRY_FAULT_ENV'
+if [[ -z "${VERDICT_EXPIRY_FAULT_OWNER_PID:-}" ]]; then
+  export VERDICT_EXPIRY_FAULT_OWNER_PID="$$"
+  set -o functrace
+  verdict_expiry_fault_debug() {
+    [[ "$$" == "$VERDICT_EXPIRY_FAULT_OWNER_PID" ]] || return 0
+    case "$VERDICT_EXPIRY_FAULT:$BASH_COMMAND" in
+      history:'audit_reflection_gate "$reflection_context" "$reflection_terminal"'*)
+        reflection_context='{}' ;;
+      lease:'audit_supervisor_expired=true')
+        kill -KILL "$audit_lease_pid" 2>/dev/null ;;
+    esac
+  }
+  trap verdict_expiry_fault_debug DEBUG
+fi
+EXPIRY_FAULT_ENV
+}
+for expiry_fault in history lease; do
+  R="$(setup)"
+  write_expiry_fault_env "$R"
+  ( cd "$R" && CLAUDE_PROJECT_DIR="$R" BASH_ENV="$R/expiry-fault-env.sh" \
+      VERDICT_EXPIRY_FAULT="$expiry_fault" VERDICT_AUDITOR_TIMEOUT=1 \
+      VERDICT_AUDITOR_CMD='cat >/dev/null; sleep 30' \
+      bash "$RUNNER" "$R/transcript.jsonl" "$SESSION" "$GENERATION" >/dev/null 2>"$R/fault.err" )
+  expiry_fault_rc=$?
+  if [[ "$expiry_fault" == history ]]; then
+    grep -q 'could not record the expired audit' "$R/fault.err" \
+      && expiry_fault_rc="$expiry_fault_rc reported"
+    check_eq "an expiry whose history record fails exits 1, not 124" "$expiry_fault_rc" "1 reported"
+  else
+    # Lease loss is caught as a cancellation (143) or at the final release (1).
+    [[ "$expiry_fault_rc" == 1 || "$expiry_fault_rc" == 143 ]] && expiry_fault_rc=blocked
+    check_eq "an expiry that loses its lease never exits 124" "$expiry_fault_rc" blocked
+  fi
+  rm -rf "$R"
+done
 
 R="$(setup)"
 out="$( cd "$R" && CLAUDE_PROJECT_DIR="$R" PATH="$test_path" VERDICT_AUDITOR_CMD='' bash "$RUNNER" "$R/transcript.jsonl" "$SESSION" "$GENERATION" 2>&1 )"

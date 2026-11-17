@@ -50,6 +50,7 @@ Shared policy: `.agents/prompts/audit/deadline-policy.md`; advisor stays advice-
 | Deadline, confirmed blockers | FAIL. |
 | Deadline, no confirmed blockers | Valid PASS, even with zero checks; unfinished work becomes explicit advisories. |
 | Missing report, cancellation, crash, hard kill | Execution error; no automatic PASS. |
+| Headless verdict runner's own deadline | Execution error; Stop ends the reply with a human-only "not independently verified" notice unless a FAIL, open finding, parked FAIL or truncated snapshot holds it. |
 | Past deadline | Stop investigating; record and clean up owned tasks; block one record-less stop. |
 
 `.agents/lib/subagent.sh` owns budgets, recording windows, and delivery; `.agents/lib/subagent-identity.sh` shares identity; `.agents/lib/commit-push-stop.sh` records Git stops.
@@ -59,7 +60,7 @@ Shared policy: `.agents/prompts/audit/deadline-policy.md`; advisor stays advice-
 | Design/advisor | Content-bound task, default 900 seconds | `design-doc.sh verdict` / `advice`. |
 | Commit/push | Attempt link, default 900 seconds | Write naming `dossier_path`; owned cleanup. |
 | Native verdict | Immutable attempt initialized from live request | Bound dossier write/validation and owned cleanup. |
-| Headless verdict | `VERDICT_AUDITOR_TIMEOUT`, default 180 seconds | Recording window; default hard stop at 240 seconds. |
+| Headless verdict | `VERDICT_AUDITOR_TIMEOUT`, default 180 seconds | Recording window; the runner's completion monitor stops the group at 240 seconds and exits 124; worker alarms fire 15 seconds later as a backstop. |
 
 Matching re-entry preserves deadlines; headless recording gets `min(60, budget)` seconds within the 3540-second ceiling; startup/cleanup add elapsed time.
 
@@ -203,6 +204,8 @@ Every record is session-scoped: a Stop payload without a non-empty string `sessi
 | harness | noise-allow | Only harness/API-error text. |
 | assertion | match-block | Whole-line completion/initial confirmation; audit without classifier. |
 | runner | ERROR-block | Runner incomplete; safe metadata/diagnostic path. |
+| runner | TIMEOUT-allow | Runner exit 124: own deadline, verified teardown, ERROR recorded; no FAIL, open finding, parked FAIL or truncated snapshot; human-only notice. |
+| runner | TIMEOUT-reuse | Same reply and prompt epoch as a TIMEOUT-allow; same notice, no new audit. |
 | triage | oversized-block | Classifier cap exceeded; file-backed audit. |
 | triage | NO-allow | Model finds no trust-dependent conclusion; announce. |
 | triage | YES-block | Model finds conclusion requiring proof; synchronous audit. |
