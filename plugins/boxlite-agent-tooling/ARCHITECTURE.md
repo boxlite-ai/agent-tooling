@@ -170,6 +170,7 @@ The [result ownership contract](docs/design-and-pr-gates.md#result-ownership) bi
 | `.agents/skills/`, `.claude/agents/` | Complete skills and native auditor/advisor specs. |
 | [.githooks/](.githooks/README.md), [scripts/](scripts/README.md) | Git gates and maintenance commands. |
 | `guidance/workflow.md` | Consumer policy. |
+| [`guidance/visuals.md`](guidance/visuals.md) | When docs, comments, and designs need a visual; design and commit-push auditors apply it. |
 | [`tests/`](tests/), `tests/host-parity.test.sh`, `tests/architecture.test.sh` | Plugin suites by subsystem, asset parity, map coverage. |
 
 Entry paths stay stable. Runtime helpers live in subsystem directories. Tests resolve implementation paths from the plugin root.
