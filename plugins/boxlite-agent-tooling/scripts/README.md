@@ -120,7 +120,7 @@ Shell owners release locks on EXIT/INT/TERM; SIGKILL may prevent cleanup; no hot
 
 | Change | Required action |
 | --- | --- |
-| Release | Bump generic/Claude/Codex manifests and both version fields in Claude/Copilot marketplaces; Codex marketplace follows `main`; `git grep -n '"version"' -- '*plugin.json' '*marketplace.json'` must show seven equal values. |
+| Release | Bump generic/Claude/Codex/OMP manifests and both version fields in Claude/Copilot marketplaces; Codex marketplace follows `main`; `git grep -n '"version"' -- '*plugin.json' '*marketplace.json' '*/package.json'` must show eight equal values. |
 | Merge after a bump | It shares that version, so hosts that installed it never load the merge; bump again before adoption. |
 | Auditor task/dossier format | Bump version so stale sessions request reload instead of receiving incompatible tasks. |
 | Host packaging | Run parity, including symlink-free copies; install/reinstall using real CLI in empty isolated Codex home, checking fresh `skills/list` and `hooks/list`. |
