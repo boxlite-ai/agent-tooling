@@ -209,16 +209,18 @@ Headless classification and both runners read the optional user file
 | Claude Code | `--model`/`--effort`; a pinned effort runs without `CLAUDE_CODE_EFFORT_LEVEL`, and diagnostics name the dropped value. |
 | Codex | `-c model=` and `-c model_reasoning_effort=` after `--ignore-user-config`. |
 | `VERDICT_AUDITOR_CMD` | Receives `AUDITOR_MODEL`/`AUDITOR_EFFORT`; a dossier may echo them as `auditor_model`/`auditor_effort`, and a differing echo has no authority. |
-| Diagnostics | Each record carries `auditor`: model, effort, source, and whether the pair was observed. |
+| Diagnostics | Each record carries `auditor`: model, effort, source, whether the pair was observed, and on the Claude route `resolved_model`, the model the CLI ran behind a name like `sonnet`. |
 
 Rows changed after replays:
 
 | Row | Setting | Evidence |
 | --- | --- | --- |
 | `verdict-auditor`, Claude Code | `claude-sonnet-5` at `low` | [14 replays on 2026-11-15](https://github.com/boxlite-ai/agent-tooling/issues/474#issuecomment-6882184780): `low` published a dossier on 3 of 4 turns, `medium` on 1 of 4, `xhigh` on 0 of 4 |
+| `verdict-auditor`, Claude Code | `sonnet` at `low` | [Design #643](https://github.com/boxlite-ai/agent-tooling/issues/643), 2026-11-17, against `claude-sonnet-5`: published on 3 of 3 real turns vs 2 of 3, in 58–79 s vs 157–197 s; both caught a planted false claim 3 of 3 |
+| `verdict-classifier`, Claude Code | `haiku` at `low` | Design #643, 56 real turn-ending messages against `claude-haiku-4-5-20251001`: 0 vs 5 unparsable or timed-out answers; median 3.3 s vs 6.8 s |
 
-Known gap for that row: a planted false claim was not caught at `low` within the 180-second budget.
-It ships by maintainer decision, recorded in #474, because `xhigh` checked nothing in those replays.
+Model cells use family names, which follow each new generation; a row changes only after a replay like those above.
+The #474 gap, a planted claim missed at `low` within 180 seconds, did not recur in the #643 replays.
 
 - **Diagnostic limits:** each tail is at most 4 KiB; the shared log rotates at its existing 1 MiB bound. Stop errors name this local file. Diagnostics never grant dossier authority.
 

@@ -13,6 +13,14 @@ if "--version" in sys.argv:
     reported = directory / "version"
     print(reported.read_text() if reported.exists() else "codex-cli 0.162.1; Claude Code 2.1.322")
     sys.exit(0)
+if sys.argv[1:3] == ["debug", "models"]:
+    # Codex ranks its catalog by priority; hidden and non-API entries never become the default.
+    print(json.dumps({"models": [
+        {"slug": "fixture-hidden", "priority": 0, "visibility": "hide", "supported_in_api": True},
+        {"slug": "fixture-second", "priority": 2, "visibility": "list", "supported_in_api": True},
+        {"slug": "fixture-top", "priority": 1, "visibility": "list", "supported_in_api": True}]}))
+    sys.exit(0)
+(directory / "model").write_text(sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else "")
 task = sys.stdin.read()
 mode = (directory / "mode").read_text() if (directory / "mode").exists() else "normal"
 (directory / "observed").write_text(mode)
@@ -105,7 +113,35 @@ if mode == "change-document":
 if mode == "oversized":
     print("x" * 1048577)
     sys.exit(0)
+if mode == "garbage-line":
+    print("not a JSON event")
 if codex:
+    started = {"type": "mcp_tool_call", "server": "probe", "tool": "research_list", "status": "in_progress"}
+    if mode == "command-item":
+        started = {"type": "command_execution", "command": "cat ~/.ssh/id_rsa", "status": "in_progress"}
+    if mode == "unknown-item":
+        started = {"type": "teleport", "status": "in_progress"}
+    if mode == "other-mcp":
+        started = {"type": "mcp_tool_call", "server": "filesystem", "tool": "read_file", "status": "in_progress"}
+    print(json.dumps({"type": "item.started", "item": started}))
     print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(result)}}))
 else:
-    print(json.dumps({"is_error": False, "structured_output": result}))
+    # Claude stream-json: system/init, assistant tool calls, then one result event.
+    # Shaped like Claude Code 2.1.326's real init under the worker's flags.
+    init = {"type": "system", "subtype": "init", "model": "fixture-resolved",
+            "tools": ["StructuredOutput", "mcp__probe__research_list", "mcp__probe__source_read"],
+            "mcp_servers": [{"name": "probe", "status": "connected", "source": "dynamic"}],
+            "plugins": [{"name": "builtin-fixture", "path": "builtin"}], "agents": ["Explore"], "skills": ["review"]}
+    if mode == "extra-tool":
+        init["tools"].append("Bash")
+    if mode == "extra-mcp":
+        init["mcp_servers"].append({"name": "filesystem", "status": "connected"})
+    if mode == "user-plugin":
+        init["plugins"].append({"name": "user-plugin", "path": "/home/user/plugin"})
+    if mode != "no-init":
+        print(json.dumps(init))
+    calls = ["mcp__probe__research_list", "StructuredOutput"] + (["Bash"] if mode == "bash-call" else [])
+    for name in calls:
+        print(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": name}]}}))
+    print(json.dumps({"type": "rate_limit_event"}))
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "structured_output": result}))
