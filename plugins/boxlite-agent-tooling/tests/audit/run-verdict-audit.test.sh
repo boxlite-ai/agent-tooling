@@ -119,6 +119,26 @@ for usage_case in session-only none; do
 done
 rm -rf "$R"
 
+case "$OSTYPE" in
+  darwin*|linux*)
+    R="$(setup)"
+    ( cd "$R" && CLAUDE_PROJECT_DIR="$R" \
+        VERDICT_AUDITOR_CMD='touch "$CLAUDE_PROJECT_DIR/model-launched"' \
+        perl -e 'alarm 10; exec @ARGV' bash "$RUNNER" \
+          "$R/transcript.jsonl" "$SESSION" "$GENERATION" \
+          16>"$R/foreign-fd" >"$R/occupied.out" 2>"$R/occupied.err" )
+    occupied_rc=$?
+    occupied_state="rc=$occupied_rc"
+    [[ ! -e "$R/model-launched" ]] && occupied_state+=" model=absent"
+    [[ ! -e "$(state_of "$R" last-verdict.json)" ]] && occupied_state+=" dossier=absent"
+    grep -Fq 'private descriptor 16 is occupied' "$R/occupied.err" \
+      && occupied_state+=" diagnostic=present"
+    check_eq 'occupied controller descriptor blocks Stop auditor launch' \
+      "$occupied_state" 'rc=1 model=absent dossier=absent diagnostic=present'
+    rm -rf "$R"
+    ;;
+esac
+
 echo
 echo "## Prompt inputs stay data"
 PROMPT_DOSSIER_STUB='prompt="$(cat)"

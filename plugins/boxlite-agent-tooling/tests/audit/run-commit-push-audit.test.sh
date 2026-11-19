@@ -637,6 +637,18 @@ case "$OSTYPE" in
       bad "controller setup failure blocks auditor launch (rc=$resource_case_rc finding=$resource_case_finding)"
     fi
     rm -rf "$R_CONTROLLER_SETUP"
+
+    R_CONTROLLER_OCCUPIED="$(setup)"; install_resource_stub "$R_CONTROLLER_OCCUPIED"
+    run_resource_case "$R_CONTROLLER_OCCUPIED" capresult 30 40 \
+      16>"$R_CONTROLLER_OCCUPIED/foreign-fd"
+    if [[ "$resource_case_rc" == 1 && "$resource_case_verdict" == FAIL \
+        && "$resource_case_finding" == *'process supervision failed'* \
+        && ! -e "$R_CONTROLLER_OCCUPIED/resource-parent.pid" ]]; then
+      ok 'occupied controller descriptor blocks commit/push auditor launch'
+    else
+      bad "occupied controller descriptor blocks commit/push auditor launch (rc=$resource_case_rc finding=$resource_case_finding)"
+    fi
+    rm -rf "$R_CONTROLLER_OCCUPIED"
     ;;
 esac
 

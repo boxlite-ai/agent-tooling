@@ -42,3 +42,4 @@ jobs:
           bash plugins/boxlite-agent-tooling/tests/session/stop-gate.test.sh
           bash plugins/boxlite-agent-tooling/tests/lib/concise-writing.test.sh
           bash plugins/boxlite-agent-tooling/tests/lib/reply-summary.test.sh
+          bash plugins/boxlite-agent-tooling/tests/lib/audit-process-group.test.sh

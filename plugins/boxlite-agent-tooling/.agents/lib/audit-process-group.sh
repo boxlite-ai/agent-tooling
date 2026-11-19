@@ -17,7 +17,19 @@ audit_group_uses_controller() {
 }
 
 audit_group_open_controller() {  # private run directory
-  local request="$1/group-request" lifetime="$1/group-lifetime"
+  local request="$1/group-request" lifetime="$1/group-lifetime" descriptor
+  # Bash saves redirected function streams on close-on-exec descriptors starting at10.
+  # Inspect in this shell: a child cannot see those saved handles.
+  if [[ ! -d /dev/fd || ! -r /dev/fd || ! -x /dev/fd ]]; then
+    printf 'audit controller: cannot inspect /dev/fd\n' >&2
+    return 1
+  fi
+  for descriptor in 12 13 14 15 16 17; do
+    if [[ -e /dev/fd/$descriptor || -L /dev/fd/$descriptor ]]; then
+      printf 'audit controller: private descriptor %s is occupied\n' "$descriptor" >&2
+      return 1
+    fi
+  done
   if ! mkfifo "$request" "$lifetime"; then
     rm -f "$request" "$lifetime"
     return 1
