@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import {
   CLAUDE_TOOL_NAMES,
   canonicalToolName,
+  evidenceModeFromProbe,
   mapStopOutcome,
   preToolUsePayload,
   routesForTool,
@@ -78,16 +79,21 @@ test('text extraction keeps only text blocks', () => {
   assert.equal(textOfContent('not an array'), '');
 });
 
-test('stop payloads carry the final reply as the only evidence', () => {
+test('stop payloads switch evidence by containment capability', () => {
   const event = { stop_hook_active: false, last_assistant_message: { content: [{ type: 'text', text: 'Done.' }] } };
-  const withReply = stopPayload(BASE, event);
-  assert.equal(withReply.last_assistant_message, 'Done.');
-  assert.equal(withReply.stop_hook_active, false);
-  // OMP session files are unreadable to the gate parser; evidence stays payload-only.
-  assert.equal(withReply.transcript_path, '');
-  const empty = stopPayload(BASE, { stop_hook_active: true, last_assistant_message: { content: [] } });
+  const base = { ...BASE, transcript_path: '/session.jsonl' };
+  const transcript = stopPayload(base, event, 'transcript');
+  assert.equal(transcript.transcript_path, '/session.jsonl');
+  assert.equal(transcript.last_assistant_message, 'Done.');
+  const payload = stopPayload(base, event, 'payload');
+  // An unusable transcript path returns a false-truncated snapshot that forces
+  // an audit on every settle, so restricted hosts send the reply only.
+  assert.equal(payload.transcript_path, '');
+  const empty = stopPayload(base, { stop_hook_active: true, last_assistant_message: { content: [] } }, 'payload');
   assert.equal('last_assistant_message' in empty, false);
   assert.equal(empty.stop_hook_active, true);
+  assert.equal(evidenceModeFromProbe('linux-pid-namespace'), 'transcript');
+  assert.equal(evidenceModeFromProbe(''), 'payload');
 });
 
 test('stop outcome mapping follows the gate contract', () => {
