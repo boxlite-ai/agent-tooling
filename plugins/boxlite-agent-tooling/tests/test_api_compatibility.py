@@ -1,7 +1,9 @@
 """Exercise compatibility enforcement through the commit/push boundary."""
+import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -121,6 +123,77 @@ class StopCompatibilityTests(RepositoryFixture, unittest.TestCase):
 
 
 class CompatibilityTests(RepositoryFixture, unittest.TestCase):
+    def test_discovery_reuses_side_trees_for_multiple_roots(self):
+        schema = self.body_schema()
+        shared = {"openapi": "3.1.1", "info": {"title": "Shared", "version": "1"},
+                  "paths": {}, "components": {"schemas": {"Input": schema}}}
+        (self.root / "openapi/shared.openapi.yaml").write_text(json.dumps(shared))
+        self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"] = {
+            "$ref": "./shared.openapi.yaml#/components/schemas/Input"}
+        self.write_spec()
+        second = self.root / "openapi/second.openapi.yaml"
+        second.write_text(json.dumps(self.spec))
+        self.commit_base("both roots share a reference")
+        self.spec["info"]["description"] = "Compatible metadata"
+        self.write_spec()
+        second.write_text(json.dumps(self.spec))
+        tool_dir = self.root / "bin"
+        tool_dir.mkdir()
+        git = tool_dir / "git"
+        git.write_text("#!/usr/bin/env bash\n"
+                       "if [[ $1 == init ]]; then printf '%s\\n' \"${PWD##*/}\" >> \"$API_GIT_CALLS\"; fi\n"
+                       f"exec {shlex.quote(shutil.which('git'))} \"$@\"\n")
+        git.chmod(0o755)
+        calls = self.root / "git-calls"
+        result = self.audit("check", {"API_GIT_CALLS": str(calls),
+                                     "PATH": str(tool_dir) + os.pathsep + os.environ["PATH"]})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        stores = calls.read_text().splitlines()
+        self.assertEqual(stores.count("discovery.git"), 1, stores)
+        self.assertEqual(stores.count("replay.git"), 2, stores)
+
+    def test_tracked_openapi_reference_uses_each_snapshot(self):
+        shared = self.root / "openapi" / "shared.openapi.yaml"
+        sibling = {"openapi": "3.1.1", "info": {"title": "Shared", "version": "1"},
+                   "paths": {}, "components": {"schemas": {"Input": self.body_schema()}}}
+        shared.write_text(json.dumps(sibling))
+        self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"] = {
+            "$ref": "./shared.openapi.yaml#/components/schemas/Input"}
+        self.write_spec()
+        self.commit_base("reference tracked schema")
+        self.spec["info"]["description"] = "Document box creation"
+        self.write_spec()
+        sibling["components"]["schemas"]["Input"]["properties"]["enabled"]["default"] = True
+        shared.write_text(json.dumps(sibling))
+
+        result = self.audit("inspect")
+        report = json.loads(result.stdout)
+        self.assertTrue(report.get("requires_confirmation"), result.stdout + result.stderr)
+        self.assertTrue(any("default" in item for item in report["errors"]), report)
+
+        sibling["components"]["schemas"]["Input"]["properties"]["enabled"]["default"] = False
+        shared.write_text(json.dumps(sibling))
+        result = self.audit("inspect")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_local_reference_fallback_requires_tracked_contracts(self):
+        document = self.root / "openapi" / "outside.yaml"
+        document.write_text(json.dumps({"components": {"schemas": {"Input": self.body_schema()}}}))
+        for ref in (
+            "./outside.yaml#/components/schemas/Input",
+            "../../outside.yaml#/components/schemas/Input",
+            "https://example.invalid/outside.yaml#/components/schemas/Input",
+        ):
+            with self.subTest(ref=ref):
+                self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"] = {
+                    "$ref": ref}
+                self.write_spec()
+                result = self.audit("inspect")
+                report = json.loads(result.stdout)
+                self.assertEqual(report["status"], "FAIL", result.stdout + result.stderr)
+                self.assertFalse(report.get("requires_confirmation"), result.stdout + result.stderr)
+                self.assertIn("ref", " ".join(report["errors"]).lower())
+
     def test_only_the_specification_is_read(self):
         # boxlite tracks submodules and leaves build outputs untracked; neither may block the check.
         sha = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
@@ -132,6 +205,26 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
         result = self.audit()
         self.assertIn("openapi/box.openapi.yaml: 1 breaking API finding", result.stderr)
         self.assertIn("human confirmation required", result.stderr)
+
+    def test_matching_gitlink_is_excluded_and_cannot_resolve(self):
+        sha = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        link = "openapi/shared.openapi.yaml"
+        command(["git", "update-index", "--add", "--cacheinfo", f"160000,{sha},{link}"],
+                self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "matching gitlink"],
+                self.root, check=True)
+        command(["git", "branch", "-f", "main", "HEAD"], self.root, check=True)
+        self.spec["info"]["description"] = "compatible change"
+        self.write_spec()
+        result = self.audit("check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"] = {
+            "$ref": "./shared.openapi.yaml#/components/schemas/Input"}
+        self.write_spec()
+        result = self.audit("inspect")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(json.loads(result.stdout).get("requires_confirmation"))
 
     def test_default_change_needs_confirmation_even_without_breaking_findings(self):
         self.body_schema()["properties"]["enabled"]["default"] = True
@@ -210,7 +303,26 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
         command(["git", "add", "openapi/box.openapi.yaml"], self.root, check=True)
         self.spec = specification()
         self.write_spec()
-        self.assertNotEqual(self.audit("commit").returncode, 0)
+        result = self.audit("commit")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("staged OpenAPI differs from the working copy", result.stderr)
+
+    def test_staged_contract_deletion_with_working_file_blocks(self):
+        command(["git", "rm", "--cached", "openapi/box.openapi.yaml"], self.root, check=True)
+        self.assertTrue((self.root / "openapi/box.openapi.yaml").is_file())
+        result = self.audit("commit")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("staged OpenAPI differs from the working copy", result.stderr)
+
+    def test_unreadable_tree_does_not_skip_contract_discovery(self):
+        command(["git", "rm", "openapi/box.openapi.yaml"], self.root, check=True)
+        self.commit_base("remove fixture contract")
+        self.assertEqual(self.audit().returncode, 0)
+        tree = command(["git", "rev-parse", "HEAD^{tree}"], self.root, check=True).stdout.strip()
+        (self.root / ".git/objects" / tree[:2] / tree[2:]).unlink()
+        result = self.audit()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("unreadable OpenAPI snapshot", result.stderr)
 
     def test_example_value_named_default_is_not_a_contract_default(self):
         self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["example"] = {"default": False}
@@ -243,6 +355,133 @@ class CompatibilityTests(RepositoryFixture, unittest.TestCase):
 
 
 class InspectionEvidenceTests(RepositoryFixture, unittest.TestCase):
+    def test_commit_msg_rechecks_newly_applicable_api_comparison(self):
+        base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        self.body_schema()["properties"]["new-field"] = {"type": "string"}
+        self.write_spec()
+        self.commit_base("API already on main")
+        (self.root / "notes").write_text("No staged API change")
+        command(["git", "add", "notes"], self.root, check=True)
+        subject = "test: commit notes"
+        message = self.root / "commit-message"
+        message.write_text(subject + "\n")
+        state = self.root / ".agents/state"
+        state.mkdir(parents=True)
+        diff = subprocess.run(["git", "diff", "--cached", "--no-ext-diff"], cwd=self.root,
+                              capture_output=True, check=True).stdout
+        (state / "last-audit.json").write_text(json.dumps({
+            "command_kind": "commit", "verdict": "PASS",
+            "diff_hash": hashlib.sha256(diff).hexdigest(),
+            "commit_subject_hash": hashlib.sha256(subject.encode()).hexdigest(),
+        }))
+        command(["git", "update-ref", "refs/heads/main", base], self.root, check=True)
+        result = command(["bash", str(self.plugin / ".githooks/commit-msg"), str(message)], self.root,
+                         env=dict(os.environ, CLAUDECODE="1"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("OpenAPI comparison source changed after pre-commit", result.stderr)
+
+    def test_native_task_includes_api_source_without_history(self):
+        base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        self.body_schema()["properties"]["new-field"] = {"type": "string"}
+        self.write_spec()
+        command(["git", "add", "openapi"], self.root, check=True)
+        tree = command(["git", "write-tree"], self.root, check=True).stdout.strip()
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.root))
+        for key in ("AUDITOR_SESSION_SCOPE", "AUDITOR_PROMPT_EPOCH", "CODEX_THREAD_ID", "CODEX_SANDBOX"):
+            env.pop(key, None)
+        result = command(["bash", str(self.plugin / ".agents/hooks/preflight-commit-push.sh")], self.root,
+                         input=json.dumps({"tool_input": {"command": "git commit -m 'test: API edit'"}}),
+                         env=env)
+        tasks = list((self.root / ".agents/state/audit-tasks").glob("*.md"))
+        self.assertEqual(len(tasks), 1, result.stdout + result.stderr)
+        task = json.loads(tasks[0].read_text().split("UNTRUSTED_TASK_INPUT_JSON:\n", 1)[1].splitlines()[0])
+        self.assertNotIn("history_context", task)
+        self.assertEqual(json.loads(task.get("api_source_json", "null")),
+                         {"kind": "commit", "base": base, "head": base, "candidate": tree})
+
+    def test_bound_evidence_uses_the_gate_base_and_reads_snapshots_into_scratch(self):
+        shared_path = self.root / "openapi/shared.openapi.yaml"
+        schema = self.body_schema()
+        shared = {"openapi": "3.1.1", "info": {"title": "Shared", "version": "1"},
+                  "paths": {}, "components": {"schemas": {"Input": schema}}}
+        shared_path.write_text(json.dumps(shared))
+        self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"] = {
+            "$ref": "./shared.openapi.yaml#/components/schemas/Input"}
+        self.write_spec()
+        self.commit_base("referenced schema")
+        base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+
+        schema["properties"]["added"] = {"type": "string"}
+        shared_path.write_text(json.dumps(shared))
+        self.spec["info"]["description"] = "staged root"
+        self.write_spec()
+        command(["git", "add", "openapi"], self.root, check=True)
+        tree = command(["git", "write-tree"], self.root, check=True).stdout.strip()
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "candidate"],
+                self.root, check=True)
+        outgoing = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+
+        schema["properties"]["working-only"] = {"type": "string"}
+        shared_path.write_text(json.dumps(shared))
+        self.spec["info"]["description"] = "unstaged root"
+        self.write_spec()
+        scratch = self.root / "scratch"
+        scratch.mkdir()
+        checker = ["bash", str(self.plugin / "scripts/api-compatibility.sh")]
+        deadlines = scratch / "deadlines"
+        oasdiff = scratch / "oasdiff"
+        actual_oasdiff = shutil.which(os.environ.get("OASDIFF_BIN", "oasdiff"))
+        oasdiff.write_text("#!/usr/bin/env bash\n"
+                           "printf '%s\\n' \"${BOXLITE_API_EVIDENCE_DEADLINE:-}\" >> \"$API_DEADLINE_LOG\"\n"
+                           f"exec {shlex.quote(actual_oasdiff)} \"$@\"\n")
+        oasdiff.chmod(0o755)
+        env = dict(os.environ, OASDIFF_BIN=str(oasdiff), API_DEADLINE_LOG=str(deadlines))
+        env.pop("BOXLITE_API_EVIDENCE_DEADLINE", None)
+        for kind, head, candidate in (("commit", base, tree), ("push", outgoing, outgoing)):
+            with self.subTest(kind=kind):
+                deadlines.write_text("")
+                binding = {"kind": kind, "base": base, "head": head, "candidate": candidate}
+                result = command([*checker, "audit-evidence", str(self.root),
+                                  json.dumps(binding), str(scratch)], self.root, env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                observed = set(deadlines.read_text().splitlines())
+                self.assertEqual(len(observed), 1, observed)
+                self.assertTrue(observed.pop().isdigit(), "native evidence subprocesses need one deadline")
+                report = json.loads(result.stdout)
+                self.assertEqual(report["source"], binding)
+                root = next(item for item in report["specifications"] if item["path"].endswith("box.openapi.yaml"))
+                artifacts = root["artifacts"]
+                entries = json.loads(Path(artifacts["manifest"]).read_text())
+                self.assertEqual(len(entries), 4)
+                for entry in entries:
+                    revision = base if entry["side"] == "before" else candidate
+                    committed = command(["git", "show", f'{revision}:{entry["path"]}'],
+                                        self.root, check=True).stdout.encode()
+                    artifact = Path(artifacts["manifest"]).parent / entry["file"]
+                    self.assertTrue(artifact.is_relative_to(scratch))
+                    self.assertEqual(artifact.read_bytes(), committed)
+                    self.assertEqual(entry["sha256"], hashlib.sha256(committed).hexdigest())
+                changelog = json.loads(Path(artifacts["changelog"]).read_text())
+                self.assertTrue(any(entry.get("id") == "new-optional-request-property"
+                                    and entry["path"] == "/boxes" for entry in changelog), changelog)
+                report_path = scratch / "report.json"
+                report_path.write_bytes(result.stdout.encode())
+                digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
+                verify = [*checker, "verify-evidence", str(report_path), digest]
+                verified = command(verify, self.root)
+                self.assertEqual(verified.returncode, 0, verified.stderr)
+                self.assertEqual(json.loads(verified.stdout), report)
+                files = {"report": report_path, **{key: Path(path) for key, path in artifacts.items()}}
+                for name in ("report", "changelog", "breaking", "diff", "manifest"):
+                    with self.subTest(tampered=name):
+                        path = files[name]
+                        original = path.read_bytes()
+                        path.write_bytes(original + b" ")
+                        rejected = command(verify, self.root)
+                        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                        self.assertIn(f"OpenAPI evidence digest mismatch: {path.name}", rejected.stderr)
+                        path.write_bytes(original)
+
     def test_native_reports_and_exact_snapshots_survive_workspace_changes(self):
         self.body_schema()["properties"]["extra"] = {"type": ["boolean", "null"], "default": False}
         self.write_spec()
@@ -426,6 +665,100 @@ class LineEndingCompatibilityTests(RepositoryFixture, unittest.TestCase):
 
 
 class PushCompatibilityTests(RepositoryFixture, unittest.TestCase):
+    def test_unchanged_matching_symlink_does_not_block_push(self):
+        link = self.root / "openapi/link.openapi.yaml"
+        target = {"openapi": "3.1.1", "info": {"title": "Shared", "version": "1"},
+                  "paths": {}, "components": {"schemas": {"Input": self.body_schema()}}}
+        (self.root / "openapi/target.openapi.yaml").write_text(json.dumps(target))
+        link.symlink_to("target.openapi.yaml")
+        self.commit_base("add unrelated link")
+        base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        self.spec["info"]["description"] = "Compatible metadata"
+        self.write_spec()
+        command(["git", "add", "openapi"], self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "edit contract"],
+                self.root, check=True)
+        head = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        checker = ["bash", str(self.plugin / "scripts/api-compatibility.sh"), "push-ref", str(self.root)]
+        accepted = command([*checker, head, base], self.root)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.spec["paths"]["/boxes"]["post"]["requestBody"]["content"]["application/json"]["schema"] = {
+            "$ref": "./link.openapi.yaml#/components/schemas/Input"}
+        self.write_spec()
+        command(["git", "add", "openapi"], self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "reference symlink"],
+                self.root, check=True)
+        relative = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        rejected = command([*checker, relative, head], self.root)
+        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+        self.assertIn("ref", rejected.stderr.lower())
+
+    def test_only_gitlink_needs_no_comparison_ref(self):
+        command(["git", "rm", "openapi/box.openapi.yaml"], self.root, check=True)
+        head = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        command(["git", "branch", "-D", "main"], self.root, check=True)
+        command(["git", "update-index", "--add", "--cacheinfo", f"160000,{head},linked.openapi.yaml"],
+                self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "gitlink only"],
+                self.root, check=True)
+        head = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        checker = ["bash", str(self.plugin / "scripts/api-compatibility.sh")]
+        for args in (("commit", head), ("push", head, "0" * len(head))):
+            with self.subTest(args=args):
+                result = command([*checker, "audit-base", str(self.root), *args], self.root)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "")
+
+    def test_gitlink_only_push_from_another_checkout_needs_no_api_evidence(self):
+        base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        path = "linked.openapi.yaml"
+        command(["git", "update-index", "--add", "--cacheinfo", f"160000,{base},{path}"],
+                self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "gitlink only"],
+                self.root, check=True)
+        outgoing = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        command(["git", "switch", "main"], self.root, check=True)
+        checker = ["bash", str(self.plugin / "scripts/api-compatibility.sh")]
+        for remote in (base, "0" * len(base)):
+            for operation, args in (("push-ref", []), ("audit-base", ["push"])):
+                with self.subTest(remote=remote, operation=operation):
+                    result = command([*checker, operation, str(self.root), *args, outgoing, remote], self.root)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout, "")
+
+    def test_push_audit_base_follows_validated_outgoing_ranges(self):
+        base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        command(["git", "switch", "-c", "notes"], self.root, check=True)
+        (self.root / "notes.txt").write_text("Non-API change")
+        command(["git", "add", "notes.txt"], self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "notes"],
+                self.root, check=True)
+        outgoing = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        command(["git", "switch", "feature"], self.root, check=True)
+        self.spec["info"]["description"] = "API change on the checked-out branch"
+        self.write_spec()
+        command(["git", "add", "openapi"], self.root, check=True)
+        command(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", "API change"],
+                self.root, check=True)
+        head = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
+        checker = ["bash", str(self.plugin / "scripts/api-compatibility.sh")]
+        unrelated = command([*checker, "push-ref", str(self.root), outgoing, base], self.root)
+        self.assertEqual(unrelated.returncode, 0, unrelated.stderr)
+        preview = command([*checker, "audit-base", str(self.root), "push", head], self.root, check=True)
+        self.assertEqual(preview.stdout.strip(), base)
+        context = self.root / "push.diff"
+        updates = (("", outgoing, base, ""), ("", head, head, ""),
+                   ("", head, base, base), (" ", head, base, ""))
+        for prefix, tip, previous, expected in updates:
+            with self.subTest(tip=tip, previous=previous, prefix=prefix):
+                context.write_text(f"{prefix}## ref-update refs/heads/test {tip} refs/heads/test {previous}\n")
+                digest = hashlib.sha256(context.read_bytes()).hexdigest()
+                args = [*checker, "audit-push-base", str(self.root), head, str(context), digest]
+                result = command(args, self.root, check=True)
+                self.assertEqual(result.stdout.strip(), expected)
+        context.write_text("changed ref evidence")
+        self.assertNotEqual(command(args, self.root).returncode, 0)
+
     def commit_breaking_change(self):
         base = command(["git", "rev-parse", "HEAD"], self.root, check=True).stdout.strip()
         del self.spec["paths"]["/boxes"]

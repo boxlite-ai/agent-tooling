@@ -68,7 +68,8 @@ setup() {  # [object format] -> repo path
   fi
   git -C "$d" config user.email t@t.test
   git -C "$d" config user.name tester
-  mkdir -p "$d/.agents/hooks/audit" "$d/.agents/state" "$d/.agents/lib" "$d/.agents/prompts" "$d/bin"
+  mkdir -p "$d/.agents/hooks/audit" "$d/.agents/state" "$d/.agents/lib" "$d/.agents/prompts" "$d/bin" "$d/scripts"
+  cp "$REPO_ROOT/scripts/api-compatibility.sh" "$d/scripts/"
   cp "$RUNNER" "$REPO_ROOT/.agents/hooks/audit/commit-push-audit.schema.json" \
     "$d/.agents/hooks/audit/"
   cp "$REPO_ROOT/.agents/hooks/auditor-control.sh" "$d/.agents/hooks/"
@@ -124,6 +125,18 @@ while [[ $# -gt 0 ]]; do
 done
 evidence_path_json="$(sed -n 's/^Evidence path JSON: //p' "$FAKE_DIR/prompt.txt" | head -1)"
 evidence_path="$(printf '%s' "$evidence_path_json" | jq -er 'select(type == "string")' 2>/dev/null || true)"
+api_input="$(jq -Rc 'fromjson? | objects | select(.api_source != null and has("api_report"))' "$FAKE_DIR/prompt.txt")"
+if [[ -n "$api_input" ]]; then
+  api_report="$(jq -r .api_report <<<"$api_input")"
+  [[ "$api_report" == "$(dirname "$workspace")/api-evidence."* ]] || exit 1
+  jq -e --slurpfile report "$api_report" '.api_source == $report[0].source' <<<"$api_input" >/dev/null
+  cp "$(jq -er '.specifications[0].artifacts.after' "$api_report")" "$FAKE_DIR/api-after.json"
+  printf '%s\n' "$api_input" > "$FAKE_DIR/api-observation.json"
+  if [[ -n "${CODEX_FAKE_MUTATE_API:-}" ]]; then
+    artifact="$(jq -er --arg name "$CODEX_FAKE_MUTATE_API" '.specifications[0].artifacts[$name]' "$api_report")"
+    printf '[]\n' > "$artifact"
+  fi
+fi
 evidence_expected_hash="$(sed -n 's/^Evidence SHA-256: //p' "$FAKE_DIR/prompt.txt" | head -1)"
 evidence_readable=no
 evidence_contains_marker=no
@@ -398,6 +411,7 @@ audit() {  # $1 = repo, $2 = fake auditor output, [$3 = mode], [$4 = command]
       CODEX_FAKE_FIFO_SWAP="${CODEX_FAKE_FIFO_SWAP:-}" \
       CODEX_FAKE_MUTATE_FILE="${CODEX_FAKE_MUTATE_FILE:-}" \
       CODEX_FAKE_MUTATE_CONTENT="${CODEX_FAKE_MUTATE_CONTENT:-}" \
+      CODEX_FAKE_MUTATE_API="${CODEX_FAKE_MUTATE_API:-}" \
       CODEX_COMMIT_PUSH_AUDIT_MODE="$mode" \
       bash "$repo/.agents/hooks/audit/run-commit-push-audit.sh" commit "$target_command" \
   ) >/dev/null 2>&1
@@ -430,6 +444,64 @@ evidence_prompt_bytes() {  # prompt file
 
 verdict_of() { printf '%s' "$1" | jq -r '.verdict // "NONE"' 2>/dev/null || printf 'NONE'; }
 finding_of() { printf '%s' "$1" | jq -r '.findings[0] // ""' 2>/dev/null || printf ''; }
+
+if [[ "$(oasdiff --version 2>/dev/null)" == 'oasdiff version 1.33.0' ]]; then
+  R_API="$(setup)"; install_stub "$R_API"
+  cp "$REPO_ROOT/scripts/api-compatibility.py" "$R_API/scripts/"
+  cp "$REPO_ROOT/.agents/lib/api_contract.py" "$REPO_ROOT/.agents/lib/api-question.json" \
+    "$REPO_ROOT/.agents/lib/user-question.sh" "$REPO_ROOT/.agents/lib/user-question-policy.jq" \
+    "$R_API/.agents/lib/"
+  printf '%s\n' '{"openapi":"3.1.1","info":{"title":"Fixture","version":"1"},"paths":{}}' > "$R_API/api.openapi.yaml"
+  git -C "$R_API" add api.openapi.yaml
+  git -C "$R_API" commit -qm 'test: add API fixture'
+  api_base="$(git -C "$R_API" rev-parse HEAD)"
+  git -C "$R_API" update-ref refs/remotes/origin/main "$api_base"
+  jq '.info.description = "staged snapshot"' "$R_API/api.openapi.yaml" > "$R_API/staged.json"
+  cp "$R_API/staged.json" "$R_API/api.openapi.yaml"
+  git -C "$R_API" add api.openapi.yaml
+  api_tree="$(git -C "$R_API" write-tree)"
+  jq '.info.description = "unstaged snapshot"' "$R_API/staged.json" > "$R_API/api.openapi.yaml"
+  api_result="$(audit "$R_API" "$(bound_output "$R_API" PASS '[]')")"
+  if jq -e --arg base "$api_base" --arg tree "$api_tree" \
+       '.verdict == "PASS" and .api_source == {kind:"commit",base:$base,head:$base,candidate:$tree}' \
+       <<<"$api_result" >/dev/null \
+     && cmp -s "$R_API/staged.json" "$R_API/api-after.json" \
+     && api_report_path="$(jq -er '.api_report' "$R_API/api-observation.json")" \
+     && [[ ! -e "$api_report_path" ]]; then
+    ok "headless commit evidence is staged, base-bound, private and cleaned"
+  else
+    bad "headless commit evidence is staged, base-bound, private and cleaned (finding=$(finding_of "$api_result"))"
+  fi
+  changed_report_result="$(CODEX_FAKE_MUTATE_API=changelog audit "$R_API" "$(bound_output "$R_API" PASS '[]')")"
+  if [[ "$(verdict_of "$changed_report_result")" == FAIL \
+     && "$(finding_of "$changed_report_result")" == *"OpenAPI audit evidence changed during the Codex audit"* ]]; then
+    ok "headless audit rejects a modified native changelog"
+  else
+    bad "headless audit rejects a modified native changelog (verdict=$(verdict_of "$changed_report_result"))"
+  fi
+  old_base="$(git -C "$R_API" rev-parse HEAD^)"
+  moved_base_result="$(
+    CODEX_FAKE_MUTATE_FILE="$R_API/.git/refs/remotes/origin/main" CODEX_FAKE_MUTATE_CONTENT="$old_base" \
+      audit "$R_API" "$(bound_output "$R_API" PASS '[]')"
+  )"
+  if [[ "$(verdict_of "$moved_base_result")" == FAIL \
+     && "$(finding_of "$moved_base_result")" == *"audit source changed during the Codex audit"* ]]; then
+    ok "headless audit rejects a changed API base with the candidate held fixed"
+  else
+    bad "headless audit rejects a changed API base (finding=$(finding_of "$moved_base_result"))"
+  fi
+  git -C "$R_API" update-ref refs/remotes/origin/main "$api_base"
+  git -C "$R_API" config core.autocrlf false
+  git -C "$R_API" show "$api_base:api.openapi.yaml" | awk '{printf "%s\r\n", $0}' > "$R_API/api.openapi.yaml"
+  git -C "$R_API" add api.openapi.yaml
+  line_endings_result="$(audit "$R_API" '' local)"
+  if [[ "$(verdict_of "$line_endings_result")" == PASS ]]; then
+    ok "local audit accepts a bound report with only line ending differences"
+  else
+    bad "local audit accepts a bound report with only line ending differences (finding=$(finding_of "$line_endings_result"))"
+  fi
+  rm -rf "$R_API"
+fi
 
 expect_fail() {  # $1 = label, $2 = dossier, $3 = substring the finding should contain
   local v; v="$(verdict_of "$2")"

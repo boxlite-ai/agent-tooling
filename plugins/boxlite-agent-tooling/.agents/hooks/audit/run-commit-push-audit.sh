@@ -23,6 +23,11 @@ audit_file="$project_dir/.agents/state/last-audit.json"
 # being dropped later.
 audit_tmp_dir=""
 candidate_tree=""
+api_base=""
+api_source=null
+api_report=""
+api_report_sha256=""
+api_checker="$tooling_root/scripts/api-compatibility.sh"
 audit_started_at="$(date +%s)"
 audit_execution_outcome=ERROR
 audit_execution_route=local
@@ -224,7 +229,9 @@ write_audit() {
     --arg verdict "$verdict" \
     --argjson findings "$findings_payload" \
     --argjson advisories "$advisories_payload" \
-    '{branch:$branch, head:$head, command_kind:$command_kind, diff_hash:$diff_hash, command_hash:$command_hash, commit_subject_hash:$commit_subject_hash, verdict:$verdict, findings:$findings, advisories:$advisories}' \
+    --argjson api_source "$api_source" \
+    '{branch:$branch, head:$head, command_kind:$command_kind, diff_hash:$diff_hash, command_hash:$command_hash, commit_subject_hash:$commit_subject_hash, verdict:$verdict, findings:$findings, advisories:$advisories}
+     + if $api_source == null then {} else {api_source:$api_source} end' \
     | verdict_audit_write_atomic_identity "$audit_file")" || {
       printf 'run-commit-push-audit: could not publish audit state safely.\n' >&2
       exit 2
@@ -471,7 +478,15 @@ run_local_checks() {  # private raw audit snapshot
 
 run_local_audit() {
   prepare_audit_source
+  if [[ -n "$api_report" ]] \
+     && ! bash "$api_checker" verify-evidence "$api_report" "$api_report_sha256" \
+       | jq -e '.status == "NOT_APPLICABLE"' >/dev/null; then
+    write_fail "OpenAPI request evidence requires a headless auditor"
+  fi
   run_local_checks "$audit_raw_source_file"
+  if [[ -n "$api_report" ]] && ! audit_source_is_current; then
+    write_fail "Internal: audit source changed during the local audit"
+  fi
   verdict="PASS"
   if (( ${#findings[@]} > 0 )); then
     verdict="FAIL"
@@ -561,6 +576,16 @@ capture_audit_source_bounded() {  # destination
   ' "$raw_source_max_bytes" > "$destination"
 }
 
+resolve_api_audit_base() {
+  if [[ "$kind" == push ]]; then
+    [[ -n "${push_context_diff_snapshot:-}" ]] || return 0
+    bash "$api_checker" audit-push-base "$repo_root" "$head" \
+      "$push_context_diff_snapshot" "$push_diff_hash_from_command"
+  else
+    bash "$api_checker" audit-base "$repo_root" commit "$head"
+  fi
+}
+
 prepare_audit_source() {
   if [[ -z "$audit_tmp_dir" ]]; then
     if ! audit_tmp_dir="$(mktemp -d)" || ! chmod 700 "$audit_tmp_dir"; then
@@ -575,6 +600,27 @@ prepare_audit_source() {
      && "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]] \
      && ! valid_push_audit_context; then
     write_fail "Internal: missing or stale pre-push audit context for pushed diff"
+  fi
+  if [[ "$head" != '?' ]]; then
+    api_base="$(resolve_api_audit_base)" \
+      || write_fail "Could not bind the OpenAPI comparison base"
+    if [[ -n "$api_base" ]]; then
+      local api_directory
+      api_directory="$(mktemp -d "$audit_tmp_dir/api-evidence.XXXXXX")" \
+        || write_fail "Could not create private OpenAPI audit scratch"
+      api_source="$(jq -nc --arg kind "$kind" --arg base "$api_base" --arg head "$head" \
+        --arg candidate "${candidate_tree:-$head}" '{kind:$kind,base:$base,head:$head,candidate:$candidate}')" \
+        || write_fail "Could not bind OpenAPI audit source"
+      api_report="$api_directory/report.json"
+      BOXLITE_API_EVIDENCE_DEADLINE="$(( audit_started_at + audit_timeout_seconds ))" \
+        bash "$api_checker" audit-evidence "$repo_root" "$api_source" "$api_directory" > "$api_report" \
+        || write_fail "Could not prepare bound OpenAPI audit evidence"
+      api_report_sha256="$(hash_file "$api_report")" \
+        || write_fail "Could not hash bound OpenAPI audit evidence"
+      jq -e --argjson source "$api_source" \
+        '.source == $source and (.status | IN("PASS","NOT_APPLICABLE"))' "$api_report" >/dev/null \
+        || write_fail "OpenAPI audit evidence does not match its bound input"
+    fi
   fi
   if [[ "$(current_diff_hash)" != "$diff_hash" ]]; then
     write_fail "Internal: audit source changed before the private snapshot was captured"
@@ -650,6 +696,11 @@ build_audit_summary() {  # evidence file, evidence sha256
 }
 
 audit_source_is_current() {
+  if [[ "$head" != '?' ]]; then
+    local live_api_base
+    live_api_base="$(resolve_api_audit_base)" || return 1
+    [[ "$live_api_base" == "$api_base" ]] || return 1
+  fi
   case "$kind" in
     commit)
       [[ "$(current_diff_hash)" == "$diff_hash" \
@@ -700,6 +751,9 @@ build_prompt() {  # evidence file, evidence sha256
     --arg operation_kind "$kind" \
     --arg repo_root "$repo_root" \
     --arg index_tree "$candidate_tree" \
+    --argjson api_source "$api_source" \
+    --arg api_report "$api_report" \
+    --arg api_report_sha256 "$api_report_sha256" \
     --arg expected_branch "$branch" \
     --arg parent_session_id "${AUDITOR_PARENT_SESSION_ID:-${CODEX_THREAD_ID:-}}" \
     --arg parent_host "${AUDITOR_PARENT_HOST:-$(hook_host_kind)}" \
@@ -708,6 +762,7 @@ build_prompt() {  # evidence file, evidence sha256
       target_command_truncated:$target_command_truncated,
       target_command_bytes:$target_command_bytes,
       operation_kind:$operation_kind, repo_root:$repo_root, index_tree:$index_tree,
+      api_source:$api_source, api_report:$api_report, api_report_sha256:$api_report_sha256,
       expected_branch:$expected_branch, parent_session_id:$parent_session_id,
       parent_host:$parent_host, audit_started_at:$audit_started_at}')"
   audit_context="$(build_audit_summary "$evidence_file" "$evidence_hash")" || return 1
@@ -804,7 +859,8 @@ normalize_agentic_output() {
   # Exact schema validation above preserves optional history assessments for the gate.
   local identity
   identity="$(printf '%s' "$normalized_output" \
-    | jq -c . \
+    | jq -c --argjson api_source "$api_source" 'del(.api_source)
+      + if $api_source == null then {} else {api_source:$api_source} end' \
     | verdict_audit_write_atomic_identity "$audit_file")" \
     || write_fail "Internal: could not publish Codex audit state safely"
   published_audit_identity="$identity"
@@ -1230,6 +1286,10 @@ run_agentic_audit() {
   fi
   if ! audit_source_is_current; then
     write_fail "Internal: audit source changed during the Codex audit"
+  fi
+  if [[ -n "$api_report" ]] \
+     && ! bash "$api_checker" verify-evidence "$api_report" "$api_report_sha256" >/dev/null; then
+    write_fail "Internal: OpenAPI audit evidence changed during the Codex audit"
   fi
 
   normalize_agentic_output "$raw_file"

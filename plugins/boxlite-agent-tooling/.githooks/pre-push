@@ -273,7 +273,7 @@ cleanup_push_audit_context() {
 push_is_single_audited_commit() {  # remote-name
   local remote_name="$1"
   local ref_updates local_ref local_sha remote_ref remote_sha
-  local commit_facts parents parent tree="" subject="" subject_hash
+  local commit_facts parents parent tree="" subject="" subject_hash api_base
 
   # A receipt cannot dismiss findings from this session's current push review.
   if [[ -n "$watch_binding_session_scope" ]]; then
@@ -327,7 +327,8 @@ push_is_single_audited_commit() {  # remote-name
   # and costs a re-audit — the safe direction.
   subject_hash="$(printf '%s' "$subject" | verdict_audit_sha256)"
 
-  commit_audit_receipt_claim "$repo_root" "$parent" "$tree" "$subject_hash" || return 1
+  api_base="$(bash "$tooling_root/scripts/api-compatibility.sh" audit-base "$repo_root" push "$local_sha" "$remote_sha")" || return 1
+  commit_audit_receipt_claim "$repo_root" "$parent" "$tree" "$subject_hash" "$api_base" || return 1
   printf '%s' "$local_sha"
 }
 

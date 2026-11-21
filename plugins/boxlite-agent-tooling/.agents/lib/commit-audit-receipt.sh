@@ -36,17 +36,18 @@ commit_audit_receipt_path() {  # repo-root
   printf '%s/.agents/state/commit-audit-receipt.json' "$1"
 }
 
-commit_audit_receipt_write() {  # repo-root parent tree subject-hash
+commit_audit_receipt_write() {  # repo-root parent tree subject-hash [api-base]
   local repo="${1-}" parent="${2-}" tree="${3-}" subject_hash="${4-}" path
   commit_audit_receipt_is_object_id "$parent" || return 1
   commit_audit_receipt_is_object_id "$tree" || return 1
   [[ "$subject_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ -z "${5:-}" ]] || commit_audit_receipt_is_object_id "$5" || return 1
   path="$(commit_audit_receipt_path "$repo")" || return 1
   mkdir -p "$(dirname "$path")" 2>/dev/null || return 1
   jq -nc --arg parent "$parent" --arg tree "$tree" \
-    --arg subject_hash "$subject_hash" --argjson created_at "$(date +%s)" \
+    --arg subject_hash "$subject_hash" --arg api_base "${5:-}" --argjson created_at "$(date +%s)" \
     '{schema:1, parent:$parent, tree:$tree, subject_hash:$subject_hash,
-      created_at:$created_at}' \
+      created_at:$created_at} + if $api_base == "" then {} else {api_base:$api_base} end' \
     | verdict_audit_write_atomic "$path"
 }
 
@@ -54,7 +55,7 @@ commit_audit_receipt_write() {  # repo-root parent tree subject-hash
 # call, so a second push of the same commit audits again. The stored parent, tree,
 # and subject are checked against the caller's own values, so the receipt left by one
 # commit can never authorize a different one.
-commit_audit_receipt_claim() {  # repo-root parent tree subject-hash
+commit_audit_receipt_claim() {  # repo-root parent tree subject-hash [api-base]
   local repo="${1-}" parent="${2-}" tree="${3-}" subject_hash="${4-}"
   local path identity snapshot created_at now
   [[ "$subject_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -67,10 +68,11 @@ commit_audit_receipt_claim() {  # repo-root parent tree subject-hash
   # commit yields no output and fails the bound check below.
   created_at="$(printf '%s' "${snapshot#*$'\n'}" \
     | jq -r --arg parent "$parent" --arg tree "$tree" \
-        --arg subject_hash "$subject_hash" '
+        --arg subject_hash "$subject_hash" --arg api_base "${5:-}" '
           if type == "object" and .schema == 1
              and .parent == $parent and .tree == $tree
              and .subject_hash == $subject_hash
+             and (.api_base // "") == $api_base
              and (.created_at | type == "number")
           then .created_at | tostring else empty end' 2>/dev/null)" || return 1
   verdict_audit_epoch_is_bounded "$created_at" || return 1

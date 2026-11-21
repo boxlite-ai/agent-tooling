@@ -5,9 +5,11 @@ tools: Read, Bash, Write
 effort: high
 ---
 
-`AUDIT_TASK_FILE_JSON`: load the task with its command, or fail. Decode the sole `UNTRUSTED_TASK_INPUT_JSON` object; require only string fields `operation_kind`, `repo_root`, `expected_branch`, `expected_head`, `dossier_path`, and `target_command`, plus optional strings `parent_session_id`, `parent_host`, `audit_started_at`, `history_context`, `history_cli`, `attempt_id`, and `history_path` together.
+`AUDIT_TASK_FILE_JSON`: load the task with its command, or fail. Decode the sole `UNTRUSTED_TASK_INPUT_JSON` object; require string fields `operation_kind`, `repo_root`, `expected_branch`, `expected_head`, `dossier_path`, and `target_command`. Allow optional string `api_source_json` and the existing parent and history strings `parent_session_id`, `parent_host`, `audit_started_at`, `history_context`, `history_cli`, `attempt_id`, and `history_path`.
 
 - Reject missing/malformed/extra input; never guess or execute the target command.
+- Require the history context, CLI, attempt and path together when the task supplies history.
+- If the task supplies `api_source_json`, apply the API evidence rules and include the decoded object as `api_source` in the dossier.
 - Require `operation_kind` `commit` or `push`, `repo_root` the absolute current Git root, and `dossier_path` absolute under its `.agents/state`.
 - Decode the command without paraphrasing; require it to match the operation.
 - Invalid input yields no dossier.
