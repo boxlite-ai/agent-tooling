@@ -6,7 +6,7 @@ def audit_dossier_normalize_git:
     type == "string" and length > 0 and utf8bytelength <= $bytes
     and (explode | all(. != 0 and . != 10 and . != 13));
   if length == 1 and (.[0] | type) == "object"
-     and (.[0] | del(.history_review,.reflection_review) | exact_keys(["branch", "head",
+     and (.[0] | del(.history_review,.reflection_review,.api_source) | exact_keys(["branch", "head",
             "command_kind", "diff_hash", "command_hash", "commit_subject_hash", "verdict",
             "findings", "advisories"]))
      and (.[0].branch | type) == "string"
@@ -21,6 +21,11 @@ def audit_dossier_normalize_git:
      and (.[0].command_hash | test("^[0-9a-f]{64}$"))
      and (.[0].commit_subject_hash | type) == "string"
      and (.[0].commit_subject_hash | test("^[0-9a-f]{64}$|^$"))
+     and (.[0] | . as $dossier | (has("api_source") | not) or
+       (.api_source | type == "object" and exact_keys(["kind","base","head","candidate"])
+        and .kind == $dossier.command_kind and .head == $dossier.head
+        and all(.base,.head,.candidate; type == "string" and test("^[a-f0-9]{40}([a-f0-9]{24})?$"))
+        and (.kind == "commit" or .candidate == .head)))
      and (.[0].verdict | IN("PASS","FAIL","REFEREE"))
      and (.[0].findings | type) == "array" and (.[0].findings | length) <= 32
      and all(.[0].findings[]; bounded_line(1024))

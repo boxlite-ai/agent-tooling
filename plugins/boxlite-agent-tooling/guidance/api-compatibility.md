@@ -16,14 +16,23 @@ OpenAPI changes need explicit user confirmation to skip breaking/default-change 
 | Existing default added, changed, or removed | Same as breaking, including informational findings |
 | New optional request field | The commit/push auditor verifies SDK request tests (below) |
 
-The checker uses pinned oasdiff 1.33.0 and its JSON parser. Inherited oasdiff configuration and external references are disabled.
+The checker uses pinned oasdiff 1.33.0. Relative references can resolve to matching tracked regular files in the same snapshot. Network references and inherited oasdiff configuration are disabled.
 
 ## Request tests
 
-Run `bash "<plugin>/scripts/api-compatibility.sh" inspect <repo-root>` for commits; use `inspect-push` for pushes to read the checked-out commit.
+Use the runner's `api_report` and `api_report_sha256` for OpenAPI audit evidence. Match the verified report's source to `api_source`. Its candidate is the staged tree for commits and the outgoing commit for pushes.
 
-- For every entry in `specifications`, read its `path` and `artifacts`: native `changelog`, `breaking`, and `diff` JSON reports, plus exact `before` and `after` snapshots.
-- Use bounded reads within the auditor's evidence budget; missing, truncated, or unresolved evidence blocks PASS.
+Commit finalization rechecks whether the comparison applies and which base revision it uses. A changed answer invalidates the audit.
+
+For native tasks, use `audit-evidence <repo-root> <source-json> <private-scratch>` with the gate's exact `api_source_json` as one argument. Save stdout to a report in private scratch and hash its raw bytes in the same preparation step. Record the matched source as `api_source` in the dossier.
+
+Evidence preparation has one deadline across its Git and oasdiff subprocesses on both routes.
+
+Both routes run `bash "<plugin>/scripts/api-compatibility.sh" verify-evidence <report> <expected-sha256>` before reading artifacts. Use the verified JSON on stdout to locate the files. The report binds every artifact's raw digest, including the native JSON reports and manifest.
+
+- For each specification, read the native `changelog`, `breaking`, and `diff` reports, plus the manifest and exact snapshots.
+- Follow a reference from its referring path in the same side's manifest.
+- Missing, mismatched or truncated evidence blocks PASS. Working-copy previews cannot establish evidence for a staged tree.
 
 Use native findings and the detailed diff to locate changes; verify request relevance, defaults, and nullability against the snapshots and SDK code.
 

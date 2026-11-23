@@ -43,7 +43,7 @@ if [[ "$is_agent" == 1 ]]; then
     local parent tree
     parent="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null)" || return 0
     tree="$(git -C "$repo_root" write-tree 2>/dev/null)" || return 0
-    commit_audit_receipt_write "$repo_root" "$parent" "$tree" "$1" 2>/dev/null || true
+    commit_audit_receipt_write "$repo_root" "$parent" "$tree" "$1" "$api_base" 2>/dev/null || true
   }
 
   validate_override_handoff() {
@@ -97,6 +97,21 @@ if [[ "$is_agent" == 1 ]]; then
     actual_diff_hash="$(git -C "$repo_root" diff --cached --no-ext-diff | verdict_audit_sha256)"
     if [[ "$actual_diff_hash" != "$expected_diff_hash" ]]; then
       printf 'Staged content changed after the audited pre-commit gate.\n' >&2
+      exit 1
+    fi
+  fi
+  if [[ "$audit_kind" == commit ]]; then
+    api_head="$(git -C "$repo_root" rev-parse --verify --quiet HEAD)" || api_head=''
+    api_base=''
+    api_tree=''
+    if [[ -n "$api_head" ]]; then
+      api_base="$(bash "$tooling_root/scripts/api-compatibility.sh" audit-base "$repo_root" commit "$api_head")" || exit 1
+    fi
+    if [[ -n "$api_base" ]]; then api_tree="$(git -C "$repo_root" write-tree)" || exit 1; fi
+    if ! jq -e --arg base "$api_base" --arg head "$api_head" --arg tree "$api_tree" \
+        '(.api_source // null) == (if $base == "" then null
+          else {kind:"commit", base:$base, head:$head, candidate:$tree} end)' "$audit_file" >/dev/null; then
+      printf 'OpenAPI comparison source changed after pre-commit.\n' >&2
       exit 1
     fi
   fi

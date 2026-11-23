@@ -146,6 +146,15 @@ class SkipConfirmationTests(RepositoryFixture, unittest.TestCase):
 
 
 class UnrelatedRepositoryTests(RepositoryFixture, unittest.TestCase):
+    def test_explicit_tree_object_is_not_a_comparison_base(self):
+        (self.root / "openapi/box.openapi.yaml").unlink()
+        self.commit_base("no API contracts")
+        tree = command(["git", "rev-parse", "HEAD^{tree}"], self.root, check=True).stdout.strip()
+        checker = self.plugin / "scripts/api-compatibility.sh"
+        result = command(["bash", str(checker), "check", str(self.root), tree], self.root)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("OpenAPI comparison base", result.stderr)
+
     def test_pre_push_without_openapi_does_not_require_remote_objects(self):
         (self.root / "openapi/box.openapi.yaml").unlink()
         self.commit_base("no API contracts")

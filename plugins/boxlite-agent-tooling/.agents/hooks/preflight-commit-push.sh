@@ -552,6 +552,14 @@ prepare_audit_attempt() {  # task input JSON -> task input JSON with attempt fie
 
 audit_instruction() {
   local input="$task_input_json" task instruction
+  if [[ -n "$compatibility_base" ]]; then
+    local candidate="$head"
+    if [[ "$kind" == commit ]]; then candidate="$(git -C "$repo_root" write-tree)" || return 2; fi
+    input="$(jq -c --arg base "$compatibility_base" --arg head "$head" --arg kind "$kind" \
+      --arg candidate "$candidate" \
+      '. + {api_source_json:({kind:$kind,base:$base,head:$head,candidate:$candidate} | tojson)}' \
+      <<<"$input")" || return 2
+  fi
   if [[ -n "$reflection_context" ]]; then
     input="$(prepare_audit_attempt "$input")" || return 2
   fi
@@ -714,6 +722,17 @@ validate_audit() {
   audit_command_hash="$(printf '%s' "$audit_document" | jq -r '.command_hash')"
   audit_commit_subject_hash="$(printf '%s' "$audit_document" | jq -r '.commit_subject_hash')"
   audit_verdict="$(printf '%s' "$audit_document" | jq -r '.verdict')"
+  local api_candidate="$head"
+  if [[ -n "$compatibility_base" && "$kind" == commit ]]; then
+    api_candidate="$(git -C "$repo_root" write-tree)" || api_candidate=''
+  fi
+  if ! jq -e --arg base "$compatibility_base" --arg head "$head" --arg kind "$kind" \
+      --arg candidate "$api_candidate" \
+      '(.api_source // null) == (if $base == "" then null
+        else {kind:$kind,base:$base,head:$head,candidate:$candidate} end)' <<<"$audit_document" >/dev/null; then
+    rm -f "$audit_selection"
+    deny_with_audit "OpenAPI audit evidence does not match the current comparison source."
+  fi
   if [[ "$kind" == "push" && ! "$push_diff_hash_from_command" =~ ^[0-9a-f]{64}$ ]]; then
     rm -f "$audit_selection"
     block_git recover 'Push audits must bind real pre-push ref-update stdin via pushed_diff_sha256.' \
@@ -966,7 +985,25 @@ if [[ -z "${GITHOOK_DELEGATED:-}" ]]; then
   fi
 fi
 
-if ! compatibility_error="$(bash "$tooling_root/scripts/api-compatibility.sh" "$kind" "$repo_root" 2>&1)"; then
+compatibility_checker="$tooling_root/scripts/api-compatibility.sh"
+compatibility_base=''
+resolve_compatibility_base() {
+  if [[ "$kind" == push ]]; then
+    [[ "$push_diff_hash_from_command" =~ ^[a-f0-9]{64}$ ]] || return 0
+    local diff_path
+    diff_path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path codex-audit/last-push-audit-context.diff)" || return 1
+    bash "$compatibility_checker" audit-push-base "$repo_root" "$head" "$diff_path" "$push_diff_hash_from_command"
+  else
+    bash "$compatibility_checker" audit-base "$repo_root" commit "$head"
+  fi
+}
+if [[ "$head" != '?' ]] && ! compatibility_base="$(resolve_compatibility_base)"; then
+  block_git recover 'Cannot bind the OpenAPI comparison base.' \
+    'Repair the local comparison snapshots, then retry the original Git operation.' \
+    'The audit and compatibility check read the same base commit.'
+fi
+if [[ "$kind" == commit || -n "$compatibility_base" ]] \
+   && ! compatibility_error="$(bash "$compatibility_checker" "$kind" "$repo_root" "$compatibility_base" 2>&1)"; then
   block_git recover "$compatibility_error" \
     "Apply the checker-specific fix above, then rerun scripts/api-compatibility.sh $kind for this repository before retrying Git." \
     'The same compatibility check passes; an audit cannot bypass it.'
@@ -1013,7 +1050,7 @@ if [[ -n "${CODEX_SANDBOX:-}" && -n "${GITHOOK_DELEGATED:-}" && "$kind" == "push
     AUDITOR_SESSION_SCOPE="$hook_session_scope" \
       AUDITOR_PROMPT_EPOCH="$hook_prompt_epoch" \
       AUDITOR_PARENT_SESSION_ID="$parent_session_id" \
-      AUDITOR_PARENT_HOST="$(hook_host_kind)" AUDIT_REFEREE_ROUTE= \
+      AUDITOR_PARENT_HOST="$(hook_host_kind)" AUDIT_REFEREE_ROUTE='' \
       bash "$headless_auditor" "$kind" "$command" >/dev/null 2>&1 || true
   fi
 fi
