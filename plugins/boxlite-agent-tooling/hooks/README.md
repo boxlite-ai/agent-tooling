@@ -31,11 +31,15 @@ Prerequisites and limits:
 
 - OMP 18.21 or newer; link the plugin with `omp plugin link
   <adopted-plugin-dir>` and relink after each adoption refresh.
-- Verdict evidence is the final reply only. The gate's transcript parser cannot
-  read OMP session JSONL, and `VERDICT_EXTRACTOR_CMD` requires OS process
-  containment that many Linux hosts restrict, so the bridge sends no transcript
-  path; the gate judges the payload reply. An assistant reply without text
-  blind-allows, the gate's own rule for transcripts lacking assistant text.
+- Verdict evidence follows containment capability. The extractor override
+  (`VERDICT_EXTRACTOR_CMD`, `scripts/omp-verdict-extractor.sh`) needs OS
+  process containment, so the bridge probes the same backends as the gate
+  (macOS sandbox-exec, Linux user/PID namespaces): where containment works it
+  sends the transcript path and the gate stages full-turn evidence; elsewhere
+  it sends the final reply only, because the gate's parser cannot read OMP
+  session JSONL and an unusable transcript path returns a false-truncated
+  snapshot that forces an audit on every settle. A reply without text
+  blind-allows, the gate's own rule.
 - Verdict and commit/push audits still need the `claude` or `codex` CLI; the
   claim classifier falls back to regex without one. Without an auditor CLI, a
   reply carrying verifiable claims (completion, fixes, passing tests) blocks at
